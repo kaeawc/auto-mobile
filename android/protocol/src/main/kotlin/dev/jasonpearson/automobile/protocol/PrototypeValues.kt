@@ -50,12 +50,20 @@ sealed class PrototypeModeValue {
 
   data class Modes(val light: String, val dark: String) : PrototypeModeValue()
 
+  /**
+   * `{data: "/pointer"}` on an image slot (#14192): the id of a device media item held in `/data`.
+   * Only an image slot accepts it (the shared contract rejects it elsewhere), and it names no
+   * uploaded asset, so [values] is empty.
+   */
+  data class Data(val pointer: String) : PrototypeModeValue()
+
   /** Every distinct value the slot names, light first. */
   val values: List<String>
     get() =
       when (this) {
         is Single -> listOf(value)
         is Modes -> listOf(light, dark).distinct()
+        is Data -> emptyList()
       }
 }
 
@@ -109,6 +117,9 @@ sealed class PrototypePageTarget {
 
 @Serializable(with = PrototypeScalarSerializer::class)
 sealed class PrototypeScalar {
+  /** Authored binding retained by the contract; resolved only by a supporting runtime. */
+  data class Binding(val value: JsonObject) : PrototypeScalar()
+
   data class Text(val value: String) : PrototypeScalar()
 
   data class Numeric(val value: Double) : PrototypeScalar()
@@ -191,6 +202,12 @@ object PrototypeModeValueSerializer :
   override fun fromJson(value: JsonElement): PrototypeModeValue {
     if (value is JsonPrimitive && value.isString) return PrototypeModeValue.Single(value.content)
     val data = value as? JsonObject ?: throw SerializationException("Expected value or mode pair")
+    if (data.keys == setOf("data")) {
+      val pointer =
+        (data.getValue("data") as? JsonPrimitive)?.takeIf { it.isString }?.content
+          ?: throw SerializationException("Expected data pointer")
+      return PrototypeModeValue.Data(pointer)
+    }
     if (data.keys != setOf("light", "dark")) throw SerializationException("Expected light and dark")
     fun mode(name: String): String =
       (data.getValue(name) as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -206,6 +223,7 @@ object PrototypeModeValueSerializer :
           put("light", value.light)
           put("dark", value.dark)
         }
+      is PrototypeModeValue.Data -> buildJsonObject { put("data", value.pointer) }
     }
 }
 
@@ -239,6 +257,8 @@ object PrototypeTransitionSerializer :
 internal fun prototypeImageSlotUses(value: JsonElement?): Int {
   if (value is JsonPrimitive) return if (value.isString) 1 else 0
   val pair = value as? JsonObject ?: return 0
+  // A data-bound slot names a device media item, not an uploaded asset (#14192): no image budget.
+  if ((pair["data"] as? JsonPrimitive)?.isString == true) return 0
   fun mode(name: String) = (pair[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
   val light = mode("light")
   val dark = mode("dark")
@@ -356,6 +376,12 @@ object PrototypePageTargetSerializer :
 object PrototypeScalarSerializer :
   PrototypeJsonValueSerializer<PrototypeScalar>("PrototypeScalar") {
   override fun fromJson(value: JsonElement): PrototypeScalar {
+    if (
+      value is JsonObject &&
+        value.size == 1 &&
+        value.keys.single() in setOf("event", "platform", "match")
+    )
+      return PrototypeScalar.Binding(value)
     val primitive = value as? JsonPrimitive ?: throw SerializationException("Expected scalar")
     if (primitive.isString) return PrototypeScalar.Text(primitive.content)
     primitive.booleanOrNull?.let {
@@ -368,6 +394,7 @@ object PrototypeScalarSerializer :
 
   override fun toJson(value: PrototypeScalar): JsonElement =
     when (value) {
+      is PrototypeScalar.Binding -> value.value
       is PrototypeScalar.Text -> JsonPrimitive(value.value)
       is PrototypeScalar.Numeric -> JsonPrimitive(value.value)
       is PrototypeScalar.BooleanValue -> JsonPrimitive(value.value)

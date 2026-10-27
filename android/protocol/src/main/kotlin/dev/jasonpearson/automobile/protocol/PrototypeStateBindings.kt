@@ -20,6 +20,8 @@ internal object PrototypeStateBindings {
       "dialog" to "Dialog",
       "snackbar" to "Snackbar",
       "menu" to "Menu",
+      "tooltip" to "Tooltip",
+      "drawer" to "Drawer",
     )
 
   fun openWhenErrors(
@@ -41,13 +43,13 @@ internal object PrototypeStateBindings {
     path: String,
     state: JsonObject,
   ): PrototypeSpecError? {
-    if (value.text("type") != "scroll") return null
+    if (value.text("type") !in setOf("scroll", "list")) return null
     val refresh = value["refresh"] as? JsonObject ?: return null
     if (value.text("axis") == "horizontal")
-      return fail("$path.refresh", "Pull-to-refresh needs a vertical scroll")
+      return fail("$path.refresh", "Pull-to-refresh needs a vertical ${value.text("type")}")
     val key = refresh.text("stateKey") ?: return null
     val stored = state[key] as? JsonPrimitive
-    return if (state.containsKey(key) && (!isBooleanState(stored)))
+    return if ((state.containsKey(key) || value.text("type") == "list") && !isBooleanState(stored))
       fail("$path.refresh.stateKey", "Refresh requires a boolean state key")
     else null
   }
@@ -94,13 +96,16 @@ internal object PrototypeStateBindings {
   fun boundKeys(value: JsonObject): List<String> =
     listOfNotNull(
       value.text("stateKey"),
+      value.text("selectionKey"),
+      value.text("openKey"),
       value.text("activeKey"),
       value.text("hourKey"),
       value.text("minuteKey"),
       (value["trailing"] as? JsonObject)?.text("stateKey"),
       if (value.text("type") in modalNames) (value["openWhen"] as? JsonObject)?.text("key")
       else null,
-      if (value.text("type") == "scroll") (value["refresh"] as? JsonObject)?.text("stateKey")
+      if (value.text("type") in setOf("scroll", "list"))
+        (value["refresh"] as? JsonObject)?.text("stateKey")
       else null,
       if (value.text("type") == "scroll") value.text("atEndKey") else null,
     )
@@ -143,12 +148,31 @@ internal object PrototypeStateBindings {
     path: String,
     state: JsonObject,
   ): PrototypeSpecError? {
+    requestProgressKeyError(action, path, state)?.let {
+      return it
+    }
     val key = action.text("statusKey") ?: return null
     if (!state.containsKey(key))
       return fail("$path.statusKey", "statusKey must name a declared state key")
     val stored = state.getValue(key) as? JsonPrimitive
     return if (stored != null && stored.isString) null
     else fail("$path.statusKey", "statusKey requires a string state key")
+  }
+
+  private fun requestProgressKeyError(
+    action: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    if (action.text("type") != "request") return null
+    val key = action.text("progressKey") ?: return null
+    val body = action["body"] as? JsonObject
+    if (listOf("multipart", "form", "file").none { body?.containsKey(it) == true })
+      return fail("$path.progressKey", "progressKey requires an upload body")
+    val stored = state[key] as? JsonPrimitive
+    val number = stored?.takeUnless { it.isString }?.doubleOrNull
+    return if (number != null && number.isFinite() && number in 0.0..100.0) null
+    else fail("$path.progressKey", "progressKey requires a declared number state key from 0 to 100")
   }
 
   fun stateActionErrors(context: Context, data: JsonObject): PrototypeSpecError? {

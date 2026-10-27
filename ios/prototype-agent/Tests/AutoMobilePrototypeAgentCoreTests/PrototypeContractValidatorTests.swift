@@ -2,6 +2,49 @@
 import XCTest
 
 final class PrototypeContractValidatorTests: XCTestCase {
+    override class func setUp() {
+        super.setUp()
+        // Compile the shared contract and condition patterns outside individual test timing.
+        let data =
+            Data(
+                "{\"id\":\"warm\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"text\",\"text\":\"warm\"}}"
+                    .utf8
+            )
+        try? PrototypeSpecStrictValidator.validate(data: data)
+        _ = try? JSONDecoder().decode(PrototypeSpec.self, from: data)
+    }
+
+    func testOnAppearSharedFixtures() throws {
+        for name in ["on-appear.json", "on-appear-repeat.json"] {
+            let data = try Data(contentsOf: fixtures.appendingPathComponent("valid/\(name)"))
+            XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
+            XCTAssertNoThrow(try JSONDecoder().decode(PrototypeSpec.self, from: data))
+        }
+        for name in [
+            "on-appear-empty.json",
+            "on-appear-too-many.json",
+            "on-appear-unconditional-child.json",
+            "on-appear-unknown-action.json",
+            "on-appear-reserved-request-event.json",
+            "strict-gate-on-appear-prototype_timers_v1.json",
+        ] {
+            let value = try JSONDecoder().decode(
+                JSONValue.self,
+                from: Data(contentsOf: fixtures.appendingPathComponent("invalid/\(name)"))
+            )
+            let fields = try XCTUnwrap(value.objectFields)
+            let data = try JSONEncoder().encode(fields["spec"])
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+                data: data,
+                supportedCapabilities: name.hasPrefix("strict") ? [] : nil
+            )) { error in
+                guard case let PrototypeLoadError.invalidSpec(path, _) = error
+                else { return XCTFail("Unexpected error: \(error)") }
+                XCTAssertEqual(path, fields["expectedPath"]?.stringValue)
+            }
+        }
+    }
+
     func testSecureLibraryPolicyPreservesNonlibraryAndOpaqueLiterals() throws {
         let unbound = fixtures.appendingPathComponent("valid/strict-library-secure-unbound.json")
         XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: Data(contentsOf: unbound), library: true))
@@ -66,6 +109,8 @@ final class PrototypeContractValidatorTests: XCTestCase {
             "doc-example-3.json",
             "exact-selector-depth.json",
             "floating-element-anchor.json",
+            "tooltip-element-anchor.json",
+            "routes-literal-anchor-selector.json",
         ]
         let inventory = try JSONDecoder().decode(
             Inventory.self,
@@ -77,6 +122,11 @@ final class PrototypeContractValidatorTests: XCTestCase {
         XCTAssertFalse(valid.isEmpty)
         for url in valid {
             let data = try Data(contentsOf: url)
+            if inventory.validCapabilities[url.lastPathComponent]?.contains("prototype_custom_shaders_v1") == true {
+                XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
+                XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(data: data, supported: supported))
+                continue
+            }
             XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), url.lastPathComponent)
             if hostAnchors.contains(url.lastPathComponent) {
                 XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(data: data, supported: supported)) { error in
@@ -105,6 +155,7 @@ final class PrototypeContractValidatorTests: XCTestCase {
         let options: Options?
 
         struct Options: Decodable {
+            let shareAssetIds: Set<String>?
             let supportedCapabilities: Set<String>?
             let library: Bool?
         }
@@ -126,11 +177,14 @@ final class PrototypeContractValidatorTests: XCTestCase {
                 try PrototypeSpecStrictValidator.validate(
                     data: data,
                     supportedCapabilities: fixture.options?.supportedCapabilities,
-                    library: fixture.options?.library ?? false
+                    library: fixture.options?.library ?? false,
+                    shareAssetIds: fixture.options?.shareAssetIds
                 )
                 XCTFail("ACCEPTED \(url.lastPathComponent)")
-            } catch let PrototypeLoadError.invalidSpec(path, _) {
+            } catch let PrototypeLoadError.invalidSpec(path, message) {
                 XCTAssertEqual(path, fixture.expectedPath, url.lastPathComponent)
+                if url.lastPathComponent.hasPrefix("share-") || url.lastPathComponent.hasPrefix("glass-"),
+                   let expected = fixture.expectedMessage { XCTAssertEqual(message, expected, url.lastPathComponent) }
             }
         }
         print("Checked \(invalid.count) invalid fixtures; 0 exemptions")

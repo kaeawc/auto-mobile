@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "literal-scheme",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss:\\\\example.com"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "literal scheme"
+    }
+  },
+  "expectedPath": "channels.c.url",
+  "expectedMessage": "A websocket channel url must be an absolute ws or wss URL"
+}

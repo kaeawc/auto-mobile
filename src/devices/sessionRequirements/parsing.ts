@@ -208,9 +208,11 @@ function parseAndroidHardware(value: unknown): RequirementResult<AndroidHardware
     if (!keys.ok) {
       return keys;
     }
-    return value.archetype === "phone" || value.archetype === "tablet"
+    return value.archetype === "phone" ||
+      value.archetype === "tablet" ||
+      value.archetype === "foldable"
       ? success({ kind: "archetype", archetype: value.archetype })
-      : failure("invalid_request", "Android hardware supports only phone or tablet.", {
+      : failure("invalid_request", "Android hardware supports only phone, tablet or foldable.", {
           field: "hardware.archetype",
         });
   }

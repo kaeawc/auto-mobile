@@ -1,4 +1,5 @@
 import type { DeviceDisplays, DisplayPanel } from "../../models/DisplayPanel";
+import { isIosDuoDeviceType } from "./iosDeviceType";
 
 /** One integrated screen reported by `simctl io <udid> enumerate`. */
 export interface SimulatorDisplay {
@@ -114,7 +115,7 @@ export function simulatorDeviceDisplays(
   const areas = displays.map((display) => display.width * display.height);
   const largest = Math.max(...areas);
   const smallest = Math.min(...areas);
-  const isDuo = deviceTypeIdentifier?.endsWith(".iPhone-Duo") === true;
+  const isDuo = isIosDuoDeviceType(deviceTypeIdentifier);
   const panels: DisplayPanel[] = displays.flatMap((display, index) => {
     if (!display.name) {
       return [];

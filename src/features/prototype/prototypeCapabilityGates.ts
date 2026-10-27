@@ -1,9 +1,67 @@
+import { prototypeGlassFields, prototypeScrollEdgeEffectFields } from "./prototypeGlass";
 import {
+  PROTOTYPE_ADAPTIVE_CAPABILITY,
+  prototypeAdaptiveFields,
+  prototypeAdaptiveUnsupportedMessage,
+} from "./prototypeAdaptive";
+import { prototypeFieldsOfKind } from "./prototypeEmitContext";
+import { PROTOTYPE_CONTENT_TRANSITION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeContentTransitionFields,
+  prototypeContentTransitionUnsupportedMessage,
+} from "./prototypeContentTransition";
+import { prototypeRouteFields, PROTOTYPE_ROUTES_CAPABILITY } from "./prototypeRoutes";
+import { prototypeWindowMotionFields } from "./prototypeWindowMotion";
+import { PROTOTYPE_WINDOW_MOTION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
+import { record } from "./prototypeTemplate";
+import { PROTOTYPE_DESIGN_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeStylePolishV2Fields,
+  prototypeStylePolishV2UnsupportedMessage,
+} from "./prototypeStylePolishV2";
+import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeScrollMotionFields } from "./prototypeScrollMotion";
+import {
+  prototypeBarScrollFields,
+  prototypeBarScrollUnsupportedMessage,
+} from "./prototypeBarScroll";
+import {
+  prototypeReducedMotionFields,
+  prototypeSharedElementFields,
+  prototypeSharedElementV2Fields,
+  prototypeSharedElementV2UnsupportedMessage,
+  prototypeReducedMotionUnsupportedMessage,
+  prototypeSharedElementUnsupportedMessage,
+} from "./prototypeSharedElement";
+import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
+import {
+  prototypeFormatFields,
+  prototypeFormatUnsupportedMessage,
+} from "./prototypeFormatCapability";
+import {
+  prototypeStackPatternFields,
+  prototypeStackPatternsUnsupportedMessage,
+  prototypeStackTransitionFields,
+  prototypeStackTransitionsUnsupportedMessage,
+} from "./prototypeStackTransitions";
+import {
+  PROTOTYPE_PAGER_STATE_KEY_CAPABILITY,
+  PROTOTYPE_TIMERS_CAPABILITY,
+  PROTOTYPE_EFFECTS_CAPABILITY,
+  PROTOTYPE_REDUCED_MOTION_CAPABILITY,
+  PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
+  PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
+  PROTOTYPE_FORMAT_CAPABILITY,
+  PROTOTYPE_STACK_PATTERNS_CAPABILITY,
+  PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
+  PROTOTYPE_BAR_SCROLL_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
+  PROTOTYPE_SCROLL_MOTION_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
   PROTOTYPE_SWIPE_ACTIONS_CAPABILITY,
   PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
@@ -11,10 +69,14 @@ import {
   PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
+  PROTOTYPE_BACKDROP_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
+  PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
+  PROTOTYPE_MEDIA_ITEMS_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
   PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
+  PROTOTYPE_LAZY_LIST_CAPABILITY,
   PROTOTYPE_CHAT_SCROLL_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_LINKIFY_CAPABILITY,
@@ -28,6 +90,7 @@ import {
   PROTOTYPE_PLATFORM_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import { hasPrototypeAnchors } from "./prototypeAnchors";
 import {
@@ -85,7 +148,10 @@ import {
   prototypeChoreographyFields,
   prototypeChoreographyUnsupportedMessage,
 } from "./prototypeChoreography";
+import { prototypeMotionV3Fields, prototypeMotionV3UnsupportedMessage } from "./prototypeMotionV3";
+import { PROTOTYPE_MOTION_V3_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeMotionV2Fields, prototypeMotionV2UnsupportedMessage } from "./prototypeMotionV2";
+import { prototypeLazyListFields, prototypeLazyListUnsupportedMessage } from "./prototypeLazyList";
 import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
 import { prototypeLinkifyFields, prototypeLinkifyUnsupportedMessage } from "./prototypeLinkify";
@@ -103,14 +169,181 @@ import {
   prototypeChecksUnsupportedMessage,
 } from "./prototypeChecksCapability";
 
+import { PROTOTYPE_TOOLTIP_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeTooltipFields, prototypeTooltipUnsupportedMessage } from "./prototypeTooltip";
+
+import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeDrawerFields, prototypeDrawerUnsupportedMessage } from "./prototypeDrawer";
+
+import {
+  prototypeKeyframesFields,
+  prototypeKeyframesUnsupportedMessage,
+} from "./prototypeKeyframes";
+import { PROTOTYPE_KEYFRAMES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
+import {
+  PROTOTYPE_STRINGS_CAPABILITY,
+  PROTOTYPE_SEMANTICS_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeStringsFields,
+  prototypeStringsUnsupportedMessage,
+  prototypeSemanticsFields,
+  prototypeSemanticsUnsupportedMessage,
+} from "./prototypeStrings";
+
+import {
+  prototypeStringConditionsFields,
+  prototypeStringConditionsUnsupportedMessage,
+} from "./prototypeStringConditions";
+
+import { prototypeBackdropFields, prototypeBackdropUnsupportedMessage } from "./prototypeBackdrop";
+
+import { prototypeShaderFields, prototypeShadersUnsupportedMessage } from "./prototypeShaders";
+import { PROTOTYPE_CUSTOM_SHADERS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
+import {
+  PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY,
+  prototypePlatformNamespaceFields,
+  prototypePlatformNamespaceUnsupportedMessage,
+} from "./prototypePlatformNamespace";
+
+import {
+  prototypeIconEffectFields,
+  prototypeIconEffectsUnsupportedMessage,
+} from "./prototypeIconEffects";
+import { PROTOTYPE_ICON_EFFECTS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
+import {
+  prototypeMediaItemFields,
+  prototypeMediaItemsUnsupportedMessage,
+} from "./prototypeMediaItems";
+
+import { PROTOTYPE_MOTION_TOKENS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeMotionTokenFields,
+  prototypeMotionTokensUnsupportedMessage,
+} from "./prototypeMotionTokens";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
-  readonly fields: (spec: unknown) => string[];
+  readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
   readonly unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") => string;
 }
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: "prototype_glass_v1",
+    fields: prototypeGlassFields,
+    unsupportedMessage: (fields, platform) =>
+      `The device does not advertise prototype_glass_v1, required by ${fields[0]}. Nothing was shown.${platform === "android" ? " Glass needs an Android renderer with real backdrop blur." : ""}`,
+  },
+  {
+    capability: "prototype_scroll_edge_effect_v1",
+    fields: prototypeScrollEdgeEffectFields,
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_scroll_edge_effect_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_MOTION_TOKENS_CAPABILITY,
+    fields: prototypeMotionTokenFields,
+    unsupportedMessage: prototypeMotionTokensUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,
+    fields: prototypeContentTransitionFields,
+    unsupportedMessage: prototypeContentTransitionUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_ROUTES_CAPABILITY,
+    fields: prototypeRouteFields,
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_routes_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_KEYFRAMES_CAPABILITY,
+    fields: prototypeKeyframesFields,
+    unsupportedMessage: prototypeKeyframesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
+    fields: prototypeShaderFields,
+    unsupportedMessage: prototypeShadersUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_DESIGN_PLATFORM_CAPABILITY,
+    fields: (spec) => (record(record(spec)?.theme)?.design === "platform" ? ["theme.design"] : []),
+    unsupportedMessage: (_fields, platform) =>
+      `The connected ${platform} renderer does not advertise ${PROTOTYPE_DESIGN_PLATFORM_CAPABILITY}. Update the renderer or use theme.design: "material". Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_ICON_EFFECTS_CAPABILITY,
+    fields: prototypeIconEffectFields,
+    unsupportedMessage: prototypeIconEffectsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_MOTION_V3_CAPABILITY,
+    fields: prototypeMotionV3Fields,
+    unsupportedMessage: prototypeMotionV3UnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
+    fields: prototypeStylePolishV2Fields,
+    unsupportedMessage: prototypeStylePolishV2UnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_ADAPTIVE_CAPABILITY,
+    fields: prototypeAdaptiveFields,
+    unsupportedMessage: prototypeAdaptiveUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_DRAWER_CAPABILITY,
+    fields: prototypeDrawerFields,
+    unsupportedMessage: prototypeDrawerUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_TOOLTIP_CAPABILITY,
+    fields: prototypeTooltipFields,
+    unsupportedMessage: prototypeTooltipUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STRINGS_CAPABILITY,
+    fields: prototypeStringsFields,
+    unsupportedMessage: prototypeStringsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SEMANTICS_CAPABILITY,
+    fields: prototypeSemanticsFields,
+    unsupportedMessage: prototypeSemanticsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_FORMAT_CAPABILITY,
+    fields: prototypeFormatFields,
+    unsupportedMessage: prototypeFormatUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
+    fields: prototypeStringConditionsFields,
+    unsupportedMessage: prototypeStringConditionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SCROLL_MOTION_CAPABILITY,
+    fields: prototypeScrollMotionFields,
+    unsupportedMessage: (fields, platform) =>
+      `The connected ${platform} renderer does not advertise prototype_scroll_motion_v1 required by ${fields[0]}. Nothing was shown. Update the renderer or remove scroll motion.`,
+  },
+  {
+    capability: PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY,
+    fields: (spec, platform) =>
+      platform
+        ? prototypePlatformNamespaceFields(spec, platform)
+        : [
+            ...prototypePlatformNamespaceFields(spec, "ios"),
+            ...prototypePlatformNamespaceFields(spec, "android"),
+          ],
+    unsupportedMessage: prototypePlatformNamespaceUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,
@@ -118,7 +351,9 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
   },
   {
     capability: PROTOTYPE_DATA_MODEL_CAPABILITY,
-    fields: prototypeDataModelFields,
+    fields: (spec) => [
+      ...new Set([...prototypeDataModelFields(spec), ...prototypeLazyListFields(spec)]),
+    ],
     unsupportedMessage: prototypeDataModelUnsupportedMessage,
   },
   {
@@ -142,8 +377,19 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeFlowGridUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_PAGER_STATE_KEY_CAPABILITY,
+    fields: (spec) => prototypePagerOptionFields(spec, ["stateKey"]),
+    unsupportedMessage: (fields, platform) =>
+      `The connected ${platform === "ios" ? "iOS prototype agent" : "CtrlProxy"} does not advertise prototype_pager_state_key_v1 required by ${fields[0]}. Nothing was shown. ${platform === "ios" ? "Relaunch with launchApp prototype: true" : "Update CtrlProxy"}, or remove pager.stateKey.`,
+  },
+  {
+    capability: PROTOTYPE_BAR_SCROLL_CAPABILITY,
+    fields: prototypeBarScrollFields,
+    unsupportedMessage: prototypeBarScrollUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
-    fields: prototypePagerOptionFields,
+    fields: (spec) => prototypePagerOptionFields(spec),
     unsupportedMessage: prototypePagerOptionsUnsupportedMessage,
   },
   {
@@ -172,9 +418,25 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeSearchBarUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_BACKDROP_CAPABILITY,
+    fields: prototypeBackdropFields,
+    unsupportedMessage: prototypeBackdropUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_MEDIA_ITEMS_CAPABILITY,
+    fields: prototypeMediaItemFields,
+    unsupportedMessage: prototypeMediaItemsUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_LOADING_STATES_CAPABILITY,
     fields: prototypeLoadingStatesFields,
     unsupportedMessage: prototypeLoadingStatesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_WINDOW_MOTION_CAPABILITY,
+    fields: prototypeWindowMotionFields,
+    unsupportedMessage: (fields) =>
+      `The connected device does not advertise prototype_window_motion_v1, required by ${fields.join(", ")}. Nothing was shown. Update the agent or remove these fields.`,
   },
   {
     capability: PROTOTYPE_MOTION_V2_CAPABILITY,
@@ -185,6 +447,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
     fields: prototypeChoreographyFields,
     unsupportedMessage: prototypeChoreographyUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_EFFECTS_CAPABILITY,
+    fields: prototypeEffectFields,
+    unsupportedMessage: prototypeEffectsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_LAZY_LIST_CAPABILITY,
+    fields: prototypeLazyListFields,
+    unsupportedMessage: prototypeLazyListUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CHART_CAPABILITY,
@@ -217,6 +489,31 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: (_fields, platform) => prototypeStackUnsupportedMessage(platform),
   },
   {
+    capability: PROTOTYPE_REDUCED_MOTION_CAPABILITY,
+    fields: prototypeReducedMotionFields,
+    unsupportedMessage: prototypeReducedMotionUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
+    fields: prototypeSharedElementV2Fields,
+    unsupportedMessage: prototypeSharedElementV2UnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
+    fields: prototypeSharedElementFields,
+    unsupportedMessage: prototypeSharedElementUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STACK_PATTERNS_CAPABILITY,
+    fields: prototypeStackPatternFields,
+    unsupportedMessage: prototypeStackPatternsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
+    fields: prototypeStackTransitionFields,
+    unsupportedMessage: prototypeStackTransitionsUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
     fields: prototypeEmitContextFields,
     unsupportedMessage: prototypeEmitContextUnsupportedMessage,
@@ -230,6 +527,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_DATA_ACTIONS_CAPABILITY,
     fields: prototypeDataActionFields,
     unsupportedMessage: prototypeDataActionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_TIMERS_CAPABILITY,
+    fields: prototypeTimerFields,
+    unsupportedMessage: prototypeTimersUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STORAGE_CAPABILITY,
@@ -251,16 +553,25 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypePlatformFields,
     unsupportedMessage: prototypePlatformUnsupportedMessage,
   },
+  {
+    capability: "prototype_network_upload_v1",
+    fields: (spec) => prototypeFieldsOfKind(spec, "uploadRequest"),
+    unsupportedMessage: (fields, platform) =>
+      `The connected ${platform} runtime does not advertise prototype_network_upload_v1, required for upload requests at ${fields.join(", ")}. Update the runtime or use a JSON body without progressKey. Nothing was shown.`,
+  },
   ...PROTOTYPE_PLATFORM_MODULE_GATES,
 ];
 
-export function prototypeRequiredCapabilities(spec: unknown): {
+export function prototypeRequiredCapabilities(
+  spec: unknown,
+  platform?: "android" | "ios",
+): {
   capability: string;
   fields: string[];
   unsupportedMessage: PrototypeSpecCapabilityGate["unsupportedMessage"];
 }[] {
   return PROTOTYPE_SPEC_CAPABILITY_GATES.flatMap((gate) => {
-    const fields = gate.fields(spec);
+    const fields = gate.fields(spec, platform);
     return fields.length === 0
       ? []
       : [{ capability: gate.capability, fields, unsupportedMessage: gate.unsupportedMessage }];
@@ -274,7 +585,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Capabilities the show preflight checks outside the gate table (#14536): any node anchor needs
  * prototype_anchor_v1, and an explicitly chromeless fullscreen window needs
- * prototype_window_chrome_v1 (the only chrome request the preflight refuses without it).
+ * prototype_window_chrome_v1 (the only chrome request the preflight refuses without it); window.deadTaps
+ * true needs prototype_dead_tap_v1 (#14124).
  */
 function preflightCapabilities(spec: unknown): string[] {
   if (!isRecord(spec)) {
@@ -285,6 +597,7 @@ function preflightCapabilities(spec: unknown): string[] {
   return [
     ...(hasPrototypeAnchors(spec) ? [PROTOTYPE_ANCHOR_CAPABILITY] : []),
     ...(fullscreen && window.chrome === "none" ? [PROTOTYPE_WINDOW_CHROME_CAPABILITY] : []),
+    ...(window.deadTaps === true ? [PROTOTYPE_DEAD_TAP_CAPABILITY] : []),
   ];
 }
 

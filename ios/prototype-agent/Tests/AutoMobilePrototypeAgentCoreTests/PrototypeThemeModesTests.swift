@@ -30,39 +30,12 @@ final class PrototypeThemeModesTests: XCTestCase {
 
     func testTheAgentAdvertisesThemeModes() {
         XCTAssertEqual(PrototypeAgentProtocol.themeModesCapability, "prototype_theme_modes_v1")
-        XCTAssertEqual(PrototypeAgentProtocol.capabilities, [
-            "show_prototype", "dismiss_prototype", "put_prototype_asset", "remove_prototype_asset",
-            "get_prototype_status", "patch_prototype", "prototype_patch_v1", "prototype_show_in_place_v1",
-            "prototype_anchor_v1", "hide_for_capture",
-            "restore_after_capture", "screenshot_hide_prototype_v1", "prototype_inspect_v1",
-            "prototype_theme_modes_v1", "prototype_flow_grid_v1", "prototype_pager_options_v1",
-            "prototype_appearance_v1", "prototype_window_chrome_v1",
-            "prototype_icon_sf_symbols_v1",
-            "prototype_data_model_v1",
-            "prototype_data_actions_v1",
-            "prototype_network_v1",
-            "prototype_network_device_v1",
-            "prototype_text_field_options_v1",
-            "prototype_gestures_v1",
-            "prototype_swipe_actions_v1",
-            "prototype_text_field_actions_v1",
-            "prototype_carousel_v1",
-            "prototype_chart_v1",
-            "prototype_loading_states_v1",
-            "prototype_text_field_leading_icon_v1",
-            "prototype_refresh_v1",
-            "prototype_search_bar_v1",
-            "prototype_rich_text_v1",
-            "prototype_linkify_v1",
-            "prototype_menus_v1",
-            "prototype_stack_v1",
-            "prototype_emit_context_v1",
-            "prototype_checks_v1",
-            "prototype_identifier_test_tag_only_v1",
-            "prototype_bottom_sheet_drag_v1",
-            "clear_prototype_storage",
-            "prototype_storage_v1",
-        ])
+        // The full advertisement is pinned against the shared fixture by AutoMobilePrototypeCapabilitiesTests;
+        // here only the theme-mode request surface and a duplicate-free list matter.
+        let capabilities = PrototypeAgentProtocol.capabilities
+        XCTAssertEqual(Set(capabilities).count, capabilities.count)
+        XCTAssertTrue(capabilities.contains("prototype_theme_modes_v1"))
+        XCTAssertTrue(capabilities.contains("prototype_platform_clipboard_v1"))
     }
 
     // MARK: Gradient

@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "icons",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "icon",
+      "name": "home",
+      "effect": {
+        "type": "bounce"
+      }
+    }
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_icon_effects_v1",
+  "options": {
+    "supportedCapabilities": []
+  }
+}

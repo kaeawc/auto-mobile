@@ -1,0 +1,78 @@
+{
+  "id": "chart-variants",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "heart": [
+      {
+        "t": "6:00",
+        "bpm": 58
+      },
+      {
+        "t": "9:00",
+        "bpm": 96
+      },
+      {
+        "t": "12:00",
+        "bpm": 141
+      },
+      {
+        "t": "15:00",
+        "bpm": 88
+      },
+      {
+        "t": "18:00",
+        "bpm": 72
+      }
+    ],
+    "steps": [
+      {
+        "day": "Mon",
+        "count": 6200
+      },
+      {
+        "day": "Tue",
+        "count": 8100
+      },
+      {
+        "day": "Wed",
+        "count": 10400
+      }
+    ],
+    "today": [
+      {
+        "count": 6500
+      }
+    ]
+  },
+  "root": {
+    "type": "text",
+    "text": "Visible",
+    "ios": {
+      "bottomAccessory": {
+        "type": "chart",
+        "id": "heart",
+        "variant": "line",
+        "series": [
+          {
+            "path": "/heart",
+            "x": "t",
+            "y": "bpm",
+            "label": "Heart rate"
+          }
+        ],
+        "xLabels": "ends",
+        "yRange": {
+          "min": 40,
+          "max": 160
+        },
+        "android": {
+          "indication": "ripple"
+        }
+      }
+    }
+  }
+}

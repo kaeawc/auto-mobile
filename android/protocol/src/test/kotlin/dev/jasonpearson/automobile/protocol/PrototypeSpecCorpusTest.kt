@@ -95,12 +95,38 @@ class PrototypeSpecCorpusTest {
             supported,
             library,
           )
-        } else PrototypeSpecValidator.validate(invalidSpec.getValue(file), supported, library)
+        } else
+          PrototypeSpecValidator.validate(
+            invalidSpec.getValue(file),
+            supported,
+            library,
+            (options?.get("shareAssetIds") as? JsonArray)
+              ?.map { it.jsonPrimitive.content }
+              ?.toSet(),
+          )
       assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
       assertEquals(
         fixture.getValue("expectedPath").jsonPrimitive.content,
         (result as PrototypeSpecValidation.Failure).error.path,
       )
+      val messageCase =
+        listOf(
+            "list-",
+            "request-append-to-",
+            "node-list",
+            "listRepeat",
+            "action-request-append",
+            "lazy_list",
+          )
+          .any(file.name::contains)
+      val compareMessage =
+        messageCase || listOf("share-", "glass-").any { file.name.startsWith(it) }
+      if (compareMessage && fixture.containsKey("expectedMessage")) {
+        assertEquals(
+          fixture.getValue("expectedMessage").jsonPrimitive.content,
+          result.error.message,
+        )
+      }
     }
   }
 
@@ -192,8 +218,14 @@ class PrototypeSpecCorpusTest {
       assertEquals(type in gestureTypes, "onLongPress" in fields, type)
       assertEquals(type in gestureTypes, "onDoubleTap" in fields, type)
     }
+    // Android namespaces render; foreign glass metadata survives typed round trips.
+    val stripped = emptySet<String>()
     for ((type, variant) in variants) {
-      assertEquals(variant.jsonObject.getValue("fields").jsonObject.keys, models[type], type)
+      assertEquals(
+        variant.jsonObject.getValue("fields").jsonObject.keys - stripped,
+        models[type],
+        type,
+      )
     }
   }
 
@@ -238,6 +270,32 @@ class PrototypeSpecCorpusTest {
       else -> Unit
     }
   }
+
+  @TestFactory
+  fun routeDiagnostics(): List<DynamicTest> =
+    invalid
+      .filter {
+        it.name.startsWith("routes-") && invalidJson.getValue(it)["expectedMessage"] != null
+      }
+      .map { file ->
+        DynamicTest.dynamicTest("route diagnostic ${file.name}") {
+          val fixture = invalidJson.getValue(file)
+          assertEquals(
+            PrototypeSpecValidation.Failure(
+              PrototypeSpecError(
+                fixture.getValue("expectedPath").jsonPrimitive.content,
+                fixture.getValue("expectedMessage").jsonPrimitive.content,
+              ),
+            ),
+            PrototypeSpecValidator.validate(
+              invalidSpec.getValue(file),
+              ((fixture["options"] as? JsonObject)?.get("supportedCapabilities") as? JsonArray)
+                ?.map { it.jsonPrimitive.content }
+                ?.toSet(),
+            ),
+          )
+        }
+      }
 
   companion object {
     @BeforeAll @JvmStatic fun loadFixtures() = PrototypeSpecFixtures.loadFixtures()

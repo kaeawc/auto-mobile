@@ -92,6 +92,7 @@ test/daemon/socketServerReaffirmedProfileAcquisition.integration.test.ts | safe 
 test/daemon/socketServerScopeKey.integration.test.ts | safe | tmpdir socket L72
 test/daemon/socketServerToolCapabilities.integration.test.ts | safe | tmpdir socket L62
 test/daemon/socketTasksRelay.integration.test.ts | safe | tmpdir socket L281, in-process dispatcher, DaemonClient.isAvailable spied, hermetic fixture device boundary
+test/daemon/statelessMcpHttpModern.integration.test.ts | safe | real SDK HTTP, listen, MRTR and task device-choice handlers with captured Request/Response, in-memory task store and bus, hermetic tool/device-manager fakes and FakeTimer; no network listener or database resolution
 test/daemon/telemetryPushSocketServer.integration.test.ts | safe | FakeSocket, FakeTimer, in-memory singleton DB
 test/daemon/videoStreamSocketServer.integration.test.ts | safe | mkdtemp socket dir L144, fake H264 capture source and timer
 test/db/DatabaseHealthProbe.integration.test.ts | safe | temp sqlite file, fake worker; /tmp path L164 is a string only
@@ -226,6 +227,7 @@ test/package/webrtcRuntimeMetadata.integration.test.ts | unsafe | Bun.spawn of t
 test/scripts/xcodegenDriftCheck.integration.test.ts | unsafe | spawnSync bash running repo shell scripts L241/L245
 test/server/acquisitionEnableTools.integration.test.ts | safe | hermetic fixture and in-memory MCP transport L1
 test/server/androidNavigationWorkflow.integration.test.ts | safe | hermetic fixture; Explore stubbed with fake executor L1/L141
+test/server/claudeCodeElicitation.integration.test.ts | unsafe | spawns a real Claude Code binary and a stdio child server, and skips without one
 test/server/configManagerDefaultRepositories.integration.test.ts | safe | getDatabase spied to createTestDatabase L29/L31
 test/server/daemonShutdownOutcomeWire.integration.test.ts | safe | hermetic fixture and McpTestFixture in-memory L14
 test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-memory DB; new Daemon never started, pool release mocked L33
@@ -236,6 +238,7 @@ test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of 
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
 test/server/mcpSessionAutolockRouting.integration.test.ts | safe | FakeDeviceUtils pool, FakeDeviceSessionPersistence L170/L186
 test/server/observeAppResource.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L129
+test/server/observeAppShellMinified.integration.test.ts | safe | Bun.build of one source file and a fake window, written under os.tmpdir()
 test/server/outputSchema.sdk.integration.test.ts | safe | hermetic server fixture; in-memory McpTestFixture; in-test stub tool L7
 test/server/performanceResources.integration.test.ts | safe | createTestDatabase in-memory L53
 test/server/plainReadToolSessionActivity.integration.test.ts | safe | hermetic fixture; FakeDeviceUtils pool L36

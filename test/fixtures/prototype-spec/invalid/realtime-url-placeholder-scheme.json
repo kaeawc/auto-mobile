@@ -1,0 +1,155 @@
+{
+  "spec": {
+    "id": "realtime",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "chatStatus": "idle",
+      "unread": 0,
+      "peerTyping": false
+    },
+    "data": {
+      "messages": []
+    },
+    "channels": {
+      "chat": {
+        "kind": "websocket",
+        "url": "wss:{scheme}://example.com",
+        "protocols": ["chat.v1"],
+        "headers": {
+          "Authorization": "Bearer {token}"
+        },
+        "via": "host",
+        "connect": "onShow",
+        "statusKey": "chatStatus",
+        "reconnect": {
+          "maxAttempts": 8,
+          "initialDelayMs": 500,
+          "maxDelayMs": 30000
+        },
+        "decode": "json",
+        "routes": [
+          {
+            "when": {
+              "pointer": "/type",
+              "equals": "message"
+            },
+            "actions": [
+              {
+                "type": "upsertData",
+                "path": "/data/messages",
+                "key": "/id",
+                "value": {
+                  "event": "/message"
+                },
+                "maxItems": 200
+              },
+              {
+                "type": "increment",
+                "key": "unread"
+              }
+            ]
+          },
+          {
+            "when": {
+              "pointer": "/typing",
+              "exists": true
+            },
+            "actions": [
+              {
+                "type": "setState",
+                "key": "peerTyping",
+                "value": {
+                  "event": "/typing"
+                }
+              }
+            ]
+          },
+          {
+            "actions": [
+              {
+                "type": "appendData",
+                "path": "/data/messages",
+                "value": {
+                  "event": ""
+                },
+                "maxItems": 200
+              }
+            ]
+          }
+        ],
+        "onOpen": [],
+        "onClose": [],
+        "onError": []
+      }
+    },
+    "platform": {
+      "on": {
+        "realtime.frame": [
+          {
+            "type": "setData",
+            "path": "/data/latest",
+            "value": {
+              "event": ""
+            }
+          }
+        ],
+        "realtime.status": [
+          {
+            "type": "setState",
+            "key": "chatStatus",
+            "value": {
+              "event": "/status"
+            }
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Chat",
+      "visibleWhen": {
+        "platform": "/realtime/chat/status",
+        "equals": "open"
+      },
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "realtime.connect",
+          "args": {
+            "channel": "chat"
+          }
+        },
+        {
+          "type": "platform",
+          "call": "realtime.send",
+          "args": {
+            "channel": {
+              "value": "chat"
+            },
+            "body": {
+              "value": {
+                "text": "hello"
+              }
+            }
+          }
+        },
+        {
+          "type": "platform",
+          "call": "realtime.disconnect",
+          "args": {
+            "channel": "chat"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "channels.chat.url",
+  "expectedMessage": "A templated websocket channel url must start with a literal ws:// or wss://"
+}

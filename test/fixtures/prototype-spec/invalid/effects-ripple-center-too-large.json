@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "ripple",
+            "center": {
+              "x": 1.5,
+              "y": 0.5
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].center.x",
+  "expectedMessage": "Invalid number value"
+}

@@ -7,7 +7,12 @@
 # a baseline: both baselines reached zero and were deleted, so ANY error fails.
 #
 #   scripts/typecheck-baseline.sh                  src (tsconfig.json)
-#   scripts/typecheck-baseline.sh --project=test   every test/**/*.ts (tsconfig.test.json)
+#   scripts/typecheck-baseline.sh --project=test   every test/**/*.ts (tsconfig.test-*.json)
+#
+# The test project is checked as three sequential shards (daemon+server, features, everything
+# else). One tsgo over all of test/ peaked near 7 GiB and was SIGKILLed on the Node ubuntu job
+# (#15580); each shard peaks near 4.5 GiB. `tsconfig.test-rest.json` excludes the other shards'
+# directories rather than listing its own, so a new test directory is covered by construction.
 #
 # Types guard: both projects resolve `bun:*` modules and the `Bun` global from
 # `@types/bun` (tsconfig `types`). If that package is missing, tsgo reports
@@ -23,7 +28,7 @@ set -euo pipefail
 export LC_ALL=C
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TSCONFIG="tsconfig.json"
+TSCONFIGS=("tsconfig.json")
 PROJECT="src"
 cd "$ROOT"
 
@@ -33,7 +38,7 @@ source "$ROOT/scripts/lib/host-heavy-run.sh"
 for arg in "$@"; do
   case "$arg" in
     --project=test)
-      TSCONFIG="tsconfig.test.json"
+      TSCONFIGS=("tsconfig.test-daemon.json" "tsconfig.test-features.json" "tsconfig.test-rest.json")
       PROJECT="test"
       ;;
     *)
@@ -61,7 +66,16 @@ run_tsc() {
     if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
       eval "$TYPECHECK_TSC_CMD" 2>&1
     else
-      host_heavy_run host_heavy_tsgo "$TSCONFIG" 2>&1
+      # Sequential, so only one shard's memory is live at a time; the worst status wins.
+      local tsconfig shard_rc=0 worst_rc=0
+      for tsconfig in "${TSCONFIGS[@]}"; do
+        set +e
+        host_heavy_run host_heavy_tsgo "$tsconfig" 2>&1
+        shard_rc=$?
+        set -e
+        if [[ "$shard_rc" -gt "$worst_rc" ]]; then worst_rc="$shard_rc"; fi
+      done
+      exit "$worst_rc"
     fi
   )
 }

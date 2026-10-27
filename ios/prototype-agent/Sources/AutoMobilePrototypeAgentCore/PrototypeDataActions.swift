@@ -15,7 +15,7 @@ struct PrototypeDataWriteFailure: Error, Equatable {
     let message: String
 }
 
-/// The device side of `setData`, `appendData` and `removeData` (#12519): a Swift twin of the pure
+/// The device side of `setData`, `appendData`, `prependData` and `removeData` (#12519): a Swift twin of the pure
 /// `applyPrototypeDataWrite` and `resolvePrototypeDataWriteValue` helpers, so the host mirror and
 /// this runtime cannot drift. Nothing here touches a session; a refused write returns a failure and
 /// the input is untouched.
@@ -23,19 +23,24 @@ enum PrototypeDataWrite {
     enum Operation: String, Equatable {
         case set
         case append
+        case upsert
+        case extend
+        case prepend
         case remove
 
         init?(actionType: String) {
             switch actionType {
             case "setData": self = .set
             case "appendData": self = .append
+            case "upsertData": self = .upsert
+            case "prependData": self = .prepend
             case "removeData": self = .remove
             default: return nil
             }
         }
     }
 
-    static let actionTypes: Set<String> = ["setData", "appendData", "removeData"]
+    static let actionTypes: Set<String> = ["setData", "appendData", "prependData", "upsertData", "removeData"]
 
     /// The pointer of a `/data/<pointer>` path: `/data` alone (the whole document) has none.
     static func pointer(ofPath path: String) -> String? {
@@ -78,6 +83,13 @@ enum PrototypeDataWrite {
                 ))
             }
             return .success(value)
+        case let (kind, pointer?) where kind == "platform" || kind == "event":
+            guard let pointer = pointer.stringValue,
+                  let value = kind == "platform" ? inputs.platform(pointer) : inputs.event(pointer)
+            else {
+                return .failure(.init(code: .notFound, message: "Binding pointer does not exist"))
+            }
+            return .success(value)
         default:
             return .failure(.init(code: .invalidValue, message: "A data write value cannot use \(kind) here"))
         }
@@ -87,24 +99,88 @@ enum PrototypeDataWrite {
 
     /// Applies one write to `data` (absent data is an empty object). `set` creates or replaces an
     /// object member and replaces an existing array element; `append` pushes onto an existing array;
+    /// `prepend` inserts an ordered page and keeps its first maxItems rows when windowed;
     /// `remove` deletes an existing member or element and later elements shift down. The result must
     /// satisfy the data limits, including `maxDataWriteBytes`, or nothing is written.
     static func apply(
-        _ data: [String: JSONValue]?, op operation: Operation, path: String, value: JSONValue?
+        _ data: [String: JSONValue]?, op operation: Operation, path: String, value: JSONValue?, maxItems: Double? = nil,
+        key: String? = nil
     )
         -> Result<[String: JSONValue], PrototypeDataWriteFailure>
+    {
+        applyWindowed(data, op: operation, path: path, value: value, maxItems: maxItems, key: key).map(\.data)
+    }
+
+    struct Applied: Equatable {
+        let data: [String: JSONValue]
+        let trimmed: Int
+    }
+
+    static func applyWindowed(
+        _ data: [String: JSONValue]?, op operation: Operation, path: String, value: JSONValue?, maxItems: Double? = nil,
+        key: String? = nil
+    )
+        -> Result<Applied, PrototypeDataWriteFailure>
     {
         guard let pointer = pointer(ofPath: path) else {
             return fail(.invalidPath, "\(path) is not a /data/<pointer> path")
         }
-        if operation != .remove, value == nil { return fail(.invalidValue, "A set or append write needs a value") }
+        if operation == .upsert {
+            guard let key, PrototypeDataPointer.isValid(key), let value, PrototypeDataPointer.resolve(
+                value,
+                tokens: PrototypeDataPointer.tokens(key)[...]
+            ) != nil else { return fail(.invalidValue, "upsert needs a valid key pointer present in value") }
+        }
+        let name = operation == .prepend ? "prependData" : operation.rawValue
+        if operation != .remove, value == nil { return fail(.invalidValue, "\(name) write needs a value") }
+        if operation == .extend || operation == .prepend {
+            guard case .array? = value else { return fail(.invalidValue, "\(name) needs an array value") }
+        }
+        if operation == .append || operation == .extend || operation == .prepend || operation == .upsert, let maxItems,
+           maxItems < 1 || maxItems > 9_007_199_254_740_991 ||
+           ((operation == .append || operation == .upsert) && maxItems > Double(PrototypeLimits.maxDataArrayItems)) ||
+           Int(exactly: maxItems) == nil
+        {
+            return fail(.invalidValue, "\(name) maxItems must be a positive safe integer")
+        }
         let current = data ?? [:]
         let tokens = PrototypeDataPointer.tokens(pointer)
         let existing = PrototypeDataPointer.resolve(.object(current), tokens: tokens[...])
         if let refusal = targetRefusal(current, tokens: tokens, existing: existing, op: operation, path: path) {
             return .failure(refusal)
         }
-        guard case let .object(next)? = mutate(.object(current), tokens: tokens[...], op: operation, value: value)
+        var effectiveOperation = operation
+        var effectiveValue = value
+        var trimmed = 0
+        if operation == .append || operation == .extend || operation == .prepend || operation == .upsert,
+           case let .array(items)? = existing, let value
+        {
+            let incoming: [JSONValue]
+            if operation == .extend || operation == .prepend, case let .array(values) = value {
+                incoming = values
+            } else { incoming = [value] }
+            var combined = operation == .prepend ? incoming + items : items + incoming
+            if operation == .upsert, let key {
+                let identity = PrototypeDataPointer.resolve(value, tokens: PrototypeDataPointer.tokens(key)[...])
+                combined = items
+                if let index = items.firstIndex(where: { sameKey(
+                    PrototypeDataPointer.resolve($0, tokens: PrototypeDataPointer.tokens(key)[...]),
+                    identity
+                ) }) { combined[index] = value } else { combined.append(value) }
+            }
+            trimmed = maxItems.map { max(0, combined.count - Int($0)) } ?? 0
+            effectiveValue = .array(
+                operation == .prepend
+                    ? Array(combined.dropLast(trimmed)) : Array(combined.dropFirst(trimmed))
+            )
+            effectiveOperation = .set
+        }
+        guard case let .object(next)? = mutate(
+            .object(current),
+            tokens: tokens[...],
+            op: effectiveOperation,
+            value: effectiveValue
+        )
         else {
             return fail(.notFound, "\(path): the target cannot be written")
         }
@@ -112,19 +188,36 @@ enum PrototypeDataWrite {
             try PrototypeLimits.guardDataWrite(next)
         } catch {
             // Only the limit walk throws here; its messages name the limit when one was exceeded.
-            let message = "\(error)"
+            let message: String
+            if case let DecodingError.dataCorrupted(context) = error {
+                message = context.debugDescription.components(separatedBy: ": ").dropFirst().joined(separator: ": ")
+            } else { message = error.localizedDescription }
             return fail(
                 message.contains("limit") ? .limitExceeded : .invalidValue,
-                "\(path): \(message)"
+                message
             )
         }
-        return .success(next)
+        return .success(Applied(data: next, trimmed: trimmed))
     }
 
-    private static func fail(
+    /// Match JSON identities without Swift's canonical-equivalence string comparison.
+    private static func sameKey(_ left: JSONValue?, _ right: JSONValue?) -> Bool {
+        switch (left, right) {
+        case let (.string(a)?, .string(b)?): return a.utf16.elementsEqual(b.utf16)
+        case let (.array(a)?, .array(b)?): return a.count == b.count && zip(a, b).allSatisfy { sameKey($0, $1) }
+        case let (.object(a)?, .object(b)?):
+            return a.count == b.count && a.allSatisfy { key, value in
+                guard let index = PrototypeDataPointer.exactKey(key, in: b) else { return false }
+                return sameKey(value, b[index].value)
+            }
+        default: return left != nil && left == right
+        }
+    }
+
+    private static func fail<T>(
         _ code: PrototypeDataWriteCode, _ message: String
     )
-        -> Result<[String: JSONValue], PrototypeDataWriteFailure>
+        -> Result<T, PrototypeDataWriteFailure>
     {
         .failure(.init(code: code, message: message))
     }
@@ -135,11 +228,13 @@ enum PrototypeDataWrite {
         -> PrototypeDataWriteFailure?
     {
         switch operation {
-        case .append:
+        case .append, .extend, .prepend, .upsert:
+            let name = operation == .append ? "appendData" : operation == .prepend ? "prependData" : operation ==
+                .upsert ? "upsertData" : "extend"
             guard let existing
-            else { return .init(code: .notFound, message: "appendData target \(path) does not exist") }
+            else { return .init(code: .notFound, message: "\(name) target \(path) does not exist") }
             if case .array = existing { return nil }
-            return .init(code: .notArray, message: "appendData target \(path) is not an array")
+            return .init(code: .notArray, message: "\(name) target \(path) is not an array")
         case .remove:
             return existing == nil
                 ? .init(code: .notFound, message: "removeData target \(path) does not exist") : nil
@@ -229,10 +324,17 @@ enum PrototypeDataWrite {
         switch operation {
         case .set:
             return value.map { .some($0) }
+        case .upsert: return nil // Converted to a checked set before mutation.
         case .append:
             guard present, case var .array(items)? = old, let value else { return nil }
             items.append(value)
             return .some(.array(items))
+        case .extend:
+            guard present, case let .array(items)? = old, case let .array(values)? = value else { return nil }
+            return .some(.array(items + values))
+        case .prepend:
+            guard present, case let .array(items)? = old, case let .array(values)? = value else { return nil }
+            return .some(.array(values + items))
         case .remove:
             return present ? .some(nil) : nil
         }
@@ -244,27 +346,40 @@ extension PrototypeDataWrite {
     static func validate(actions: [PrototypeLocatedValue], data: [String: JSONValue]?) throws {
         for action in actions {
             let fields = action.value
-            guard ["setData", "appendData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { continue }
+            guard ["setData", "appendData", "prependData", "upsertData", "removeData"]
+                .contains(fields["type"]?.stringValue ?? "")
+            else { continue }
             let path = fields["path"]?.stringValue ?? ""
             let bound = path.split(separator: "/", omittingEmptySubsequences: false)
                 .map { $0 == "{index}" ? "0" : String($0) }.joined(separator: "/")
             guard let pointer = pointer(ofPath: bound) else { throw PrototypeContractValidator.invalid(
                 "\(action.path).path",
-                "Invalid data write path"
+                "Data action paths are /data/<RFC 6901 pointer> and address a member of data"
             ) }
             if let literal = fields["value"]?.objectFields?["value"] {
+                if fields["type"] == .string("upsertData") {
+                    let identity = PrototypeDataPointer.resolve(
+                        literal,
+                        tokens: PrototypeDataPointer.tokens(fields["key"]?.stringValue ?? "")[...]
+                    )
+                    guard let identity, identity != .null else { throw PrototypeContractValidator.invalid(
+                        "\(action.path).value.value",
+                        "upsertData key pointer must be present and non-null in the literal value"
+                    ) }
+                }
                 do { try PrototypeLimits.guardDataWrite(["value": literal]) }
                 catch { throw PrototypeContractValidator.invalid(
                     "\(action.path).value.value",
-                    "Invalid data write value"
+                    "A data write value must be a string, boolean, finite number, array or object"
                 ) }
             }
-            if fields["type"] == .string("appendData"), !path.contains("{index}"),
+            if ["appendData", "prependData", "upsertData"].contains(fields["type"]?.stringValue ?? ""),
+               !path.contains("{index}"),
                let value = PrototypeDataPointer.resolve(data, pointer: pointer)
             {
                 guard case .array = value else { throw PrototypeContractValidator.invalid(
                     "\(action.path).path",
-                    "appendData needs array"
+                    "\(fields["type"]?.stringValue ?? "") target is not an array"
                 ) }
             }
         }

@@ -1,0 +1,15 @@
+{
+  "id": "foreign-android",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Hello",
+    "android": {
+      "indication": "none"
+    }
+  }
+}

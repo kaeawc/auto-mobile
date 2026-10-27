@@ -1,0 +1,262 @@
+{
+  "id": "icon-effects",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "flag": false
+  },
+  "data": {
+    "revision": 0
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "bounce"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "bounce",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "bounce",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "pulse"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "pulse",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "pulse",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "scale"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "scale",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "scale",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "variableColor"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "variableColor",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "variableColor",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "wiggle"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "wiggle",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "wiggle",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "rotate"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "rotate",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "rotate",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "breathe"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "breathe",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "breathe",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "replace"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "replace",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "replace",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "drawOn"
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "drawOn",
+          "trigger": {
+            "key": "flag"
+          }
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "drawOn",
+          "trigger": {
+            "data": "/revision"
+          }
+        }
+      }
+    ]
+  }
+}

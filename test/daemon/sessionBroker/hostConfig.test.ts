@@ -134,6 +134,31 @@ describe("session broker host configuration", () => {
     ).toEqual({ mode: "erase", maxUses: 20, fallback: "erase" });
   });
 
+  test("iOS minimal defaults to retiring every 5th release and takes no fallback (#14682)", () => {
+    expect(
+      iosReusePolicy(parseSessionBrokerHostConfig(config({ reuse: { ios: { mode: "minimal" } } }))),
+    ).toEqual({ mode: "minimal", maxUses: 5 });
+    expect(
+      iosReusePolicy(
+        parseSessionBrokerHostConfig(config({ reuse: { ios: { mode: "minimal", maxUses: 2 } } })),
+      ),
+    ).toEqual({ mode: "minimal", maxUses: 2 });
+    for (const ios of [
+      { mode: "minimal", fallback: "erase" },
+      { mode: "minimal", fallback: "destroy" },
+      { mode: "minimal", maxUses: 0 },
+    ]) {
+      expect(() => parseSessionBrokerHostConfig(config({ reuse: { ios } }))).toThrow(
+        "Invalid session broker host configuration",
+      );
+    }
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({ reuseCleanDevices: true, reuse: { ios: { mode: "minimal" } } }),
+      ),
+    ).toThrow("remove it to select minimal");
+  });
+
   test("iOS keep-booted accepts a destroy fallback; erase mode keeps erase only (#15232)", () => {
     expect(
       iosReusePolicy(
@@ -217,10 +242,28 @@ describe("session broker host configuration", () => {
       iosClassifications: [],
       reuseCleanDevices: false,
       reuseAndroidCleanDevices: false,
+      capabilities: { iosDuo: false },
     });
     expect(() => parseSessionBrokerHostConfig(config({ defaults: {} }))).toThrow(
       "At least one platform must have an explicit default policy",
     );
+  });
+
+  test("iOS Duo execution is an explicit operator capability that needs iOS defaults", () => {
+    expect(
+      parseSessionBrokerHostConfig(config({ capabilities: { iosDuo: true } })).capabilities,
+    ).toEqual({ iosDuo: true });
+    expect(parseSessionBrokerHostConfig(config({ capabilities: {} })).capabilities).toEqual({
+      iosDuo: false,
+    });
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({ defaults: { android: androidDefaults() }, capabilities: { iosDuo: true } }),
+      ),
+    ).toThrow("capabilities.iosDuo requires an explicit defaults.ios policy");
+    expect(() =>
+      parseSessionBrokerHostConfig(config({ capabilities: { iosDuo: true, androidFold: true } })),
+    ).toThrow("Invalid session broker host configuration");
   });
 
   test("preserves operator defaults, classifications, and zero or bounded caps", () => {

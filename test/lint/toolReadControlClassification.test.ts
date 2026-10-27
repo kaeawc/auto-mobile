@@ -136,6 +136,7 @@ const CLASSIFICATION: Classification = {
     "displayProfile",
     "dragAndDrop",
     "dragPath",
+    "hoverAt",
     "executePlan",
     "explore",
     "focusNavigate",
@@ -182,6 +183,7 @@ const CLASSIFICATION: Classification = {
     "setSensor",
     "setUIState",
     "shake",
+    "siri",
     "swipeAt",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.

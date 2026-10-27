@@ -197,6 +197,13 @@ describe("setPosture and changeLocalization journal intents", () => {
     expect(entries[0]).toEqual({ kind: "device-setting", key: "tool:setPosture" });
     expect(entries.filter(opaqueForcesFallback)).toHaveLength(1);
     expect(
+      deviceToolMutations(
+        "setPosture",
+        { posture: "opened", displayPreset: "tablet" },
+        "android",
+      ).filter(opaqueForcesFallback),
+    ).toHaveLength(2);
+    expect(
       deviceToolMutations("setPosture", { hingeAngle: 90 }, "ios").filter(opaqueForcesFallback),
     ).toEqual([]);
   });

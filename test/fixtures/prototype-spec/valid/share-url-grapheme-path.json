@@ -1,0 +1,26 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Share",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "share.open",
+        "args": {
+          "url": {
+            "value": "https://a/́:99999"
+          }
+        }
+      }
+    ]
+  }
+}

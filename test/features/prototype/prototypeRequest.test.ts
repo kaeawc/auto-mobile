@@ -291,11 +291,11 @@ describe("request contract mirror", () => {
     expect(Object.keys(option!.shape).sort()).toEqual(Object.keys(variant.fields).sort());
   });
 
-  test("request and platform (#14294) are the only actions whose lists nest actions", () => {
+  test("request, platform and startTimer are the actions whose lists nest actions", () => {
     const nesting = Object.entries(contract.definitions.action.variants).filter(([, variant]) =>
       JSON.stringify(variant).includes('"name":"action"'),
     );
-    expect(nesting.map(([name]) => name)).toEqual(["request", "platform"]);
+    expect(nesting.map(([name]) => name)).toEqual(["request", "platform", "startTimer"]);
   });
 });
 
@@ -549,13 +549,17 @@ describe("applyPrototypeRequestOutcome", () => {
 
   test("a body that fits without room for any metadata is rolled back as invalid_response", () => {
     const message = "response and metadata exceed the data limit";
-    const result = applyPrototypeRequestOutcome({}, "/data/feed", ok("x".repeat(262120)));
+    const result = applyPrototypeRequestOutcome(
+      {},
+      "/data/feed",
+      ok("x".repeat(contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES - 24)),
+    );
     expect(result.status).toBe("error");
     expect(result.wroteInto).toBe(false);
     expect(result.meta.error).toEqual({ code: "invalid_response", message });
     // `into` is untouched and the error metadata still fits, so it is written.
     expect<unknown>(result.data).toEqual({ feed__meta: result.meta });
-    const pad = { pad: "p".repeat(262100) };
+    const pad = { pad: "p".repeat(contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES - 44) };
     const full = applyPrototypeRequestOutcome(pad, "/data/feed", ok("ab"));
     expect(full.status).toBe("error");
     expect(full.meta.error?.message).toBe(message);

@@ -1,3 +1,4 @@
+import type { AdvancePrototypeClockMessage } from "./prototypeMessages";
 /** Typed request builders and millisecond normalization for byte-identical wire frames. */
 import type { PrototypePatchRequest } from "../../../prototype/prototypePatchWire";
 import type { PrototypeSpec } from "../../../prototype/prototypeSpec";
@@ -319,6 +320,7 @@ export const ctrlProxyRequests = {
     reset?: boolean;
     replaceOthers?: boolean;
     appearance?: PrototypeAppearanceOverride;
+    locale?: string;
   }): ShowPrototypeMessage {
     return {
       type: "show_prototype",
@@ -327,6 +329,7 @@ export const ctrlProxyRequests = {
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       ...(args.reset === true ? { reset: true as const } : {}),
       ...(args.replaceOthers === false ? { replaceOthers: false as const } : {}),
+      ...(args.spec.strings && args.locale !== undefined ? { locale: args.locale } : {}),
       ...(args.appearance === undefined ? {} : { appearance: args.appearance }),
     };
   },
@@ -363,6 +366,11 @@ export const ctrlProxyRequests = {
   deleteSavedPrototype(args: { requestId: string; id: string }): DeleteSavedPrototypeMessage {
     return { type: "delete_saved_prototype", requestId: args.requestId, id: args.id };
   },
+  advancePrototypeClock: (args: {
+    requestId: string;
+    id: string;
+    advanceTimeMs: number;
+  }): AdvancePrototypeClockMessage => ({ type: "advance_prototype_clock", ...args }),
   clearPrototypeStorage: clearPrototypeStorageMessage,
   patchPrototype(args: { requestId: string } & PrototypePatchRequest): PatchPrototypeMessage {
     return {

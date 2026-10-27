@@ -68,6 +68,44 @@ const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElemen
 });
 
 describe("buildTapOnResultMessage", () => {
+  test("names a long press as a long press, not a tap", () => {
+    const message = buildTapOnResultMessage(
+      selected({ text: "Photo" }),
+      undefined,
+      undefined,
+      undefined,
+      { action: "longPress" },
+    );
+    expect(message).toBe('Long-pressed element (matched text="Photo"; 1 match)');
+  });
+
+  test("says when a long-pressed target advertises no long-click action", () => {
+    const message = buildTapOnResultMessage(
+      selected({ text: "Photo" }),
+      undefined,
+      undefined,
+      undefined,
+      { action: "longPress", longClickAdvertised: false },
+    );
+    expect(message).toBe(
+      'Long-pressed element (matched text="Photo"; 1 match; target advertises no long-click action)',
+    );
+  });
+
+  test("keeps the tap wording for a tap", () => {
+    const message = buildTapOnResultMessage(
+      selected({ text: "Photo" }),
+      undefined,
+      undefined,
+      undefined,
+      {
+        action: "tap",
+        longClickAdvertised: false,
+      },
+    );
+    expect(message).toBe('Tapped on element (matched text="Photo"; 1 match)');
+  });
+
   // AC3: a precise selector must be distinguishable from an ambiguous one, and the
   // message must say what it matched — a correct tap and a wrong tap must not be
   // byte-identical (#5868).

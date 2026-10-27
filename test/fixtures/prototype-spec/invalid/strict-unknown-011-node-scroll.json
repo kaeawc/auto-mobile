@@ -1,0 +1,51 @@
+{
+  "spec": {
+    "id": "bars",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "topAppBar",
+          "onScroll": "pinned",
+          "title": "Feed"
+        },
+        {
+          "type": "bottomNav",
+          "onScroll": "none",
+          "scroll": "feed",
+          "items": [
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Search",
+              "icon": "search"
+            }
+          ],
+          "stateKey": "tab"
+        },
+        {
+          "id": "feed",
+          "type": "scroll",
+          "axis": "vertical",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          },
+          "zzzUnknown": true
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2].zzzUnknown"
+}

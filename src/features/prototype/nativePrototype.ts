@@ -72,6 +72,7 @@ const MIME_EXTENSIONS: Record<PrototypeAssetMimeType, string> = {
   "image/webp": "webp",
   "font/ttf": "ttf",
   "font/otf": "otf",
+  "application/vnd.automobile.agsl": "agsl",
 };
 
 function required(value: string | undefined, name: string): string {
@@ -340,6 +341,13 @@ export async function readNativePrototype(
   const requested = parsePlatform(params.platform);
   const resolved = await resolvePrototype(sources, id, params.deviceId);
   const platform = await resolvePlatform(sources, requested, resolved);
+  if (requiredPrototypeCapabilities(resolved.spec).includes("prototype_custom_shaders_v1")) {
+    throw new ActionableError(
+      platform === "ios"
+        ? "Custom AGSL shaders are Android only; remove style.shader before exporting for iOS."
+        : "Native prototype export does not support style.shader yet; the Compose renderer has no custom shader runtime. Remove style.shader before exporting.",
+    );
+  }
   const version = sources.libraryVersion();
   const capabilities = requiredPrototypeCapabilities(resolved.spec);
   const assets = nativeAssets(platform, id, resolved);

@@ -157,6 +157,14 @@ enum PrototypePatch {
         if name == "test", tests == .skip { return spec }
         state = try member(state, key: key, operation: operation, location: location)
         if name == "test" { return spec }
+        if let value = state[key]?.numberValue, value.isFinite, value.rounded(.towardZero) == value,
+           let root = spec["root"], let fields = root.objectFields,
+           let pager = tree(fields, tokens: [], path: "root")
+           .first(where: { $0.node["type"] == .string("pager") && $0.node["stateKey"] == .string(key) }),
+           case let .array(children)? = pager.node["children"], !children.isEmpty
+        {
+            state[key] = .number(min(max(value, 0), Double(children.count - 1)))
+        }
         var result = spec
         put(&result, "state", .object(state))
         return result
@@ -289,6 +297,16 @@ enum PrototypePatch {
     {
         var result = [Entry(node: node, tokens: tokens, path: path, insideRepeat: insideRepeat)]
         let repeated = insideRepeat || get(node, "repeat") != nil
+        if node["type"] == .string("adaptive") {
+            for key in PrototypeAdaptive.slots {
+                if let child = node[key]?.objectFields { result += tree(
+                    child,
+                    tokens: tokens + [key],
+                    path: "\(path).\(key)",
+                    insideRepeat: repeated
+                ) }
+            }
+        }
         if case let .object(child)? = get(node, "child") {
             result += tree(child, tokens: tokens + ["child"], path: "\(path).child", insideRepeat: repeated)
         }
@@ -334,6 +352,11 @@ enum PrototypePatch {
 
     private static func checkSubtree(_ node: [String: JSONValue], path: String) throws(Failure) {
         try checkReplacement(Entry(node: node, tokens: [], path: path, insideRepeat: false))
+        if node["type"] == .string("adaptive") {
+            for key in PrototypeAdaptive.slots {
+                if let child = node[key]?.objectFields { try checkSubtree(child, path: "\(path).\(key)") }
+            }
+        }
         if case let .object(child)? = get(node, "child") {
             try checkSubtree(child, path: "\(path).child")
         }

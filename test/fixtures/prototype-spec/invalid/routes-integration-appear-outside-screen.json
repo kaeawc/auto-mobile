@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "routes-integration",
+    "data": {
+      "items": []
+    },
+    "state": {
+      "input": "",
+      "open": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Go",
+      "onAppear": [
+        {
+          "type": "emit",
+          "name": "{route.id}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onAppear[0].name",
+  "expectedMessage": "Route placeholder outside a screen"
+}

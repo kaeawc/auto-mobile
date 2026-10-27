@@ -56,6 +56,7 @@ Available buttons:
 - `screenshot`: Take a system screenshot (Android 9+)
 - `split_screen`: Toggle the raw system split screen (Android; `windowMode` picks the second app)
 - `dismiss_notification_shade`: Close the notification shade (Android 12+)
+- `rotary_rotate_cw` / `rotary_rotate_ccw` (with `steps`), `rotary_nudge_up|down|left|right`, `rotary_select`: rotary controller input (Android Automotive only)
 
 ## Key Press
 

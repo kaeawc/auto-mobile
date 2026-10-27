@@ -17,16 +17,27 @@ struct ProcessInfoOSVersion: OSVersionProvider {
 /// `src/features/prototype/prototypeIosMinimumOs.ts` must carry the same entries so its refusal can
 /// name the version; `test/features/prototype/prototypeIosMinimumOs.test.ts` fails when they drift.
 enum PrototypeCapabilityMinimumOS {
-    static let table: [String: Int] = [:]
+    static let table = [
+        "prototype_platform_namespace_v1": 17,
+        "prototype_icon_effects_v1": 17,
+        "prototype_glass_v1": 26,
+        "prototype_keyframes_v1": 17,
+        "prototype_motion_tokens_v1": 17,
+        "prototype_zoom_transition_v1": 18,
+    ]
 }
 
 extension PrototypeAgentProtocol {
     /// The capabilities to advertise on this OS: the full list minus those whose minimum is newer.
     static func advertisedCapabilities(
         os: any OSVersionProvider = ProcessInfoOSVersion(),
-        minimumOS: [String: Int] = PrototypeCapabilityMinimumOS.table
-    ) -> [String] {
-        capabilities.filter { (minimumOS[$0] ?? 0) <= os.majorVersion }
+        minimumOS: [String: Int] = PrototypeCapabilityMinimumOS.table,
+        registryCapabilities: [String] = []
+    )
+        -> [String]
+    {
+        (capabilities + registryCapabilities.filter { !capabilities.contains($0) }.sorted())
+            .filter { (minimumOS[$0] ?? 0) <= os.majorVersion }
     }
 }
 

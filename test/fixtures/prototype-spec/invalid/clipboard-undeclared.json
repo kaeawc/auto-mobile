@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "clipboard",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Clipboard",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "clipboard.paste"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].call",
+  "expectedMessage": "Platform module clipboard is not declared in requires.platform"
+}

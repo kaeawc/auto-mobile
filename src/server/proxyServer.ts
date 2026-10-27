@@ -1,13 +1,16 @@
+import type { SessionDeviceRebound } from "../daemon/sessionDeviceReboundBroadcast";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
-import type {
-  CallToolResult,
-  ListToolsResult,
-  McpServer,
-  ServerCapabilities,
-  ServerContext,
+import {
+  ResourceNotFoundError,
+  type CallToolResult,
+  type ListToolsResult,
+  type McpServer,
+  type ServerCapabilities,
+  type ServerContext,
 } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
+import { attachUsageSkill, isSkillUri, readUsageSkillResource } from "./usageSkill";
 import { McpError } from "../daemon/mcpError";
 import { logger } from "../utils/logger";
 import {
@@ -48,6 +51,7 @@ import {
   type ToolCall,
 } from "./toolCallDispatch";
 import { shapeToolCallError } from "../daemon/shapeToolCallError";
+import type { AmbiguousDeviceElicitationOptions } from "./ambiguousDeviceElicitation";
 import {
   DAEMON_STALLED_CODE,
   livenessHandoverPayload,
@@ -92,6 +96,8 @@ export interface ProxyMcpServerOptions {
   session?: SessionBrokerResult;
   /** Session context for tracking */
   sessionContext?: { sessionId?: string };
+  /** Overrides the timer and bound of the device question asked of an eliciting client (#13945). */
+  ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
 }
 
 export function brokerSessionEndedPayload(
@@ -430,6 +436,29 @@ async function forwardLivenessHandover(
   }
 }
 
+async function forwardSessionDeviceRebound(
+  server: McpServer,
+  event: SessionDeviceRebound,
+): Promise<void> {
+  try {
+    await server.server.sendLoggingMessage({
+      level: "info",
+      logger: "auto-mobile.liveness",
+      data: {
+        code: "session_device_rebound",
+        sessionUuid: event.sessionId,
+        previousDeviceId: event.previousDeviceId,
+        deviceId: event.deviceId,
+        avdName: event.avdName,
+        stableDeviceId: event.stableDeviceId,
+        generation: event.generation,
+      },
+    });
+  } catch (error) {
+    logger.warn("[ProxyServer] Failed to forward session-device rebound", error);
+  }
+}
+
 async function forwardResourceUpdate(server: McpServer, uri: string): Promise<void> {
   try {
     await server.server.notification({
@@ -676,6 +705,15 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
       throw new ActionableError("Resource URI is missing in the request");
     }
 
+    // Usage-skill files are static and local: serve them without a daemon connection (#15430).
+    if (isSkillUri(uri)) {
+      const skillResult = await readUsageSkillResource(uri);
+      if (skillResult) {
+        return skillResult;
+      }
+      throw new ResourceNotFoundError(uri);
+    }
+
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
 
     try {
@@ -734,6 +772,42 @@ export function createDaemonMcpProxy(proxyConfig?: DaemonMcpProxyConfig): Daemon
   });
 }
 
+function proxyToolCallExecutor(
+  proxy: ReturnType<typeof createDaemonMcpProxy>,
+  options: ProxyMcpServerOptions,
+  advertisedToolOutputSchemas: ReadonlyMap<string, boolean>,
+) {
+  return async ({ name, args, progressToken, progress, extra }: ToolCall<McpToolCallExtra>) => {
+    const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
+
+    logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
+
+    // Echo the CLIENT's own progress token through the daemon round trip
+    // (issue #6205) — the direct server (#6118) already refuses to fabricate
+    // one, and the proxy must not either: relay a tick only when the client
+    // asked, tagged with that SAME token. The relay is fire-and-forget; the
+    // shared echo logs a failed send instead of rejecting.
+    const onProgress = progress
+      ? (tick: number, total?: number, message?: string): void => {
+          void progress(tick, total, message);
+        }
+      : undefined;
+
+    try {
+      return await callProxyTool(proxy, { name, args, progressToken, extra }, onProgress, options);
+    } catch (error) {
+      // The SDK suppresses responses for aborted requests. Do not turn a
+      // cancellation into a tool error result while that request unwinds.
+      extra.signal.throwIfAborted();
+      const brokerEnded = localBrokerSessionEndedResult(error, options.session);
+      if (brokerEnded) {
+        return brokerEnded;
+      }
+      return resolveCallToolErrorResult(error, name, hasOutputSchema);
+    }
+  };
+}
+
 export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   server: McpServer;
   proxy: DaemonMcpProxy;
@@ -750,6 +824,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     },
     proxyServerCapabilities(options) as ServerCapabilities,
   );
+  attachUsageSkill(server);
 
   // Forward daemon-emitted list-changed notifications to the external client
   // (issue #3223): the proxy has already invalidated its matching cache, so a
@@ -780,10 +855,14 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   const stopLivenessHandovers = proxy.onLivenessHandover((handover) => {
     void forwardLivenessHandover(server, handover);
   });
+  const stopSessionDeviceRebounds = proxy.onSessionDeviceRebound((event) => {
+    void forwardSessionDeviceRebound(server, event);
+  });
   const previousOnClose = server.server.onclose;
   server.server.onclose = () => {
     stopResourceUpdates();
     stopLivenessHandovers();
+    stopSessionDeviceRebounds();
     previousOnClose?.();
     void proxy.close().catch((error) => {
       logger.warn("[ProxyServer] Failed to close daemon proxy", error);
@@ -879,43 +958,14 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
 
   // Register tools/call handler - forward to daemon through the shared
   // dispatch envelope (#6545).
-  installToolCallDispatcher(server, {
-    progressFailureMessage: "[ProxyServer] Failed to relay progress notification",
-    execute: async ({ name, args, progressToken, progress, extra }) => {
-      const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
-
-      logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
-
-      // Echo the CLIENT's own progress token through the daemon round trip
-      // (issue #6205) — the direct server (#6118) already refuses to fabricate
-      // one, and the proxy must not either: relay a tick only when the client
-      // asked, tagged with that SAME token. The relay is fire-and-forget; the
-      // shared echo logs a failed send instead of rejecting.
-      const onProgress = progress
-        ? (tick: number, total?: number, message?: string): void => {
-            void progress(tick, total, message);
-          }
-        : undefined;
-
-      try {
-        return await callProxyTool(
-          proxy,
-          { name, args, progressToken, extra },
-          onProgress,
-          options,
-        );
-      } catch (error) {
-        // The SDK suppresses responses for aborted requests. Do not turn a
-        // cancellation into a tool error result while that request unwinds.
-        extra.signal.throwIfAborted();
-        const brokerEnded = localBrokerSessionEndedResult(error, options.session);
-        if (brokerEnded) {
-          return brokerEnded;
-        }
-        return resolveCallToolErrorResult(error, name, hasOutputSchema);
-      }
+  installToolCallDispatcher(
+    server,
+    {
+      progressFailureMessage: "[ProxyServer] Failed to relay progress notification",
+      execute: proxyToolCallExecutor(proxy, options, advertisedToolOutputSchemas),
     },
-  });
+    { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} },
+  );
 
   registerProxyResourceHandlers(server, proxy);
   installTasksRelay(server, proxy);

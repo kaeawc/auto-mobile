@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "keyframes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked": false
+    },
+    "root": {
+      "type": "icon",
+      "name": "favorite",
+      "keyframes": {
+        "trigger": {
+          "key": "liked"
+        },
+        "durationMs": 600,
+        "tracks": {
+          "scaleX": [
+            [0, 1],
+            [0.5, -1],
+            [1, 1]
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "root.keyframes.tracks.scaleX",
+  "expectedMessage": "alpha must be in 0..1 and scale values must be positive"
+}

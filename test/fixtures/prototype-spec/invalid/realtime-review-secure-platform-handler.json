@@ -1,0 +1,53 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss://example.com",
+        "via": "device"
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true
+    },
+    "platform": {
+      "on": {
+        "realtime.frame": [
+          {
+            "type": "platform",
+            "call": "realtime.send",
+            "args": {
+              "channel": "c",
+              "body": {
+                "state": "secret"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "platform.on[\"realtime.frame\"][0].args.body.state",
+  "expectedMessage": "Secure value cannot be bound into an action payload"
+}

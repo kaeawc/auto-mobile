@@ -496,6 +496,28 @@
           }
         }
       }
+    },
+    "Select a prototype": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select a prototype"
+          }
+        }
+      }
+    },
+    "Choose a prototype from the library to open it.": {
+      "comment": "LibraryView chrome: Label, message, or action in this screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a prototype from the library to open it."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

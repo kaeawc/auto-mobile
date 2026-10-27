@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "icon-effects",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "flag": false
+    },
+    "data": {
+      "revision": 0
+    },
+    "root": {
+      "type": "icon",
+      "name": "home",
+      "effect": {
+        "type": "bounce",
+        "trigger": {
+          "key": "flag"
+        },
+        "repeat": 1
+      }
+    }
+  },
+  "expectedPath": "root.effect.trigger",
+  "expectedMessage": "At most one of trigger, repeat is allowed"
+}

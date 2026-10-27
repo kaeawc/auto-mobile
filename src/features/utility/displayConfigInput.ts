@@ -4,7 +4,14 @@ import {
   type AccessibilityDisplayValues,
 } from "./AccessibilityDisplayPreferences";
 import { hasDisplayGeometryField, type DisplayGeometryChange } from "./AndroidDisplayGeometry";
-import type { DisplayConfigResult, SetDisplayConfigInput } from "./DisplayConfig";
+import type {
+  DisplayConfig,
+  DisplayConfigResult,
+  DisplayConfigSupport,
+  DisplayTheme,
+  SetDisplayConfigInput,
+} from "./DisplayConfig";
+import { IOS_DEFAULT_CONTENT_SIZE } from "./IosSimulatorDisplayConfig";
 
 /** Why a set request contradicts itself or asks for nothing, before any platform check. */
 export function setInputContradiction(input: SetDisplayConfigInput): string | undefined {
@@ -99,4 +106,81 @@ export function mergeGeometryChange(
     ...(error ? { error } : {}),
     ...(message === undefined ? {} : { message }),
   };
+}
+
+/** Platform defaults for every field a target supports, forced by `reset: "factory"` (#15337). */
+export function factoryDefaults(
+  platform: "android" | "ios",
+  support: DisplayConfigSupport,
+): SetDisplayConfigInput {
+  const on = (level: boolean | "partial" | undefined) => level === true || level === "partial";
+  const defaults: SetDisplayConfigInput = {};
+  if (support.theme) {
+    defaults.theme = "light";
+  }
+  if (platform === "ios" && support.fontScale) {
+    defaults.contentSize = IOS_DEFAULT_CONTENT_SIZE;
+  }
+  for (const field of [
+    "increaseContrast",
+    "reduceMotion",
+    "boldText",
+    "colorInversion",
+    "magnification",
+    "extraDim",
+  ] as const) {
+    if (on(support[field])) {
+      defaults[field] = false;
+    }
+  }
+  if (on(support.colorCorrection)) {
+    defaults.colorCorrection = "off";
+  }
+  return defaults;
+}
+
+/**
+ * `reset` followed by explicit platform defaults for whatever the recorded baselines missed, then
+ * the recorded baselines are dropped: the forced values are defaults, not a state to return to.
+ */
+export async function setFactoryDisplayConfig(
+  config: DisplayConfig,
+  platform: "android" | "ios",
+): Promise<DisplayConfigResult> {
+  const reset = await config.setConfig({ reset: true });
+  if (!reset.success && reset.previous === undefined) {
+    return reset;
+  }
+  const accessibilitySupport = (await config.accessibility().read()).supported;
+  const defaults = factoryDefaults(platform, { ...reset.supported, ...accessibilitySupport });
+  const forced = Object.keys(defaults).length > 0 ? await config.setConfig(defaults) : undefined;
+  config.clearBaselines();
+  const errors = [reset.error, forced?.error].filter((e): e is string => e !== undefined);
+  const error = errors.length > 0 ? errors.join("; ") : undefined;
+  const fields = Object.keys(defaults).join(", ") || "none needed";
+  return {
+    ...reset,
+    success: error === undefined,
+    applied: { ...reset.applied, ...forced?.applied },
+    ...(error ? { error } : {}),
+    message: error ?? `Factory reset: restored platform defaults (${fields}).`,
+  };
+}
+
+export function androidResultMessage(
+  reset: boolean | undefined,
+  theme: DisplayTheme | undefined,
+  error: string | undefined,
+): string | undefined {
+  if (error !== undefined) {
+    return error;
+  }
+  if (!reset) {
+    return undefined;
+  }
+  const nightMode =
+    theme === undefined
+      ? "night mode left unchanged (no night-mode baseline was recorded by displayConfig)"
+      : `night mode restored to ${theme} (changed earlier by displayConfig)`;
+  return `Reset font scale and density to device defaults; ${nightMode}.`;
 }

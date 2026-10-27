@@ -64,6 +64,93 @@ Other refusals you may meet, and what to do:
 | `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                              |
 | `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                  |
 
+### Choosing a device when a call is ambiguous
+
+If your MCP client declares the elicitation capability (form mode) and connects
+over stdio, an `ambiguous_device_target` refusal first becomes a question: the
+client shows the candidate devices and the call continues on the one you pick.
+If you decline or cancel, do not answer within about 20 seconds, or your client
+does not declare elicitation, you get the `ambiguous_device_target` refusal
+above, unchanged. Unattended agents are never held open. Pass `deviceId` on the
+call to skip the question.
+
+If you decline or cancel, the same connection is not asked again for the same set
+of devices, so you are not prompted on every call; a different set of devices, a
+new connection, or an accepted answer asks again. Set `AUTOMOBILE_ELICITATION=off`
+to never ask (CI, benchmarks): the call returns the refusal immediately.
+
+#### Answering the question from code or a headless run
+
+What happens to the question depends on how you run your client:
+
+| Client setup                                       | What the question does                                                                                          |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Claude Code, interactive                           | Shows a dialog listing the devices; your pick continues the call.                                               |
+| Claude Code `-p` (headless) with no hook           | Answered with `cancel` within milliseconds, so you get the `ambiguous_device_target` refusal. Nothing waits.    |
+| Claude Agent SDK (TypeScript) with `onElicitation` | Your callback decides.                                                                                          |
+| Claude Agent SDK (TypeScript) without a handler    | Declined automatically, so you get the refusal.                                                                 |
+| Claude Agent SDK (Python) or the CLI               | There is no callback; only an `Elicitation` hook can answer. Without one the question is declined or cancelled. |
+
+The Agent SDK runs Claude Code underneath, so an external AutoMobile server always sees Claude
+Code's behavior, not a separate client.
+
+**TypeScript `onElicitation`.** The callback receives the request and returns an elicitation result:
+
+```json
+{
+  "serverName": "automobile",
+  "message": "tapOn matched 2 devices. Which device should it use?",
+  "mode": "form",
+  "requestedSchema": {
+    "type": "object",
+    "properties": {
+      "deviceId": {
+        "type": "string",
+        "title": "Device",
+        "description": "The device this call should run on.",
+        "oneOf": [
+          { "const": "emulator-5554", "title": "emulator-5554 (android)" },
+          { "const": "emulator-5556", "title": "emulator-5556 (android)" }
+        ]
+      }
+    },
+    "required": ["deviceId"]
+  }
+}
+```
+
+Answer with `{ "action": "accept", "content": { "deviceId": "emulator-5554" } }`, or
+`{ "action": "decline" }` to get the refusal back. A `deviceId` that was not offered is treated as
+invalid and also returns the refusal.
+
+**`Elicitation` hook (CLI and both SDKs).** A command hook in your settings receives:
+
+```json
+{
+  "hook_event_name": "Elicitation",
+  "mcp_server_name": "automobile",
+  "message": "tapOn matched 2 devices. Which device should it use?",
+  "mode": "form",
+  "requested_schema": { "type": "object", "properties": { "deviceId": { "type": "string" } } }
+}
+```
+
+and answers on stdout:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "Elicitation",
+    "action": "accept",
+    "content": { "deviceId": "emulator-5554" }
+  }
+}
+```
+
+A hook that always accepts picks a device for you without anyone looking, which can run a control
+call on the wrong device. Have the hook choose by a rule you trust (for example the one device that
+is booted), or decline; and pass `deviceId` on the call whenever you know it.
+
 When a refusal carries `retryAfterMs`, wait that long before retrying.
 Refusals do not count as session use and do not extend the session's idle window.
 
@@ -105,6 +192,13 @@ device's readiness lock, so a concurrent `startDevice` or session upgrade for th
 simulator waits within its own deadline. Retry the observe shortly.
 A warm retry can complete in about 1.4 seconds; timing depends on the device and host.
 
+A rollback of an Android AVD that `provisionDevice` created and never attempted to boot
+is not blocked by an unrelated unnamed sibling emulator while the request holds the
+lifecycle reservation. If rollback is refused before changing the device, the response
+keeps the original failure's retryability and reports the retained device in `lifecycle`;
+follow `recovery.nextAction`, which permits reacquiring an intact retained device when
+the original failure is retryable.
+
 ## When a session is released
 
 A session is released by an explicit release, a lost owner heartbeat, the idle
@@ -131,9 +225,24 @@ the windows with the variables in
   same UUID for 180 seconds; other sessions cannot take that device meanwhile
   (a start naming it is refused with a retry hint). If the window passes without
   a resume the session ends with `session_ownership_lost`.
-- **Device killed or lost.** The session ends with `session_ownership_lost`;
-  while a kill is running, calls get `session_terminal_release_in_progress`
-  (`retryable: false`). Acquire the device again under a new session.
+- **Device killed or lost.** An explicit kill ends the session with
+  `session_ownership_lost`; while it runs, calls get
+  `session_terminal_release_in_progress` (`retryable: false`). Acquire again
+  under a new session. With session continuity enabled, a connection loss can
+  instead return `device_lost` while the session is retained. Its `deviceId`
+  names the lost serial; `replacementDeviceId`, when present, names the live
+  replacement. `retry.sameSession: true` and `requiresNewSession: false` mean
+  retry using the same `sessionUuid`. `recovery.status: "pending"` means recovery
+  is still settling, even if a replacement serial is already known; wait and
+  retry. `"recovered"` means recovery completed, and `recovery.attempts` counts
+  recorded attempts (zero when only live-session evidence is available). An
+  exhausted or unattempted recovery retains its reported status; follow
+  `sessionState` and `retry` to decide whether to reacquire. Without a retained
+  session or incident, no retry guidance is inferred. Verify continuity using
+  the [binding metadata and liveness notification](environment-variables.md#session-heartbeat-timeout). The generation counter is valid only within one daemon
+  lifetime and restarts at zero after a daemon restart. `session_device_rebound`
+  is sent at `info` level, so a client that raised its log level above `info`
+  will not see it; read `session-info` instead.
 - **Plan labels.** A multi-device plan runs its extra labels on derived
   `<base>:<label>` sessions that live only as long as the plan run and end with
   the base session. The next plan run mints them again; do not create

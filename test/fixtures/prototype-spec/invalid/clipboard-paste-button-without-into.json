@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "clipboard",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "pasteButton"
+    }
+  },
+  "expectedPath": "root.into",
+  "expectedMessage": "Required property"
+}

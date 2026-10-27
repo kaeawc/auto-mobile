@@ -33,10 +33,15 @@ export interface PrototypeShowOptions {
    * advertising `prototype_appearance_v1`; absent follows the device and sends nothing.
    */
   appearance?: PrototypeAppearanceOverride;
+  /** Show locale override; forwarded only for specs with strings. */
+  locale?: string;
 }
 
 /** Show flags shared with legacy positional appearance callers in the Android client. */
-export type PrototypeShowOverrides = Pick<PrototypeShowOptions, "appearance" | "replaceOthers">;
+export type PrototypeShowOverrides = Pick<
+  PrototypeShowOptions,
+  "appearance" | "replaceOthers" | "locale"
+>;
 
 /** A device's own view of its prototype, where the platform can answer one. */
 export interface PrototypeDeviceStatus {

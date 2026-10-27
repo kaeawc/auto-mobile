@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** One piece of a string with `{as.field}` / `{index}` placeholders resolved into segments. */
@@ -191,7 +192,8 @@ internal enum class PrototypeBindableKind {
    * limits) but `{data:/pointer}` and `{key}` are read when the request runs, so the render-time
    * data resolver leaves it alone.
    */
-  REQUEST_TEXT;
+  REQUEST_TEXT,
+  ROUTE_POINTER;
 
   /** The kinds holding a `/data/...` path with `{index}` segments. */
   fun isDataPath(): Boolean = this == DATA_PATH || this == REQUEST_INTO
@@ -204,6 +206,7 @@ internal enum class PrototypeBindableKind {
  */
 internal object PrototypeBindableFields {
   private val contextNamePattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+  private val followUpLists = listOf("onSuccess", "onError")
 
   /** A member path as the TypeScript validator spells it: `.name`, or `["name"]` if not a name. */
   fun memberPath(path: String, name: String): String =
@@ -213,16 +216,95 @@ internal object PrototypeBindableFields {
   fun <T : Any> first(
     node: JsonObject,
     path: String,
+    includeRoutePointers: Boolean = false,
+    visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
+  ): T? {
+    val visitor = Visitor { raw, at, kind ->
+      if (kind == PrototypeBindableKind.ROUTE_POINTER && !includeRoutePointers) null
+      else visit(raw, at, kind)
+    }
+    return visitor.node(node, path)
+  }
+
+  fun <T : Any> routeFirst(
+    node: JsonObject,
+    path: String,
     visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ): T? {
     val visitor = Visitor(visit)
-    return visitor.node(node, path)
+    return if (path.startsWith("platform.on[")) visitor.action(node, path)
+    else visitor.node(node, path)
   }
+
+  fun <T : Any> firstAction(
+    action: JsonObject,
+    path: String,
+    visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
+  ): T? = Visitor(visit).action(action, path)
 
   private fun objects(data: JsonObject, key: String, path: String): List<Pair<JsonObject, String>> =
     (data[key] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
       (entry as? JsonObject)?.let { it to "$path.$key[$index]" }
     }
+
+  /** The first hit inside the action lists [names] of [action]: follow-ups, timer actions. */
+  private fun <T : Any> Visitor<T>.actionLists(
+    action: JsonObject,
+    names: List<String>,
+    path: String,
+  ): T? {
+    for (name in names) {
+      for ((entry, entryPath) in objects(action, name, path)) {
+        action(entry, entryPath)?.let {
+          return it
+        }
+      }
+    }
+    return null
+  }
+
+  private fun <T : Any> Visitor<T>.routeAction(action: JsonObject, path: String): T? =
+    when ((action["type"] as? JsonPrimitive)?.content) {
+      "push",
+      "replace" -> routeParams(action, path)
+      "setStack" ->
+        objects(action, "path", path).firstNotNullOfOrNull { (entry, at) -> routeParams(entry, at) }
+      else -> null
+    }
+
+  private fun <T : Any> Visitor<T>.routeParams(action: JsonObject, path: String): T? {
+    for ((name, value) in (action["params"] as? JsonObject).orEmpty()) {
+      val at = memberPath("$path.params", name)
+      val result =
+        if (value is JsonObject) binding(value, at)
+        else visit(value, at, PrototypeBindableKind.OPERAND)
+      if (result != null) return result
+    }
+    return null
+  }
+
+  private fun <T : Any> Visitor<T>.requestBody(value: JsonElement?, path: String): T? {
+    val body = value as? JsonObject ?: return null
+    val parts = body["multipart"] as? JsonArray
+    if (parts != null) {
+      for ((index, part) in parts.withIndex()) {
+        binding((part as? JsonObject)?.get("value"), "$path.multipart[$index].value")?.let {
+          return it
+        }
+      }
+      return null
+    }
+    val form = body["form"] as? JsonObject
+    if (form != null) {
+      for ((name, entry) in form) {
+        binding(entry, memberPath("$path.form", name))?.let {
+          return it
+        }
+      }
+      return null
+    }
+    return if (body.containsKey("file")) null else binding(value, path)
+  }
 
   private class Visitor<T : Any>(
     val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
@@ -241,6 +323,9 @@ internal object PrototypeBindableFields {
 
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
+      field(condition, "data", path, PrototypeBindableKind.ROUTE_POINTER)?.let {
+        return it
+      }
       field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
@@ -256,6 +341,11 @@ internal object PrototypeBindableFields {
       field(condition, "notEquals", path, operandKind)?.let {
         return it
       }
+      for (operand in listOf("contains", "startsWith")) {
+        field(condition, operand, path, operandKind)?.let {
+          return it
+        }
+      }
       condition(condition["not"], "$path.not")?.let {
         return it
       }
@@ -269,8 +359,9 @@ internal object PrototypeBindableFields {
       return null
     }
 
-    fun action(action: JsonObject, path: String): T? =
-      when ((action["type"] as? JsonPrimitive)?.content) {
+    fun action(action: JsonObject, path: String): T? {
+      val type = (action["type"] as? JsonPrimitive)?.content
+      return when (type) {
         "setState" ->
           field(action, "key", path, PrototypeBindableKind.KEY)
             ?: field(action, "value", path, PrototypeBindableKind.OPERAND)
@@ -282,14 +373,18 @@ internal object PrototypeBindableFields {
         "increment",
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
         "setData",
-        "appendData" ->
+        "appendData",
+        "upsertData",
+        "prependData" ->
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+        "startTimer" -> actionLists(action, listOf("actions"), path)
         "request" -> request(action, path)
         "platform" -> platform(action, path)
-        else -> null
+        else -> routeAction(action, path)
       }
+    }
 
     /** Mirrors `mapPlatformAction` (#14294): argument bindings, into, statusKey, follow-ups. */
     fun platform(action: JsonObject, path: String): T? {
@@ -304,14 +399,7 @@ internal object PrototypeBindableFields {
       field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
-      for (name in listOf("onSuccess", "onError")) {
-        for ((entry, entryPath) in objects(action, name, path)) {
-          action(entry, entryPath)?.let {
-            return it
-          }
-        }
-      }
-      return null
+      return actionLists(action, followUpLists, path)
     }
 
     /** Mirrors `mapRequestAction`: url, headers, query, body, into, statusKey, then follow-ups. */
@@ -324,23 +412,21 @@ internal object PrototypeBindableFields {
           return it
         }
       }
-      binding(action["body"], "$path.body")?.let {
+      requestBody(action["body"], "$path.body")?.let {
         return it
       }
       field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
         return it
       }
+      (action["append"] as? JsonObject)?.let { append ->
+        field(append, "to", "$path.append", PrototypeBindableKind.REQUEST_INTO)?.let {
+          return it
+        }
+      }
       field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
-      for (name in listOf("onSuccess", "onError")) {
-        for ((entry, entryPath) in objects(action, name, path)) {
-          action(entry, entryPath)?.let {
-            return it
-          }
-        }
-      }
-      return null
+      return actionLists(action, followUpLists, path)
     }
 
     /** A header or query entry: a literal string is text, an object is a value binding. */
@@ -366,7 +452,10 @@ internal object PrototypeBindableFields {
       visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
         return it
       }
-      return (value as? JsonObject)?.let { field(it, "state", at, PrototypeBindableKind.KEY) }
+      return (value as? JsonObject)?.let {
+        field(it, "state", at, PrototypeBindableKind.KEY)
+          ?: field(it, "data", at, PrototypeBindableKind.ROUTE_POINTER)
+      }
     }
 
     fun emitContext(action: JsonObject, path: String): T? {
@@ -381,7 +470,16 @@ internal object PrototypeBindableFields {
     }
 
     fun actions(data: JsonObject, path: String): T? {
-      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
+      for (field in
+        listOf(
+          "onTap",
+          "onLongPress",
+          "onDoubleTap",
+          "onDismiss",
+          "onEndReached",
+          "onStartReached",
+          "onAppear",
+        )) {
         for ((action, actionPath) in objects(data, field, path)) {
           action(action, actionPath)?.let {
             return it
@@ -391,7 +489,18 @@ internal object PrototypeBindableFields {
       return null
     }
 
-    fun node(node: JsonObject, path: String): T? = Components(this).node(node, path)
+    fun node(node: JsonObject, path: String): T? {
+      Components(this).node(node, path)?.let {
+        return it
+      }
+      for ((name, raw) in (node["routes"] as? JsonObject).orEmpty().toSortedMap()) {
+        actionLists(raw.jsonObject, listOf("onEnter", "onBack"), memberPath("$path.routes", name))
+          ?.let {
+            return it
+          }
+      }
+      return null
+    }
   }
 
   private class Components<T : Any>(val visitor: Visitor<T>) {
@@ -421,8 +530,8 @@ internal object PrototypeBindableFields {
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
-            part(entry, entryPath)
-              ?: visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+            visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+              ?: part(entry, entryPath)
           }
         "select" ->
           visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
@@ -443,6 +552,8 @@ internal object PrototypeBindableFields {
         "searchBar",
         "dialog",
         "snackbar" -> formComponent(node, path)
+        "tooltip",
+        "image" -> contentComponent(node, path)
         else -> null
       }
 
@@ -472,6 +583,18 @@ internal object PrototypeBindableFields {
         else -> null
       }
 
+    private fun contentComponent(node: JsonObject, path: String): T? =
+      when ((node["type"] as? JsonPrimitive)?.content) {
+        "tooltip" ->
+          visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "onDismiss", path).firstNotNullOfOrNull { (entry, at) ->
+              visitor.action(entry, at)
+            }
+        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+        else -> null
+      }
+
     fun keys(node: JsonObject, path: String): T? {
       for (key in listOf("stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey")) {
         visitor.field(node, key, path, PrototypeBindableKind.KEY)?.let {
@@ -483,13 +606,13 @@ internal object PrototypeBindableFields {
           return it
         }
       }
-      (node["refresh"] as? JsonObject)?.let { refresh ->
-        visitor.field(refresh, "stateKey", "$path.refresh", PrototypeBindableKind.KEY)?.let {
+      (node["openWhen"] as? JsonObject)?.let { openWhen ->
+        visitor.field(openWhen, "key", "$path.openWhen", PrototypeBindableKind.KEY)?.let {
           return it
         }
       }
-      return (node["openWhen"] as? JsonObject)?.let { openWhen ->
-        visitor.field(openWhen, "key", "$path.openWhen", PrototypeBindableKind.KEY)
+      return (node["refresh"] as? JsonObject)?.let { refresh ->
+        visitor.field(refresh, "stateKey", "$path.refresh", PrototypeBindableKind.KEY)
       }
     }
 
@@ -504,17 +627,42 @@ internal object PrototypeBindableFields {
       return null
     }
 
-    fun node(node: JsonObject, path: String): T? {
-      if ((node["type"] as? JsonPrimitive)?.content == "text") {
-        visitor.field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
+    private fun textParts(node: JsonObject, path: String): T? {
+      visitor.field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
+        return it
+      }
+      (node["linkify"] as? JsonObject)?.let { options ->
+        visitor.actions(options, "$path.linkify")?.let {
           return it
         }
-        for ((span, spanPath) in objects(node, "spans", path)) {
-          (visitor.field(span, "text", spanPath, PrototypeBindableKind.TEXT)
-              ?: visitor.actions(span, spanPath))
-            ?.let {
-              return it
-            }
+      }
+      for ((span, spanPath) in objects(node, "spans", path)) {
+        (visitor.field(span, "text", spanPath, PrototypeBindableKind.TEXT)
+            ?: visitor.actions(span, spanPath))
+          ?.let {
+            return it
+          }
+      }
+      return null
+    }
+
+    private fun semanticsParts(node: JsonObject, path: String): T? {
+      val semantics = node["semantics"] as? JsonObject ?: return null
+      for (key in listOf("label", "hint")) {
+        visitor.field(semantics, key, "$path.semantics", PrototypeBindableKind.TEXT)?.let {
+          return it
+        }
+      }
+      return null
+    }
+
+    fun node(node: JsonObject, path: String): T? {
+      semanticsParts(node, path)?.let {
+        return it
+      }
+      if ((node["type"] as? JsonPrimitive)?.content == "text") {
+        textParts(node, path)?.let {
+          return it
         }
       }
       return component(node, path)
@@ -524,14 +672,23 @@ internal object PrototypeBindableFields {
           visitor.field(entry, "message", entryPath, PrototypeBindableKind.TEXT)
         }
         ?: visitor.condition(node["visibleWhen"], "$path.visibleWhen")
+        ?: visitor.condition(node["errorWhen"], "$path.errorWhen")
+        ?: visitor.field(node, "errorText", path, PrototypeBindableKind.TEXT)
         ?: objects(node, "styleWhen", path).firstNotNullOfOrNull { (entry, entryPath) ->
           visitor.condition(entry["when"], "$entryPath.when")
         }
         ?: visitor.actions(node, path)
-        ?: refreshActions(node, path)
         ?: swipeParts(node, path)
-        ?: keys(node, path)
+        ?: refreshActions(node, path)
+        ?: sharedAndKeys(node, path)
     }
+
+    private fun sharedAndKeys(node: JsonObject, path: String): T? =
+      visitor.visit(
+        (node["shared"] as? JsonObject)?.get("key"),
+        "$path.shared.key",
+        PrototypeBindableKind.OPERAND,
+      ) ?: keys(node, path)
   }
 }
 
@@ -547,6 +704,7 @@ internal object PrototypeRepeatValidator {
     val alias: String,
     val items: List<JsonObject>,
     val pathBound: Boolean = false,
+    val derivedNames: Set<String> = emptySet(),
   )
 
   fun validate(
@@ -586,6 +744,13 @@ internal object PrototypeRepeatValidator {
     path: String,
   ): List<Pair<JsonObject, Int?>> {
     val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") }
+    if (
+      scope != null &&
+        checkedKeys(value).any { key ->
+          PrototypeRepeatTemplate.fieldReferences(key, scope.alias).any { it in scope.derivedNames }
+        }
+    )
+      return emptyList()
     if (scope == null || checkedKeys(value).none { hasPlaceholder(it, scope.alias) }) {
       return listOf(value to null)
     }

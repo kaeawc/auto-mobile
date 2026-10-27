@@ -51,6 +51,9 @@ struct PrototypeBundleManifest {
     }
 
     private static func record(_ value: JSONValue) throws -> Asset {
+        if value.objectFields?["mediaType"]?.stringValue == PrototypeCustomShaders.mimeType {
+            throw PrototypeBundleFailure(.customShadersUnsupported, "bundle.json")
+        }
         guard let fields = value.objectFields, Set(fields.keys) == ["id", "file", "sha256", "mediaType"],
               let id = fields["id"]?.stringValue, validID(id), let file = fields["file"]?.stringValue,
               let hash = fields["sha256"]?.stringValue, validHash(hash),
@@ -61,6 +64,7 @@ struct PrototypeBundleManifest {
 
     static func validID(_ id: String) -> Bool {
         !id.isEmpty && id.utf16.count <= PrototypeBundle.assetLimits.maxIdLength
+            && !PrototypeMediaItems.isMediaId(id)
     }
 
     private static func validHash(_ hash: String) -> Bool {

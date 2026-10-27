@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "ios": {
+        "backgroundExtension": true
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.ios.backgroundExtension",
+  "expectedMessage": "backgroundExtension is only valid on a node"
+}

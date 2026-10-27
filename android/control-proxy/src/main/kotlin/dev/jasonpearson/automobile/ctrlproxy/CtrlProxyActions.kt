@@ -172,6 +172,7 @@ interface CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean = true,
+    locale: String? = null,
   )
 
   suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)
@@ -187,6 +188,8 @@ interface CtrlProxyActions {
   suspend fun listSavedPrototypes(requestId: String?)
 
   suspend fun deleteSavedPrototype(requestId: String?, id: String)
+
+  suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int)
 
   suspend fun clearPrototypeStorage(requestId: String?, id: String)
 

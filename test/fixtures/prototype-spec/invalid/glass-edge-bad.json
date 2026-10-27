@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "scroll",
+      "edgeEffect": "blur",
+      "child": {
+        "type": "spacer"
+      }
+    }
+  },
+  "expectedPath": "root.edgeEffect",
+  "expectedMessage": "Invalid enum value"
+}

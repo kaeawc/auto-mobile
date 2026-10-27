@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "images": {
+              "value": [
+                "image",
+                "image",
+                "image",
+                "image",
+                "image",
+                "image",
+                "image",
+                "image",
+                "image",
+                "image",
+                "image"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.images.value",
+  "expectedMessage": "Share images must contain 1 to 10 items"
+}

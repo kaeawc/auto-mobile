@@ -1,0 +1,27 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "drawer",
+    "edge": "start",
+    "openWhen": {
+      "key": "open",
+      "equals": true
+    },
+    "child": {
+      "type": "text",
+      "text": "Navigation"
+    },
+    "scrim": {
+      "light": "scrim",
+      "dark": "#000000"
+    }
+  }
+}

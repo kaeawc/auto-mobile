@@ -6,9 +6,18 @@ import Foundation
 /// offending path instead of misbehaving when tapped.
 enum PrototypeRequestValidator {
     /// Every key under which a node holds an action list.
-    private static let actionLists: Set<String> = ["onTap", "onLongPress", "onDoubleTap", "onSubmit", "onRefresh"]
+    private static let actionLists: Set<String> = [
+        "onTap",
+        "onLongPress",
+        "onDoubleTap",
+        "onSubmit",
+        "onRefresh",
+        "onEndReached",
+        "onStartReached",
+        "onAppear",
+    ]
     private static let methods = Set(PrototypeRequestMethod.allCases.map(\.rawValue))
-    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index"]
+    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index", "platform", "event"]
     private static let headerName = try? NSRegularExpression(pattern: "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
     private static let templatedURL = try? NSRegularExpression(pattern: "^https?://", options: .caseInsensitive)
 
@@ -50,7 +59,14 @@ enum PrototypeRequestValidator {
         }
     }
 
-    private static func validateList(
+    /// Contract-located actions include channel callbacks and platform handlers, in host order.
+    static func validateActions(_ actions: [PrototypeLocatedValue], state: [String: JSONValue]) throws {
+        for action in actions {
+            try validateAction(action.value, path: action.path, depth: 1, state: state)
+        }
+    }
+
+    static func validateList(
         _ actions: [JSONValue], path: String, depth: Int, state: [String: JSONValue]
     )
         throws
@@ -69,8 +85,14 @@ enum PrototypeRequestValidator {
         if action["type"] == .string("emit"), action["name"] == .string(PrototypeRequestEvent.name) {
             throw fail("\(path).name", "The emit name \(PrototypeRequestEvent.name) is reserved for request events")
         }
-        guard action["type"] == .string("request") else { return }
-        try validateUnrepeated(action, path: path, state: state)
+        if action["type"] == .string("startTimer"), case let .array(nested)? = action["actions"] {
+            guard depth < PrototypeLimits.maxActionDepth else {
+                throw fail("\(path).actions", "Action nesting depth limit exceeded")
+            }
+            try validateList(nested, path: "\(path).actions", depth: depth + 1, state: state)
+        }
+        guard action["type"] == .string("request") || action["type"] == .string("platform") else { return }
+        if action["type"] == .string("request") { try validateUnrepeated(action, path: path, state: state) }
         for list in ["onSuccess", "onError"] {
             guard let raw = action[list] else { continue }
             guard case let .array(followUps) = raw, (1 ... PrototypeLimits.maxFollowUpActions).contains(followUps.count)
@@ -93,7 +115,11 @@ enum PrototypeRequestValidator {
             guard PrototypeRequestMethod(rawValue: method)?.allowsBody == true else {
                 throw fail("\(path).body", "A GET or HEAD request cannot have a body")
             }
-            try binding(body, path: "\(path).body")
+            if body.objectFields?.keys.contains(where: { ["multipart", "form", "file"].contains($0) }) != true {
+                try binding(body, path: "\(path).body")
+            } else {
+                try PrototypeContractValidator.validateRequestBody(body, path: "\(path).body")
+            }
         }
         if let into = action["into"] { try self.into(into, path: "\(path).into") }
         if let via = action["via"], via != .string("host"), via != .string("device") {
@@ -107,6 +133,12 @@ enum PrototypeRequestValidator {
                 "Expected an integer from 1 to \(PrototypeLimits.maxRequestTimeoutMs)"
             ) }
         }
+        if action["progressKey"] != nil,
+           action["body"]?.objectFields?.keys.contains(where: { ["multipart", "form", "file"].contains($0) }) != true
+        {
+            throw fail("\(path).progressKey", "progressKey requires an upload body")
+        }
+        try progressKey(action["progressKey"], path: "\(path).progressKey", state: state)
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
         try entries(action["headers"], path: "\(path).headers", isHeader: true)
         try entries(action["query"], path: "\(path).query", isHeader: false)
@@ -120,9 +152,9 @@ enum PrototypeRequestValidator {
         return method
     }
 
-    private static func url(_ raw: JSONValue?, path: String) throws {
+    static func url(_ raw: JSONValue?, path: String, checkLength: Bool = true) throws {
         guard case let .string(text)? = raw,
-              (1 ... PrototypeLimits.maxRequestURLLength).contains(text.utf16.count)
+              !checkLength || (1 ... PrototypeLimits.maxRequestURLLength).contains(text.utf16.count)
         else {
             throw fail(path, "Expected a URL of 1 to \(PrototypeLimits.maxRequestURLLength) characters")
         }
@@ -137,7 +169,7 @@ enum PrototypeRequestValidator {
     }
 
     /// `/data/<pointer>` naming an object member, so `<into>__meta` can sit beside it.
-    private static func into(_ raw: JSONValue, path: String) throws {
+    static func into(_ raw: JSONValue, path: String) throws {
         let message = "request into is /data/<RFC 6901 pointer> and addresses a member of data"
         guard case let .string(text) = raw else { throw fail(path, message) }
         let bound = text.split(separator: "/", omittingEmptySubsequences: false)
@@ -161,7 +193,14 @@ enum PrototypeRequestValidator {
         guard stored.stringValue != nil else { throw fail(path, "statusKey requires a string state key") }
     }
 
-    private static func entries(_ raw: JSONValue?, path: String, isHeader: Bool) throws {
+    private static func progressKey(_ raw: JSONValue?, path: String, state: [String: JSONValue]) throws {
+        guard let raw else { return }
+        guard case let .string(key) = raw, case let .number(value)? = state[key], value.isFinite,
+              (0 ... 100).contains(value)
+        else { throw fail(path, "progressKey requires a declared number state key from 0 to 100") }
+    }
+
+    static func entries(_ raw: JSONValue?, path: String, isHeader: Bool) throws {
         guard let raw else { return }
         guard case let .object(fields) = raw, fields.count <= PrototypeLimits.maxRequestEntries else {
             throw fail(path, "Expected an object of at most \(PrototypeLimits.maxRequestEntries) entries")
@@ -200,11 +239,12 @@ enum PrototypeRequestValidator {
         }
     }
 
-    /// Exactly one of `state`, `data`, `value`, `item`, `index: true`.
+    /// One structured value binding, including platform state and handler-scoped event data.
     private static func binding(_ raw: JSONValue, path: String) throws {
         guard case let .object(form) = raw, form.count == 1, let key = form.keys.first,
               bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
-        else { throw fail(path, "Expected one value binding: state, data, value, item or index") }
+        else { throw fail(path, "Expected one value binding: state, data, value, item, index, platform or event")
+        }
     }
 
     private static func fail(_ path: String, _ message: String) -> DecodingError {

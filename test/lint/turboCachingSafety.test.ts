@@ -82,6 +82,7 @@ describe("turbo caching safety (#5124)", () => {
       "test/**/*.ts",
       "tsconfig.json",
       "tsconfig.test.json",
+      "tsconfig.test-*.json",
       TYPECHECK_SCRIPT,
       "scripts/lib/host-heavy-run.sh",
       "scripts/lib/host-slots.sh",

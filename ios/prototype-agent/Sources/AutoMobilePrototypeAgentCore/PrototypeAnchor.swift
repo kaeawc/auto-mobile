@@ -194,6 +194,17 @@ private let prototypeInlineContainerTypes: Set<String> = [
 extension PrototypeNode {
     /// Child nodes in tree order with their paths: `child`, else `children` (the spec contract).
     func childEntries(path: String) -> [(node: PrototypeNode, path: String)] {
+        if type == "adaptive" {
+            return [
+                ("list", list),
+                ("detail", detail),
+                ("content", content),
+                ("main", main),
+                ("supporting", adaptiveSupporting),
+            ].compactMap { name, node in
+                node.map { ($0, "\(path).\(name)") }
+            }
+        }
         if type == "stack" {
             return (screens ?? [:]).keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) })
                 .compactMap { name in
@@ -279,7 +290,7 @@ extension PrototypeNode {
         -> [PrototypeAnchoredNode]
     {
         entries.flatMap { entry -> [PrototypeAnchoredNode] in
-            let own = entry.node.anchor.map {
+            let own = (entry.node.type == "tooltip" ? nil : entry.node.anchor).map {
                 [PrototypeAnchoredNode(node: entry.node, path: entry.path, anchor: $0, ancestorsShown: ancestorsShown)]
             } ?? []
             return own + entry.node.layeredAnchors(
@@ -299,7 +310,8 @@ extension PrototypeNode {
     )
         -> [PrototypeAnchoredNode]
     {
-        let own = anchor.map { [PrototypeAnchoredNode(node: self, path: "root", anchor: $0)] } ?? []
+        let own = (type == "tooltip" ? nil : anchor)
+            .map { [PrototypeAnchoredNode(node: self, path: "root", anchor: $0)] } ?? []
         return own + layeredAnchors(state: state, pages: pages, stacks: stacks, retainExiting: retainExiting)
     }
 }

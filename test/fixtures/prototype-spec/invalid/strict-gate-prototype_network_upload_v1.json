@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "POST",
+          "url": "https://example.com/upload",
+          "body": {
+            "multipart": [
+              {
+                "name": "caption",
+                "value": {
+                  "state": "caption"
+                }
+              },
+              {
+                "name": "photo",
+                "file": {
+                  "asset": "hero"
+                },
+                "filename": "photo.png",
+                "contentType": "image/png"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_network_v1"]
+  },
+  "expectedPath": "$"
+}

@@ -201,6 +201,10 @@ class PrototypeRenderMapperFixtureTest(private val name: String, private val inp
           .first { it.isDirectory }
       return checkNotNull(directory.listFiles())
         .filter { it.extension == "json" }
+        // Derived values format through android.icu, which a plain JVM test cannot run (it is
+        // covered under Robolectric by PrototypeDerivedMappingTest and
+        // PrototypeValueFormatterTest).
+        .filterNot { it.readText().contains("\"derive\"") }
         .sortedBy { it.name }
         .map { file ->
           val validated =
@@ -224,6 +228,7 @@ class PrototypeRenderMapperFixtureTest(private val name: String, private val inp
     for ((key, value) in input.state.orEmpty()) {
       val next =
         when (value) {
+          is PrototypeScalar.Binding -> error("Expected resolved scalar state")
           is PrototypeScalar.BooleanValue -> PrototypeScalar.BooleanValue(!value.value)
           is PrototypeScalar.Numeric -> PrototypeScalar.Numeric(value.value + 1)
           is PrototypeScalar.Text -> PrototypeScalar.Text("${value.value} changed")

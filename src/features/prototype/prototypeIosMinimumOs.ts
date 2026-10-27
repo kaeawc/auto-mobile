@@ -5,7 +5,14 @@
  * `PrototypeCapabilityMinimumOS` (Swift) and `prototypeIosMinimumOs.test.ts` fails when they drift.
  * A capability absent from the table runs on the floor.
  */
-export const PROTOTYPE_IOS_MINIMUM_OS: Readonly<Record<string, number>> = {};
+export const PROTOTYPE_IOS_MINIMUM_OS: Readonly<Record<string, number>> = {
+  prototype_platform_namespace_v1: 17,
+  prototype_icon_effects_v1: 17,
+  prototype_glass_v1: 26,
+  prototype_keyframes_v1: 17,
+  prototype_motion_tokens_v1: 17,
+  prototype_zoom_transition_v1: 18,
+};
 
 /** Sentence appended to an iOS refusal when the capability needs a newer iOS, else "". */
 export function prototypeIosMinimumOsNote(

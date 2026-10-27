@@ -1,0 +1,35 @@
+{
+  "id": "media",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "photo": "media:5b1f",
+    "picked": [
+      {
+        "id": 1,
+        "thumbnail": "media:5b1f/thumb"
+      }
+    ]
+  },
+  "root": {
+    "type": "grid",
+    "columns": 2,
+    "repeat": {
+      "items": {
+        "path": "/picked"
+      },
+      "as": "item",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "image",
+        "asset": "{item.thumbnail}",
+        "contentDescription": "Photo"
+      }
+    ]
+  }
+}

@@ -2,7 +2,7 @@
   "host": {
     "baseMs": 10000,
     "perSegmentMs": 750,
-    "perCharMs": 20,
+    "perCharMs": 150,
     "capMs": 25000
   },
   "device": {
@@ -92,67 +92,71 @@
     },
     {
       "text": "plain text",
-      "hostTimeoutMs": 10200
+      "hostTimeoutMs": 11500
     },
     {
       "text": "*one*",
-      "hostTimeoutMs": 10100
+      "hostTimeoutMs": 10750
     },
     {
       "text": "*one* and `two`",
-      "hostTimeoutMs": 11050
+      "hostTimeoutMs": 13000
     },
     {
       "text": "*one* tail",
-      "hostTimeoutMs": 10950
+      "hostTimeoutMs": 12250
     },
     {
       "text": "**bold**",
-      "hostTimeoutMs": 10160
+      "hostTimeoutMs": 11200
     },
     {
       "text": "~~strike~~",
-      "hostTimeoutMs": 10200
+      "hostTimeoutMs": 11500
     },
     {
       "text": "`code`",
-      "hostTimeoutMs": 10120
+      "hostTimeoutMs": 10900
     },
     {
       "text": "```",
-      "hostTimeoutMs": 10060
+      "hostTimeoutMs": 10450
     },
     {
       "text": "```code```",
-      "hostTimeoutMs": 10950
+      "hostTimeoutMs": 12250
     },
     {
       "text": "_italic_",
-      "hostTimeoutMs": 10160
+      "hostTimeoutMs": 11200
     },
     {
       "text": "~tilde~",
-      "hostTimeoutMs": 10140
+      "hostTimeoutMs": 11050
     },
     {
       "text": "*one**two*",
-      "hostTimeoutMs": 10950
+      "hostTimeoutMs": 12250
     },
     {
       "text": "**bold**~~strike~~`code` tail",
-      "hostTimeoutMs": 12830
+      "hostTimeoutMs": 16600
     },
     {
       "text": "日本 *😀* 👨‍👩‍👧 _é_",
-      "hostTimeoutMs": 11170
+      "hostTimeoutMs": 13900
     },
     {
       "text": "**unclosed",
-      "hostTimeoutMs": 10200
+      "hostTimeoutMs": 11500
     },
     {
       "text": "*one*\nnext",
-      "hostTimeoutMs": 10950
+      "hostTimeoutMs": 12250
+    },
+    {
+      "text": "https://example.com/search/text/academy.html?q=test&pageType=home#/topresults/test",
+      "hostTimeoutMs": 22300
     },
     {
       "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",

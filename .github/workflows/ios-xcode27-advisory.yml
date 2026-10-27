@@ -1,0 +1,70 @@
+name: "iOS Xcode 27 Build (Advisory)"
+
+# Advisory Xcode 27 iOS build on the self-hosted Macs (owner decision 7 of #15244). The required
+# iOS jobs stay on Xcode 26.5 and switch only after a green week here. Runs nightly, on dispatch,
+# and on pull requests only when opted in with the `run-xcode27` label. This is not a required
+# check and nothing depends on it. If the runner has no Xcode 27, select-self-hosted-xcode.sh
+# fails the job, which stays advisory.
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  schedule:
+    - cron: "45 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Unrelated label events get unique groups, and event_name keeps dispatch separate from nightly runs.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'run-xcode27') && github.run_id || 'run' }}
+  cancel-in-progress: true
+
+jobs:
+  ios-xcode27-build:
+    name: "iOS Build (Xcode 27, Advisory)"
+    if: vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'run-xcode27') && (github.event.action != 'labeled' || github.event.label.name == 'run-xcode27')))
+    runs-on: ${{ fromJSON('["self-hosted","automobile-mac"]') }}
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - name: "Isolate self-hosted Xcode 27 home"
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/xcode27-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          clean: true
+
+      - name: "Select self-hosted Xcode 27"
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "27.0"
+
+      - name: "Report toolchain"
+        run: xcodebuild -version && swift --version
+
+      - name: "Resolve root Swift package dependencies"
+        run: swift package resolve
+
+      - name: "Build root Package.swift"
+        run: swift build -c release
+
+      - name: "Build AutoMobilePrototype library and embed consumer"
+        run: bash scripts/ios/prototype-library-build.sh
+
+      - name: "Remove isolated Xcode 27 home"
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/xcode27-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"

@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "tabBar",
+      "ios": {
+        "glassGroup": {
+          "spacing": 1
+        }
+      },
+      "items": [
+        {
+          "label": "A",
+          "icon": "home"
+        },
+        {
+          "label": "B",
+          "icon": "home"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.ios.glassGroup",
+  "expectedMessage": "glassGroup requires a container node"
+}

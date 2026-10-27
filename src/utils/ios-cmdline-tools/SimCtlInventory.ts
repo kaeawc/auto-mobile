@@ -28,11 +28,12 @@ import { SingleFlight } from "../cache/SingleFlight";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 
-import { inferIosFormFactor } from "./iosDeviceType";
+import { inferIosFormFactor, isIosDuoDeviceType } from "./iosDeviceType";
 
 import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 
 import { iosSimulatorCapabilityInventory } from "../virtualDeviceCapabilities";
+import { hostAudioSnapshot } from "../audio/defaultHostAudioProbe";
 
 import { compareStrictNumericVersions } from "../deviceMatcher";
 
@@ -530,6 +531,7 @@ export class SimCtlInventory {
                 isAvailable: device.isAvailable,
                 availabilityError: device.availabilityError,
                 runtime: runtimeId,
+                hostAudio: hostAudioSnapshot(),
               }),
             } as DeviceInfo;
           }),
@@ -565,7 +567,7 @@ export class SimCtlInventory {
       return [];
     }
     // Duo panels can change with fold state without a new boot timestamp.
-    const cacheable = !device.deviceTypeIdentifier?.endsWith(".iPhone-Duo");
+    const cacheable = !isIosDuoDeviceType(device.deviceTypeIdentifier);
     const cached = SimCtlInventory.simulatorDisplays.get(device.udid);
     if (cacheable && cached?.displays && cached.lastUsedAt === device.lastUsedAt) {
       return cached.displays;

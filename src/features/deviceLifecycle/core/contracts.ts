@@ -82,6 +82,8 @@ export interface ProvisionDeviceArgs {
 /** Only in-process binding reconciliation may retain a created simulator for readiness retry. */
 export interface InternalProvisionDeviceArgs extends ProvisionDeviceArgs {
   rollbackOnRetryableReadiness?: boolean;
+  /** Android: boot the emulator with `-no-snapshot-save` (#15477). */
+  discardSnapshotOnExit?: boolean;
 }
 
 export interface KillDeviceArgs {

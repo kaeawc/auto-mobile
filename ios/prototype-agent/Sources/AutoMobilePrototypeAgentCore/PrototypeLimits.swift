@@ -4,8 +4,8 @@ import Foundation
 /// `guardPrototypeTree`. A spec that reaches the agent without the host check (a direct client)
 /// cannot exhaust it: the tree is bounded before `repeat` expansion allocates anything.
 ///
-/// The constants repeat `schemas/prototype-spec-contract.json`; `PrototypeLimitsTests` fails when they
-/// drift from it.
+/// The constants repeat `schemas/prototype-spec-contract.json` (the data and list limits read it
+/// directly); `PrototypeLimitsTests` fails when any of them drifts from it.
 enum PrototypeLimits {
     static let maxStackScreens = 32
     static let maxStackDepth = 32
@@ -17,6 +17,7 @@ enum PrototypeLimits {
     static let maxDepth = 24
     static let maxTextSpans = 64
     static let maxRepeatItems = 128
+    static let maxListItems = PrototypeContractValidator.limit("MAX_PROTOTYPE_LIST_ITEMS")
     static let maxRepeatPathCells = 65536
     static let maxSubstitutedTextLength = 16384
     static let maxSubstitutedTextTotal = 4_194_304
@@ -25,17 +26,17 @@ enum PrototypeLimits {
     static let maxSpecBytes = 1_048_576
 
     static let maxDataDepth = 8
-    static let maxDataArrayItems = 500
+    static let maxDataArrayItems = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
     static let maxDataPointerLength = 256
-    static let maxDataBytes = 262_144
+    static let maxDataBytes = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_BYTES")
     /// `MAX_PROTOTYPE_STORAGE_BYTES` (#12522): stored bytes per prototype id, summed over entries as
     /// the UTF-8 length of the storage key plus the compact JSON of the value.
     static let maxStorageBytes = 262_144
     /// `MAX_PROTOTYPE_STORAGE_KEYS`: entries in the spec's `storage.keys`.
     static let maxStorageKeys = 64
     /// `MAX_PROTOTYPE_DATA_WRITE_BYTES`: the host validator's byte cost of `data` after a device
-    /// `setData`, `appendData` or `removeData` write.
-    static let maxDataWriteBytes = 262_144
+    /// `setData`, `appendData`, `prependData` or `removeData` write.
+    static let maxDataWriteBytes = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_WRITE_BYTES")
 
     /// Agent-side depth/array backstop, in the host's sorted UTF-16 member order. Data is depth 1.
     /// The host's byte-cost rule is not duplicated: there is no Swift validator twin, and the
@@ -122,6 +123,7 @@ enum PrototypeLimits {
     static func guardTree(_ root: JSONValue) throws {
         var expandedCount = 0
         try visit(root, path: "root", depth: 1, authored: false, count: &expandedCount)
+        try PrototypeScrollMotion.validate(root)
     }
 
     /// Known nonempty literal instances use the expanded budget. Unknown or empty templates use
@@ -151,6 +153,9 @@ enum PrototypeLimits {
                     throw violation("\(path).repeat.items.path", "Repeat path cell limit exceeded")
                 }
             }
+            for name in ["header", "footer"] {
+                if let child = fields[name] { try visitCells(child, path: "\(path).\(name)", depth: depth + 1) }
+            }
             if let child = fields["child"] {
                 try visitCells(child, path: "\(path).child", depth: depth + 1)
             } else if case let .array(children)? = fields["children"] {
@@ -177,7 +182,9 @@ enum PrototypeLimits {
             guard depth < maxDepth else { return }
             try guardObjectChildren(value, path: childPath, depth: depth + 1)
         }
-        if let value = fields["child"] { try child(value, at: "\(path).child") }
+        for name in fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"] {
+            if let value = fields[name] { try child(value, at: "\(path).\(name)") }
+        }
         if case let .array(children)? = fields["children"] {
             for (index, value) in children.enumerated() {
                 try child(value, at: "\(path).children[\(index)]")
@@ -229,7 +236,7 @@ enum PrototypeLimits {
         if authored { try guardTextSpans(fields, path: path) }
         if authored, hasUncountedTemplate(fields) { return }
         if case let .array(children)? = fields["children"] {
-            if case let .object(spec)? = fields["repeat"] {
+            if case let .object(spec)? = fields["repeat"], fields["type"] != .string("list") {
                 try visitLiteralChildren(
                     spec, children: children, path: path, depth: depth, authored: authored, count: &count
                 )
@@ -241,8 +248,14 @@ enum PrototypeLimits {
                 }
             }
         }
-        if let child = fields["child"] {
-            try visit(child, path: "\(path).child", depth: depth + 1, authored: authored, count: &count)
+        for name in fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"] {
+            if let child = fields[name] { try visit(
+                child,
+                path: "\(path).\(name)",
+                depth: depth + 1,
+                authored: authored,
+                count: &count
+            ) }
         }
         try visitScreens(fields, path: path, depth: depth, authored: authored, count: &count)
     }
@@ -269,6 +282,7 @@ enum PrototypeLimits {
     }
 
     private static func hasUncountedTemplate(_ fields: [String: JSONValue]) -> Bool {
+        if fields["type"] == .string("list") { return false }
         guard case let .object(spec)? = fields["repeat"] else { return false }
         guard case let .array(items)? = spec["items"] else { return true }
         return items.isEmpty
@@ -328,6 +342,18 @@ enum PrototypeLimits {
                 child, path: "\(path).child", depth: depth + 1, template: childTemplate, count: &count,
                 insideRepeat: insideRepeat || fields["repeat"] != nil
             )
+        }
+        for name in ["header", "footer"] {
+            if let child = fields[name] {
+                try visitAuthoredTemplates(
+                    child,
+                    path: "\(path).\(name)",
+                    depth: depth + 1,
+                    template: childTemplate,
+                    count: &count,
+                    insideRepeat: insideRepeat
+                )
+            }
         }
         try visitAuthoredScreens(
             fields,
@@ -411,6 +437,7 @@ enum PrototypeLimits {
         for key in [
             "visibleWhen",
             "enabledWhen",
+            "errorWhen",
             "styleWhen",
             "onTap",
             "actions",

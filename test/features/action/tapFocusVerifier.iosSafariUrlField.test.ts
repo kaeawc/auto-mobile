@@ -11,7 +11,7 @@ import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import compactCapture from "../../fixtures/ios-safari-url-field/hierarchy-compact.json";
 import editingCapture from "../../fixtures/ios-safari-url-field/hierarchy-editing.json";
 import typedCapture from "../../fixtures/ios-safari-url-field/runner-typed-keyboard-up.json";
-import { observationFromRunnerCapture } from "../../helpers/iosSafariRunnerCapture";
+import { observationFromRunnerCapture } from "../../helpers/iosRunnerCapture";
 import { buildObserveResult, viewHierarchyFromFixture } from "../../helpers/observeFixture";
 
 function verifier(platform: BootedDevice["platform"] = "ios"): FocusVerifier {

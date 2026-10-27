@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "library-channel",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "pw": ""
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss://a.example.com/",
+        "via": "device",
+        "headers": {
+          "Authorization": {
+            "state": "pw"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "pw",
+          "secure": true
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "channels.c.headers.Authorization.state",
+  "expectedMessage": "Secure value cannot be bound into a request"
+}

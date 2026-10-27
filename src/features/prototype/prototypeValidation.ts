@@ -1,3 +1,12 @@
+import { prototypeGlassObjectError } from "./prototypeGlass";
+import { excludeAccessoryReferences } from "./prototypeBindingValidation";
+import { prototypeMotionObjectError } from "./prototypeMotionTokens";
+import { prototypeRoutesError } from "./prototypeRoutes";
+import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
+import { prototypeDerivedError } from "./prototypeDerivedValidation";
+import { prototypeScrollMotionError } from "./prototypeScrollMotion";
+import { prototypeBarScrollError } from "./prototypeBarScroll";
+import { prototypeSharedElementError } from "./prototypeSharedElement";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -5,19 +14,28 @@ import { prototypeCheckErrors } from "./prototypeCheckValidation";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandPrototypeComponents } from "./prototypeComponents";
+import { prototypeLazyListError, prototypeLazyListLimitError } from "./prototypeLazyList";
 import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
+import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
+import { prototypeMotionV3Error } from "./prototypeMotionV3";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
-import { prototypePlatformError } from "./prototypePlatform";
+import { prototypePlatformError, prototypeReservedTestTagError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
+import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
+import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { chargeKeyframeNode, prototypeKeyframesError } from "./prototypeKeyframes";
+import { effectUses } from "./prototypeEffects";
+import { jsonCost } from "./prototypeJsonCost";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
   Rule,
@@ -28,13 +46,18 @@ import {
   numberValid,
   listItemBindingErrors,
   bindingErrors,
+  emptyConditionConstraint,
   sheetBindingErrors,
   stateActionErrors,
   Checked,
   bound,
 } from "./prototypeBindingValidation";
 export { type PrototypeValidationError } from "./prototypeBindingValidation";
-
+import {
+  horizontalLazyError,
+  pagerNodeError,
+  pagerStateKeyErrors,
+} from "./prototypePagerValidation";
 export type PrototypeValidationResult =
   | { success: true; data: PrototypeSpec }
   | { success: false; error: PrototypeValidationError };
@@ -42,6 +65,9 @@ interface Context {
   nodes: Located[];
   actions: Located[];
   images: number;
+  effects: number;
+  animatedEffects: number;
+  keyframeNodes: number;
   /** Current nesting per bounded reference (see `nestedReferences`). */
   nesting: Record<string, number>;
 }
@@ -58,7 +84,6 @@ function bytes(value: unknown): number {
 function refRule(rule: Rule): Rule {
   return definitions[rule.name ?? ""] ?? rule;
 }
-
 /** References whose nesting is bounded by their own contract limit. A request nests actions. */
 const nestedReferences = Object.assign(
   Object.create(null) as Record<string, { limit: number; message: string } | undefined>,
@@ -77,7 +102,6 @@ const nestedReferences = Object.assign(
     },
   },
 );
-
 function visitReference(
   value: unknown,
   rule: Rule,
@@ -96,12 +120,23 @@ function visitReference(
       return fail(`${path}.image`, "Image limit exceeded");
     }
   }
-  if (rule.name !== "node") {
-    return walk(value, refRule(rule), path, context, depth);
-  }
+  return rule.name === "node"
+    ? visitNodeReference(value, rule, path, context, depth)
+    : walk(value, refRule(rule), path, context, depth);
+}
+function visitNodeReference(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
   const node = object(value);
   if (!node) {
     return fail(path, "Expected object");
+  }
+  if (node.onAppear !== undefined && path !== "root" && node.visibleWhen === undefined) {
+    return fail(`${path}.onAppear`, "onAppear requires visibleWhen or the root");
   }
   context.nodes.push({ value: node, path });
   if (context.nodes.length > contract.limits.MAX_PROTOTYPE_NODES) {
@@ -110,13 +145,37 @@ function visitReference(
   if (depth + 1 > contract.limits.MAX_PROTOTYPE_DEPTH) {
     return fail(path, "Tree depth limit exceeded");
   }
+  const budgetError = chargeNodeBudgets(node, path, context);
+  if (budgetError) {
+    return budgetError;
+  }
+  return walk(value, refRule(rule), path, context, depth + 1);
+}
+/** Adds a node's images and `style.effects` to the spec-wide totals; the node that crosses a limit is reported. */
+function chargeNodeBudgets(
+  node: Record<string, unknown>,
+  path: string,
+  context: Context,
+): PrototypeValidationError | undefined {
   if (node.type === "image") {
     context.images += Math.max(1, imageSlotUses(node.asset));
   }
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
   }
-  return walk(value, refRule(rule), path, context, depth + 1);
+  const keyframeLimit = chargeKeyframeNode(node, context, contract.limits, path);
+  if (keyframeLimit) {
+    return fail(keyframeLimit.path, keyframeLimit.message);
+  }
+  const uses = effectUses(node);
+  context.effects += uses.total;
+  context.animatedEffects += uses.animated;
+  if (context.effects > contract.limits.MAX_PROTOTYPE_EFFECTS) {
+    return fail(path, "Effect limit exceeded");
+  }
+  return context.animatedEffects > contract.limits.MAX_PROTOTYPE_ANIMATED_EFFECTS
+    ? fail(path, "Animated effect limit exceeded")
+    : undefined;
 }
 function visitNested(
   value: unknown,
@@ -191,16 +250,6 @@ function searchBarConstraint(
   }
   return undefined;
 }
-/** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */
-function emptyConditionConstraint(
-  data: Record<string, unknown>,
-  path: string,
-): PrototypeValidationError | undefined {
-  return Object.hasOwn(data, "empty") &&
-    (Object.hasOwn(data, "key") || Object.hasOwn(data, "platform"))
-    ? fail(keyPath(path, "empty"), "empty applies only to data conditions")
-    : undefined;
-}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -239,13 +288,32 @@ function visitObject(
       return error;
     }
   }
-  return objectConstraint(data, rule, path);
+  return objectSemanticConstraint(data, rule, path);
+}
+function objectSemanticConstraint(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
+  return (
+    prototypeGlassObjectError(data, kind ?? "", path) ??
+    prototypeStylePolishV2ObjectError(data, kind ?? "", path) ??
+    prototypeMotionObjectError(rule, data, path) ??
+    objectConstraint(data, rule, path)
+  );
 }
 function objectConstraint(
   data: Record<string, unknown>,
   rule: Rule,
   path: string,
 ): PrototypeValidationError | undefined {
+  if (rule.atMostOne && rule.atMostOne.filter((key) => Object.hasOwn(data, key)).length > 1) {
+    return fail(
+      keyPath(path, rule.atMostOne[0]),
+      `At most one of ${rule.atMostOne.join(", ")} is allowed`,
+    );
+  }
   if (rule.binding && Object.hasOwn(data, "pager") === Object.hasOwn(data, "stateKey")) {
     return fail(keyPath(path, "pager"), "Exactly one of pager or stateKey is required");
   }
@@ -257,11 +325,16 @@ function objectConstraint(
     return formError;
   }
   if (rule.atLeastOne && Object.keys(data).length === 0) {
-    return fail(path, "At least one selector field is required");
+    return fail(
+      path,
+      rule === definitions.semantics
+        ? "Expected at least one semantics field"
+        : "At least one selector field is required",
+    );
   }
   return undefined;
 }
-/** `exactlyOne` picks one form of a union-like object; `dependents` ties optional fields to a trigger. */
+/** Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one. */
 function formConstraint(
   data: Record<string, unknown>,
   rule: Rule,
@@ -269,17 +342,19 @@ function formConstraint(
 ): PrototypeValidationError | undefined {
   if (rule.exactlyOne && rule.exactlyOne.filter((key) => Object.hasOwn(data, key)).length !== 1) {
     return fail(
-      keyPath(path, rule.exactlyOne[0]),
+      rule.exactlyOneAtObject ? path : keyPath(path, rule.exactlyOne[0]),
       `Exactly one of ${rule.exactlyOne.join(", ")} is required`,
     );
   }
-  for (const [trigger, dependents] of Object.entries(rule.dependents ?? {})) {
+  const dependencies = rule.dependents ?? {};
+  for (const trigger of Object.keys(dependencies).sort()) {
+    const dependents = dependencies[trigger];
     const present = dependents.filter((key) => Object.hasOwn(data, key));
     if (!trigger.split("|").some((key) => Object.hasOwn(data, key))) {
       if (present.length > 0) {
         return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
       }
-    } else if (present.length !== 1) {
+    } else if (trigger.includes("|") && present.length !== 1) {
       const target = present[1] ?? dependents[0];
       return fail(keyPath(path, target), `Exactly one of ${dependents.join(", ")} is required`);
     }
@@ -325,6 +400,9 @@ function visitMap(
   if (!data) {
     return fail(path, "Expected object");
   }
+  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Map entry limit exceeded");
+  }
   for (const key of Object.keys(data).sort()) {
     const childPath = keyPath(path, key);
     if (!prototypeContractPatterns.stateKey.test(key)) {
@@ -364,6 +442,19 @@ function visitScreenMap(
   }
   return undefined;
 }
+function recordSizeError(
+  count: number,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (count < (rule.minEntries ?? 0)) {
+    return fail(path, "Record entry minimum not met");
+  }
+  if (count > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Record entry limit exceeded");
+  }
+  return undefined;
+}
 function visitRecord(
   value: unknown,
   rule: Rule,
@@ -375,13 +466,22 @@ function visitRecord(
   if (!data) {
     return fail(path, "Expected object");
   }
-  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
-    return fail(path, "Record entry limit exceeded");
+  const sizeError = recordSizeError(Object.keys(data).length, rule, path);
+  if (sizeError) {
+    return sizeError;
   }
   for (const [key, child] of Object.entries(data)) {
     const at = keyPath(path, key);
     if (key.length === 0) {
       return fail(at, "Invalid context name");
+    }
+    if (
+      rule.keyPattern &&
+      !prototypeContractPatterns[rule.keyPattern as keyof typeof prototypeContractPatterns]?.test(
+        key,
+      )
+    ) {
+      return fail(at, "Invalid record key");
     }
     const error = walk(child, rule.item ?? { kind: "json" }, at, context, depth);
     if (error) {
@@ -395,7 +495,10 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || !prototypeContractPatterns.blankText.test(value)) &&
-    value.length <= (rule.max ?? Infinity),
+    value.length <= (rule.max ?? Infinity) &&
+    Buffer.byteLength(value, "utf8") <= (rule.maxBytes ?? Infinity) &&
+    (!rule.pattern ||
+      new RegExp(contract.patterns[rule.pattern as keyof typeof contract.patterns]).test(value)),
   pointer: isPrototypeDataPointer,
   key: (value) => typeof value === "string" && prototypeContractPatterns.stateKey.test(value),
   boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
@@ -415,39 +518,6 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     return Number.isFinite(cost) && cost <= (rule.maxBytes ?? Infinity);
   },
 };
-// Reserve 32 bytes per finite number so lexical exponent/decimal spellings cannot
-// change payload acceptance between JavaScript and JVM JSON decoders.
-function jsonCost(value: unknown, depth = 0): number {
-  if (depth > contract.limits.MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH) {
-    return Infinity;
-  }
-  if (value === null) {
-    return 4;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? 32 : Infinity;
-  }
-  if (typeof value === "string" || typeof value === "boolean") {
-    return bytes(value);
-  }
-  if (Array.isArray(value)) {
-    return (
-      2 +
-      Math.max(0, value.length - 1) +
-      value.reduce<number>((sum, child) => sum + jsonCost(child, depth + 1), 0)
-    );
-  }
-  const data = object(value);
-  if (!data) {
-    return Infinity;
-  }
-  const entries = Object.entries(data);
-  return (
-    2 +
-    Math.max(0, entries.length - 1) +
-    entries.reduce((sum, [key, child]) => sum + bytes(key) + 1 + jsonCost(child, depth + 1), 0)
-  );
-}
 /** Data uses the emit payload cost after its own stricter depth-first walk. */
 export function prototypeDataError(
   value: unknown,
@@ -461,7 +531,6 @@ export function prototypeDataError(
     (jsonCost(value) > maxBytes ? fail("data", "Data byte limit exceeded") : undefined)
   );
 }
-
 function dataChildren(value: unknown, path: string): { value: unknown; path: string }[] {
   if (Array.isArray(value)) {
     return value.map((child, index) => ({ value: child, path: `${path}[${index}]` }));
@@ -471,7 +540,6 @@ function dataChildren(value: unknown, path: string): { value: unknown; path: str
     .sort()
     .map((key) => ({ value: data[key], path: keyPath(path, key) }));
 }
-
 function walkDataValue(
   value: unknown,
   path: string,
@@ -522,6 +590,13 @@ function visitChoice(
     }
     return typeof value === "string";
   });
+  // Prefer diagnostics from the object alternative sharing the most authored fields.
+  const fields = object(value);
+  const matches = (option: Rule): number =>
+    Object.keys(option.fields ?? {}).filter((key) => fields && Object.hasOwn(fields, key)).length;
+  if (rule.preferMatchingFields) {
+    candidates.sort((left, right) => matches(right) - matches(left));
+  }
   // Several options can accept the same JSON type (a hex colour or a role name are both strings).
   let firstError: PrototypeValidationError | undefined;
   for (const option of candidates) {
@@ -541,6 +616,7 @@ function walk(
   depth: number,
 ): PrototypeValidationError | undefined {
   const handlers: Record<string, typeof visitObject> = {
+    strings: (value) => prototypeStringsTableError(value),
     data: visitData,
     ref: visitReference,
     tagged: visitTagged,
@@ -632,50 +708,6 @@ function swipeActionsErrors(context: Context): PrototypeValidationError | undefi
   }
   return undefined;
 }
-/** Whether a `scroll` with the given axis rule encloses the node at `path`. */
-function insideScroll(context: Context, path: string, horizontal: boolean): boolean {
-  return context.nodes.some(
-    ({ value: ancestor, path: ancestorPath }) =>
-      ancestor.type === "scroll" &&
-      (ancestor.axis === "horizontal") === horizontal &&
-      path.startsWith(`${ancestorPath}.`),
-  );
-}
-/**
- * A horizontal `scroll` measures its child with an infinite width, which the lazy horizontal pager
- * and carousel layouts cannot take (#14165); the vertical rule is the same for vertical pagers.
- */
-function horizontalLazyError(
-  node: Record<string, unknown>,
-  path: string,
-  context: Context,
-): PrototypeValidationError | undefined {
-  if (node.type === "carousel" && insideScroll(context, path, true)) {
-    return fail(path, "A carousel cannot appear inside a horizontal scroll");
-  }
-  if (node.type === "pager" && node.axis !== "vertical" && insideScroll(context, path, true)) {
-    return fail(path, "A horizontal pager cannot appear inside a horizontal scroll");
-  }
-  return undefined;
-}
-/** One pager's own checks; records its id in `pagers`. */
-function pagerNodeError(
-  value: Record<string, unknown>,
-  path: string,
-  context: Context,
-  pagers: Set<string>,
-): PrototypeValidationError | undefined {
-  if (value.type !== "pager" || typeof value.id !== "string") {
-    return undefined;
-  }
-  if (pagers.has(value.id)) {
-    return fail(`${path}.id`, "Duplicate pager id");
-  }
-  pagers.add(value.id);
-  return value.axis === "vertical" && insideScroll(context, path, false)
-    ? fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll")
-    : undefined;
-}
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
@@ -706,8 +738,12 @@ function stateTypeErrors(
   repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   const checked: Checked = {
-    nodes: repeatKeyInstances(value, context.nodes, repeats).map(bound),
-    actions: repeatKeyInstances(value, context.actions, repeats).map(bound),
+    nodes: repeatKeyInstances(value, context.nodes, repeats)
+      .map(bound)
+      .filter((entry) => !routeBoundKeys(entry.value)),
+    actions: repeatKeyInstances(value, context.actions, repeats)
+      .map(bound)
+      .filter((entry) => !routeBoundKeys(entry.value)),
   };
   return (
     bindingErrors(checked, data) ??
@@ -742,7 +778,6 @@ function gridSpanErrors(context: Context): PrototypeValidationError | undefined 
   }
   return undefined;
 }
-
 /** Tree-shape checks that run after the schema walk, in the order the host reports them. */
 function layoutErrors(
   value: unknown,
@@ -750,13 +785,16 @@ function layoutErrors(
   repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   return (
+    prototypeBarScrollError(context.nodes) ??
     gridSpanErrors(context) ??
     swipeActionsErrors(context) ??
+    prototypeLazyListError(context.nodes) ??
+    prototypeDerivedError(value, context.nodes) ??
+    pagerStateKeyErrors(context) ??
     repeatErrors(value, repeats) ??
     prototypeStorageError(value)
   );
 }
-
 /** A literal platform-call argument against its `platformModules` rule (#14294). */
 function platformArgumentError(
   value: unknown,
@@ -767,9 +805,45 @@ function platformArgumentError(
     nodes: [],
     actions: [],
     images: 0,
+    effects: 0,
+    animatedEffects: 0,
+    keyframeNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   return walk(value, rule, path, context, 0);
+}
+/** The host-owned vocabulary: the reserved `automobile-` testTag namespace, then the platform rules. */
+function hostVocabularyError(
+  value: unknown,
+  context: Context,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeStringsError(value, context.nodes) ??
+    prototypeReservedTestTagError(context.nodes) ??
+    prototypePlatformError(value, context.actions, platformArgumentError)
+  );
+}
+
+/** Motion and choreography share one set of located nodes. */
+function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
+  return (
+    prototypeMotionV3Error(nodes) ??
+    prototypeMotionV2Error(nodes) ??
+    prototypeChoreographyError(nodes)
+  );
+}
+
+/** Cross-node references share the component-expanded tree and repeat cardinalities. */
+function nodeReferenceErrors(
+  context: Context,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeTooltipError(context.nodes, repeats) ??
+    prototypeChatScrollError(context.nodes, context.actions) ??
+    pagerErrors(context) ??
+    stackErrors(context)
+  );
 }
 
 /** Action, container and state checks, after the layout checks pass. */
@@ -778,36 +852,51 @@ function behaviourErrors(
   context: Context,
   data: Record<string, unknown>,
   repeats: PrototypeRepeatData,
+  componentTimers: Located[],
 ): PrototypeValidationError | undefined {
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
-    prototypeRequestsError(context.actions) ??
+    prototypeRequestsError(context.actions, data.data) ??
+    hostVocabularyError(value, context) ??
+    prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
-    prototypeMotionV2Error(context.nodes) ??
-    prototypeChoreographyError(context.nodes) ??
-    prototypePlatformError(value, context.actions, platformArgumentError) ??
+    motionErrors(context.nodes) ??
+    prototypeKeyframesError(context.nodes, data) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
-    prototypeChatScrollError(context.nodes, context.actions) ??
-    pagerErrors(context) ??
-    stackErrors(context) ??
+    nodeReferenceErrors(context, repeats) ??
     stateTypeErrors(value, context, data, repeats)
   );
 }
 
-function validateValue(value: unknown, options: PrototypeStrictOptions): PrototypeValidationResult {
+function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
+  return walk(value, definitions.spec, "", context, 0) ?? excludeAccessoryReferences(context);
+}
+
+function validateValue(
+  value: unknown,
+  options: PrototypeStrictOptions,
+  componentTimers: Located[] = [],
+): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
     actions: [],
     images: 0,
+    effects: 0,
+    animatedEffects: 0,
+    keyframeNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};
   const repeats = new PrototypeRepeatData(data.data);
   const error =
-    walk(value, definitions.spec, "", context, 0) ??
+    prototypeLazyListLimitError(value) ??
+    walkedError(value, context) ??
+    prototypeRoutesError(value, context.nodes, context.actions) ??
+    prototypeSharedElementError(context.nodes, repeats, context.actions) ??
     layoutErrors(value, context, repeats) ??
-    behaviourErrors(value, context, data, repeats);
+    prototypeScrollMotionError(value, context.nodes) ??
+    behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {
     return { success: false, error };
   }
@@ -820,11 +909,7 @@ function validateValue(value: unknown, options: PrototypeStrictOptions): Prototy
     ? { success: false, error: policyError }
     : { success: true, data: parsed.data };
 }
-/**
- * Expands reusable components (#11053) before validating, so every limit applies to the tree the
- * device receives. The expanded spec must also fit the byte limit, because the device re-validates
- * bytes, and an error inside an expansion is reported at its authored location.
- */
+/** Expand components before validation and preserve authored error locations. */
 function validateExpanded(
   value: unknown,
   options: PrototypeStrictOptions,
@@ -836,7 +921,17 @@ function validateExpanded(
   if (expansion.expanded && bytes(expansion.spec) > MAX_PROTOTYPE_SPEC_BYTES) {
     return { success: false, error: fail("$", "Expanded spec byte limit exceeded") };
   }
-  const result = validateValue(expansion.spec, options);
+  // Expanded contract order comes first; append authored definitions not represented there.
+  const components = object(object(value)?.components);
+  const result = validateValue(
+    expansion.spec,
+    options,
+    prototypeTimerActions({
+      components: Object.fromEntries(
+        Object.entries(components ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+      ),
+    }),
+  );
   return result.success
     ? result
     : {

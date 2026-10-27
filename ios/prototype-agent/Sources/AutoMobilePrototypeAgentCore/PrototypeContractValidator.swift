@@ -4,22 +4,43 @@ import Foundation
 /// Cross-node and host environment checks remain the host's responsibility.
 struct PrototypeContractValidator {
     private struct Contract: Decodable {
+        let motionTokens: [String: [String: [String: PrototypeMotionToken]]]
         let patterns: [String: String]
+        let stringFields: [String]
+        let stringOpaqueFields: [String]
         let checkControls: [String: [String]]
         let definitions: [String: JSONValue]
         let limits: [String: Int]
+        let platformModules: [String: JSONValue]
     }
 
     private static let contract = try? JSONDecoder().decode(
         Contract.self, from: Data(prototypeSpecContractData.utf8)
     )
+    static func motionToken(scheme: String, role: String, tempo: String) -> PrototypeMotionToken {
+        guard let token = contract?.motionTokens[scheme]?[role]?[tempo] else {
+            preconditionFailure("Embedded motion token is unavailable")
+        }
+        return token
+    }
+
+    static var platformModules: [String: JSONValue] {
+        guard let contract else { preconditionFailure("Embedded structural contract is unavailable") }
+        return contract.platformModules
+    }
+
     private static let patterns = contract?.patterns.compactMapValues { try? NSRegularExpression(pattern: $0) } ?? [:]
 
     static func matches(_ name: String, _ text: String) -> Bool {
         patterns[name]?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
+    static let stringFieldOrder = contract?.stringFields ?? []
+    static let stringFields = Set(stringFieldOrder)
+    static let stringOpaqueFields = Set(contract?.stringOpaqueFields ?? [])
+
     static func limit(_ name: String) -> Int { contract?.limits[name] ?? 0 }
+    static func definition(_ name: String) -> JSONValue? { contract?.definitions[name] }
     static let checkPatternMaxLength = Int(
         contract?.definitions["check"]?.objectFields?["fields"]?
             .objectFields?["pattern"]?.objectFields?["rule"]?.objectFields?["max"]?.numberValue ?? 0
@@ -34,7 +55,20 @@ struct PrototypeContractValidator {
     var actions: [PrototypeLocatedValue] = []
     var nodes = 0
     var images = 0
+    var effects = PrototypeEffectUses()
+    var keyframeNodes = 0
     var referenceDepth: [String: Int] = [:]
+
+    static func validateRequestBody(_ value: JSONValue, path: String) throws {
+        guard let contract,
+              let rule = contract.definitions["action"]?.objectFields?["variants"]?.objectFields?["request"]?
+              .objectFields?["fields"]?.objectFields?["body"]?.objectFields?["rule"]
+        else {
+            throw invalid(path, "Embedded request body contract is unavailable")
+        }
+        var validator = Self(definitions: contract.definitions, limits: contract.limits)
+        try validator.walk(value, rule: rule, path: path, depth: 0)
+    }
 
     static func validate(data: Data) throws { _ = try inspect(data: data) }
 
@@ -58,8 +92,28 @@ struct PrototypeContractValidator {
             throw invalid("$", "Embedded structural contract is unavailable")
         }
         var validator = Self(definitions: contract.definitions, limits: contract.limits)
+        if let fields = value.objectFields, let root = fields["root"] {
+            try PrototypeLazyList.validateLimits(root: root, data: fields["data"]?.objectFields)
+        }
         try validator.walk(value, rule: spec, path: "", depth: 0)
+        // Accessory nodes are structurally checked but neither renderer draws them.
+        let ignored = validator.locatedNodes.filter {
+            $0.value["ios"]?.objectFields?["bottomAccessory"]?.objectFields != nil
+        }.map { "\($0.path).ios.bottomAccessory" }
+        func ignoredEntry(_ entry: PrototypeLocatedValue) -> Bool {
+            ignored.contains { entry.path == $0 || entry.path.hasPrefix($0 + ".") || entry.path.hasPrefix($0 + "[") }
+        }
+        validator.locatedNodes.removeAll(where: ignoredEntry)
+        validator.actions.removeAll(where: ignoredEntry)
+        try PrototypeKeyframes.validate(nodes: validator.locatedNodes, spec: value.objectFields ?? [:])
         return validator
+    }
+
+    /// Interpret a module state rule with the same definitions and limits as the spec walk.
+    static func validateValue(_ value: JSONValue, rule: JSONValue, path: String) throws {
+        guard let contract else { throw invalid(path, "Embedded structural contract is unavailable") }
+        var validator = Self(definitions: contract.definitions, limits: contract.limits)
+        try validator.walk(value, rule: rule, path: path, depth: 0)
     }
 
     static func invalid(_ path: String, _ message: String) -> PrototypeLoadError {
@@ -87,6 +141,7 @@ struct PrototypeContractValidator {
         case "map", "screenMap", "record": try map(value, rule: fields, path: path, depth: depth)
         case "choice": try choice(value, rule: fields, path: path, depth: depth)
         case "data": try Self.data(value)
+        case "strings": try PrototypeStrings.validateTables(value)
         default:
             guard Self.primitive(value, rule: fields) else {
                 throw Self.invalid(path, "Invalid \(kind == "boundKey" ? "key" : kind) value")
@@ -128,6 +183,11 @@ struct PrototypeContractValidator {
                 (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid("\(path).image", "Image limit exceeded") }
         }
         if name == "node" {
+            if let fields = value.objectFields, fields["onAppear"] != nil,
+               path != "root", fields["visibleWhen"] == nil
+            {
+                throw Self.invalid("\(path).onAppear", "onAppear requires visibleWhen or the root")
+            }
             guard let node = value.objectFields else { throw Self.invalid(path, "Expected object") }
             locatedNodes.append(.init(value: node, path: path))
             nodes += 1
@@ -135,6 +195,17 @@ struct PrototypeContractValidator {
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }
             if node["type"] == .string("image") { images += max(1, Self.imageUses(node["asset"])) }
             if images > (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid(path, "Image limit exceeded") }
+            if node["keyframes"] != nil { keyframeNodes += 1 }
+            if keyframeNodes > (limits["MAX_PROTOTYPE_KEYFRAME_NODES"] ?? 0) {
+                throw Self.invalid("\(path).keyframes", "Keyframe node limit exceeded")
+            }
+            effects.add(PrototypeEffectUses(node: node))
+            if effects.total > (limits["MAX_PROTOTYPE_EFFECTS"] ?? 0) {
+                throw Self.invalid(path, "Effect limit exceeded")
+            }
+            if effects.animated > (limits["MAX_PROTOTYPE_ANIMATED_EFFECTS"] ?? 0) {
+                throw Self.invalid(path, "Animated effect limit exceeded")
+            }
         }
         try walk(value, rule: target, path: path, depth: depth + (name == "node" ? 1 : 0))
     }

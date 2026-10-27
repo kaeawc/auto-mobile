@@ -1,3 +1,4 @@
+import { poolMatcher } from "./brokerPoolMatch";
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import {
   abortedByBrokerStop,
@@ -12,7 +13,6 @@ import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import {
-  matchSessionDevice,
   normalizeSessionDeviceRequirement,
   resolveSessionDeviceProfile,
 } from "../../devices/sessionRequirements";
@@ -38,7 +38,7 @@ import { ResetReadiness } from "./resetReadiness";
 import { SessionBrokerFailureError } from "./devicePort";
 import { assertDeviceProfileEmulatable, requestedDeviceProfile } from "./deviceProfile";
 import type { SessionBrokerOptions } from "./brokerOptions";
-import { nativeProfile, poolProfile } from "./profile";
+import { nativeProfile } from "./profile";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import {
@@ -336,7 +336,10 @@ export class SessionBroker {
     signal.throwIfAborted();
     const catalog = await this.options.catalog(config.device.platform, signal);
     const defaults = this.options.defaults(config.device.platform);
-    const requirement = unwrap(normalizeSessionDeviceRequirement(config.device, defaults, catalog));
+    const capabilities = this.options.capabilities ?? {};
+    const requirement = unwrap(
+      normalizeSessionDeviceRequirement(config.device, defaults, catalog, capabilities),
+    );
     assertDeviceProfileEmulatable(requestedDeviceProfile(config));
     return {
       requestId: config.requestId,
@@ -345,8 +348,9 @@ export class SessionBroker {
       owner: this.options.owner,
       export: exportIdentity,
       limits: this.options.limits,
-      matches: (profile) => matchSessionDevice(requirement, poolProfile(profile)).kind === "match",
-      resolveCreation: () => unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog)),
+      matches: poolMatcher(requirement, defaults),
+      resolveCreation: () =>
+        unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog, capabilities)),
     };
   }
 
@@ -453,6 +457,11 @@ export class SessionBroker {
   ): Promise<SessionBrokerResult> {
     const latest = await this.options.store.getRequest(config.requestId);
     return latest && latest.state !== "active" ? this.result(latest) : result;
+  }
+
+  /** Whether this host's configuration enables iPhone Duo sessions. */
+  supportsIosDuo(): boolean {
+    return this.options.capabilities?.iosDuo === true;
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {

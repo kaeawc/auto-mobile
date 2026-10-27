@@ -1,3 +1,4 @@
+import { prototypeAdaptiveError } from "./prototypeAdaptive";
 import { z } from "zod";
 import { type KeyInstance } from "./prototypeRepeat";
 import { prototypeRequestStatusKeyError } from "./prototypeRequest";
@@ -7,8 +8,12 @@ export interface Rule {
   name?: string;
   empty?: boolean;
   nonblank?: boolean;
+  pattern?: string;
   exclusive?: string[];
   exactlyOne?: string[];
+  exactlyOneAtObject?: boolean;
+  preferMatchingFields?: boolean;
+  atMostOne?: string[];
   dependents?: Record<string, string[]>;
   integer?: boolean;
   min?: number;
@@ -21,7 +26,9 @@ export interface Rule {
   item?: Rule;
   options?: Rule[];
   values?: (string | boolean)[];
+  minEntries?: number;
   maxEntries?: number;
+  keyPattern?: string;
   fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;
   variants?: Record<string, Rule>;
 }
@@ -338,7 +345,7 @@ function selectionErrors(
 ): PrototypeValidationError | undefined {
   if (
     typeof value.stateKey !== "string" ||
-    (value.type !== "tabBar" && value.type !== "bottomNav")
+    (value.type !== "tabBar" && value.type !== "bottomNav" && value.type !== "pager")
   ) {
     return undefined;
   }
@@ -353,7 +360,10 @@ export function bindingErrors(
 ): PrototypeValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path, item } of checked.nodes) {
-    const error = componentBindingErrors(value, path, state) ?? selectionErrors(value, path, state);
+    const error =
+      prototypeAdaptiveError(value, path, state) ??
+      componentBindingErrors(value, path, state) ??
+      selectionErrors(value, path, state);
     if (error) {
       return forItem(error, item);
     }
@@ -363,6 +373,8 @@ export function bindingErrors(
 
 /** Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean. */
 const MODAL_NAMES: Record<string, string | undefined> = {
+  tooltip: "Tooltip",
+  drawer: "Drawer",
   bottomSheet: "Sheet",
   dialog: "Dialog",
   menu: "Menu",
@@ -388,15 +400,19 @@ function refreshErrors(
   path: string,
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
-  const refresh = value.type === "scroll" ? object(value.refresh) : undefined;
+  const refresh = ["scroll", "list"].includes(String(value.type))
+    ? object(value.refresh)
+    : undefined;
   if (!refresh) {
     return undefined;
   }
   if (value.axis === "horizontal") {
-    return fail(`${path}.refresh`, "Pull-to-refresh needs a vertical scroll");
+    return fail(`${path}.refresh`, `Pull-to-refresh needs a vertical ${value.type}`);
   }
   const key = refresh.stateKey;
-  return typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean"
+  return typeof key === "string" &&
+    (Object.hasOwn(state, key) || value.type === "list") &&
+    typeof state[key] !== "boolean"
     ? fail(`${path}.refresh.stateKey`, "Refresh requires a boolean state key")
     : undefined;
 }
@@ -449,11 +465,13 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
 function boundKeys(value: Record<string, unknown>): string[] {
   const keys = [
     value.stateKey,
+    value.type === "adaptive" ? value.selectionKey : undefined,
+    value.type === "adaptive" ? value.openKey : undefined,
     value.activeKey,
     value.hourKey,
     value.minuteKey,
     object(value.trailing)?.stateKey,
-    value.type === "scroll" ? object(value.refresh)?.stateKey : undefined,
+    ["scroll", "list"].includes(String(value.type)) ? object(value.refresh)?.stateKey : undefined,
     value.type === "scroll" ? value.atEndKey : undefined,
   ];
   const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))
@@ -469,6 +487,7 @@ function controlErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   return (
+    prototypeAdaptiveError(value, path, state) ??
     componentBindingErrors(value, path, state) ??
     selectionErrors(value, path, state) ??
     trailingErrors(value, path, state) ??
@@ -489,7 +508,12 @@ function setStateBindingErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const { key, value } = action.value;
-  if (typeof key !== "string" || action.operandTemplated || value === undefined) {
+  if (
+    typeof key !== "string" ||
+    action.operandTemplated ||
+    value === undefined ||
+    dynamicStateValue(value)
+  ) {
     return undefined;
   }
   const controls = checked.nodes.filter((node) => boundKeys(node.value).includes(key));
@@ -565,3 +589,35 @@ export const bound = ({ located, value, item, operandTemplated }: KeyInstance<Lo
   item,
   operandTemplated,
 });
+
+function dynamicStateValue(value: unknown): boolean {
+  return object(value)?.event !== undefined || object(value)?.platform !== undefined;
+}
+
+/** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */
+export function emptyConditionConstraint(
+  data: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  return Object.hasOwn(data, "empty") &&
+    (Object.hasOwn(data, "key") || Object.hasOwn(data, "platform"))
+    ? fail(path ? `${path}.empty` : "empty", "empty applies only to data conditions")
+    : undefined;
+}
+
+/** Structural-only accessory nodes cannot provide renderer targets or executable actions. */
+export function excludeAccessoryReferences(context: {
+  nodes: Located[];
+  actions: Located[];
+}): undefined {
+  const ignored = context.nodes.flatMap(({ value, path }) =>
+    object(object(value.ios)?.bottomAccessory) ? [`${path}.ios.bottomAccessory`] : [],
+  );
+  const rendered = ({ path }: Located): boolean =>
+    !ignored.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}.`) || path.startsWith(`${prefix}[`),
+    );
+  context.nodes = context.nodes.filter(rendered);
+  context.actions = context.actions.filter(rendered);
+  return undefined;
+}

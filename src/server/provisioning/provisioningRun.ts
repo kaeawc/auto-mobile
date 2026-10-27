@@ -253,6 +253,10 @@ async function runProvisionDeviceLifecycle(
       deviceManager,
       provisioned,
       {
+        createdAvdNeverLaunched:
+          args.device.platform === "android" &&
+          provisioned?.created === true &&
+          !settlementState.bootAttempted,
         creationStarted: creationStarted,
         retainCreatedForRetry: settlementState.retainCreatedForRetry,
         signal: combineAbortSignals(signal, lifecycleLease?.signal),

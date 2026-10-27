@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Leaf",
+      "ios": {
+        "backgroundExtension": true
+      }
+    }
+  },
+  "expectedPath": "root.ios.backgroundExtension",
+  "expectedMessage": "backgroundExtension requires an image node"
+}

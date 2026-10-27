@@ -1,11 +1,13 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.layout.ContentScale
+import dev.jasonpearson.automobile.protocol.PrototypeAssetContract
 import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
 import dev.jasonpearson.automobile.protocol.PrototypeFontFamily
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
 import dev.jasonpearson.automobile.protocol.PrototypeItem
 import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypeShader
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 
@@ -59,13 +61,14 @@ private fun prototypeFontAssetReferences(node: PrototypeNode): List<String> =
  * Every asset id the tree references, in first-use order without repeats: `image` nodes and the
  * `image` of `tabBar` and `bottomNav` items. Covers nodes that are currently hidden or on another
  * pager page, because those can be revealed without another `show`. Font assets named by
- * `style.fontFamily: {asset}` (also inside `styleWhen`) are included.
+ * `style.fontFamily: {asset}` and `style.shader` (also inside `styleWhen`) are included.
  */
 @InternalAutoMobilePrototypeApi
 fun prototypeAssetReferences(root: PrototypeNode): List<String> {
   val ids = LinkedHashSet<String>()
   fun visit(node: PrototypeNode) {
     prototypeFontAssetReferences(node).forEach { ids += it }
+    prototypeNodeShaders(node).forEach { ids += it.asset }
     when (node) {
       // A {light, dark} asset pair (#11218) references both ids, whichever mode is drawn.
       is PrototypeImageNode -> ids += node.asset.values
@@ -76,5 +79,30 @@ fun prototypeAssetReferences(root: PrototypeNode): List<String> {
     prototypeDescendants(node).forEach(::visit)
   }
   visit(root)
-  return ids.toList()
+  // A `media:` id is minted on the device (#14192): never an upload, never reported missing.
+  return ids.filterNot(PrototypeAssetContract::isMediaId)
+}
+
+/** Includes inactive style alternatives and hidden descendants, before a spec can be shown. */
+internal fun prototypeNodeShaders(node: PrototypeNode): List<PrototypeShader> =
+  (listOfNotNull(node.style) + node.styleWhen.orEmpty().map { it.style }).mapNotNull { it.shader }
+
+@InternalAutoMobilePrototypeApi
+fun validatePrototypeShaderUniforms(root: PrototypeNode, lookup: (String) -> PrototypeAssetInfo?) {
+  fun visit(node: PrototypeNode) {
+    prototypeNodeShaders(node).forEach { shader ->
+      // Unknown ids retain the existing missingAssets warning/re-upload path.
+      val info = lookup(shader.asset) ?: return@forEach
+      require(info.mimeType == "application/vnd.automobile.agsl") {
+        "Shader asset '${shader.asset}' must have AGSL MIME type."
+      }
+      val declared =
+        requireNotNull(info.shaderUniforms) {
+          "Shader asset '${shader.asset}' has not been compiled by this device."
+        }
+      prototypeShaderUniformValues(declared, shader.uniforms.orEmpty())
+    }
+    prototypeDescendants(node).forEach(::visit)
+  }
+  visit(root)
 }

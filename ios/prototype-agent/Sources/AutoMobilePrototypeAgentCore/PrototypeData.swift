@@ -173,13 +173,13 @@ struct PrototypeRepeatData {
 
 /// Scans authored UTF-16 once, just like Kotlin; replacement values are never scanned again.
 enum PrototypeDataText {
-    static func bind(_ text: String, data: [String: JSONValue]?) -> String {
+    static func bind(_ text: String, data: [String: JSONValue]?, platform: [String: JSONValue]? = nil) -> String {
         let units = Array(text.utf16)
         var result = ""
         var literalStart = 0
-        scan(units) { open, close, pointer in
+        scan(units, includePlatform: true) { open, close, pointer, isPlatform in
             result += String(decoding: units[literalStart ..< open], as: UTF16.self)
-            result += rendered(pointer, data: data)
+            result += rendered(pointer, data: isPlatform ? platform : data)
             literalStart = close + 1
             return true
         }
@@ -199,7 +199,7 @@ enum PrototypeDataText {
     {
         var recognized = false
         var length = 0
-        scan(Array(text.utf16)) { _, _, pointer in
+        scan(Array(text.utf16)) { _, _, pointer, _ in
             recognized = true
             length += rendered(pointer, data: data).utf16.count
             return length <= PrototypeLimits.maxSubstitutedTextLength
@@ -214,17 +214,23 @@ enum PrototypeDataText {
     }
 
     /// Returning false stops the shared scanner before any oversized binding is constructed.
-    private static func scan(_ units: [UInt16], visit: (Int, Int, String) -> Bool) {
+    private static func scan(
+        _ units: [UInt16],
+        includePlatform: Bool = false,
+        visit: (Int, Int, String, Bool) -> Bool
+    ) {
         var cursor = 0
         while cursor < units.count {
-            let end = min(units.count, cursor + 2 + 5 + PrototypeLimits.maxDataPointerLength)
+            let isPlatform = includePlatform && units.dropFirst(cursor + 1).starts(with: Array("platform:".utf16))
+            let prefix = Array((isPlatform ? "platform:" : "data:").utf16)
+            let end = min(units.count, cursor + 2 + prefix.count + PrototypeLimits.maxDataPointerLength)
             if units[cursor] == 123,
-               units[(cursor + 1) ..< end].starts(with: [100, 97, 116, 97, 58]),
+               units[(cursor + 1) ..< end].starts(with: prefix),
                let close = units[(cursor + 1) ..< end].firstIndex(of: 125)
             {
-                let pointer = String(decoding: units[(cursor + 6) ..< close], as: UTF16.self)
+                let pointer = String(decoding: units[(cursor + 1 + prefix.count) ..< close], as: UTF16.self)
                 if PrototypeDataPointer.isValid(pointer) {
-                    guard visit(cursor, close, pointer) else { return }
+                    guard visit(cursor, close, pointer, isPlatform) else { return }
                     cursor = close + 1
                     continue
                 }
@@ -236,36 +242,63 @@ enum PrototypeDataText {
 
 /// Pure, one-time resolution after authored limits, before repeat expansion and state interpolation.
 enum PrototypeDataResolver {
-    static func resolveRoot(_ root: JSONValue, data: [String: JSONValue]?) -> JSONValue {
+    static func resolveRoot(
+        _ root: JSONValue,
+        data: [String: JSONValue]?,
+        platform: [String: JSONValue]? = nil
+    )
+        -> JSONValue
+    {
         var repeats = PrototypeRepeatData(data: data)
-        return resolveRoot(root, data: data, repeats: &repeats)
+        return resolveRoot(root, data: data, platform: platform, repeats: &repeats)
     }
 
     private static func resolveRoot(
-        _ root: JSONValue, data: [String: JSONValue]?, repeats: inout PrototypeRepeatData
+        _ root: JSONValue, data: [String: JSONValue]?, platform: [String: JSONValue]?,
+        repeats: inout PrototypeRepeatData
     )
         -> JSONValue
     {
         guard case var .object(fields) = root else { return root }
-        PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data) }
-        if let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
-        for key in ["visibleWhen", "enabledWhen"] {
-            if let value = fields[key] { fields[key] = resolveCondition(value, data: data) }
+        PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data, platform: platform) }
+        let lazy = fields["type"] == .string("list")
+        if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
+            if let value = fields[key] { fields[key] = resolveCondition(value, data: data, platform: platform) }
         }
         if case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
                 guard case var .object(style) = entry, let condition = style["when"] else { return entry }
-                style["when"] = resolveCondition(condition, data: data)
+                style["when"] = resolveCondition(condition, data: data, platform: platform)
                 return .object(style)
             })
         }
         if let child = fields["child"] {
-            fields["child"] = resolveRoot(child, data: data, repeats: &repeats)
+            fields["child"] = resolveRoot(child, data: data, platform: platform, repeats: &repeats)
+        } else if fields["type"] == .string("adaptive") {
+            for slot in PrototypeAdaptive.slots {
+                if let child = fields[slot] { fields[slot] = resolveRoot(
+                    child,
+                    data: data,
+                    platform: platform,
+                    repeats: &repeats
+                ) }
+            }
         } else if case let .array(children)? = fields["children"] {
-            fields["children"] = .array(children.map { resolveRoot($0, data: data, repeats: &repeats) })
+            fields["children"] = .array(children
+                .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })
+        }
+        for name in ["header", "footer"] {
+            if let child = fields[name] { fields[name] = resolveRoot(
+                child,
+                data: data,
+                platform: platform,
+                repeats: &repeats
+            ) }
         }
         if case let .object(screens)? = fields["screens"] {
-            fields["screens"] = .object(screens.mapValues { resolveRoot($0, data: data, repeats: &repeats) })
+            fields["screens"] = .object(screens
+                .mapValues { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })
         }
         return .object(fields)
     }
@@ -278,18 +311,24 @@ enum PrototypeDataResolver {
         return .object(fields)
     }
 
-    private static func resolveCondition(_ value: JSONValue, data: [String: JSONValue]?) -> JSONValue {
+    private static func resolveCondition(
+        _ value: JSONValue,
+        data: [String: JSONValue]?,
+        platform: [String: JSONValue]?
+    )
+        -> JSONValue
+    {
         guard case var .object(fields) = value else { return value }
-        // A `{platform}` condition (#14294) reads device-owned state this agent does not keep yet,
-        // so it compares against a missing value: only `notEquals` holds.
         if fields["data"] != nil || fields["platform"] != nil {
-            let form = PrototypeDataValues.holds(fields, data: data) ? "all" : "any"
+            let isPlatform = fields["platform"] != nil
+            if isPlatform { fields["data"] = fields.removeValue(forKey: "platform") }
+            let form = PrototypeDataValues.holds(fields, data: isPlatform ? platform : data) ? "all" : "any"
             return .object([form: .array([])])
         }
-        if let negated = fields["not"] { fields["not"] = resolveCondition(negated, data: data) }
+        if let negated = fields["not"] { fields["not"] = resolveCondition(negated, data: data, platform: platform) }
         for group in ["all", "any"] {
             if case let .array(conditions)? = fields[group] {
-                fields[group] = .array(conditions.map { resolveCondition($0, data: data) })
+                fields[group] = .array(conditions.map { resolveCondition($0, data: data, platform: platform) })
             }
         }
         return .object(fields)

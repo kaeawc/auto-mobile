@@ -1,0 +1,42 @@
+{
+  "id": "request-upload",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "progress": 0,
+    "caption": "hello"
+  },
+  "root": {
+    "type": "button",
+    "label": "Upload",
+    "onTap": [
+      {
+        "type": "request",
+        "method": "POST",
+        "url": "https://example.com/upload",
+        "body": {
+          "form": {
+            "effects": {
+              "value": "x"
+            },
+            "checks": {
+              "value": "x"
+            },
+            "refresh": {
+              "value": "x"
+            },
+            "value": {
+              "value": "x"
+            },
+            "payload": {
+              "value": "x"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

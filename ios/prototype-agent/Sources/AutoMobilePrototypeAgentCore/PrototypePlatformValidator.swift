@@ -4,12 +4,15 @@ import Foundation
 /// handlers, the `platform` action and `{platform}` / `{event}` reads. The host validator
 /// (`prototypePlatform.ts` and the contract walk) is authoritative; this repeats its rules so a
 /// spec that skipped it still fails the show at the host's path. Running the calls is the module
-/// registry's job (#14296); no agent advertises `prototype_platform_v1` yet.
+/// registry's job; the device module supplies read-only state.
 enum PrototypePlatformValidator {
     /// A literal `{value}` argument's rule, from the contract's `platformModules` table.
     enum Rule: Equatable {
         case json(maxBytes: Int)
+        case string(empty: Bool, maxBytes: Int)
+        case boolean
         case integer(min: Double, max: Double)
+        case enumeration(Set<String>)
     }
 
     struct Argument: Equatable {
@@ -27,27 +30,53 @@ enum PrototypePlatformValidator {
         let capability: String
         let calls: [String: Call]
         let events: Set<String>
+        var state: Set<String>?
     }
 
     /// The contract's `platformModules`; `PrototypePlatformTests` keeps the two equal. `test` is a
     /// placeholder module no production runtime advertises.
-    static let modules: [String: Module] = [
-        "test": Module(
-            capability: "prototype_platform_test_v1",
-            calls: [
-                "echo": Call(
-                    args: [
-                        "message": Argument(optional: false, rule: .json(maxBytes: 1024)),
-                        "delayMs": Argument(optional: true, rule: .integer(min: 0, max: 60000)),
-                    ],
-                    permissions: [],
-                    background: []
-                ),
-                "protected": Call(args: [:], permissions: ["camera"], background: ["audio"]),
-            ],
-            events: ["tick"]
-        ),
-    ]
+    static let modules: [String: Module] = PrototypeContractValidator.platformModules
+        .mapValues { raw in
+            let fields = raw.objectFields ?? [:]
+            let calls = (fields["calls"]?.objectFields ?? [:]).mapValues { raw in
+                let call = raw.objectFields ?? [:]
+                let args = (call["args"]?.objectFields ?? [:]).mapValues { raw in
+                    let arg = raw.objectFields ?? [:]
+                    let rule = arg["value"]?.objectFields ?? [:]
+                    return Argument(
+                        optional: arg["optional"] == .bool(true),
+                        rule: argumentRule(rule)
+                    )
+                }
+                func strings(_ key: String) -> [String] {
+                    guard case let .array(values)? = call[key] else { return [] }
+                    return values.compactMap(\.stringValue)
+                }
+                return Call(args: args, permissions: strings("permissions"), background: strings("background"))
+            }
+            return Module(
+                capability: fields["capability"]?.stringValue ?? "",
+                calls: calls,
+                events: Set((fields["events"]?.objectFields ?? [:]).keys),
+                state: fields["state"]?.objectFields.map { Set($0.keys) }
+            )
+        }
+
+    private static func argumentRule(_ rule: [String: JSONValue]) -> Rule {
+        switch rule["kind"]?.stringValue {
+        case "json": .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
+        case "string": .string(empty: rule["empty"] == .bool(true),
+                               maxBytes: Int(rule["maxBytes"]?.numberValue ?? Double(Int.max / 2)))
+        case "boolean": .boolean
+        case "enum":
+            if case let .array(values)? = rule["values"] {
+                .enumeration(Set(values.compactMap(\.stringValue)))
+            } else {
+                preconditionFailure("platform enum argument without values")
+            }
+        default: .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        }
+    }
 
     static let permissionNames: Set<String> = [
         "camera", "microphone", "location", "locationBackground", "notifications", "photos",
@@ -58,6 +87,8 @@ enum PrototypePlatformValidator {
         "remoteNotification",
     ]
     static let reservedEmitPrefix = "prototype_"
+    /// Authored `testTag`s cannot start with this; host controls own the namespace (#15120).
+    static let reservedTestTagPrefix = "automobile-"
     static let maxArgs = 16
     static let maxHandlers = 32
     static let maxTimeoutMs = 300_000
@@ -77,17 +108,43 @@ enum PrototypePlatformValidator {
         var modules: Set<String> = []
         var permissions: Set<String> = []
         var background: Set<String> = []
+        var channels: [String: JSONValue] = [:]
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
-        requires: JSONValue?, handlers: JSONValue?, root: JSONValue, state: [String: JSONValue]
+        requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, root: JSONValue,
+        state: [String: JSONValue]
     )
         throws
     {
-        let declared = try validateRequires(requires)
+        try PrototypeChannels.validate(channels?.objectFields, requires: requires, state: state)
+        var declared = try validateRequires(requires)
+        declared.channels = channels?.objectFields ?? [:]
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
+        for (handler, path) in PrototypeChannels.handlers(declared.channels) {
+            if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
+                actions,
+                path: path,
+                depth: 1,
+                state: state
+            ) }
+            try scan(handler, path: path, inHandler: true, declared: declared, state: state)
+        }
         try scan(root, path: "root", inHandler: false, declared: declared, state: state)
+    }
+
+    /// Throws at the first authored node whose `testTag` takes the host-reserved namespace.
+    static func validateTestTags(nodes: [PrototypeLocatedValue]) throws {
+        for node in nodes {
+            guard case let .string(tag)? = node.value["testTag"], tag.hasPrefix(reservedTestTagPrefix) else {
+                continue
+            }
+            throw PrototypeContractValidator.invalid(
+                "\(node.path).testTag",
+                "testTag values starting with \(reservedTestTagPrefix) are reserved for host controls"
+            )
+        }
     }
 
     // MARK: requires
@@ -192,6 +249,7 @@ enum PrototypePlatformValidator {
             }
             guard let owner = eventModule(event) else { throw fail(path, "Unknown platform event") }
             guard declared.modules.contains(owner) else { throw notDeclared(path, owner) }
+            try PrototypeRequestValidator.validateList(actions, path: path, depth: 1, state: state)
             try scan(.array(actions), path: path, inHandler: true, declared: declared, state: state)
         }
     }
@@ -210,6 +268,14 @@ enum PrototypePlatformValidator {
             }
         case let .object(fields):
             if fields.count == 1, fields["value"] != nil { return }
+            if fields["type"] == .string("pasteButton") {
+                try validateCall(
+                    ["type": .string("platform"), "call": .string("clipboard.paste"), "into": fields["into"] ?? .null],
+                    path: path,
+                    declared: declared,
+                    state: state
+                )
+            }
             if fields["type"] == .string("platform") {
                 try validateCall(fields, path: path, declared: declared, state: state)
             }
@@ -224,6 +290,7 @@ enum PrototypePlatformValidator {
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)
+                    try comparison(fields, pointer: pointer, path: path)
                 }
                 if case .string(_)? = fields["event"], !inHandler {
                     throw fail("\(path).event", "{event} is only available inside a platform.on handler")
@@ -261,6 +328,33 @@ enum PrototypePlatformValidator {
         let name = PrototypeDataPointer.tokens(pointer).first ?? ""
         guard modules[name] != nil else { throw fail(path, "Unknown platform module \(name)") }
         guard declared.modules.contains(name) else { throw notDeclared(path, name) }
+        if let state = modules[name]?.state {
+            let tokens = PrototypeDataPointer.tokens(pointer)
+            let valid = name == "realtime" ? tokens.count == 3 && declared.channels[tokens[1]] != nil && state
+                .contains(tokens[2]) : tokens.count == 2 && state.contains(tokens[1])
+            guard valid else {
+                throw fail(path, "Unknown platform state \(pointer)")
+            }
+        }
+    }
+
+    /// Portable specs can branch on device.os; these validators have no target-platform input.
+    private static func comparison(_ fields: [String: JSONValue], pointer: String, path: String) throws {
+        let tokens = PrototypeDataPointer.tokens(pointer)
+        guard tokens.count == 2,
+              let entry = PrototypeContractValidator.platformModules[tokens[0]]?.objectFields?["state"]?
+              .objectFields?[tokens[1]]?.objectFields,
+              let overrides = entry["valueByPlatform"]?.objectFields, let base = entry["value"]
+        else { return }
+        let rule = JSONValue.object(["kind": .string("choice"), "options": .array([base] + Array(overrides.values))])
+        for operation in ["equals", "notEquals"] {
+            guard let literal = fields[operation] else { continue }
+            do {
+                try PrototypeContractValidator.validateValue(literal, rule: rule, path: "\(path).\(operation)")
+            } catch let PrototypeLoadError.invalidSpec(path, message) {
+                throw fail(path, message)
+            }
+        }
     }
 
     // MARK: call
@@ -287,7 +381,7 @@ enum PrototypePlatformValidator {
                 throw fail("\(path).\(list)", "Array length out of range")
             }
         }
-        let args = try arguments(action["args"], path: "\(path).args")
+        let args = try arguments(action["args"], path: "\(path).args", realtime: call.hasPrefix("realtime."))
         guard let parts = qualified(call), let definition = modules[parts.module]?.calls[parts.member] else {
             throw fail("\(path).call", "Unknown platform call")
         }
@@ -301,25 +395,43 @@ enum PrototypePlatformValidator {
         }
         for name in sorted(Set(definition.args.keys).union(args.keys)) {
             let at = PrototypeLimits.dataMemberPath("\(path).args", key: name)
-            guard let argument = definition.args[name] else { throw fail(at, "Unknown argument") }
+            guard let argument = definition.args[name] else { throw fail(
+                at,
+                call == "share.open" && name == "title" ? "Unknown argument: use subject" : "Unknown argument"
+            ) }
             guard let binding = args[name] else {
                 if argument.optional { continue }
                 throw fail(at, "Required argument")
             }
+            if call == "share.open", ["text", "url", "subject"].contains(name) { continue }
             if case let .object(form) = binding, let literal = form["value"] {
                 try check(literal, argument.rule, path: "\(at).value")
             }
+        }
+        try PrototypeChannels.call(action, path: path, channels: declared.channels)
+        if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
+            throw fail(error.path, error.message)
         }
         if let into = action["into"] { try self.into(into, path: "\(path).into") }
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
     }
 
-    private static func arguments(_ raw: JSONValue?, path: String) throws -> [String: JSONValue] {
+    private static func arguments(_ raw: JSONValue?, path: String, realtime: Bool) throws -> [String: JSONValue] {
         guard let raw else { return [:] }
         guard case let .object(fields) = raw else { throw fail(path, "Expected object") }
         guard fields.count <= maxArgs else { throw fail(path, "Record entry limit exceeded") }
         for name in sorted(Set(fields.keys)) {
             let at = PrototypeLimits.dataMemberPath(path, key: name)
+            if fields[name]?.stringValue != nil {
+                if realtime, name == "channel" { continue }
+                throw fail(at, "Invalid union value")
+            }
+            // An unknown key inside a one-key form is reported at that key, as the TypeScript walk does.
+            if case let .object(form)? = fields[name], form.count == 1, let key = form.keys.first,
+               !bindingKeys.contains(key)
+            {
+                throw fail(PrototypeLimits.dataMemberPath(at, key: key), "Unknown property")
+            }
             guard case let .object(form)? = fields[name], form.count == 1, let key = form.keys.first,
                   bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
             else { throw fail(at, "Invalid union value") }
@@ -327,7 +439,7 @@ enum PrototypePlatformValidator {
         return fields
     }
 
-    private static func check(_ literal: JSONValue, _ rule: Rule, path: String) throws {
+    static func check(_ literal: JSONValue, _ rule: Rule, path: String) throws {
         switch rule {
         case let .json(maxBytes):
             let encoder = JSONEncoder()
@@ -335,9 +447,19 @@ enum PrototypePlatformValidator {
             guard let bytes = try? encoder.encode(literal), bytes.count <= maxBytes else {
                 throw fail(path, "Invalid json value")
             }
+        case let .string(empty, maxBytes):
+            guard let text = literal.stringValue, empty || !text.isEmpty, text.utf8.count <= maxBytes else {
+                throw fail(path, "Invalid string value")
+            }
+        case .boolean:
+            guard literal.boolValue != nil else { throw fail(path, "Invalid boolean value") }
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")
+            }
+        case let .enumeration(values):
+            guard case let .string(value) = literal, values.contains(value) else {
+                throw fail(path, "Invalid enum value")
             }
         }
     }

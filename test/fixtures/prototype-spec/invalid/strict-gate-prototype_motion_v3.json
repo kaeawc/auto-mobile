@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "motion3",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "on": false
+    },
+    "motion": "expressive",
+    "root": {
+      "type": "text",
+      "text": "Hi"
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities"
+}

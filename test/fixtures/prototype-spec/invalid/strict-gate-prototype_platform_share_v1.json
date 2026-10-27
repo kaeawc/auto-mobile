@@ -1,0 +1,57 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "as": "item",
+        "items": [
+          {
+            "u": "https://example.com",
+            "mime": "text/plain",
+            "name": "a.txt"
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "button",
+          "label": "Share",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "share.open",
+              "args": {
+                "url": {
+                  "value": "https://{item.u}/"
+                },
+                "files": {
+                  "value": [
+                    {
+                      "asset": "file",
+                      "name": "{item.name}",
+                      "mimeType": "{item.mime}"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_share_v1"
+}

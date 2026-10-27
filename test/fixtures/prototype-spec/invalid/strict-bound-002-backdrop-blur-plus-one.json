@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "backdrop": {
+        "material": "ultraThin",
+        "blur": 151,
+        "tint": "scrim"
+      },
+      "opacity": 100
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "window.backdrop.blur"
+}

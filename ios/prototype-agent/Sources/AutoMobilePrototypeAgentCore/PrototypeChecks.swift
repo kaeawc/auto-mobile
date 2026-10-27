@@ -161,6 +161,7 @@ extension PrototypeNode {
     func bindValidity(_ bindings: [PrototypeCheckBinding]) {
         visibleWhen?.bindValidity(bindings)
         enabledWhen?.bindValidity(bindings)
+        errorWhen?.bindValidity(bindings)
         openWhen?.bindValidity(bindings)
         styleWhen?.forEach { $0.when.bindValidity(bindings) }
         childEntries(path: "root").forEach { $0.node.bindValidity(bindings) }

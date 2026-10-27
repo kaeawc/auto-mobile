@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "shadows": [
+          {
+            "color": "#000000",
+            "radius": 20,
+            "unknown": 1
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.shadows[0].unknown",
+  "expectedMessage": "Unknown property"
+}

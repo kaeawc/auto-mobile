@@ -1,3 +1,9 @@
+import { prototypeGlassEdgeNotes } from "./prototypeGlassNotes";
+import { prototypeAdaptiveNotes } from "./prototypeAdaptive";
+import { prototypeNamespaceNotes } from "./prototypeNamespaceNotes";
+import { designFallbackPaths } from "./prototypeDesign";
+import { prototypeStringsFallbackKeys } from "./prototypeStrings";
+import { prototypeIgnoredNamespaceFields } from "./prototypePlatformNamespace";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -8,15 +14,23 @@ import {
   PROTOTYPE_ICON_VARIANT_CAPABILITY,
   PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import { prototypeZoomTransitionNotes } from "./prototypeZoomTransition";
+import { prototypeIconEffectNotes } from "./prototypeIconEffectNotes";
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
+  | "adaptive"
+  | "design.fallback"
+  | "platformNamespace"
+  | "scroll.edgeEffect"
   | "rich-text-links"
+  | "stack.zoom"
   | "stack"
   | "carousel"
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
+  | "icon.effect"
   | "icon.name"
   | "icon.variant"
   | "textField.variant"
@@ -24,10 +38,11 @@ export type PrototypePlatformNoteConstruct =
   | "searchBar"
   | "searchBar.icons"
   | "menu"
-  | "select";
+  | "select"
+  | "strings.fallback";
 export type PrototypePlatformNoteEffect = "ignored" | "substituted";
 export interface PrototypePlatformNote {
-  platform: "ios";
+  platform: "android" | "ios" | "all";
   construct: PrototypePlatformNoteConstruct;
   effect: PrototypePlatformNoteEffect;
   /** Paths in the component-expanded, anchor-resolved device spec, in tree order, capped at 20.
@@ -35,7 +50,7 @@ export interface PrototypePlatformNote {
   paths: string[];
   /** Total occurrences when more than the cap were found. */
   total?: number;
-  /** Distinct placeholder icon names, sorted; icon.name only. */
+  /** icon.name: sorted distinct placeholders; strings.fallback: up to 20 referenced keys. */
   values?: string[];
   detail: string;
 }
@@ -218,7 +233,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     platform: "ios",
     effect: "substituted",
     detail:
-      "iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1.",
+      "Platform, slide and zoom support interactive edge pop; only the composed sharedAxisX/Y and fadeThrough patterns pop non-interactively. Pattern values and source require prototype_stack_patterns_v1. iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1. Explicit stack or push/replace transitions require prototype_stack_transitions_v1. iOS Reduce Motion uses fades; Android animator or transition scale 0 makes transitions instant.",
     occurrencePath: ({ node, path }) => (node?.type === "stack" ? path : undefined),
   },
   {
@@ -288,6 +303,15 @@ const definitions: Record<string, Rule> = contract.definitions;
  * The validator and anchor walkers are private and cannot be reused; this uses their dot/index
  * notation and walks depth first in contract field order. Validated device specs only.
  */
+function skipsOccurrences(value: unknown, rule: Rule): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    rule.name === "iosNamespace" ||
+    rule.name === "androidNamespace"
+  );
+}
+
 function occurrences(
   value: unknown,
   rule: Rule,
@@ -295,12 +319,14 @@ function occurrences(
   found: Occurrence[],
   nodeType?: string,
 ): void {
-  if (value === undefined || value === null) {
+  if (skipsOccurrences(value, rule)) {
     return;
   }
   switch (rule.kind) {
     case "ref":
       referenceOccurrences(value, rule.name!, path, found, nodeType);
+      break;
+    case "strings":
       break;
     case "screenMap":
       Object.entries(value as Record<string, unknown>).forEach(([name, child]) =>
@@ -367,9 +393,35 @@ export function prototypePlatformNotes(
   spec: PrototypeSpec,
   platform: "android" | "ios",
   supports: (capability: string) => boolean,
+  osMajor?: number,
 ): PrototypePlatformNote[] {
+  const edgeNotes = prototypeGlassEdgeNotes(spec, platform, osMajor);
+  const zoomNotes = [
+    ...edgeNotes,
+    ...prototypeZoomTransitionNotes(spec, platform, supports, osMajor),
+  ];
+  const foreign = platform === "android" ? "ios" : "android";
+  const paths = prototypeIgnoredNamespaceFields(spec, foreign);
+  const foreignNotes: PrototypePlatformNote[] = paths.length
+    ? [
+        {
+          platform,
+          construct: "platformNamespace",
+          effect: "ignored",
+          paths: paths.slice(0, 20),
+          ...(paths.length > 20 ? { total: paths.length } : {}),
+          detail: `${foreign} namespace blocks are ignored on ${platform}.`,
+        },
+      ]
+    : [];
+  const namespaceNotes = [...foreignNotes, ...prototypeNamespaceNotes(spec, platform, osMajor)];
   if (platform === "android") {
-    return [];
+    return [
+      ...prototypeAdaptiveNotes(spec, platform),
+      ...namespaceNotes,
+      ...zoomNotes,
+      ...prototypeIconEffectNotes(spec, platform),
+    ];
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
@@ -440,5 +492,47 @@ export function prototypePlatformNotes(
           },
         ];
   });
-  return [...notes, ...menus];
+  const fallbackPaths = designFallbackPaths(spec);
+  if (fallbackPaths.length) {
+    notes.push({
+      platform: "ios",
+      construct: "design.fallback",
+      effect: "substituted",
+      paths: fallbackPaths.slice(0, 20),
+      ...(fallbackPaths.length > 20 ? { total: fallbackPaths.length } : {}),
+      detail:
+        "These nodes have no native iOS coverage yet and keep the Material drawing (see designCoverage).",
+    });
+  }
+  return [
+    ...notes,
+    ...zoomNotes,
+    ...menus,
+    ...prototypeAdaptiveNotes(spec, platform),
+    ...namespaceNotes,
+    ...prototypeIconEffectNotes(spec, platform, osMajor),
+  ];
+}
+
+export function prototypeStringsFallbackNotes(
+  spec: PrototypeSpec,
+  locale?: string,
+): PrototypePlatformNote[] {
+  if (locale === undefined || !spec.strings) {
+    return [];
+  }
+  const keys = prototypeStringsFallbackKeys(spec, locale);
+  return keys.length
+    ? [
+        {
+          platform: "all",
+          construct: "strings.fallback",
+          effect: "substituted",
+          paths: keys.slice(0, 20).map((key) => `strings.default.${key}`),
+          values: keys.slice(0, 20),
+          ...(keys.length > 20 ? { total: keys.length } : {}),
+          detail: `Locale ${locale}: referenced keys fall through to default: ${keys.slice(0, 20).join(", ")}.`,
+        },
+      ]
+    : [];
 }

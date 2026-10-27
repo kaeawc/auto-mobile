@@ -54,6 +54,7 @@ describe("prototype saved actions", () => {
     dialog = pinDialogTree(["Cancel", "Add to home screen"]);
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     proxy = new FakeCtrlProxy(timer);
     proxy.setSupportedCommands([PROTOTYPE_SAVED_CAPABILITY]);
     proxy.setSaveResult({ success: true, saved });
@@ -144,7 +145,54 @@ describe("prototype saved actions", () => {
   });
   test("already pinned reports pinned", async () => {
     proxy.setPinResult({ success: true, pin: { id: "demo", status: "already_pinned" } });
-    expect(await save({ pin: true })).toEqual({ success: true, saved, pinned: "pinned" });
+    expect(await save({ pin: true })).toMatchObject({ success: true, saved, pinned: "pinned" });
+  });
+  describe("launcher refresh (#14887)", () => {
+    const resolveHome = "cmd package resolve-activity";
+    const pixelHome = createExecResult(
+      "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n",
+      "",
+    );
+    beforeEach(() => {
+      proxy.setPinResult({ success: true, pin: { id: "demo", status: "already_pinned" } });
+    });
+    test("restarts the resolved launcher once when the shortcut is not showing", async () => {
+      adb.setCommandResponse(resolveHome, pixelHome);
+      const output = await save({ pin: true });
+      expect(output).toMatchObject({
+        pinned: "pinned",
+        launcherRestarted: true,
+        shortcutVisible: false,
+      });
+      const commands = adb.getExecutedCommands();
+      expect(commands.filter((c) => c.includes("am force-stop"))).toEqual([
+        "shell am force-stop com.google.android.apps.nexuslauncher",
+      ]);
+    });
+    test("does not restart when the shortcut label is already visible", async () => {
+      dialog = pinDialogTree(["demo"]);
+      adb.setCommandResponse(resolveHome, pixelHome);
+      const output = await save({ pin: true });
+      expect(output).toMatchObject({ launcherRestarted: false, shortcutVisible: true });
+      expect(adb.getExecutedCommands().filter((c) => c.includes("force-stop"))).toEqual([]);
+    });
+    test("restartLauncher:false skips the check entirely", async () => {
+      adb.setCommandResponse(resolveHome, pixelHome);
+      const output = await save({ pin: true, restartLauncher: false });
+      expect(output.launcherRestarted).toBeUndefined();
+      expect(adb.getExecutedCommands().filter((c) => c.includes("force-stop"))).toEqual([]);
+    });
+    test("a pending pin has no shortcut yet, so nothing is restarted", async () => {
+      proxy.setPinResult({ success: true, pin: { id: "demo", status: "requested" } });
+      const output = await save({ pin: true });
+      expect(output.launcherRestarted).toBeUndefined();
+    });
+    test("an updated shortcut on a plain save is refreshed too", async () => {
+      proxy.setSaveResult({ success: true, saved: { ...saved, shortcut: "updated" } });
+      adb.setCommandResponse(resolveHome, pixelHome);
+      const output = await save();
+      expect(output.launcherRestarted).toBe(true);
+    });
   });
   test("unsupported launcher keeps the save", async () => {
     proxy.setPinResult({ success: false, errorCode: "pin_unsupported" });
@@ -599,7 +647,11 @@ describe("prototype saved actions", () => {
           prototypeSchema.safeParse({ action: "deleteSaved", id: "demo", [field]: value }).success,
         ).toBe(false);
       }
-      if (!["spec", "assets", "label", "icon", "pin", "autoConfirm"].includes(field)) {
+      if (
+        !["spec", "assets", "label", "icon", "pin", "autoConfirm", "restartLauncher"].includes(
+          field,
+        )
+      ) {
         expect(prototypeSchema.safeParse({ action: "save", spec, [field]: value }).success).toBe(
           false,
         );

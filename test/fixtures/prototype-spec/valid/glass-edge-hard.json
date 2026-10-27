@@ -1,0 +1,19 @@
+{
+  "id": "glass",
+  "state": {
+    "active": true
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "scroll",
+    "edgeEffect": "hard",
+    "child": {
+      "type": "text",
+      "text": "Content"
+    }
+  }
+}

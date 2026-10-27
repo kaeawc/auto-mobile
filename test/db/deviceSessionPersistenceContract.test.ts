@@ -404,7 +404,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
       const before = structuredClone(await rowOf(persistence));
       const guard = {
-        supersededReasons: [],
         livePeerDaemonSessionIds: [],
         ownDaemonSessionId: "daemon-a",
       };
@@ -711,7 +710,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
           .upsertActiveSession(record({ lastUsedAtMs: 3_000 }), 3_000, {
             unlessTerminal: true,
             rewriteOverSupersededRelease: {
-              supersededReasons: [],
               livePeerDaemonSessionIds: ["daemon-peer"],
               expectedRowGeneration: Number(generation),
             },
@@ -734,7 +732,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     );
 
     const cases = [
-      { reason: "device-disconnected:emulator-5554", owner: "daemon-a", replaced: true },
+      { reason: "device-disconnected:emulator-5554", owner: "daemon-a", replaced: false },
       { reason: "explicit-release", owner: "daemon-a", replaced: false },
       { reason: "plan-auto-release", owner: "daemon-a", replaced: true },
       { reason: null, owner: "daemon-a", replaced: true },
@@ -742,7 +740,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       { reason: "plan-auto-release", owner: "daemon-peer", replaced: false },
       { reason: "device-disconnected:emulator-5554", owner: "daemon-peer", replaced: false },
       { reason: null, owner: null, replaced: true },
-      { reason: "device-disconnected:emulator-5554", owner: null, replaced: true },
+      { reason: "device-disconnected:emulator-5554", owner: null, replaced: false },
       { reason: null, owner: "daemon-dead", replaced: true },
       { reason: "plan-auto-release", owner: "daemon-dead", replaced: true },
     ];
@@ -758,7 +756,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const result = await persistence
         .upsertActiveSession(record({ deviceId: "replacement", lastUsedAtMs: 3_000 }), 3_000, {
           rewriteOverSupersededRelease: {
-            supersededReasons: ["device-disconnected:emulator-5554"],
             livePeerDaemonSessionIds: ["daemon-peer"],
           },
         })
@@ -787,7 +784,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const persistence = await create();
       await persistence.upsertActiveSession(record(), 1_000, {
         rewriteOverSupersededRelease: {
-          supersededReasons: [],
           livePeerDaemonSessionIds: ["daemon-peer"],
         },
       });
@@ -806,7 +802,6 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
         const result = await persistence
           .upsertActiveSession(record({ lastUsedAtMs: 3_000 }), 3_000, {
             rewriteOverSupersededRelease: {
-              supersededReasons: [],
               livePeerDaemonSessionIds: [],
             },
           })

@@ -224,6 +224,7 @@ export class AccessibilityHierarchyConverter {
       "tooltip-text",
       "pane-title",
       "live-region",
+      "heading",
       "collection-info",
       "collection-item-info",
       "range-info",

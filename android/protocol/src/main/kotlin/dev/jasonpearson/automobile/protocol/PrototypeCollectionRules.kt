@@ -66,6 +66,8 @@ internal object PrototypeCollectionRules {
     depth: Int,
   ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
+    if (data.size > rule.number("maxEntries", Double.POSITIVE_INFINITY))
+      return fail(path, "Map entry limit exceeded")
     for (key in data.keys.sorted()) {
       val childPath = keyPath(path, key)
       if (!stateKeyPattern.matches(key)) return fail(childPath, "Invalid state key")
@@ -103,11 +105,19 @@ internal object PrototypeCollectionRules {
     depth: Int,
   ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
+    if (data.size < rule.number("minEntries", 0.0))
+      return fail(path, "Record entry minimum not met")
     if (data.size > rule.number("maxEntries", Double.POSITIVE_INFINITY))
       return fail(path, "Record entry limit exceeded")
     for ((key, child) in data) {
       val at = keyPath(path, key)
       if (key.isEmpty()) return fail(at, "Invalid context name")
+      if (
+        rule["keyPattern"] != null &&
+          PrototypeSpecContract.patterns[rule.getValue("keyPattern").jsonPrimitive.content]
+            ?.matches(key) != true
+      )
+        return fail(at, "Invalid record key")
       walk(child, rule.getValue("item").jsonObject, at, context, depth)?.let {
         return it
       }
@@ -133,7 +143,15 @@ internal object PrototypeCollectionRules {
       }
     }
     // Several options can accept the same JSON type (a hex colour or a role name are both strings).
-    val errors = candidates.map { walk(value, it, path, context, depth) }
+    val ranked =
+      if (rule.flag("preferMatchingFields"))
+        candidates.sortedByDescending { option ->
+          (option["fields"] as? JsonObject)?.keys?.count {
+            (value as? JsonObject)?.containsKey(it) == true
+          } ?: 0
+        }
+      else candidates
+    val errors = ranked.map { walk(value, it, path, context, depth) }
     if (errors.any { it == null }) return null
     return errors.firstOrNull() ?: fail(path, "Invalid union value")
   }

@@ -56,7 +56,17 @@ export interface TapOnElementResult extends BaseActionResult {
   };
   selectedElement?: TapOnSelectedElement;
   debug?: ToolDebugInfo;
+  /**
+   * Heuristic: a context menu, text selection, or new window root appeared after the long press.
+   * False means none of those was seen, not that the press was delivered as a tap.
+   */
   pressRecognized?: boolean;
+  /**
+   * Android long press only: whether the pressed node advertises a long-click accessibility
+   * action. False means the node has no long-click handler, so the app handles the hold like a
+   * tap on release; handlers built on raw touch input (such as drag-to-reorder) are not visible.
+   */
+  longClickAdvertised?: boolean;
   contextMenuOpened?: boolean;
   selectionStarted?: boolean;
   /** Whether a focus action was confirmed on the resolved editable target. */

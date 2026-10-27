@@ -10,12 +10,18 @@ struct PrototypeViewerApp: App {
     private let content: PrototypeViewerContent
     private static let terminationObserver = ViewerTerminationObserver()
 
-    init() {
+    init() { self.init(registry: .system) }
+
+    init(registry: PrototypePlatformRegistry) {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         let layoutDirectory = (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"))
             .appendingPathComponent(PrototypeViewerLayoutLoader.documentsDirectoryName)
         let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
-        let model = PrototypeModel(mode: .standalone, storage: PrototypeStorageCoordinator.fileBacked())
+        let model = PrototypeModel(
+            mode: .standalone,
+            storage: PrototypeStorageCoordinator.fileBacked(),
+            registry: registry
+        )
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
         let fallback = PrototypeViewerSpecLoader(reader: PrototypeViewerFileReader(), locations: locations)
         let launch: PrototypeViewerLaunch

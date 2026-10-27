@@ -1,0 +1,63 @@
+{
+  "id": "glass",
+  "state": {
+    "active": true
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "ios": {
+      "glassGroup": {
+        "spacing": 20
+      }
+    },
+    "children": [
+      {
+        "type": "button",
+        "label": "Play",
+        "style": {
+          "surface": "glass",
+          "glass": {
+            "variant": "regular",
+            "tint": {
+              "light": "primary",
+              "dark": "#FF0000"
+            },
+            "interactive": true
+          }
+        },
+        "ios": {
+          "glassUnion": "player",
+          "glassTransition": "matchedGeometry"
+        },
+        "shared": {
+          "key": "play",
+          "as": "element"
+        }
+      },
+      {
+        "type": "button",
+        "label": "Stop",
+        "style": {
+          "surface": "glass",
+          "glass": {
+            "variant": "clear",
+            "interactive": false
+          }
+        },
+        "ios": {
+          "glassUnion": "player",
+          "glassTransition": "materialize"
+        },
+        "shared": {
+          "key": "stop",
+          "as": "element"
+        }
+      }
+    ]
+  }
+}

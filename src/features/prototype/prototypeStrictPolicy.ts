@@ -1,7 +1,11 @@
+import { prototypeShareArgumentsError } from "./prototypeShare";
+import { prototypePlatformUses } from "./prototypePlatform";
+import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { repeatKeyInstances } from "./prototypeRepeat";
-import { mapBindableFields } from "./prototypeTemplate";
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { mapBindableFields, visitPrototypeHandlerFields } from "./prototypeTemplate";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -11,6 +15,8 @@ export interface PrototypeStrictOptions {
    */
   requiredCapabilities?: (spec: unknown) => readonly string[];
   library?: boolean;
+  /** Complete uploaded asset inventory, when statically known. */
+  shareAssetIds?: readonly string[];
 }
 
 /** Host/device capability negotiation and the additional unprivileged import boundary. */
@@ -19,16 +25,20 @@ export function prototypeStrictPolicyError(
   options: PrototypeStrictOptions,
   actions: readonly Located[],
 ): PrototypeValidationError | undefined {
-  if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
-    const missing = options
-      .requiredCapabilities(spec)
-      .filter((name) => !options.supportedCapabilities?.includes(name));
-    if (missing.length) {
-      return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
-    }
+  const unsupported = unsupportedCapabilitiesError(spec, options);
+  if (unsupported) {
+    return unsupported;
+  }
+  const assets = shareAssetsError(spec, options.shareAssetIds);
+  if (assets) {
+    return assets;
   }
   const window = object(object(spec)?.window);
   if (options.library) {
+    const shader = prototypeShaderFields(spec)[0];
+    if (shader) {
+      return { path: "$", message: "ProtoViewer bundles refuse custom AGSL shaders" };
+    }
     if (window?.layer === "system") {
       return { path: "window.layer", message: "Privileged window layer" };
     }
@@ -40,7 +50,37 @@ export function prototypeStrictPolicyError(
     if (host) {
       return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
     }
-    return secureLibraryError(spec);
+    return hostChannelsError(spec) ?? secureLibraryError(spec);
+  }
+  return undefined;
+}
+
+function secureScanBudgetError(
+  spec: unknown,
+  sinkFields: readonly LibraryField[],
+): PrototypeValidationError | undefined {
+  // Bound work before allocating per-row strings. Charge every sink's authored UTF-8 bytes
+  // for every repeat row, including literal spans that the repeat binder would copy.
+  const copies = new Map<string, number>();
+  for (const { located } of repeatKeyInstances(
+    spec,
+    sinkFields.map((field) => ({
+      ...field,
+      value: { stateKey: "{index}" },
+    })),
+  )) {
+    copies.set(located.path, (copies.get(located.path) ?? 0) + 1);
+  }
+  let expandedBytes = 0;
+  for (const field of sinkFields) {
+    expandedBytes +=
+      Buffer.byteLength(field.text, "utf8") * Math.max(1, copies.get(field.path) ?? 0);
+    if (expandedBytes > 4194304) {
+      return {
+        path: field.path,
+        message: "Secure binding scan exceeds 4194304 expanded UTF-8 bytes",
+      };
+    }
   }
   return undefined;
 }
@@ -65,25 +105,14 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   if (!secure.size) {
     return undefined;
   }
-  const requests: string[] = [];
-  const fields: { text: string; path: string; key: boolean }[] = [];
-  for (const { value, path } of nodes) {
-    mapBindableFields(value, path, (raw, at, kind) => {
-      if (kind === "request") {
-        requests.push(at);
-      }
-      if (typeof raw === "string" && (kind === "text" || kind === "key")) {
-        fields.push({ text: raw, path: at, key: kind === "key" });
-      }
-      return raw;
-    });
-  }
+  const { requests, fields } = libraryFields(spec, nodes);
+  const sharePaths = shareLibraryFields(spec, fields);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const inRequest = (path: string) =>
     requests.some(
       (at) =>
         path === `${at}.url` ||
-        path === `${at}.body.state` ||
+        path.startsWith(`${at}.body.`) ||
         ["headers", "query"].some(
           (name) => path.startsWith(`${at}.${name}.`) || path.startsWith(`${at}.${name}[`),
         ),
@@ -91,8 +120,14 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   const sinkFields = fields.filter(
     (field) =>
       // mapBinding visits only the state key of request/data/emit/platform value bindings.
-      (field.key && field.path.endsWith(".state")) || inRequest(field.path),
+      (field.key && field.path.endsWith(".state")) ||
+      inRequest(field.path) ||
+      sharePaths.has(field.path),
   );
+  const budgetError = secureScanBudgetError(spec, sinkFields);
+  if (budgetError) {
+    return budgetError;
+  }
   // Reuse the key binder for text too: repeat substitution has the same string grammar.
   const instances = repeatKeyInstances(
     spec,
@@ -122,4 +157,159 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     }
   }
   return undefined;
+}
+
+function hostChannelsError(spec: unknown): PrototypeValidationError | undefined {
+  const channels = object(object(spec)?.channels) ?? {};
+  for (const id of Object.keys(channels).sort()) {
+    if (object(channels[id])?.via !== "device") {
+      const at = prototypeContractPatterns.pathKey.test(id)
+        ? `channels.${id}`
+        : `channels[${JSON.stringify(id)}]`;
+      return { path: `${at}.via`, message: "Host requests are unavailable in a library" };
+    }
+  }
+  return undefined;
+}
+
+interface LibraryField {
+  text: string;
+  path: string;
+  key: boolean;
+}
+function libraryFields(
+  spec: unknown,
+  nodes: readonly Located[],
+): { requests: string[]; fields: LibraryField[] } {
+  const requests: string[] = [];
+  const fields: { text: string; path: string; key: boolean }[] = [];
+  for (const { value, path } of nodes) {
+    mapBindableFields(value, path, (raw, at, kind) => {
+      if (kind === "request") {
+        requests.push(at);
+      }
+      if (typeof raw === "string" && (kind === "text" || kind === "key")) {
+        fields.push({ text: raw, path: at, key: kind === "key" });
+      }
+      return raw;
+    });
+  }
+  visitPrototypeHandlerFields(spec, (raw, at, kind) => {
+    if (kind === "request") {
+      requests.push(at);
+    }
+    if (typeof raw === "string" && (kind === "text" || kind === "key")) {
+      fields.push({ text: raw, path: at, key: kind === "key" });
+    }
+    return raw;
+  });
+  channelFields(spec, requests, fields);
+  return { requests, fields };
+}
+
+function channelFields(spec: unknown, requests: string[], fields: LibraryField[]): void {
+  for (const [id, raw] of Object.entries(object(object(spec)?.channels) ?? {})) {
+    const channel = object(raw)!;
+    const at = prototypeContractPatterns.pathKey.test(id)
+      ? `channels.${id}`
+      : `channels[${JSON.stringify(id)}]`;
+    requests.push(at);
+    fields.push({ text: String(channel.url), path: `${at}.url`, key: false });
+    for (const [name, value] of Object.entries(object(channel.headers) ?? {})) {
+      const path = prototypeContractPatterns.pathKey.test(name)
+        ? `${at}.headers.${name}`
+        : `${at}.headers[${JSON.stringify(name)}]`;
+      if (typeof value === "string") {
+        fields.push({ text: value, path, key: false });
+      } else if (typeof object(value)?.state === "string") {
+        fields.push({ text: String(object(value)!.state), path: `${path}.state`, key: true });
+      }
+    }
+  }
+}
+
+function unsupportedCapabilitiesError(
+  spec: unknown,
+  options: PrototypeStrictOptions,
+): PrototypeValidationError | undefined {
+  if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
+    const missing = options
+      .requiredCapabilities(spec)
+      .filter((name) => !options.supportedCapabilities?.includes(name));
+    if (missing.length) {
+      return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
+    }
+  }
+  return undefined;
+}
+
+function shareAssetsError(
+  spec: unknown,
+  ids: readonly string[] | undefined,
+): PrototypeValidationError | undefined {
+  if (ids === undefined) {
+    return undefined;
+  }
+  const assets = new Set(ids);
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind !== "call" || use.action.call !== "share.open") {
+      continue;
+    }
+    const error = prototypeShareArgumentsError(
+      object(use.action.args) ?? {},
+      `${use.path}.args`,
+      assets,
+    );
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+function shareLibraryFields(spec: unknown, fields: LibraryField[]): Set<string> {
+  const paths = new Set<string>();
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind !== "call" || use.action.call !== "share.open") {
+      continue;
+    }
+    for (const [name, binding] of Object.entries(object(use.action.args) ?? {})) {
+      addShareBinding(binding, `${use.path}.args.${name}`, fields, paths);
+    }
+  }
+  return paths;
+}
+function addShareBinding(
+  binding: unknown,
+  path: string,
+  fields: LibraryField[],
+  paths: Set<string>,
+): void {
+  const form = object(binding);
+  if (form && Object.hasOwn(form, "value")) {
+    shareStrings(form.value, `${path}.value`, fields, paths);
+  }
+  if (typeof form?.state === "string") {
+    fields.push({ text: form.state, path: `${path}.state`, key: true });
+  }
+}
+function shareStrings(
+  value: unknown,
+  path: string,
+  fields: LibraryField[],
+  paths: Set<string>,
+): void {
+  if (typeof value === "string") {
+    fields.push({ text: value, path, key: false });
+    paths.add(path);
+  } else if (Array.isArray(value)) {
+    value.forEach((entry, index) => shareStrings(entry, `${path}[${index}]`, fields, paths));
+  } else {
+    for (const [key, entry] of Object.entries(object(value) ?? {})) {
+      const at = prototypeContractPatterns.pathKey.test(key)
+        ? `${path}.${key}`
+        : `${path}[${JSON.stringify(key)}]`;
+      shareStrings(entry, at, fields, paths);
+    }
+  }
 }

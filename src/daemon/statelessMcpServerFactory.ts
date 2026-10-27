@@ -42,6 +42,7 @@ export type StatelessMcpServerBase = Pick<
   | "debug"
   | "acceptanceDiscoveryCapability"
   | "sessionToolBindingStore"
+  | "deviceChoiceRequestState"
 >;
 
 // Fetch's `Headers` strips leading and trailing HTTP whitespace from a value before sending it,
@@ -104,6 +105,7 @@ export function createStatelessMcpServer(
 ): ReturnType<typeof createMcpServer> {
   return createMcpServer({
     ...base,
+    ...(scope.era !== undefined && { era: scope.era }),
     ...(scope.taskOwnerKey !== undefined && { taskOwnerKey: scope.taskOwnerKey }),
     sessionContext: { ...context, sessionId: scope.requestScopeId },
     daemonMode: true,

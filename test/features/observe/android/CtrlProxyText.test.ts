@@ -262,7 +262,7 @@ describe("Android CtrlProxyText", () => {
     };
     const text = "one *bold* two `code` tail";
     expect(imeCommitSegmentCount(text)).toBe(3);
-    const expected = 10_000 + 750 * 2 + 20 * text.length;
+    const expected = 10_000 + 750 * 2 + 150 * text.length;
     expect(imeCommitTimeoutMs(text)).toBe(expected);
     expect(imeCommitTimeoutMs("*x* ".repeat(100))).toBe(25_000);
 

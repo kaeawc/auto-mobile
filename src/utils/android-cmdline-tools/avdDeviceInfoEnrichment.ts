@@ -55,5 +55,7 @@ function deviceInfoFromConfig(
     screenDensity: config.screenDensity ?? device.screenDensity,
     formFactor: formFactor === "unknown" ? device.formFactor : formFactor,
     capabilityInventory: config.capabilityInventory ?? device.capabilityInventory,
+    effectiveRamMb: config.effectiveRamMb ?? device.effectiveRamMb,
+    effectiveCpuCores: config.effectiveCpuCores ?? device.effectiveCpuCores,
   };
 }

@@ -17,6 +17,28 @@ class PrototypeBundleCorpusTest {
     }
   }
 
+  @Test
+  fun `upload assets include nested request files but skip opaque literals`() {
+    val bytes =
+      """
+      {"id":"uploads","window":{"placement":{"type":"fullscreen"}},
+       "data":{"body":{"file":{"asset":"opaque-data"}}},
+       "root":{"type":"button","label":"Upload","onTap":[
+         {"type":"request","method":"POST","url":"https://example.com/upload",
+          "body":{"file":{"asset":"raw"},"contentType":"image/png"},
+          "onSuccess":[{"type":"request","method":"POST","url":"https://example.com/upload",
+            "body":{"multipart":[{"name":"photo","file":{"asset":"part"}},
+              {"name":"text","value":{"value":{"file":{"asset":"opaque-part"}}}}]}}]},
+         {"type":"request","method":"POST","url":"https://example.com/upload",
+          "body":{"value":{"file":{"asset":"opaque-body"}}}}]}}
+      """
+        .trimIndent()
+        .toByteArray()
+    val refs = PrototypeBundleSpec.references(bytes)
+    assertEquals(setOf("raw", "part"), refs.images)
+    assertTrue(refs.fonts.isEmpty())
+  }
+
   @TestFactory
   fun `reader matches every shared corpus verdict code and path`(): List<DynamicTest> =
     PrototypeBundleCorpus.cases.map { case ->

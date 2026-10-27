@@ -90,3 +90,13 @@ describe("formFactorFrom non-handheld form factors", () => {
     expect(androidProfileFormFactor({ profileId: "pixel_tablet" })).toBe("tablet");
   });
 });
+
+test.each(["pixel_fold", "pixel_9_pro_fold", "pixel_10_pro_fold"])(
+  "classifies fold profile %s for inventory",
+  (profileId) => {
+    expect(androidProfileFormFactor({ profileId })).toBe("foldable");
+  },
+);
+test.each(["pixel_8", "pixel_tablet"])("does not classify %s as a fold", (profileId) => {
+  expect(androidProfileFormFactor({ profileId })).not.toBe("foldable");
+});

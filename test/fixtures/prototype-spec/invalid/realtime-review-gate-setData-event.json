@@ -1,0 +1,49 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["device"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true
+    },
+    "platform": {
+      "on": {
+        "device.changed": [
+          {
+            "type": "setData",
+            "path": "/data/rows",
+            "value": {
+              "event": "/x"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_v1",
+      "prototype_text_field_options_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_realtime_v1"
+}

@@ -41,12 +41,20 @@ internal fun AnimatedVisibilityScope.ProvideAnchorFade(
 ) {
   val outer = LocalPrototypeAnchorFade.current
   // Not animated for `none`: a child animation of the transition would hold the node on screen.
+  val expressive =
+    if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<Float>(effects = true) else null
   val own =
     if (none) null
     else
       transition.animateFloat(
         transitionSpec = {
-          prototypeAnchorFadeSpec(entering = targetState == EnterExitState.Visible, enterDelayMs)
+          expressive?.prototypeEnterDelay(
+            if (targetState == EnterExitState.Visible) enterDelayMs else 0,
+          )
+            ?: prototypeAnchorFadeSpec(
+              entering = targetState == EnterExitState.Visible,
+              enterDelayMs,
+            )
         },
         label = "prototypeAnchorFade",
       ) {

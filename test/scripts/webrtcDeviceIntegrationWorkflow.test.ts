@@ -43,8 +43,17 @@ function workflow(path: string): WorkflowDocument {
   return load(readFileSync(path, "utf8")) as WorkflowDocument;
 }
 
+// A job whose body is a shared composite action (#11872) is read as if its steps were inline.
 function jobSteps(path: string, jobId: string): WorkflowStep[] {
-  return workflow(path).jobs?.[jobId]?.steps ?? [];
+  return (workflow(path).jobs?.[jobId]?.steps ?? []).flatMap((step) => {
+    if (step.uses?.startsWith("./.github/actions/ci-") !== true) {
+      return [step];
+    }
+    const action = load(readFileSync(`${step.uses.slice(2)}/action.yml`, "utf8")) as {
+      runs?: { steps?: WorkflowStep[] };
+    };
+    return action.runs?.steps ?? [];
+  });
 }
 
 describe("#4308 device WebRTC integration workflow", () => {
@@ -149,11 +158,10 @@ describe("#4308 device WebRTC integration workflow", () => {
 
   test("keeps stage-latency artifacts from passing runs without making uploads required", () => {
     for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
-      const document = workflow(path);
       for (const jobId of path === PULL_REQUEST_WORKFLOW
         ? DEVICE_JOB_IDS
         : ["android-device-webrtc"]) {
-        const upload = document.jobs?.[jobId]?.steps?.find(
+        const upload = jobSteps(path, jobId).find(
           (step) => step.uses?.startsWith("actions/upload-artifact") === true,
         );
 

@@ -1001,6 +1001,26 @@
       }
     },
     {
+      "name" : "siri_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "siri_result"
+      }
+    },
+    {
       "name" : "location_result",
       "wire" : {
         "perfTiming" : {
@@ -1344,6 +1364,7 @@
     "set_preference_result",
     "set_text_result",
     "shake_result",
+    "siri_result",
     "storage_capabilities_result",
     "swipe_result",
     "table_data_result",

@@ -481,6 +481,11 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     invoke: (h) => new CtrlProxyNavigation(h.context).requestSetHingeAngle(130),
   },
   {
+    name: "request_siri",
+    builder: "CtrlProxyNavigation.requestSiri",
+    invoke: (h) => new CtrlProxyNavigation(h.context).requestSiri("Show my orders in Playground"),
+  },
+  {
     name: "request_appearance",
     builder: "CtrlProxyNavigation.requestAppearance",
     invoke: (h) => new CtrlProxyNavigation(h.context).requestAppearance("dark"),

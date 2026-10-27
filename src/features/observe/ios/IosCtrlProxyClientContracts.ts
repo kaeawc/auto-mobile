@@ -47,6 +47,7 @@ import type {
   CtrlProxyLocationRequest,
   CtrlProxyLocationResult,
   CtrlProxyAppearanceResult,
+  CtrlProxySiriResult,
   CtrlProxyImeActionResult,
   CtrlProxyKeyboardResult,
   CtrlProxyLaunchAppResult,
@@ -318,6 +319,8 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<CtrlProxyLocationResult>;
+
+  requestSiri(text: string, timeoutMs?: number, signal?: AbortSignal): Promise<CtrlProxySiriResult>;
 
   requestAppearance(
     appearance?: "light" | "dark",

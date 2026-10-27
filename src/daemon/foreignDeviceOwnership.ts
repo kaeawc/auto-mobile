@@ -519,7 +519,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       return "unpublished";
     }
     if (acquired) {
-      return "claimed";
+      return this.unlessHeldInTable(deviceId, path, owner);
     }
     const observed = this.source.read(path);
     if (!observed || Number.isNaN(observed.pid) || observed.pid === this.selfPid) {
@@ -531,7 +531,33 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       return "refused";
     }
     // The previous claimant is gone or no longer uses the device.
-    return this.source.takeOver(path, observed, owner) ? "claimed" : "refused";
+    return this.source.takeOver(path, observed, owner)
+      ? this.unlessHeldInTable(deviceId, path, owner)
+      : "refused";
+  }
+
+  /**
+   * A claim file just taken is given back when another live daemon holds the device in the
+   * host-wide table, whatever claim directory it used (#11811 step c). A claim that was already
+   * ours is never questioned: the table row is then merely behind.
+   */
+  private async unlessHeldInTable(
+    deviceId: string,
+    path: string,
+    owner: { pid: number; ownerToken: string },
+  ): Promise<"claimed" | "refused"> {
+    if ((await this.tableClaimOwner(deviceId)) === undefined) {
+      return "claimed";
+    }
+    try {
+      this.source.release(path, owner);
+    } catch (error) {
+      logger.warn(
+        `Cannot give back the claim on ${deviceId} another daemon holds in the host-wide table: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    return "refused";
   }
 
   release(deviceId: string): void {
@@ -567,17 +593,44 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private async readForeignOwner(deviceId: string): Promise<number | undefined> {
     const leasePath = this.resolvePath(() => this.source.leasePath(deviceId), deviceId);
     const claimPath = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
-    const [lease, claimOwner, legacyOwner] = await Promise.all([
+    const [lease, claimOwner, legacyOwner, tableOwner] = await Promise.all([
       leasePath === undefined ? undefined : this.evaluateLock(leasePath, deviceId, "lease"),
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
       this.legacyClaimOwner(deviceId),
+      this.tableClaimOwner(deviceId),
     ]);
     if (lease?.idleSocketPath !== undefined && (claimOwner ?? legacyOwner) === undefined) {
       this.idleLeaseHolders.set(deviceId, lease.idleSocketPath);
     } else {
       this.idleLeaseHolders.delete(deviceId);
     }
-    return lease?.pid ?? claimOwner ?? legacyOwner;
+    return lease?.pid ?? claimOwner ?? legacyOwner ?? tableOwner;
+  }
+
+  /**
+   * The live foreign owner the host-wide claims table names, judged like a claim file's owner
+   * (#11811 step c). Any owner a file names wins, and a table that cannot be read changes nothing:
+   * the files decide alone, as before the table existed.
+   */
+  private async tableClaimOwner(deviceId: string): Promise<number | undefined> {
+    if (!this.claimMirror?.read) {
+      return undefined;
+    }
+    try {
+      const row = await this.claimMirror.read(deviceId);
+      if (!row) {
+        return undefined;
+      }
+      return (
+        await this.evaluateContent({ pid: row.pid, metadata: row.metadata }, deviceId, "claim")
+      )?.pid;
+    } catch (error) {
+      logger.warn(
+        `Cannot read the host-wide claim on ${deviceId}; the claim files decide: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   /** The live foreign owner of a 0.0.84-format claim in the coordination directory, if any. */
@@ -616,7 +669,16 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     deviceId: string,
     kind: "lease" | "claim",
   ): Promise<{ pid: number; idleSocketPath?: string } | undefined> {
-    const lock = this.liveForeignLock(path);
+    return this.evaluateContent(this.source.read(path), deviceId, kind);
+  }
+
+  /** {@link evaluateLock} for an owner record already read, from a claim file or the table. */
+  private async evaluateContent(
+    content: Pick<LockContent, "pid" | "metadata"> | undefined,
+    deviceId: string,
+    kind: "lease" | "claim",
+  ): Promise<{ pid: number; idleSocketPath?: string } | undefined> {
+    const lock = this.liveForeignLock(content);
     if (!lock) {
       return undefined;
     }
@@ -640,9 +702,8 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
 
   /** The lock at `path` when a live process other than this one holds it. */
   private liveForeignLock(
-    path: string,
+    content: Pick<LockContent, "pid" | "metadata"> | undefined,
   ): { pid: number; metadata: ForwardLeaseOwnerMetadata | undefined } | undefined {
-    const content = this.source.read(path);
     const pid = content?.pid;
     if (pid === undefined || Number.isNaN(pid) || pid === this.selfPid) {
       return undefined;

@@ -819,7 +819,7 @@ and rotation/offsets additively with style motion. Tracks do not change layout o
 semantics. Reduced motion drops spatial tracks and retains alpha; off disables playback.
 Finite playback contributes to the motion-active signal. The pure spring sampler uses a
 normalized damped ease derived from damping ratio 0.8 and stiffness 380, with exact endpoints.
-iOS uses native spring keyframes with duration 0.35 and bounce 0.15. A `trigger.key` is a plain declared state key, not a per-row bound key, so every repeat instance plays on the same trigger; per-row triggers need a bound-key form and are not part of v1. The iOS spring overshoots slightly where the Android sampler eases without overshoot.
+iOS runs one linear `KeyframeAnimator` phase per track and applies the same sampler as Android, so all three curves match across platforms. A `trigger.key` is a plain declared state key, not a per-row bound key, so every repeat instance plays on the same trigger; per-row triggers need a bound-key form and are not part of v1.
 
 ### Motion profiles (#15115, `prototype_reduced_motion_v1`)
 

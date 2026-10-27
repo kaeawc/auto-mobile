@@ -53,11 +53,7 @@
         let generation: Int
 
         func body(content: Content) -> some View {
-            KeyframeAnimator(initialValue: PrototypeKeyframePhases(
-                scale: initial("scale"), scaleX: initial("scaleX"), scaleY: initial("scaleY"),
-                rotation: initial("rotation"), offsetX: initial("offsetX"), offsetY: initial("offsetY"),
-                alpha: initial("alpha")
-            ), trigger: generation) { phases in
+            KeyframeAnimator(initialValue: PrototypeKeyframePhases(), trigger: generation) { phases in
                 content
                     .scaleEffect(
                         x: value("scale", phases.scale) * value("scaleX", phases.scaleX),
@@ -67,76 +63,29 @@
                     .offset(x: value("offsetX", phases.offsetX), y: value("offsetY", phases.offsetY))
                     .opacity(value("alpha", phases.alpha))
             } keyframes: { _ in
-                KeyframeTrack(\.scale) { timeline("scale") }
-                KeyframeTrack(\.scaleX) { timeline("scaleX") }
-                KeyframeTrack(\.scaleY) { timeline("scaleY") }
-                KeyframeTrack(\.rotation) { timeline("rotation") }
-                KeyframeTrack(\.offsetX) { timeline("offsetX") }
-                KeyframeTrack(\.offsetY) { timeline("offsetY") }
-                KeyframeTrack(\.alpha) { timeline("alpha") }
+                KeyframeTrack(\.scale) { timeline() }
+                KeyframeTrack(\.scaleX) { timeline() }
+                KeyframeTrack(\.scaleY) { timeline() }
+                KeyframeTrack(\.rotation) { timeline() }
+                KeyframeTrack(\.offsetX) { timeline() }
+                KeyframeTrack(\.offsetY) { timeline() }
+                KeyframeTrack(\.alpha) { timeline() }
             }
         }
 
+        /// Every track runs one linear 0 to 1 phase; `keyframeValue` applies the points and curve, so all
+        /// three curves share the Android sampler (the result builder has no control flow).
         private func value(_ name: String, _ phase: Double) -> Double {
             guard let track = tracks[name] else { return name.hasPrefix("scale") || name == "alpha" ? 1 : 0 }
-            // Native springs animate property values; standard uses the shared exact Bezier sampler.
             let curve = track.objectFields?["curve"]?.stringValue ?? "standard"
-            if curve == "spring" { return phase }
             return keyframeValue(points: PrototypeKeyframes.points(track), curve: curve, fraction: phase)
         }
 
-        private func initial(_ name: String) -> Double {
-            tracks[name]?.objectFields?["curve"]?.stringValue == "spring"
-                && (name.hasPrefix("scale") || name == "alpha") ? 1 : 0
-        }
-
         @KeyframeTrackContentBuilder<Double>
-        private func timeline(_ name: String)
-            -> some KeyframeTrackContent<Double>
-        {
+        private func timeline() -> some KeyframeTrackContent<Double> {
             // A trigger during a play resets from zero, rather than continuing the interrupted phase.
-            MoveKeyframe(initial(name))
-            // KeyframeTrackContentBuilder has no `for`: the contract allows at most 8 points (7 segments).
-            if let track = tracks[name] {
-                let count = PrototypeKeyframes.points(track).count
-                if count > 1 { segment(track, 1) }
-                if count > 2 { segment(track, 2) }
-                if count > 3 { segment(track, 3) }
-                if count > 4 { segment(track, 4) }
-                if count > 5 { segment(track, 5) }
-                if count > 6 { segment(track, 6) }
-                if count > 7 { segment(track, 7) }
-            } else {
-                MoveKeyframe(0)
-            }
-        }
-
-        @KeyframeTrackContentBuilder<Double>
-        private func segment(
-            _ track: JSONValue,
-            _ index: Int
-        )
-            -> some KeyframeTrackContent<Double>
-        {
-            let points = PrototypeKeyframes.points(track)
-            let end = points[index].0
-            let seconds = (end - points[index - 1].0) * duration
-            let curve = track.objectFields?["curve"]?.stringValue ?? "standard"
-            if curve == "spring" {
-                SpringKeyframe(
-                    points[index].1,
-                    duration: seconds,
-                    spring: Spring(
-                        duration: PrototypeKeyframeTiming.springDuration,
-                        bounce: PrototypeKeyframeTiming.springBounce
-                    )
-                )
-            } else if curve == "linear" {
-                LinearKeyframe(end, duration: seconds)
-            } else {
-                // Linear phase in native cubic time; the sampler applies (0.2,0,0,1) per segment.
-                CubicKeyframe(end, duration: seconds, startVelocity: 1 / duration, endVelocity: 1 / duration)
-            }
+            MoveKeyframe(0)
+            LinearKeyframe(1, duration: duration)
         }
     }
 #endif

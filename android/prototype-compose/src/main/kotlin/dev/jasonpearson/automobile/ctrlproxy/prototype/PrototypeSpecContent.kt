@@ -53,7 +53,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -1336,7 +1341,8 @@ private fun prototypeNodeModifier(
   val actions = node.source?.onTap.orEmpty()
   val tappable = prototypeNodeTappable(node)
   val handleVisual =
-    (node.role == "icon" || node.role == "image") &&
+    node.semantics == null &&
+      (node.role == "icon" || node.role == "image") &&
       node.identity in LocalPrototypeHandleVisuals.current
   val presses = remember { MutableInteractionSource() }
   var modifier: Modifier = if (node.enabled) Modifier else Modifier.semantics { disabled() }
@@ -1423,6 +1429,7 @@ private fun prototypeNodeModifier(
           }
       } else if (longPress != null || doubleTap != null) {
         modifier.combinedClickable(
+          onClickLabel = node.semantics?.hint,
           enabled = node.enabled,
           interactionSource = presses,
           indication = LocalIndication.current,
@@ -1432,6 +1439,7 @@ private fun prototypeNodeModifier(
         )
       } else {
         modifier.clickable(
+          onClickLabel = node.semantics?.hint,
           enabled = node.enabled,
           interactionSource = presses,
           indication = LocalIndication.current,
@@ -1485,6 +1493,7 @@ private fun prototypeNodeModifier(
       // PrototypeRole.
       description?.let { contentDescription = it }
       state?.let { stateDescription = it }
+      applyPrototypeAuthoredSemantics(node, state)
       node.testTag?.let { testTag = it }
     }
   }
@@ -1561,7 +1570,8 @@ internal fun isSemanticsFreeContainer(
   description: String?,
   state: String?,
 ): Boolean =
-  node.role in SEMANTICS_FREE_CONTAINERS &&
+  node.semantics == null &&
+    node.role in SEMANTICS_FREE_CONTAINERS &&
     !tappable &&
     node.text.isEmpty() &&
     node.testTag == null &&
@@ -1570,7 +1580,8 @@ internal fun isSemanticsFreeContainer(
 
 /** Icon names describe the drawing, not an authored accessibility label. */
 internal fun isDecorativePrototypeVisual(node: PrototypeRenderNode, tappable: Boolean): Boolean =
-  (node.role == "icon" || node.role == "image") &&
+  node.semantics == null &&
+    (node.role == "icon" || node.role == "image") &&
     !tappable &&
     node.testTag == null &&
     node.contentDescription.isNullOrEmpty()
@@ -1583,7 +1594,8 @@ private val MERGEABLE_TAP_CONTAINERS =
 /** Preserve exact text selectors and every independently targetable descendant. */
 internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {
   if (
-    !tappable ||
+    node.semantics != null ||
+      !tappable ||
       node.role !in MERGEABLE_TAP_CONTAINERS ||
       node.text.isNotEmpty() ||
       !node.contentDescription.isNullOrEmpty()
@@ -1592,7 +1604,8 @@ internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolea
   var label: String? = null
   fun visit(child: PrototypeRenderNode): Boolean {
     if (
-      child.testTag != null ||
+      child.semantics != null ||
+        child.testTag != null ||
         child.spans?.any { it.onTap != null } == true ||
         !child.contentDescription.isNullOrEmpty() ||
         prototypeNodeTappable(child) ||
@@ -1818,4 +1831,26 @@ private fun PrototypeCheckedControl(
       content()
       PrototypeErrorCaption(node)
     }
+}
+
+/** Shared by ordinary nodes and the search bar's inner editable field. */
+internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
+  node: PrototypeRenderNode,
+  state: String? = null,
+) {
+  node.semantics?.let { authored ->
+    if (authored.heading == true) heading()
+    authored.liveRegion?.let {
+      liveRegion = if (it == "assertive") LiveRegionMode.Assertive else LiveRegionMode.Polite
+    }
+    if (authored.group == true) isTraversalGroup = true
+    if ("button" in authored.traits.orEmpty()) role = Role.Button
+    if ("image" in authored.traits.orEmpty()) role = Role.Image
+    if ("selected" in authored.traits.orEmpty()) selected = true
+    authored.label?.let { contentDescription = it }
+    authored.hint?.let {
+      if (!node.source?.onTap.isNullOrEmpty()) onClick(label = it, action = null)
+      else stateDescription = listOfNotNull(state, it).joinToString(", ")
+    }
+  }
 }

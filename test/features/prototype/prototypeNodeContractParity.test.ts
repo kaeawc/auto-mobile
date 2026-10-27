@@ -50,6 +50,7 @@ function zodNodeShapes(): Map<string, string[]> {
 
 // Every node carries these; a node type added without one is the #10557 crossing again.
 const COMMON_NODE_FIELDS = [
+  "semantics",
   "span",
   "id",
   "testTag",

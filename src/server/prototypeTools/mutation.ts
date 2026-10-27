@@ -25,7 +25,10 @@ import { shownAppearance } from "../../features/prototype/prototypeAppearance";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
 import { prototypeGestureFields } from "../../features/prototype/prototypeGestures";
 import { parsePrototypeHiddenReason } from "../../features/prototype/prototypeHidden";
-import { prototypePlatformNotes } from "../../features/prototype/prototypePlatformNotes";
+import {
+  prototypePlatformNotes,
+  prototypeStringsFallbackNotes,
+} from "../../features/prototype/prototypePlatformNotes";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import { recordPrototypeTextShow } from "../../features/prototype/prototypeTextTarget";
 import { type PrototypeWindowChrome } from "../../features/prototype/prototypeWindowChrome";
@@ -357,15 +360,16 @@ function platformNotesOutput(
   target: PrototypeTarget,
   success: boolean,
 ): Pick<PrototypeOutput, "platformNotes"> {
-  if (args.action !== "show" || !success || device.platform !== "ios") {
+  if (args.action !== "show" || !success) {
     return {};
   }
   const notes: NonNullable<PrototypeOutput["platformNotes"]> = prototypePlatformNotes(
     args.spec as PrototypeSpec,
-    "ios",
+    device.platform === "ios" ? "ios" : "android",
     (capability) => target.ios?.supportsCapability(capability) === true,
   );
-  const gestures = prototypeGestureFields(args.spec);
+  notes.push(...prototypeStringsFallbackNotes(args.spec as PrototypeSpec, args.locale));
+  const gestures = device.platform === "ios" ? prototypeGestureFields(args.spec) : [];
   if (gestures.length > 0) {
     notes.push({
       platform: "ios",

@@ -10,6 +10,7 @@ enum PrototypeStrictCapabilities {
             if spec["theme"] != nil { need("theme_modes") }
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
         }
+        if spec["strings"] != nil { need("strings") }
         if spec["data"] != nil { need("data_model") }
         if spec["storage"] != nil { need("storage") }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
@@ -21,12 +22,14 @@ enum PrototypeStrictCapabilities {
             guard let fields = value.objectFields else { return }
             if fields.count == 1, fields["value"] != nil { return }
             func textBinding(_ text: String) {
+                if text.contains("{t:") { need("strings") }
                 if PrototypeDataText.substitutionLength(text, data: nil).recognized { need("data_model") }
             }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
+            if fields["semantics"] != nil { need("semantics") }
             let type = fields["type"]?.stringValue ?? ""
             let types = [
                 "startTimer": "timers",
@@ -87,6 +90,7 @@ enum PrototypeStrictCapabilities {
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
             for (key, child) in fields {
+                if key == "strings" { continue }
                 if key == "payload" || (key == "value" && !["setData", "appendData"].contains(type)) { continue }
                 if key == "repeat" {
                     if let repeatSpec = child.objectFields,

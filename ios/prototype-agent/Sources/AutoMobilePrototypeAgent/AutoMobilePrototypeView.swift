@@ -18,15 +18,16 @@
             assets: PrototypeAssets = .none,
             storage: PrototypeStorageOption = .none,
             network: PrototypeNetworkConfiguration = .default,
+            options: PrototypeEmbeddedOptions = PrototypeEmbeddedOptions(),
             onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in },
             onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in },
             onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in }
         ) {
             renderer = PrototypeEmbeddedRenderer(
-                spec: spec, assets: assets, storage: storage, network: network,
+                spec: spec, assets: assets, storage: storage, network: network, options: options,
                 onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError
             )
-            identity = PrototypeEmbeddedIdentity(spec: spec, assets: assets, storage: storage)
+            identity = PrototypeEmbeddedIdentity(spec: spec, assets: assets, storage: storage, options: options)
         }
 
         /// Internal lifecycle seam for app hosts that must reset storage after the final flush.
@@ -54,8 +55,10 @@
         let images: [String: SHA256.Digest]
         let fonts: [String: SHA256.Digest]
         let storage: PrototypeStorageOption
+        let options: PrototypeEmbeddedOptions
 
-        init(spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption) {
+        init(spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption, options: PrototypeEmbeddedOptions) {
+            self.options = options
             self.spec = SHA256.hash(data: spec)
             images = assets.images.mapValues { SHA256.hash(data: $0) }
             fonts = assets.fonts.mapValues { SHA256.hash(data: $0) }
@@ -69,6 +72,7 @@
         let assets: PrototypeAssets
         let storage: PrototypeStorageOption
         let network: PrototypeNetworkConfiguration
+        let options: PrototypeEmbeddedOptions
         let onEvent: @MainActor (PrototypeEvent) -> Void
         let onDismiss: @MainActor (PrototypeDismissReason) -> Void
         let onLoadError: @MainActor (PrototypeLoadError) -> Void
@@ -85,7 +89,7 @@
 
         func makeUIViewController(context _: Context) -> PrototypeEmbeddedController {
             let controller = PrototypeEmbeddedController(
-                spec: spec, assets: assets, storage: storage, network: network,
+                spec: spec, assets: assets, storage: storage, network: network, options: options,
                 onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError
             )
             controller.onFirstRender = onFirstRender

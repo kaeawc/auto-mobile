@@ -318,6 +318,7 @@ sealed class PrototypeNode {
   abstract val id: String?
   abstract val testTag: String?
   /** The node's accessible label; replaces the label derived from its text, icon or kind. */
+  abstract val semantics: PrototypeSemantics?
   abstract val contentDescription: String?
   abstract val onTap: List<PrototypeAction>?
   open val onLongPress: List<PrototypeAction>?
@@ -347,6 +348,7 @@ sealed class PrototypeNode {
 data class PrototypeBoxNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val onLongPress: List<PrototypeAction>? = null,
@@ -370,6 +372,7 @@ data class PrototypeBoxNode(
 data class PrototypeRowNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val onLongPress: List<PrototypeAction>? = null,
@@ -394,6 +397,7 @@ data class PrototypeRowNode(
 data class PrototypeColumnNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val onLongPress: List<PrototypeAction>? = null,
@@ -440,6 +444,7 @@ data class PrototypeSwipeActions(
 data class PrototypeFlowNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -495,6 +500,7 @@ object PrototypeGridColumnsSerializer :
 data class PrototypeGridNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -515,6 +521,7 @@ data class PrototypeGridNode(
 data class PrototypeTextNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val onLongPress: List<PrototypeAction>? = null,
@@ -575,6 +582,7 @@ fun prototypePlainText(node: PrototypeTextNode, resolve: (String) -> String = { 
 data class PrototypeImageNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val onLongPress: List<PrototypeAction>? = null,
@@ -600,6 +608,7 @@ data class PrototypeImageNode(
 data class PrototypeIconNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val onLongPress: List<PrototypeAction>? = null,
@@ -622,6 +631,7 @@ data class PrototypeIconNode(
 data class PrototypeSpacerNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -639,6 +649,7 @@ data class PrototypeSpacerNode(
 data class PrototypeTextFieldNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -674,6 +685,7 @@ data class PrototypeTextFieldNode(
 data class PrototypeSearchBarNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -699,6 +711,7 @@ data class PrototypeSearchBarNode(
 data class PrototypeSwitchNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -721,6 +734,7 @@ data class PrototypeSwitchNode(
 data class PrototypeCheckboxNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -743,6 +757,7 @@ data class PrototypeCheckboxNode(
 data class PrototypeButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -764,6 +779,7 @@ data class PrototypeButtonNode(
 data class PrototypeRadioGroupNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -786,6 +802,7 @@ data class PrototypeRadioGroupNode(
 data class PrototypeSelectNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -837,6 +854,7 @@ object PrototypeMenuItemSerializer :
 data class PrototypeMenuNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -856,6 +874,7 @@ data class PrototypeMenuNode(
 data class PrototypeListItemNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -879,6 +898,7 @@ data class PrototypeListItemNode(
 data class PrototypeSliderNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -904,6 +924,7 @@ data class PrototypeSliderNode(
 data class PrototypeChipNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -925,6 +946,7 @@ data class PrototypeChipNode(
 data class PrototypeCardNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val onLongPress: List<PrototypeAction>? = null,
@@ -947,6 +969,7 @@ data class PrototypeCardNode(
 data class PrototypeIconButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -968,6 +991,7 @@ data class PrototypeIconButtonNode(
 data class PrototypeFabNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -990,6 +1014,7 @@ data class PrototypeFabNode(
 data class PrototypeSegmentedButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1010,6 +1035,7 @@ data class PrototypeSegmentedButtonNode(
 data class PrototypeTopAppBarNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1032,6 +1058,7 @@ data class PrototypeTopAppBarNode(
 data class PrototypeDividerNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1051,6 +1078,7 @@ data class PrototypeDividerNode(
 data class PrototypeBadgeNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1073,6 +1101,7 @@ data class PrototypeBadgeNode(
 data class PrototypeProgressNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1098,6 +1127,7 @@ data class PrototypeProgressNode(
 data class PrototypeChartNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1134,6 +1164,7 @@ data class PrototypeChartSeries(
 data class PrototypeDialogNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1163,6 +1194,7 @@ data class PrototypeDialogNode(
 data class PrototypeSnackbarNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1185,6 +1217,7 @@ data class PrototypeSnackbarNode(
 data class PrototypeTimePickerNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1209,6 +1242,7 @@ data class PrototypeTimePickerNode(
 data class PrototypeDatePickerNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1230,6 +1264,7 @@ data class PrototypeDatePickerNode(
 data class PrototypeScrollNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1259,6 +1294,7 @@ data class PrototypeScrollNode(
 data class PrototypePagerNode(
   override val id: String,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1287,6 +1323,7 @@ data class PrototypePagerNode(
 data class PrototypeCarouselNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1311,6 +1348,7 @@ data class PrototypeCarouselNode(
 data class PrototypeStackNode(
   override val id: String,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1334,6 +1372,7 @@ data class PrototypeStackNode(
 data class PrototypeTabBarNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1355,6 +1394,7 @@ data class PrototypeTabBarNode(
 data class PrototypeBottomNavNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1375,6 +1415,7 @@ data class PrototypeBottomNavNode(
 data class PrototypeBottomSheetNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val semantics: PrototypeSemantics? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
@@ -1541,6 +1582,7 @@ data class PrototypeSpec(
   val requires: PrototypeRequires? = null,
   /** `platform.on`: action lists run when a platform event is delivered (#14294). */
   val platform: PrototypePlatformHandlers? = null,
+  val strings: JsonObject? = null,
 )
 
 /** The root `requires` block (#14294): platform modules, permissions and background needs. */
@@ -1670,3 +1712,14 @@ data class PrototypeStartTimerAction(
 @Serializable
 @SerialName("cancelTimer")
 data class PrototypeCancelTimerAction(val id: String) : PrototypeAction()
+
+/** Localizable accessibility metadata shared by every node. */
+@Serializable
+data class PrototypeSemantics(
+  val heading: Boolean? = null,
+  val liveRegion: String? = null,
+  val group: Boolean? = null,
+  val label: String? = null,
+  val hint: String? = null,
+  val traits: List<String>? = null,
+)

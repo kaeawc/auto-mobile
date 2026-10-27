@@ -11,6 +11,7 @@ import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
@@ -283,7 +284,12 @@ function objectConstraint(
     return formError;
   }
   if (rule.atLeastOne && Object.keys(data).length === 0) {
-    return fail(path, "At least one selector field is required");
+    return fail(
+      path,
+      rule === definitions.semantics
+        ? "Expected at least one semantics field"
+        : "At least one selector field is required",
+    );
   }
   const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
   return prototypeStylePolishV2ObjectError(data, kind ?? "", path);
@@ -568,6 +574,7 @@ function walk(
   depth: number,
 ): PrototypeValidationError | undefined {
   const handlers: Record<string, typeof visitObject> = {
+    strings: (value) => prototypeStringsTableError(value),
     data: visitData,
     ref: visitReference,
     tagged: visitTagged,
@@ -807,6 +814,7 @@ function hostVocabularyError(
   context: Context,
 ): PrototypeValidationError | undefined {
   return (
+    prototypeStringsError(value, context.nodes) ??
     prototypeReservedTestTagError(context.nodes) ??
     prototypePlatformError(value, context.actions, platformArgumentError)
   );

@@ -123,6 +123,17 @@ import { prototypeTooltipFields, prototypeTooltipUnsupportedMessage } from "./pr
 import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeDrawerFields, prototypeDrawerUnsupportedMessage } from "./prototypeDrawer";
 
+import {
+  PROTOTYPE_STRINGS_CAPABILITY,
+  PROTOTYPE_SEMANTICS_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeStringsFields,
+  prototypeStringsUnsupportedMessage,
+  prototypeSemanticsFields,
+  prototypeSemanticsUnsupportedMessage,
+} from "./prototypeStrings";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown) => string[];
@@ -145,6 +156,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_TOOLTIP_CAPABILITY,
     fields: prototypeTooltipFields,
     unsupportedMessage: prototypeTooltipUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STRINGS_CAPABILITY,
+    fields: prototypeStringsFields,
+    unsupportedMessage: prototypeStringsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SEMANTICS_CAPABILITY,
+    fields: prototypeSemanticsFields,
+    unsupportedMessage: prototypeSemanticsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,

@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi",
+      "contentDescription": "Hi",
+      "semantics": {
+        "label": "Hi"
+      }
+    },
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    }
+  },
+  "expectedPath": "root.semantics.label",
+  "expectedMessage": "semantics.label conflicts with contentDescription"
+}

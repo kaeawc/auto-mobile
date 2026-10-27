@@ -64,7 +64,12 @@ extension PrototypeContractValidator {
             }
         }
         if rule["atLeastOne"] == .bool(true), data.isEmpty {
-            throw invalid(path, "At least one selector field is required")
+            throw invalid(
+                path,
+                path
+                    .hasSuffix(".semantics") ? "Expected at least one semantics field" :
+                    "At least one selector field is required"
+            )
         }
     }
 

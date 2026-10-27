@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
+import dev.jasonpearson.automobile.protocol.PrototypeStrings
 import java.util.IdentityHashMap
 import kotlinx.serialization.json.JsonObject
 
@@ -29,6 +30,9 @@ internal class PrototypeRenderCache(val root: PrototypeNode) {
 internal class PrototypeRenderMapper {
   private val lock = Any()
   private var authoredSpec: PrototypeSpec? = null
+  private var sourceLocales: List<String>? = null
+  private var sourceStrings: JsonObject? = null
+  private var authoredLocales: List<String>? = null
   private var resolvedSpec: PrototypeSpec? = null
   private var sourceRoot: PrototypeNode? = null
   private var sourceData: JsonObject? = null
@@ -55,9 +59,10 @@ internal class PrototypeRenderMapper {
     stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
     shownErrors: Set<String> = emptySet(),
     platform: JsonObject? = null,
+    locales: List<String> = emptyList(),
   ): PrototypeRenderModel =
     synchronized(lock) {
-      val resolved = resolveLocked(spec, platform)
+      val resolved = resolveLocked(spec, platform, locales)
       previousModel?.let { model ->
         if (
           previousSpec?.root === resolved.root &&
@@ -97,14 +102,27 @@ internal class PrototypeRenderMapper {
       }
     }
 
-  /** Called only under [lock]; state writes preserve authored root and data identities. */
-  private fun resolveLocked(spec: PrototypeSpec, platform: JsonObject?): PrototypeSpec {
-    if (authoredSpec === spec && sourcePlatform == platform) return checkNotNull(resolvedSpec)
+  /** Called only under [lock]; state writes preserve authored root, data, locale and platform identities. */
+  private fun resolveLocked(
+    spec: PrototypeSpec,
+    platform: JsonObject?,
+    locales: List<String>,
+  ): PrototypeSpec {
+    if (authoredSpec === spec && authoredLocales == locales && sourcePlatform == platform)
+      return checkNotNull(resolvedSpec)
     val root =
-      if (sourceRoot === spec.root && sourceData === spec.data && sourcePlatform == platform)
+      if (
+        sourceRoot === spec.root &&
+          sourceData === spec.data &&
+          sourceLocales == locales &&
+          sourceStrings === spec.strings &&
+          sourcePlatform == platform
+      )
         checkNotNull(resolvedRoot)
       else {
-        PrototypeDataResolver.resolve(spec, platform).root.also {
+        PrototypeStrings.resolve(PrototypeDataResolver.resolve(spec, platform), locales).root.also {
+          sourceLocales = locales.toList()
+          sourceStrings = spec.strings
           sourcePlatform = platform
           sourceRoot = spec.root
           sourceData = spec.data
@@ -113,6 +131,7 @@ internal class PrototypeRenderMapper {
       }
     val resolved = if (root === spec.root) spec else spec.copy(root = root)
     authoredSpec = spec
+    authoredLocales = locales.toList()
     resolvedSpec = resolved
     return resolved
   }

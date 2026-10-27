@@ -47,6 +47,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPinnedShortcutPlatform
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
@@ -1965,6 +1966,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             fonts = prototypeFonts,
             foreground = prototypeForeground,
             deviceAppearance = AndroidPrototypeDeviceAppearance(this),
+            deviceLocale = AndroidPrototypeDeviceLocale(this),
             hostFactory = createPrototypeHost,
             httpClients =
               PrototypeHttpClients(
@@ -2896,9 +2898,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean,
+    locale: String?,
   ) {
     launchRequestScope(requestId) {
-      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers)
+      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers, locale)
     }
   }
 

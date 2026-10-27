@@ -5,6 +5,8 @@ import Foundation
 struct PrototypeContractValidator {
     private struct Contract: Decodable {
         let patterns: [String: String]
+        let stringFields: [String]
+        let stringOpaqueFields: [String]
         let checkControls: [String: [String]]
         let definitions: [String: JSONValue]
         let limits: [String: Int]
@@ -24,6 +26,10 @@ struct PrototypeContractValidator {
     static func matches(_ name: String, _ text: String) -> Bool {
         patterns[name]?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
+
+    static let stringFieldOrder = contract?.stringFields ?? []
+    static let stringFields = Set(stringFieldOrder)
+    static let stringOpaqueFields = Set(contract?.stringOpaqueFields ?? [])
 
     static func limit(_ name: String) -> Int { contract?.limits[name] ?? 0 }
     static func definition(_ name: String) -> JSONValue? { contract?.definitions[name] }
@@ -95,6 +101,7 @@ struct PrototypeContractValidator {
         case "map", "screenMap", "record": try map(value, rule: fields, path: path, depth: depth)
         case "choice": try choice(value, rule: fields, path: path, depth: depth)
         case "data": try Self.data(value)
+        case "strings": try PrototypeStrings.validateTables(value)
         default:
             guard Self.primitive(value, rule: fields) else {
                 throw Self.invalid(path, "Invalid \(kind == "boundKey" ? "key" : kind) value")

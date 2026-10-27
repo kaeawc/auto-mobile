@@ -9,6 +9,7 @@ import {
   PROTOTYPE_THEME_MODES_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
+  GUIDE_STRINGS_SEMANTICS,
   GUIDE_APPEARANCE,
   GUIDE_CHECKS,
   GUIDE_COMPONENTS,
@@ -72,6 +73,8 @@ function describeRule(rule: Rule): string {
     case "boundKey":
       // A state key; inside a repeat template it may also hold placeholders (see Lists).
       return "key";
+    case "strings":
+      return "strings";
     case "screenMap":
       return `screen-name → node (${rule.min}..${rule.max} entries)`;
     case "array":
@@ -254,6 +257,7 @@ function renderPlatformDifferences(): string {
 export function renderPrototypeGuide(): string {
   return [
     GUIDE_INTRO,
+    GUIDE_STRINGS_SEMANTICS,
     "## Limits\n\nGenerated from `schemas/prototype-spec-contract.json`.\n\n" + renderLimitsTable(),
     renderWindow(),
     renderNodes(),

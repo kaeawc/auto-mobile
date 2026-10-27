@@ -47,6 +47,7 @@ data class PrototypeRuntimeSnapshot(
   /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
   val scrollRequests: Map<String, PrototypeScrollRequest> = emptyMap(),
   val platformState: JsonObject = JsonObject(emptyMap()),
+  val locales: List<String> = emptyList(),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
@@ -245,6 +246,13 @@ class PrototypeRuntime(
       snapshot.shownErrors,
       snapshot.platformState,
     )
+    renderMapper.map(
+      snapshot.spec,
+      snapshot.pages,
+      snapshot.stacks,
+      snapshot.shownErrors,
+      snapshot.locales,
+    )
 
   internal val renderMappingPasses: Int
     get() = renderMapper.mappingPasses
@@ -298,6 +306,11 @@ class PrototypeRuntime(
     mutableSnapshot.value = current.copy(platformState = next)
   }
 
+  /** A locale-only change publishes a new snapshot so every host maps fresh text. */
+  fun updateLocales(locales: List<String>) {
+    if (current.locales != locales) mutableSnapshot.value = current.copy(locales = locales.toList())
+  }
+
   fun replace(spec: PrototypeSpec) {
     if (!current.active) return
     stateWriteValidator = null
@@ -307,7 +320,7 @@ class PrototypeRuntime(
   /** Authoritative text replacement shares its epoch handling with patch commits. */
   private fun replacementSnapshot(spec: PrototypeSpec): PrototypeRuntimeSnapshot {
     val before = current
-    val next = snapshot(spec, before.pages, before.stacks)
+    val next = snapshot(spec, before.pages, before.stacks).copy(locales = before.locales)
     val changed =
       (before.state.keys + next.state.keys).filter { key ->
         before.state[key] != next.state[key] &&

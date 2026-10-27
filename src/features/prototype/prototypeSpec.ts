@@ -2,6 +2,8 @@ export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import * as timers from "./prototypeTimerSchema";
+import { prototypeStringsSchema } from "./prototypeStrings";
+import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
 import { z } from "zod";
@@ -172,6 +174,7 @@ const checksShape = {
   validateOn: z.enum(["change", "blur", "submit"]).optional(),
 };
 export const commonNodeShape = {
+  semantics: prototypeSemanticsSchema.optional(),
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -834,6 +837,7 @@ const specSchema = z
     id: z.string().min(1),
     window: windowSchema,
     theme: themeSchema.optional(),
+    strings: prototypeStringsSchema.optional(),
     data: z
       .custom<PrototypeData>((value) => {
         if (typeof value !== "object" || value === null || Array.isArray(value)) {

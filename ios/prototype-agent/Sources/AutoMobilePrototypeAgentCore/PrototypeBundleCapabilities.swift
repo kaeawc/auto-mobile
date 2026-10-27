@@ -8,6 +8,7 @@ enum PrototypeBundleCapabilities {
         guard let spec = value.objectFields else { return [] }
         var names = Set<String>()
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
+        if spec["strings"] != nil { need("strings") }
         if spec["data"] != nil { need("data_model") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
@@ -29,6 +30,9 @@ enum PrototypeBundleCapabilities {
         while let node = pending.popLast()?.objectFields {
             if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
+            if node["semantics"] != nil { need("semantics") }
+            if PrototypeStrings.textFields(.object(node))
+                .contains(where: { $0.text.contains("{t:") }) { need("strings") }
             let type = node["type"]?.stringValue ?? ""
             let featureTypes = [
                 "flow": "flow_grid",
@@ -153,6 +157,7 @@ enum PrototypeBundleCapabilities {
                 "supportingText",
                 "trailingText",
                 "message",
+                "hint",
                 "url",
             ]
             if textKeys.contains(key), let text = child.stringValue {

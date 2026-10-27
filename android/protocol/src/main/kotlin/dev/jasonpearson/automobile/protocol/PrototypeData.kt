@@ -428,10 +428,13 @@ private object PrototypeBindingScan {
       return (value as? JsonObject)?.containsKey("data") == true
     }
     val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-    return kind == PrototypeBindableKind.TEXT &&
-      text != null &&
-      (PrototypeDataText.hasBinding(text) || PrototypeDataText.hasBinding(text, "platform"))
+    return kind == PrototypeBindableKind.TEXT && text != null && textBound(text)
   }
+
+  private fun textBound(text: String): Boolean =
+    PrototypeDataText.hasBinding(text) ||
+      PrototypeDataText.hasBinding(text, "platform") ||
+      "{t:" in text
 
   private fun hasOwnBindings(node: JsonObject): Boolean {
     val textBound =

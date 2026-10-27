@@ -1783,6 +1783,12 @@
           "type": "boolean",
           "nullable": false,
           "hasDefault": true
+        },
+        {
+          "name": "locale",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -4753,6 +4759,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -4829,6 +4841,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -4921,6 +4939,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5055,6 +5079,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -5155,6 +5185,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5265,6 +5301,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -5359,6 +5401,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5467,6 +5515,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -5567,6 +5621,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5675,6 +5735,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -5769,6 +5835,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5873,6 +5945,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -7393,6 +7471,44 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeSemantics": [
+      {
+        "name": "heading",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "liveRegion",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "group",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "hint",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "traits",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeSheetCondition": [
       {
         "name": "key",
@@ -7465,6 +7581,12 @@
       {
         "name": "platform",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "strings",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       }
@@ -8595,6 +8717,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -8707,6 +8835,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -8941,6 +9075,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -9053,6 +9193,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -9153,6 +9299,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -9241,6 +9393,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9343,6 +9501,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -9431,6 +9595,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9573,6 +9743,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -9683,6 +9859,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -9765,6 +9947,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9939,6 +10127,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -10055,6 +10249,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10259,6 +10459,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -10365,6 +10571,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10511,6 +10723,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -10633,6 +10851,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -10715,6 +10939,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10867,6 +11097,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -10989,6 +11225,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -11087,6 +11329,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -11157,6 +11405,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11287,6 +11541,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -11381,6 +11641,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11485,6 +11751,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11667,6 +11939,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11895,6 +12173,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },

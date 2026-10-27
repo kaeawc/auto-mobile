@@ -148,5 +148,18 @@
   "pointer": {
     "accepted": ["/", "//", "/a", "/a~0b/~1", "/~01", "/é/😀", "/a\n", "/a\r\n", "/a"],
     "rejected": ["", "a", "a/b", "/~", "/~2", "/~10~", "/a~\n"]
+  },
+  "stringKey": {
+    "accepted": ["title", "cart.items", "_name", "a-b"],
+    "rejected": [
+      "",
+      "1key",
+      "a b",
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ]
+  },
+  "localeTag": {
+    "accepted": ["en", "pt-BR", "zh-Hant-TW", "EN-us"],
+    "rejected": ["default", "en_US", "e", "abcd", "en-", "en-a"]
   }
 }

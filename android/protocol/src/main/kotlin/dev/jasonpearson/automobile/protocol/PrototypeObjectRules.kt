@@ -99,7 +99,11 @@ internal object PrototypeObjectRules {
       return it
     }
     if (rule.flag("atLeastOne") && data.isEmpty())
-      return fail(path, "At least one selector field is required")
+      return fail(
+        path,
+        if (rule === definitions["semantics"]) "Expected at least one semantics field"
+        else "At least one selector field is required",
+      )
     return null
   }
 

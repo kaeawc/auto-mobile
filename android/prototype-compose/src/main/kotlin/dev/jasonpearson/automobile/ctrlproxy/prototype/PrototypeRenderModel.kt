@@ -11,6 +11,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.protocol.PrototypeSemantics
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -73,6 +74,7 @@ data class PrototypeRenderNode(
   val minute: Int = 0,
   /** The authored `contentDescription`, state placeholders resolved; null when not authored. */
   val contentDescription: String? = null,
+  val semantics: PrototypeSemantics? = null,
   val spans: List<PrototypeRenderSpan>? = null,
   val enabled: Boolean = true,
   val errorMessage: String? = null,
@@ -132,9 +134,14 @@ fun mapPrototypeSpec(
   pages: Map<String, Int> = emptyMap(),
   stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   shownErrors: Set<String> = emptySet(),
+  locales: List<String> = emptyList(),
 ): PrototypeRenderModel =
   PrototypeTrace.section(PrototypeTrace.MAP_PROTOTYPE_SPEC) {
-    val resolved = PrototypeDataResolver.resolve(spec)
+    val resolved =
+      dev.jasonpearson.automobile.protocol.PrototypeStrings.resolve(
+        PrototypeDataResolver.resolve(spec),
+        locales,
+      )
     guardPrototypeTree(resolved.root)
     prototypeRenderModel(
       resolved,
@@ -275,7 +282,16 @@ internal class PrototypeNodeMapping(
         hour = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.hourKey),
         minute = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.minuteKey),
         contentDescription =
-          node.contentDescription?.let { interpolatePrototypeText(it, localState, inPager) },
+          (node.semantics?.label ?: node.contentDescription)?.let {
+            interpolatePrototypeText(it, localState, inPager)
+          },
+        semantics =
+          node.semantics?.let { semantics ->
+            semantics.copy(
+              label = semantics.label?.let { interpolatePrototypeText(it, localState, inPager) },
+              hint = semantics.hint?.let { interpolatePrototypeText(it, localState, inPager) },
+            )
+          },
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
         chart = chart,

@@ -1052,3 +1052,21 @@ Inspect reports \`timers:[{id,nextFireInMs,runs}]\`, ordered by remaining time t
 remaining time is nonnegative and frozen while paused. A capable device yields an empty array
 when no timers are live.
 `;
+
+export const GUIDE_STRINGS_SEMANTICS = `## Strings and semantics
+
+Top-level \`strings\` requires \`prototype_strings_v1\`: \`{default: {title: "Cart", items: {one: "{#} item", other: "{#} items"}}, fr: {title: "Panier"}}\`.
+Use \`{t:title}\` or \`{t:items|2}\` in display text, spans, semantics.label or semantics.hint.
+Counts are non-negative integer literals (1–9 digits) or \`{data:/pointer}\`; state-key counts are unsupported.
+Pipeline: data substitution, then translation, then state binding. Translation values may contain state bindings; translated text is never scanned again for translations. \`{#}\` inserts the decimal count in a plural form. Invalid runtime counts use other.
+show \`locale\` (locale tag, max 35 characters) overrides device preferred locales for that show; omitted follows device locales, which re-resolve live.
+Each requested locale tries its full tag then shorter prefixes, deduplicated, then default. Tags match case-insensitively with underscores normalized to hyphens. Lookup is per key; the supplying table language decides plurals (default uses the first requested language, else en).
+Integer plural groups: ja/zh/ko/vi/th/id/ms/lo/km/my use other; fr/pt/hi/bn/fa/gu/kn/am use one for 0–1; ru/uk/be and pl use one/few/many; cs/sk use one/few/other; ar uses zero/one/two/few/many/other; remaining languages use one at 1, other otherwise. Missing forms use other; million-multiple Romance many is outside v1.
+Limits: 16 tables, 512 keys per table, 2048 characters per nonempty value; default and every plural other form are required. Keys use letters/underscore followed by letters/digits/underscore/dot/hyphen, at most 64 characters. Values cannot contain translation, data or platform placeholders.
+With an explicit locale, \`platformNotes\` construct \`strings.fallback\` (platform all) lists up to 20 referenced keys reaching default. Advisory lint reports missing-translation and unknown-translation-key.
+Pseudo-localisation transforms each table value and plural form while preserving keys, tags, category names and bindings; strings is opaque to node walking. Node translation placeholders stay intact; semantics label and hint are display text.
+
+Every node accepts \`semantics {heading?,liveRegion?: "polite"|"assertive",group?,label?,hint?,traits?: ["button"|"image"|"selected"]}\`, requiring \`prototype_semantics_v1\`. At least one field is required; traits are unique (1–3). Label/hint are nonempty and accept translations, data and state bindings. Label conflicts with contentDescription.
+Heading enables screen-reader navigation; empty-heading lint flags headings without text/label. Group contains child traversal. Android maps heading/liveRegion/traversal group, label to contentDescription, hint to onClickLabel for tap actions else stateDescription, and traits to Role.Button/Role.Image/selected. iOS maps header/button/image/selected traits, contain grouping, label/hint, and live-region change announcements (not initial render; assertive has high speech priority).
+Android observe exposes heading as the string "true" and live-region as polite/assertive; iOS snapshots currently expose no SwiftUI traits. Logical RTL swipe sides are outside this capability.
+`;

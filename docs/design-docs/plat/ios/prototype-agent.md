@@ -434,6 +434,13 @@ and contracts inner holes. Scroll fades use iOS 17 geometry preferences to mask 
 edges with remaining content, mirroring horizontal start/end in RTL; opposing fades
 are capped at half the viewport. Image saturation precedes the palette-resolved tint.
 
+## Strings and semantics capability
+
+`prototype_strings_v1` supports string tables, plural `{t:key|count}` references and show `locale`;
+`prototype_semantics_v1` supports node heading, liveRegion, group, label, hint and traits.
+See [Strings and semantics](../android/prototype-ux.md#strings-and-semantics-14210) for resolution,
+plural rules and platform mappings. iOS observe snapshots do not expose SwiftUI traits.
+
 ## Data model capability
 
 Advertises `prototype_data_model_v1` for the shared

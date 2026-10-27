@@ -266,10 +266,17 @@
             apply(activity: false) { $0.setDeviceDark(dark) }
         }
 
+        func setDeviceLocales(_ locales: [String]) {
+            var next = session
+            next.setDeviceLocales(locales)
+            publish(next, replacingSpec: next.structureRevision != session.structureRevision)
+        }
+
         func show(
             _ spec: PrototypeSpec,
             reset: Bool = false,
             appearance: PrototypeAppearanceOverride = .device,
+            locale: String? = nil,
             specBytes: Int? = nil
         ) {
             // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
@@ -283,7 +290,7 @@
             do { seeded = try (prepared?.spec ?? spec).replacingPlatform(deviceState.snapshot) }
             catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             next.show(
-                seeded, reset: reset, appearance: appearance, specBytes: specBytes,
+                seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state
             )
             // A show that replaces another prototype cancels that one's requests.

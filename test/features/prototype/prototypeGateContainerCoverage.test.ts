@@ -35,6 +35,8 @@ const fixtures: Record<string, Node> = {
     openWhen: { key: "liked", equals: true },
     child: { type: "spacer" },
   },
+  prototype_strings_v1: { ...label, text: "{t:title}" },
+  prototype_semantics_v1: { ...label, semantics: { heading: true } },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },

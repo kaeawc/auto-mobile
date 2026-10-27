@@ -528,7 +528,20 @@ internal object PrototypeBindableFields {
       return null
     }
 
+    private fun semanticsParts(node: JsonObject, path: String): T? {
+      val semantics = node["semantics"] as? JsonObject ?: return null
+      for (key in listOf("label", "hint")) {
+        visitor.field(semantics, key, "$path.semantics", PrototypeBindableKind.TEXT)?.let {
+          return it
+        }
+      }
+      return null
+    }
+
     fun node(node: JsonObject, path: String): T? {
+      semanticsParts(node, path)?.let {
+        return it
+      }
       if ((node["type"] as? JsonPrimitive)?.content == "text") {
         textParts(node, path)?.let {
           return it

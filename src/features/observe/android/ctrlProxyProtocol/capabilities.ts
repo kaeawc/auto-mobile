@@ -432,3 +432,7 @@ export const PROTOTYPE_STYLE_POLISH_V2_CAPABILITY = "prototype_style_polish_v2";
 export const PROTOTYPE_TOOLTIP_CAPABILITY = "prototype_tooltip_v1";
 
 export const PROTOTYPE_DRAWER_CAPABILITY = "prototype_drawer_v1";
+
+export const PROTOTYPE_STRINGS_CAPABILITY = "prototype_strings_v1";
+
+export const PROTOTYPE_SEMANTICS_CAPABILITY = "prototype_semantics_v1";

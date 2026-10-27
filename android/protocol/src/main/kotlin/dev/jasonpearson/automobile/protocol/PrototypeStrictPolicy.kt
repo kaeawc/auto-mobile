@@ -196,6 +196,7 @@ internal object PrototypeStrictPolicy {
 
   private val fieldFeatures =
     mapOf(
+      "semantics" to "semantics",
       "checks" to "checks",
       "validateOn" to "checks",
       "enabledWhen" to "checks",
@@ -230,6 +231,8 @@ internal object PrototypeStrictPolicy {
     }
 
     fun envelope(spec: JsonObject) {
+      if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text })
+        need("strings")
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
       val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject

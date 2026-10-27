@@ -9,7 +9,8 @@ Compiled from "AutoMobilePrototype.kt"
 public final class dev.jasonpearson.automobile.prototype.AutoMobilePrototypeKt {
   public static final void AutoMobilePrototype(java.lang.String, androidx.compose.ui.Modifier, dev.jasonpearson.automobile.prototype.PrototypeAssets, dev.jasonpearson.automobile.prototype.PrototypeStorage, dev.jasonpearson.automobile.prototype.PrototypeNetwork, dev.jasonpearson.automobile.prototype.PrototypePlatform, kotlin.jvm.functions.Function1<? super dev.jasonpearson.automobile.protocol.PrototypeEvent, kotlin.Unit>, kotlin.jvm.functions.Function1<? super dev.jasonpearson.automobile.prototype.PrototypeDismissReason, kotlin.Unit>, boolean, kotlin.jvm.functions.Function3<? super dev.jasonpearson.automobile.prototype.PrototypeLoadError, ? super androidx.compose.runtime.Composer, ? super java.lang.Integer, kotlin.Unit>, androidx.compose.runtime.Composer, int, int);
   public static final androidx.compose.runtime.ProvidableCompositionLocal<dev.jasonpearson.automobile.prototype.EmbeddedPrototypeEnvironment> getLocalEmbeddedPrototypeEnvironment();
-  public static final dev.jasonpearson.automobile.prototype.EmbeddedCallbacks access$EmbeddedPrototype$lambda$0(androidx.compose.runtime.State);
+  public static final dev.jasonpearson.automobile.prototype.EmbeddedCallbacks access$EmbeddedPrototype$lambda$2(androidx.compose.runtime.State);
+  public static final java.util.List access$EmbeddedPrototype$lambda$1(androidx.compose.runtime.State);
 }
 Compiled from "PrototypeAssets.kt"
 public final class dev.jasonpearson.automobile.prototype.EmbeddedPrototypeAssets implements dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetSource {

@@ -129,6 +129,15 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
   }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
+  prototype_reduced_motion_v1: { minimalSpec: { ...base, motion: "reduced" }, ops: [] },
+  prototype_shared_element_v1: fixture({
+    type: "box",
+    id: "label",
+    children: [
+      { ...label, id: "first", sharedKey: "hero", visibleWhen: { key: "liked", equals: true } },
+      { ...label, id: "second", sharedKey: "hero", visibleWhen: { key: "liked", equals: false } },
+    ],
+  }),
   prototype_stack_transitions_v1: {
     ...fixture({
       type: "stack",

@@ -123,6 +123,9 @@ export const PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY = "prototype_text_fiel
 /** Draws pull-to-refresh on a vertical prototype `scroll` bound to a boolean state key. */
 export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";
 
+export const PROTOTYPE_REDUCED_MOTION_CAPABILITY = "prototype_reduced_motion_v1";
+export const PROTOTYPE_SHARED_ELEMENT_CAPABILITY = "prototype_shared_element_v1";
+
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
 export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
@@ -198,6 +201,19 @@ export const SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY = "screenshot_hide_prototype_v
 export const MULTI_FINGER_GESTURE_CAPABILITY = "multi_finger_gesture_v1";
 
 /**
+ * The runner can inject stylus pointers (tool type, pressure) through a route other than
+ * accessibility `dispatchGesture`, which cannot produce them (#13098). A runner without it is never
+ * sent a stylus request; hosts refuse before dispatch instead of degrading to a finger touch.
+ */
+export const STYLUS_INPUT_CAPABILITY = "stylus_input_v1";
+
+/**
+ * The runner can inject hover enter/move/exit with no contact (#13098), which `dispatchGesture`
+ * cannot produce either. Gates `hoverAt`.
+ */
+export const HOVER_INPUT_CAPABILITY = "hover_input_v1";
+
+/**
  * request_action honours the semantic accessibility actions (expand, collapse, dismiss, select,
  * scroll and page directions, press_and_hold, set_progress with `progress`, custom with
  * `customAction`) and its refusal lists the node's available actions (#14077). An older service
@@ -236,6 +252,8 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "gesture_display_id_v1",
   "tap_double_v1",
   MULTI_FINGER_GESTURE_CAPABILITY,
+  STYLUS_INPUT_CAPABILITY,
+  HOVER_INPUT_CAPABILITY,
   PROTOTYPE_SAVED_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,

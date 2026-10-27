@@ -209,6 +209,7 @@ internal object PrototypeStrictPolicy {
       "empty" to "loading_states",
       "shimmer" to "loading_states",
       "effects" to "effects",
+      "sharedKey" to "shared_element",
     )
 
   private fun usesData(raw: JsonElement?, kind: PrototypeBindableKind): Boolean =
@@ -230,6 +231,7 @@ internal object PrototypeStrictPolicy {
     }
 
     fun envelope(spec: JsonObject) {
+      if (spec.text("motion") == "reduced") need("reduced_motion")
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
       val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject

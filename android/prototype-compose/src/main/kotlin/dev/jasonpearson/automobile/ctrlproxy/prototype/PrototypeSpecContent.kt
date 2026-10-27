@@ -155,7 +155,9 @@ fun PrototypeRuntimeContent(
   val imageVersion = images?.version?.collectAsState()?.value
   val resolver = LocalContext.current.contentResolver
   val durationScale by rememberAnimatorDurationScale(resolver)
-  val motion = prototypeMotionEnabled(snapshot.spec.motion, durationScale)
+  val transitionScale by rememberTransitionAnimationScale(resolver)
+  val profile = prototypeMotionProfile(snapshot.spec.motion, durationScale, transitionScale)
+  val motion = profile != PrototypeMotionProfile.OFF
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -179,7 +181,9 @@ fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
+        LocalPrototypeMotionProfile provides profile,
         LocalPrototypeMotionActivity provides runtime.motionActivity,
+        LocalPrototypeEffectHealth provides runtime.effectHealth,
         LocalPrototypeStackRuntime provides runtime,
         LocalPrototypeStackSnapshot provides snapshot,
         LocalPrototypeSwipeCoordinator provides
@@ -205,55 +209,57 @@ fun PrototypeSpecContent(
   interact: (PrototypeInteraction) -> Unit = {},
 ) {
   PrototypeTheme(root, theme) {
-    val anchorLocals = remember { PrototypeAnchorLocals() }
-    val menuLayers = remember { PrototypeMenuLayers() }
-    val menuParents = remember(root) { prototypeMenuParents(root) }
-    CompositionLocalProvider(
-      LocalPrototypeAnchorLocals provides anchorLocals,
-      LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
-      LocalPrototypeMenuLayers provides menuLayers,
-      LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
-      LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
-      LocalPrototypeTargetFocus provides remember { mutableMapOf() },
-      LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
-      LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
-    ) {
-      Box(
-        Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
-          .semantics { testTagsAsResourceId = true },
+    PrototypeSharedRoot(root) {
+      val anchorLocals = remember { PrototypeAnchorLocals() }
+      val menuLayers = remember { PrototypeMenuLayers() }
+      val menuParents = remember(root) { prototypeMenuParents(root) }
+      CompositionLocalProvider(
+        LocalPrototypeAnchorLocals provides anchorLocals,
+        LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
+        LocalPrototypeMenuLayers provides menuLayers,
+        LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
+        LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
+        LocalPrototypeTargetFocus provides remember { mutableMapOf() },
+        LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+        LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
       ) {
-        val modals = prototypeModalLayers(root)
-        PrototypeModalPage(modals) {
-          RenderPrototypeNode(root, interact, windowRoot = true)
-          PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
-        }
-        modals.forEach { node ->
-          key(node.identity) {
-            if (node.role == "menu") {
-              val parent = menuParents[node.identity]
-              RenderPrototypeMenu(
-                node,
-                prototypeNodeModifier(node, interact),
-                parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+        Box(
+          Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+            .semantics { testTagsAsResourceId = true },
+        ) {
+          val modals = prototypeModalLayers(root)
+          PrototypeModalPage(modals) {
+            RenderPrototypeNode(root, interact, windowRoot = true)
+            PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
+          }
+          modals.forEach { node ->
+            key(node.identity) {
+              if (node.role == "menu") {
+                val parent = menuParents[node.identity]
+                RenderPrototypeMenu(
+                  node,
+                  prototypeNodeModifier(node, interact),
+                  parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                  interact,
+                )
+              } else RenderPrototypeModal(node, interact)
+              PrototypeAnchorLayer(
+                remember(node) { layeredPrototypeAnchorsIn(node.children) },
                 interact,
               )
-            } else RenderPrototypeModal(node, interact)
-            PrototypeAnchorLayer(
-              remember(node) { layeredPrototypeAnchorsIn(node.children) },
-              interact,
-            )
+            }
           }
-        }
-        val expanded = menuLayers.expandedSelect
-        val select = expanded?.let { identity ->
-          visiblePrototypeSelect(root, identity)?.takeIf {
-            // A newly opened modal closes a dropdown on the page behind it.
-            modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
-              modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+          val expanded = menuLayers.expandedSelect
+          val select = expanded?.let { identity ->
+            visiblePrototypeSelect(root, identity)?.takeIf {
+              // A newly opened modal closes a dropdown on the page behind it.
+              modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
+                modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+            }
           }
+          if (select != null) RenderPrototypeSelectOptions(select, interact)
+          else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
         }
-        if (select != null) RenderPrototypeSelectOptions(select, interact)
-        else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
       }
     }
   }
@@ -458,7 +464,12 @@ internal fun RenderPrototypeNode(
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalPrototypeMotion.current && node.source?.visibleWhen != null) {
     // A stack transition controls navigation only; its own visibility uses the defaults.
-    val visibilityTransition = node.source.transition?.type.takeUnless { node.role == "stack" }
+    val visibilityTransition =
+      prototypeVisibilityTransition(
+        node.source.transition?.type.takeUnless { node.role == "stack" },
+        LocalPrototypeMotionProfile.current,
+        shared = node.source.sharedKey != null,
+      )
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
@@ -474,7 +485,8 @@ internal fun RenderPrototypeNode(
         RenderPrototypeNodeContent(
           node,
           interact,
-          Modifier.prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
+          Modifier.prototypeSharedBounds(node, this)
+            .prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
           weightAxis,
           windowRoot,
         )
@@ -491,6 +503,15 @@ private fun usesPlainVisibility(node: PrototypeRenderNode): Boolean {
     node.source?.visibleWhen != null &&
     (type == "fade" || type == "none")
 }
+
+/** The node's visibility transition under the current motion profile. */
+@Composable
+private fun nodeVisibilityTransition(node: PrototypeRenderNode): String? =
+  prototypeVisibilityTransition(
+    node.source?.transition?.type,
+    LocalPrototypeMotionProfile.current,
+    shared = node.source?.sharedKey != null,
+  )
 
 @Composable
 private fun RenderPrototypeVisibility(
@@ -511,6 +532,7 @@ private fun RenderPrototypeVisibility(
       RenderPrototypeNodeContent(n, currentInteract, m, axis, root)
     }
   }
+  val visibilityTransition = nodeVisibilityTransition(node)
   val history = remember { RetainedVisibilityHistory() }
   if (node.identity in LocalPrototypeRetainedSubtrees.current) {
     PrototypeRetainedVisibility(
@@ -533,20 +555,21 @@ private fun RenderPrototypeVisibility(
         modifier = parentModifier,
         enter =
           prototypeEnterTransition(
-            node.source?.transition?.type,
+            visibilityTransition,
             prototypeRtl(),
             node.enterDelayMs,
           ),
-        exit = prototypeExitTransition(node.source?.transition?.type, prototypeRtl()),
+        exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
       ) {
         ReportPrototypeMotion { transition.isRunning }
         ProvideAnchorFade(
-          none = node.source?.transition?.type == "none",
+          none = visibilityTransition == "none",
           enterDelayMs = node.enterDelayMs,
         ) {
           content(
             node,
-            Modifier.prototypeBlurReplace(this, node.source?.transition?.type, node.enterDelayMs),
+            Modifier.prototypeSharedBounds(node, this)
+              .prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
             weightAxis,
             windowRoot,
           )
@@ -606,6 +629,7 @@ private fun RenderPrototypeNodeContent(
   // Others neither spring for text/style/image-load changes nor clip children with motion.
   val animatesSize =
     LocalPrototypeMotion.current &&
+      LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL &&
       (node.role == "box" ||
         node.role == "row" ||
         node.role == "column" ||
@@ -1099,7 +1123,9 @@ private fun RenderPrototypePager(
       (source.peek?.end ?: 0.0) > 0.0 ||
       source.pageSize is PrototypePagerPageSize.Dp
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
-  val animate = LocalPrototypeMotion.current
+  val animate =
+    LocalPrototypeMotion.current &&
+      LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL
   ReportPrototypeMotion { pager.isScrollInProgress }
   // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
   // The offset check matters then: past the halfway point currentPage already reads the target.
@@ -1374,6 +1400,14 @@ private fun prototypeNodeModifier(
         modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
     }
   modifier = modifier.prototypeShadows(style.shadows, shape, inner = false)
+  // Effects (#15129): paint over the content undistorted, then the distorting layer around the
+  // background and content. Both sit outside the clip and keep to the node's bounds themselves.
+  val effects = rememberPrototypeEffectPlan(node)
+  val effectElapsed = rememberPrototypeEffectElapsed(effects, node.identity)
+  modifier =
+    modifier
+      .prototypeEffectOverlay(effects, shape, effectElapsed)
+      .prototypeEffectLayer(effects, effectElapsed)
   if (style.cornerRadius != null || style.cornerStyle != null) modifier = modifier.clip(shape)
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(prototypeAnimatedColor(node, it), shape)
@@ -1381,6 +1415,7 @@ private fun prototypeNodeModifier(
   style.gradient?.let {
     modifier = modifier.background(prototypeGradientBrush(it, prototypePalette()), shape)
   }
+  modifier = modifier.prototypeEffectUnderlay(effects, shape)
   // Post-content modifiers nest in reverse painting order: shimmer, border, then inner shadows.
   modifier = modifier.prototypeShadows(style.shadows, shape, inner = true)
   style.border?.let {

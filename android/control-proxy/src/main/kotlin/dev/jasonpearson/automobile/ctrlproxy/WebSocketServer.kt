@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.ctrlproxy.pointer.PointerInjectionSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
@@ -310,6 +311,15 @@ class WebSocketServer(
     add("tap_double_v1")
     // request_two_finger_swipe honours fingerCount (2-5); older services perform two fingers.
     add("multi_finger_gesture_v1")
+    // PointerInstrumentation injects a stylus (tool type, pressure, tilt, buttons) through
+    // UiAutomation, which accessibility dispatchGesture cannot, and hover enter/move/exit (#13097).
+    // Hosts require the flag before sending either. Only where `am instrument --no-restart` exists
+    // (see PointerInjectionSupport); device-unverified until the probe in the design note runs, so
+    // releases stay gated by the manual test.
+    if (PointerInjectionSupport.advertised(options.sdkInt())) {
+      add("stylus_input_v1")
+      add("hover_input_v1")
+    }
     // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
     // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the
     // reply when this flag is present, so an older runner never costs them a timeout.
@@ -381,9 +391,15 @@ class WebSocketServer(
     addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
+    // style.effects (#15129): noise, gradientMesh, shimmer, glow, vignette, blur, pixelate,
+    // chromaticAberration, wave and ripple. Every effect renders on its API floor or is omitted and
+    // reported in degradedEffects, so a host may send the list to any APK that advertises this.
+    add("prototype_effects_v1")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).
     add("prototype_choreography_v1")
     add("prototype_stack_transitions_v1")
+    add("prototype_reduced_motion_v1")
+    add("prototype_shared_element_v1")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).

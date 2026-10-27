@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.pointer.PointerInjectionSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import kotlinx.coroutines.cancel
@@ -32,6 +33,8 @@ class CommandAdvertisementTest {
       "ime_commit_trace_v1",
       "tap_double_v1",
       "multi_finger_gesture_v1",
+      "stylus_input_v1",
+      "hover_input_v1",
       "network_mock_rules_report_v1",
       "sdk_capabilities_user_id_v1",
       "gesture_display_id_v1",
@@ -64,8 +67,11 @@ class CommandAdvertisementTest {
       "prototype_loading_states_v1",
       "prototype_style_polish_v2",
       "prototype_motion_v2",
+      "prototype_effects_v1",
       "prototype_choreography_v1",
       "prototype_stack_transitions_v1",
+      "prototype_reduced_motion_v1",
+      "prototype_shared_element_v1",
       "prototype_chart_v1",
       "prototype_linkify_v1",
       "prototype_chat_scroll_v1",
@@ -117,6 +123,9 @@ class CommandAdvertisementTest {
         sdk >= GestureDisplayRouting.DISPLAY_API,
         commands.contains("gesture_display_id_v1"),
       )
+      // Only where `am instrument --no-restart` exists, so an injection never kills the service.
+      assertEquals(sdk >= PointerInjectionSupport.MIN_SDK, commands.contains("stylus_input_v1"))
+      assertEquals(sdk >= PointerInjectionSupport.MIN_SDK, commands.contains("hover_input_v1"))
       assertEquals(
         sdk >= PrototypeDisplayRouting.DISPLAY_API,
         commands.contains("prototype_display_id_v1"),

@@ -98,6 +98,7 @@ internal fun PrototypeChatScrollEffects(
   }
   val request = source.id?.let { LocalPrototypeScrollRequests.current[it] }
   val handled = remember { HandledScrollRequest() }
+  val reducedMotion = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
   LaunchedEffect(request?.sequence) {
     val pending = request?.takeIf { it.sequence != handled.sequence } ?: return@LaunchedEffect
     handled.sequence = pending.sequence
@@ -107,7 +108,9 @@ internal fun PrototypeChatScrollEffects(
       (pending.target as? PrototypeScrollTarget.Key)?.let { anchors.rowTop(it.key, contentOffset) }
     val offset =
       PrototypeChatScroll.offset(pending.target, max, reverse, rowTop) ?: return@LaunchedEffect
-    if (pending.animated) scroll.animateScrollTo(offset) else scroll.scrollTo(offset)
+    // Scrolling is spatial motion: the reduced profile jumps to the target.
+    if (pending.animated && !reducedMotion) scroll.animateScrollTo(offset)
+    else scroll.scrollTo(offset)
   }
 }
 

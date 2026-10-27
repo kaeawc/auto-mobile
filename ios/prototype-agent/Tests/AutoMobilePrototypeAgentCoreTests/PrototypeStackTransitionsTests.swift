@@ -165,13 +165,14 @@ final class PrototypeStackTransitionsTests: XCTestCase {
         let overrides: [PrototypeStackTransition?] = [nil] + PrototypeStackTransition.allCases.map(Optional.some)
         for declared in PrototypeStackTransition.allCases {
             for override in overrides {
-                for specMotion in [nil, "none", "platform"] as [String?] {
+                for specMotion in [nil, "none", "standard", "reduced"] as [String?] {
                     for reduced in [false, true] {
                         for direction in [PrototypeStackChange.Direction.push, .pop, .replace, .reset] {
                             let chosen = override ?? declared
                             let expected: PrototypeStackAnimation = specMotion == "none" || chosen == .none ||
                                 direction == .reset
-                                ? .none : reduced || chosen == .fade || (chosen == .platform && direction == .replace) ?
+                                ? .none : reduced || specMotion == "reduced" || chosen == .fade ||
+                                (chosen == .platform && direction == .replace) ?
                                 .fade : .slide
                             XCTAssertEqual(PrototypeStackNavigation.animation(
                                 declared: declared, perAction: override, specMotion: specMotion,

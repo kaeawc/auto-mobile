@@ -1,0 +1,317 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key0",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key0",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key1",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key1",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key2",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key2",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key3",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key3",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key4",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key4",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key5",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key5",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key6",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key6",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key7",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key7",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key8",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key8",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key9",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key9",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key10",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key10",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key11",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key11",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key12",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key12",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key13",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key13",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key14",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key14",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key15",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "key15",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "extra",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[32].sharedKey",
+  "expectedMessage": "a spec allows at most 16 sharedKey values"
+}

@@ -109,6 +109,7 @@ not_in_nav: |
   /design-docs/plat/android/android17-playground-audit.md
   /design-docs/plat/android/dependency-injection.md
   /release/ios-simulator-continuity.md
+  /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
   /decisions/mcp-sdk-v2-split-packages.md
@@ -171,6 +172,7 @@ nav:
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
+      - "CI attestation signing envelope": design-docs/ci/attestation-envelope.md
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
@@ -180,6 +182,7 @@ nav:
       - "Daemon": design-docs/mcp/daemon.md
       - "Push-stream backpressure": push-stream-backpressure.md
       - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
+      - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
       - "Live observe App shell": design-docs/mcp/observe-app-shell.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md

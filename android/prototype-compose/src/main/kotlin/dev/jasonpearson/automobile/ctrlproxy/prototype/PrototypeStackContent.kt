@@ -95,7 +95,7 @@ internal fun PrototypeStackContent(
   val runtime = LocalPrototypeStackRuntime.current
   val preview = seek?.preview?.takeIf { it.stackChange?.id == source.id }
   val motion = LocalPrototypeMotion.current
-  val reducedMotion = LocalPrototypeReducedMotion.current
+  val reducedMotion = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
   val animation = resolveStackAnimation(source.stackTransition, change, motion, reducedMotion)
   val rtl = prototypeRtl()
   AnimatedStackContent(

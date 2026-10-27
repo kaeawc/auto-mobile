@@ -66,7 +66,10 @@ internal fun prototypeRetainedSubtrees(root: PrototypeRenderNode): Set<String> {
 
 private class RetentionEntry(val node: PrototypeRenderNode, val eligible: Boolean) {
   var size = 1
-  var excluded = isLayeredPrototypeAnchor(node) || node.role in RETENTION_EXCLUDED_ROLES
+  var excluded =
+    node.source?.sharedKey != null ||
+      isLayeredPrototypeAnchor(node) ||
+      node.role in RETENTION_EXCLUDED_ROLES
 }
 
 private fun collectRetentionEntries(

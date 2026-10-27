@@ -46,6 +46,8 @@ export interface AndroidCtrlProxyApkInstallerHost {
   grantLocalNetworkAfterInstall(): Promise<void>;
   statusInspectionDeviceError(error: unknown): Error | undefined;
   getApiLevel(): Promise<[number | null, boolean]>;
+  /** The user to set CtrlProxy up for on a headless-system-user device; undefined everywhere else. */
+  setupUser(): Promise<number | undefined>;
   readonly device: BootedDevice;
 }
 
@@ -328,7 +330,12 @@ export class AndroidCtrlProxyApkInstaller {
 
   async grantLocalNetworkAfterInstall(): Promise<void> {
     const [apiLevel] = await this.host.getApiLevel();
-    await grantLocalNetworkPermission(this.host.adb, CTRL_PROXY_PACKAGE, apiLevel);
+    await grantLocalNetworkPermission(
+      this.host.adb,
+      CTRL_PROXY_PACKAGE,
+      apiLevel,
+      await this.host.setupUser(),
+    );
   }
 
   /**

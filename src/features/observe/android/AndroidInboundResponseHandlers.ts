@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectsField } from "../../prototype/prototypeDegradedEffects";
 import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import { prototypePatchReplyFields } from "../../prototype/prototypePatchWire";
 import { logger } from "../../../utils/logger";
@@ -378,6 +379,7 @@ export class AndroidInboundResponseHandlers {
           : {}),
         ...prototypePatchReplyFields(message),
         ...prototypeSavedReplyFields(message),
+        ...prototypeDegradedEffectsField(message.degradedEffects),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
         ...(parsePrototypeStacks(message.stacks)
           ? { stacks: parsePrototypeStacks(message.stacks) }

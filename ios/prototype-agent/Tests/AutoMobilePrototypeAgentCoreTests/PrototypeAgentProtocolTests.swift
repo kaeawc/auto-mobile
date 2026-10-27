@@ -83,6 +83,14 @@ final class PrototypeAgentConfigurationTests: XCTestCase {
         XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains("prototype_icon_variant_v1"))
     }
 
+    func testDeadTapCapability() {
+        XCTAssertEqual(PrototypeAgentProtocol.deadTapCapability, "prototype_dead_tap_v1")
+        XCTAssertEqual(
+            PrototypeAgentProtocol.capabilities.filter { $0 == PrototypeAgentProtocol.deadTapCapability }.count,
+            1
+        )
+    }
+
     func testWindowChromeCapability() {
         XCTAssertEqual(PrototypeAgentProtocol.windowChromeCapability, "prototype_window_chrome_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.windowChromeCapability))

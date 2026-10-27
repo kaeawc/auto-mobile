@@ -150,6 +150,39 @@ describe("prototype patch host", () => {
     },
   );
   test.each([android, ios])(
+    "$platform gates namespaces introduced by replaceNode",
+    async (device) => {
+      expect((await show(device)).success).toBe(true);
+      const before = await call({ action: "status" }, device);
+      const ops = [
+        {
+          op: "replaceNode",
+          id: "label",
+          node: { type: "text", id: "label", text: "Hi", [device.platform]: {} },
+        },
+      ];
+      const refused = await patch(ops, {}, device);
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain("prototype_platform_namespace_v1");
+      expect(refused.error).toContain(`root.children[0].${device.platform}`);
+      expect(proxy.patchRequests).toHaveLength(0);
+      expect(agent.patchRequests).toHaveLength(0);
+      expect(await call({ action: "status" }, device)).toEqual(before);
+      if (device.platform === "android") {
+        proxy.setSupportedCommands([
+          PROTOTYPE_PATCH_CAPABILITY,
+          PROTOTYPE_DATA_MODEL_CAPABILITY,
+          "prototype_persistence_replay_v1",
+          "prototype_show_in_place_v1",
+          "prototype_platform_namespace_v1",
+        ]);
+      } else {
+        agent.handshake.capabilities.push("prototype_platform_namespace_v1");
+      }
+      expect((await patch(ops, {}, device)).success).toBe(true);
+    },
+  );
+  test.each([android, ios])(
     "$platform refuses rich text patch nodes without the capability and sends them with it",
     async (device) => {
       expect((await show(device)).success).toBe(true);

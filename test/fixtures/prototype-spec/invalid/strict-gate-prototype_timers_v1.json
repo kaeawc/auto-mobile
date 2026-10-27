@@ -1,94 +1,47 @@
 {
   "spec": {
-    "id": "timers",
+    "id": "repeat-appear",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
+    "state": {
+      "show": true
+    },
     "root": {
       "type": "column",
+      "repeat": {
+        "as": "item",
+        "items": [
+          {
+            "name": "one"
+          },
+          {
+            "name": "two"
+          }
+        ]
+      },
       "children": [
         {
-          "type": "button",
-          "label": "Start",
-          "onTap": [
+          "type": "text",
+          "text": "{item.name}",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "onAppear": [
             {
-              "type": "startTimer",
-              "id": "tick",
-              "afterMs": 100,
-              "actions": [
-                {
-                  "type": "emit",
-                  "name": "tick"
-                },
-                {
-                  "type": "startTimer",
-                  "id": "nested",
-                  "afterMs": 3600000,
-                  "actions": [
-                    {
-                      "type": "emit",
-                      "name": "tick"
-                    }
-                  ]
-                }
-              ],
-              "everyMs": 3600000,
-              "maxRuns": 10000
-            },
-            {
-              "type": "cancelTimer",
-              "id": "tick"
-            },
-            {
-              "type": "request",
-              "url": "https://example.com",
-              "onSuccess": [
-                {
-                  "type": "startTimer",
-                  "id": "request",
-                  "afterMs": 100,
-                  "actions": [
-                    {
-                      "type": "emit",
-                      "name": "tick"
-                    }
-                  ]
-                }
-              ]
+              "type": "emit",
+              "name": "{item.name}"
             }
           ]
         }
       ]
-    },
-    "requires": {
-      "platform": ["test"]
-    },
-    "platform": {
-      "on": {
-        "test.tick": [
-          {
-            "type": "startTimer",
-            "id": "handler",
-            "afterMs": 100,
-            "actions": [
-              {
-                "type": "emit",
-                "name": "handler"
-              }
-            ]
-          }
-        ]
-      }
     }
   },
   "options": {
-    "supportedCapabilities": [
-      "prototype_network_v1",
-      "prototype_platform_test_v1",
-      "prototype_platform_v1"
-    ]
+    "supportedCapabilities": []
   },
   "expectedPath": "$"
 }

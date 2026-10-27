@@ -3,6 +3,7 @@
  * never refuses a show. Findings are advisory and name the spec path they apply to.
  */
 
+import { prototypeRequiredPluralCategories } from "./prototypeStrings";
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import {
@@ -16,6 +17,9 @@ import {
 import { record } from "./prototypeTemplate";
 
 export const PROTOTYPE_ACCESSIBILITY_RULES = [
+  "missing-translation",
+  "unknown-translation-key",
+  "empty-heading",
   "unlabeled-control",
   "unlabeled-image",
   "unlabeled-text-field",
@@ -47,7 +51,15 @@ const LARGE_TEXT_CONTRAST = 3;
 
 const TAP_FIELDS = ["onTap", "onLongPress", "onDoubleTap"] as const;
 /** Fields that give a node an accessible name. */
-const NAME_FIELDS = ["contentDescription", "label", "text", "spans", "headline", "title"] as const;
+const NAME_FIELDS = [
+  "semantics.label",
+  "contentDescription",
+  "label",
+  "text",
+  "spans",
+  "headline",
+  "title",
+] as const;
 /** Controls whose only name is an optional `label` or `contentDescription`. */
 const LABEL_OPTIONAL_CONTROLS = new Set([
   "iconButton",
@@ -100,7 +112,7 @@ export function lintPrototypeAccessibility(spec: unknown): {
   total: number;
 } {
   const context = lintContext(spec);
-  const findings: PrototypeAccessibilityFinding[] = [];
+  const findings: PrototypeAccessibilityFinding[] = translationFindings(spec);
   const pending: Visit[] = prototypeSpecNodeRoots(spec)
     .flatMap(({ node, path }) => {
       const object = record(node);
@@ -150,6 +162,15 @@ function rootBackgrounds(context: LintContext): Backgrounds {
 function nodeFindings(visit: Visit, context: LintContext): PrototypeAccessibilityFinding[] {
   return [
     ...labelFindings(visit.node, visit.path),
+    ...(record(visit.node.semantics)?.heading === true && !hasName(visit.node)
+      ? [
+          {
+            rule: "empty-heading" as const,
+            path: `${visit.path}.semantics.heading`,
+            detail: "Heading has no text or accessible label.",
+          },
+        ]
+      : []),
     ...touchTargetFindings(visit.node, visit.path),
     ...contrastFindings(visit, context),
     ...transitionFindings(visit.node, visit.path),
@@ -182,8 +203,11 @@ function isTappable(node: Record<string, unknown>): boolean {
 
 function hasOwnName(node: Record<string, unknown>): boolean {
   return NAME_FIELDS.some((field) => {
-    const value = node[field];
-    return (typeof value === "string" && value.trim() !== "") || Array.isArray(value);
+    const value = field === "semantics.label" ? record(node.semantics)?.label : node[field];
+    return (
+      (typeof value === "string" && value.trim() !== "") ||
+      (Array.isArray(value) && value.some((span) => String(record(span)?.text ?? "").trim() !== ""))
+    );
   });
 }
 
@@ -240,9 +264,12 @@ function textFieldFindings(
   node: Record<string, unknown>,
   path: string,
 ): PrototypeAccessibilityFinding[] {
-  const named = ["label", "placeholder", "contentDescription"].some(
-    (field) => typeof node[field] === "string" && (node[field] as string).trim() !== "",
-  );
+  const named = [
+    record(node.semantics)?.label,
+    node.label,
+    node.placeholder,
+    node.contentDescription,
+  ].some((value) => typeof value === "string" && value.trim() !== "");
   return named
     ? []
     : [
@@ -368,4 +395,56 @@ export function prototypeAccessibilityOutput(spec: unknown): {
     accessibilityFindings: findings.map((finding) => ({ ...finding, path: locate(finding.path) })),
     ...(total > findings.length ? { accessibilityFindingsTotal: total } : {}),
   };
+}
+
+function translationFindings(spec: unknown): PrototypeAccessibilityFinding[] {
+  const tables = record(record(spec)?.strings);
+  const defaults = record(tables?.default);
+  if (!tables || !defaults) {
+    return [];
+  }
+  return Object.entries(tables).flatMap(([tag, raw]) =>
+    tag === "default" ? [] : localeFindings(defaults, record(raw) ?? {}, tag),
+  );
+}
+
+function localeFindings(
+  defaults: Record<string, unknown>,
+  table: Record<string, unknown>,
+  tag: string,
+): PrototypeAccessibilityFinding[] {
+  const findings: PrototypeAccessibilityFinding[] = [];
+  const required = prototypeRequiredPluralCategories(tag);
+  for (const [key, entry] of Object.entries(defaults)) {
+    const detail = translationDetail(entry, table[key], required);
+    if (detail) {
+      findings.push({ rule: "missing-translation", path: `strings.${tag}.${key}`, detail });
+    }
+  }
+  for (const key of Object.keys(table)) {
+    if (!Object.hasOwn(defaults, key)) {
+      findings.push({
+        rule: "unknown-translation-key",
+        path: `strings.${tag}.${key}`,
+        detail: "Key is absent from default and cannot be referenced.",
+      });
+    }
+  }
+  return findings;
+}
+
+function translationDetail(
+  entry: unknown,
+  translated: unknown,
+  required: readonly string[],
+): string | undefined {
+  if (translated === undefined) {
+    return "Missing translation; locale chain falls back.";
+  }
+  if (typeof entry !== typeof translated) {
+    return "Translation shape differs from default (string versus plural).";
+  }
+  const plural = record(translated);
+  const missingForms = plural ? required.filter((form) => !Object.hasOwn(plural, form)) : [];
+  return missingForms.length ? `Missing plural forms: ${missingForms.join(", ")}.` : undefined;
 }

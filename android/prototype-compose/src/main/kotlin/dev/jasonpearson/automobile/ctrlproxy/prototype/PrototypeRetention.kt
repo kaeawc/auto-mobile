@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 
 /** Smallest subtree (node count, the node included) worth keeping composed while hidden. */
 internal const val PROTOTYPE_RETAIN_MIN_NODES = 24
@@ -164,7 +165,11 @@ internal fun PrototypeRetainedVisibility(
     modifier = visibilityModifier,
     content = {
       if (history.shown) {
-        CompositionLocalProvider(LocalPrototypeShowEpoch provides epoch, content = content)
+        CompositionLocalProvider(
+          LocalPrototypeShowEpoch provides epoch,
+          LocalPrototypeShadersVisible provides (LocalPrototypeShadersVisible.current && !hidden),
+          content = content,
+        )
       }
     },
   ) { measurables, constraints ->

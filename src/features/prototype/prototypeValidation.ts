@@ -1,4 +1,7 @@
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
+import { prototypeDerivedError } from "./prototypeDerivedValidation";
+import { prototypeScrollMotionError } from "./prototypeScrollMotion";
+import { prototypeBarScrollError } from "./prototypeBarScroll";
 import { prototypeSharedElementError } from "./prototypeSharedElement";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
@@ -7,17 +10,19 @@ import { prototypeCheckErrors } from "./prototypeCheckValidation";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandPrototypeComponents } from "./prototypeComponents";
+import { prototypeLazyListError, prototypeLazyListLimitError } from "./prototypeLazyList";
 import { imageSlotUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
 import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
-import { prototypePlatformError } from "./prototypePlatform";
+import { prototypePlatformError, prototypeReservedTestTagError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
@@ -39,6 +44,11 @@ import {
   bound,
 } from "./prototypeBindingValidation";
 export { type PrototypeValidationError } from "./prototypeBindingValidation";
+import {
+  horizontalLazyError,
+  pagerNodeError,
+  pagerStateKeyErrors,
+} from "./prototypePagerValidation";
 
 export type PrototypeValidationResult =
   | { success: true; data: PrototypeSpec }
@@ -103,12 +113,23 @@ function visitReference(
       return fail(`${path}.image`, "Image limit exceeded");
     }
   }
-  if (rule.name !== "node") {
-    return walk(value, refRule(rule), path, context, depth);
-  }
+  return rule.name === "node"
+    ? visitNodeReference(value, rule, path, context, depth)
+    : walk(value, refRule(rule), path, context, depth);
+}
+function visitNodeReference(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
   const node = object(value);
   if (!node) {
     return fail(path, "Expected object");
+  }
+  if (node.onAppear !== undefined && path !== "root" && node.visibleWhen === undefined) {
+    return fail(`${path}.onAppear`, "onAppear requires visibleWhen or the root");
   }
   context.nodes.push({ value: node, path });
   if (context.nodes.length > contract.limits.MAX_PROTOTYPE_NODES) {
@@ -284,12 +305,17 @@ function objectConstraint(
     return formError;
   }
   if (rule.atLeastOne && Object.keys(data).length === 0) {
-    return fail(path, "At least one selector field is required");
+    return fail(
+      path,
+      rule === definitions.semantics
+        ? "Expected at least one semantics field"
+        : "At least one selector field is required",
+    );
   }
   const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
   return prototypeStylePolishV2ObjectError(data, kind ?? "", path);
 }
-/** `exactlyOne` picks one form of a union-like object; `dependents` ties optional fields to a trigger. */
+/** Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one. */
 function formConstraint(
   data: Record<string, unknown>,
   rule: Rule,
@@ -301,13 +327,15 @@ function formConstraint(
       `Exactly one of ${rule.exactlyOne.join(", ")} is required`,
     );
   }
-  for (const [trigger, dependents] of Object.entries(rule.dependents ?? {})) {
+  const dependencies = rule.dependents ?? {};
+  for (const trigger of Object.keys(dependencies).sort()) {
+    const dependents = dependencies[trigger];
     const present = dependents.filter((key) => Object.hasOwn(data, key));
     if (!trigger.split("|").some((key) => Object.hasOwn(data, key))) {
       if (present.length > 0) {
         return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
       }
-    } else if (present.length !== 1) {
+    } else if (trigger.includes("|") && present.length !== 1) {
       const target = present[1] ?? dependents[0];
       return fail(keyPath(path, target), `Exactly one of ${dependents.join(", ")} is required`);
     }
@@ -352,6 +380,9 @@ function visitMap(
   const data = object(value);
   if (!data) {
     return fail(path, "Expected object");
+  }
+  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Map entry limit exceeded");
   }
   for (const key of Object.keys(data).sort()) {
     const childPath = keyPath(path, key);
@@ -411,6 +442,14 @@ function visitRecord(
     if (key.length === 0) {
       return fail(at, "Invalid context name");
     }
+    if (
+      rule.keyPattern &&
+      !prototypeContractPatterns[rule.keyPattern as keyof typeof prototypeContractPatterns]?.test(
+        key,
+      )
+    ) {
+      return fail(at, "Invalid record key");
+    }
     const error = walk(child, rule.item ?? { kind: "json" }, at, context, depth);
     if (error) {
       return error;
@@ -423,7 +462,9 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || !prototypeContractPatterns.blankText.test(value)) &&
-    value.length <= (rule.max ?? Infinity),
+    value.length <= (rule.max ?? Infinity) &&
+    (!rule.pattern ||
+      new RegExp(contract.patterns[rule.pattern as keyof typeof contract.patterns]).test(value)),
   pointer: isPrototypeDataPointer,
   key: (value) => typeof value === "string" && prototypeContractPatterns.stateKey.test(value),
   boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
@@ -569,6 +610,7 @@ function walk(
   depth: number,
 ): PrototypeValidationError | undefined {
   const handlers: Record<string, typeof visitObject> = {
+    strings: (value) => prototypeStringsTableError(value),
     data: visitData,
     ref: visitReference,
     tagged: visitTagged,
@@ -660,50 +702,6 @@ function swipeActionsErrors(context: Context): PrototypeValidationError | undefi
   }
   return undefined;
 }
-/** Whether a `scroll` with the given axis rule encloses the node at `path`. */
-function insideScroll(context: Context, path: string, horizontal: boolean): boolean {
-  return context.nodes.some(
-    ({ value: ancestor, path: ancestorPath }) =>
-      ancestor.type === "scroll" &&
-      (ancestor.axis === "horizontal") === horizontal &&
-      path.startsWith(`${ancestorPath}.`),
-  );
-}
-/**
- * A horizontal `scroll` measures its child with an infinite width, which the lazy horizontal pager
- * and carousel layouts cannot take (#14165); the vertical rule is the same for vertical pagers.
- */
-function horizontalLazyError(
-  node: Record<string, unknown>,
-  path: string,
-  context: Context,
-): PrototypeValidationError | undefined {
-  if (node.type === "carousel" && insideScroll(context, path, true)) {
-    return fail(path, "A carousel cannot appear inside a horizontal scroll");
-  }
-  if (node.type === "pager" && node.axis !== "vertical" && insideScroll(context, path, true)) {
-    return fail(path, "A horizontal pager cannot appear inside a horizontal scroll");
-  }
-  return undefined;
-}
-/** One pager's own checks; records its id in `pagers`. */
-function pagerNodeError(
-  value: Record<string, unknown>,
-  path: string,
-  context: Context,
-  pagers: Set<string>,
-): PrototypeValidationError | undefined {
-  if (value.type !== "pager" || typeof value.id !== "string") {
-    return undefined;
-  }
-  if (pagers.has(value.id)) {
-    return fail(`${path}.id`, "Duplicate pager id");
-  }
-  pagers.add(value.id);
-  return value.axis === "vertical" && insideScroll(context, path, false)
-    ? fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll")
-    : undefined;
-}
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
@@ -778,8 +776,12 @@ function layoutErrors(
   repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   return (
+    prototypeBarScrollError(context.nodes) ??
     gridSpanErrors(context) ??
     swipeActionsErrors(context) ??
+    prototypeLazyListError(context.nodes) ??
+    prototypeDerivedError(value, context.nodes) ??
+    pagerStateKeyErrors(context) ??
     repeatErrors(value, repeats) ??
     prototypeStorageError(value)
   );
@@ -800,6 +802,18 @@ function platformArgumentError(
     nesting: { container: 0, condition: 0, action: 0 },
   };
   return walk(value, rule, path, context, 0);
+}
+
+/** The host-owned vocabulary: the reserved `automobile-` testTag namespace, then the platform rules. */
+function hostVocabularyError(
+  value: unknown,
+  context: Context,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeStringsError(value, context.nodes) ??
+    prototypeReservedTestTagError(context.nodes) ??
+    prototypePlatformError(value, context.actions, platformArgumentError)
+  );
 }
 
 /** Motion and choreography share one set of located nodes. */
@@ -830,8 +844,8 @@ function behaviourErrors(
 ): PrototypeValidationError | undefined {
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
-    prototypeRequestsError(context.actions) ??
-    prototypePlatformError(value, context.actions, platformArgumentError) ??
+    prototypeRequestsError(context.actions, data.data) ??
+    hostVocabularyError(value, context) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
     motionErrors(context.nodes) ??
@@ -858,9 +872,11 @@ function validateValue(
   const data = object(value) ?? {};
   const repeats = new PrototypeRepeatData(data.data);
   const error =
+    prototypeLazyListLimitError(value) ??
     walk(value, definitions.spec, "", context, 0) ??
     prototypeSharedElementError(context.nodes, repeats) ??
     layoutErrors(value, context, repeats) ??
+    prototypeScrollMotionError(value, context.nodes) ??
     behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {
     return { success: false, error };

@@ -1,0 +1,112 @@
+{
+  "spec": {
+    "id": "pager-state-key",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "page": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "box",
+              "style": {
+                "width": {
+                  "dp": 8
+                },
+                "height": {
+                  "dp": 8
+                },
+                "background": "#888888"
+              },
+              "styleWhen": [
+                {
+                  "when": {
+                    "key": "page",
+                    "equals": 0
+                  },
+                  "style": {
+                    "background": "#0066FF"
+                  }
+                }
+              ],
+              "children": []
+            },
+            {
+              "type": "box",
+              "style": {
+                "width": {
+                  "dp": 8
+                },
+                "height": {
+                  "dp": 8
+                },
+                "background": "#888888"
+              },
+              "styleWhen": [
+                {
+                  "when": {
+                    "key": "page",
+                    "equals": 1
+                  },
+                  "style": {
+                    "background": "#0066FF"
+                  }
+                }
+              ],
+              "children": []
+            }
+          ]
+        },
+        {
+          "type": "pager",
+          "id": "deck",
+          "stateKey": "page",
+          "children": [
+            {
+              "type": "text",
+              "text": "First"
+            },
+            {
+              "type": "text",
+              "text": "Second"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Next",
+          "onTap": [
+            {
+              "type": "increment",
+              "key": "page"
+            }
+          ]
+        },
+        {
+          "type": "tabBar",
+          "stateKey": "page",
+          "items": [
+            {
+              "label": "First"
+            },
+            {
+              "label": "Second"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

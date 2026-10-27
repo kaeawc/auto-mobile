@@ -235,9 +235,9 @@ test("worked documentation examples match the shared fixture files", () => {
     "utf8",
   );
   const examples = parseDocumentExamples(document);
-  expect(examples.length).toBe(3);
+  expect(examples.length).toBe(5);
   for (let index = 0; index < examples.length; index++) {
-    const fixture = valid.find((entry) => entry.name === `doc-example-${index + 1}.json`);
+    const fixture = valid.find((entry) => Bun.deepEquals(JSON.parse(entry.json), examples[index]));
     expect(fixture).toBeDefined();
     if (!fixture) {
       throw new Error("Missing document fixture");
@@ -252,8 +252,8 @@ test("worked documentation examples parse identically with LF and CRLF line endi
   ).replace(/\r\n/g, "\n");
   const lfExamples = parseDocumentExamples(document);
   const crlfExamples = parseDocumentExamples(document.replace(/\n/g, "\r\n"));
-  expect(lfExamples.length).toBe(3);
-  expect(crlfExamples.length).toBe(3);
+  expect(lfExamples.length).toBe(5);
+  expect(crlfExamples.length).toBe(5);
   expect(crlfExamples).toEqual(lfExamples);
 });
 test("non JSON numeric tokens and literal string controls are rejected", () => {

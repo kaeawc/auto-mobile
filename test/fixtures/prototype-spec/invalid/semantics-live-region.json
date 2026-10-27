@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi",
+      "semantics": {
+        "liveRegion": "off"
+      }
+    },
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    }
+  },
+  "expectedPath": "root.semantics.liveRegion",
+  "expectedMessage": "Invalid enum value"
+}

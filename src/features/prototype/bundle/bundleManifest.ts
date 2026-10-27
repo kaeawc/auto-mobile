@@ -1,3 +1,6 @@
+import { record } from "../prototypeTemplate";
+import { PROTOTYPE_SHADER_MIME_TYPE } from "../prototypeShaderSource";
+import { BundleFailure } from "./bundleContract";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -11,6 +14,7 @@ import { parseBundleJson } from "./bundleJson";
 import { bundleAssert } from "./bundleContract";
 
 const sha = z.string().regex(/^[0-9a-f]{64}$/);
+// AGSL is explicitly refused before this portable MIME allowlist.
 const assetSchema = z
   .object({
     id: z.string().refine((id) => prototypeAssetIdProblem(id) === null),
@@ -36,9 +40,21 @@ export function bundleSha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 export function parseBundleManifest(bytes: Uint8Array): BundleManifest {
-  const parsed = manifestSchema.safeParse(
-    parseBundleJson(bytes, "manifest_invalid", "bundle.json"),
-  );
+  const raw = parseBundleJson(bytes, "manifest_invalid", "bundle.json");
+  for (const key of ["assets", "fonts"]) {
+    const entries = record(raw)?.[key];
+    if (
+      Array.isArray(entries) &&
+      entries.some((entry) => record(entry)?.mediaType === PROTOTYPE_SHADER_MIME_TYPE)
+    ) {
+      throw new BundleFailure(
+        "custom_shaders_unsupported",
+        "bundle.json",
+        "ProtoViewer bundles refuse application/vnd.automobile.agsl assets; remove custom shaders.",
+      );
+    }
+  }
+  const parsed = manifestSchema.safeParse(raw);
   bundleAssert(parsed.success, "manifest_invalid", "bundle.json");
   const manifest = parsed.data;
   const requires = z.array(z.string().regex(/^[a-z][a-z0-9_]*$/)).safeParse(manifest.requires);
@@ -71,6 +87,9 @@ export function parseBundleManifest(bytes: Uint8Array): BundleManifest {
   return { ...manifest, requires: requires.data };
 }
 export function bundleAssetTypeMatches(type: PrototypeAssetMimeType, bytes: Uint8Array): boolean {
+  if (type === PROTOTYPE_SHADER_MIME_TYPE) {
+    return false;
+  }
   if (isPrototypeFontMimeType(type)) {
     return detectFontMimeType(bytes) === type;
   }

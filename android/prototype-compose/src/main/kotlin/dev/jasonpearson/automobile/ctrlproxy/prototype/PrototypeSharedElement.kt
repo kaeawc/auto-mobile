@@ -11,6 +11,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 
 private val LocalPrototypeSharedTransition = compositionLocalOf<SharedTransitionScope?> { null }
 

@@ -6,7 +6,16 @@
         static let defaultValue = true
     }
 
+    private struct PrototypeStackEntryIDKey: EnvironmentKey {
+        static let defaultValue: Int? = nil
+    }
+
     extension EnvironmentValues {
+        var prototypeStackEntryID: Int? {
+            get { self[PrototypeStackEntryIDKey.self] }
+            set { self[PrototypeStackEntryIDKey.self] = newValue }
+        }
+
         var prototypeStackActive: Bool {
             get { self[PrototypeStackActiveKey.self] }
             set { self[PrototypeStackActiveKey.self] = newValue }
@@ -120,6 +129,7 @@
                             .allowsHitTesting(active && drag?.settling != true)
                             .accessibilityHidden(!active)
                             .environment(\.prototypeStackActive, active)
+                            .environment(\.prototypeStackEntryID, entry.id)
                             .layoutValue(key: PrototypeStackTopKey.self, value: entry.id == current.last?.id)
                             .layoutValue(key: PrototypeStackEntryKey.self, value: entry.id)
                     }

@@ -22,19 +22,18 @@ internal object PrototypeRepeatTree {
     var animatedEffects: Int = 0,
   )
 
-  fun childrenOf(node: JsonObject, path: String): List<Child> {
-    (node["child"] as? JsonObject)?.let {
-      return listOf(Child(it, "$path.child"))
-    }
-    (node["screens"] as? JsonObject)?.let { screens ->
-      return screens.entries.mapNotNull { (name, value) ->
-        (value as? JsonObject)?.let {
-          Child(it, "$path.screens[${JsonPrimitive(name)}]")
+  fun childrenOf(node: JsonObject, path: String): List<Child> = buildList {
+    for ((key, value) in node) when {
+      key == "child" || (node.text("type") == "list" && key in setOf("header", "footer")) ->
+        (value as? JsonObject)?.let { add(Child(it, "$path.$key")) }
+      key == "children" ->
+        (value as? JsonArray).orEmpty().forEachIndexed { index, child ->
+          (child as? JsonObject)?.let { add(Child(it, "$path.children[$index]")) }
         }
-      }
-    }
-    return (node["children"] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
-      (entry as? JsonObject)?.let { Child(it, "$path.children[$index]") }
+      key == "screens" ->
+        (value as? JsonObject).orEmpty().forEach { (name, child) ->
+          (child as? JsonObject)?.let { add(Child(it, "$path.screens[${JsonPrimitive(name)}]")) }
+        }
     }
   }
 
@@ -46,7 +45,12 @@ internal object PrototypeRepeatTree {
     val items =
       if (pointer != null) data.items(pointer)
       else (repeat["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-    return Scope(path, alias, items, source != null)
+    val names = (repeat["derive"] as? JsonObject)?.keys.orEmpty()
+    // Only copy rows when derived fields are added; the projected list is otherwise shared.
+    val projected =
+      if (names.isEmpty()) items
+      else items.map { JsonObject(it + names.associateWith { JsonPrimitive("") }) }
+    return Scope(path, alias, projected, source != null, names)
   }
 
   fun repeatSourceError(
@@ -59,8 +63,13 @@ internal object PrototypeRepeatTree {
     val at = "$path.repeat.items.path"
     val items =
       state.data.source(pointer) ?: return fail(at, "Repeat path does not resolve to an array")
-    val maximum = PrototypeSpecValidator.maxRepeatItems
+    val maximum =
+      if (node.text("type") == "list") PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS
+      else PrototypeSpecValidator.maxRepeatItems
     if (items.size > maximum) return fail(at, "Repeat path resolves to more than $maximum items")
+    val maxItems = (node["maxItems"] as? JsonPrimitive)?.doubleOrNull
+    if (node.text("type") == "list" && maxItems != null && items.size > maxItems)
+      return fail(at, "List data has more items than maxItems")
     val invalid = items.indexOfFirst { it !is JsonObject }
     if (invalid >= 0) return fail(at, "Repeat path item $invalid is not an object")
     state.cells += state.data.cells(pointer)
@@ -76,6 +85,7 @@ internal object PrototypeRepeatTree {
     if (scope.items.any { !it.containsKey(key) }) {
       return fail(at, "Unknown repeat field ${JsonPrimitive(key)}")
     }
+    if (key in scope.derivedNames) return null
     val seen = mutableMapOf<String, Int>()
     val numbers = mutableMapOf<Double, Int>()
     for ((index, item) in scope.items.withIndex()) {
@@ -101,6 +111,8 @@ internal object PrototypeRepeatTree {
     state: RepeatState,
   ): PrototypeSpecError? {
     if (scope != null) {
+      if (node.text("type") == "list")
+        return fail(path, "A list cannot sit inside a repeat template")
       if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
       if (node.text("type") == "pager")
         return fail(path, "Pager cannot appear inside a repeat template")
@@ -117,9 +129,16 @@ internal object PrototypeRepeatTree {
     val ownScope = scopeOf(node, path, state.data)
     val childScope = ownScope ?: scope
     for (child in childrenOf(node, path)) {
-      templateErrors(child.node, child.path, childScope, state)?.let {
-        return it
-      }
+      templateErrors(
+          child.node,
+          child.path,
+          if (node.text("type") == "list" && !child.path.startsWith("$path.children[")) scope
+          else childScope,
+          state,
+        )
+        ?.let {
+          return it
+        }
     }
     return repeatKeyError(node, path, ownScope)
   }
@@ -150,7 +169,7 @@ internal object PrototypeRepeatTree {
     }
     val scope = scopeOf(node, path, data)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
-    repeat(scope?.items?.size ?: 1) {
+    repeat(if (node.text("type") == "list") 1 else scope?.items?.size ?: 1) {
       for (child in childrenOf(node, path)) {
         expandedErrors(child.node, child.path, budget, nestedPath, data)?.let {
           return it

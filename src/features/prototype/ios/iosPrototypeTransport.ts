@@ -1,3 +1,10 @@
+import { parsePrototypeBackdrop } from "../prototypeBackdrop";
+import {
+  prototypeShaderPatchSpec,
+  prototypeShaderFields,
+  prototypeShadersUnsupportedMessage,
+} from "../prototypeShaders";
+import { PROTOTYPE_SHADER_MIME_TYPE } from "../prototypeShaderSource";
 import { prototypeDegradedEffectsField } from "../prototypeDegradedEffects";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import { prototypeTimersUnsupportedMessage } from "../prototypeTimers";
@@ -144,6 +151,7 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const appearance = parsePrototypeAppearance(result.appearance);
   return {
     ...(appearance ? { appearance } : {}),
+    ...parsePrototypeBackdrop(result.backdrop),
     ...(prototypeStacksSchema.parse(result.stacks)
       ? { stacks: prototypeStacksSchema.parse(result.stacks) }
       : {}),
@@ -246,6 +254,9 @@ export class IosPrototypeTransport implements PrototypeTransport {
    * `prototype_show_in_place_v1`.
    */
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
+    if (prototypeShaderFields(spec).length) {
+      throw new ActionableError(prototypeShadersUnsupportedMessage([], "ios"));
+    }
     if (prototypeHasStack(spec) && !this.supportsCapability(PROTOTYPE_STACK_CAPABILITY)) {
       throw new ActionableError(prototypeStackUnsupportedMessage("ios"));
     }
@@ -264,15 +275,7 @@ export class IosPrototypeTransport implements PrototypeTransport {
       throw new ActionableError(prototypeAppearanceUnsupportedMessage(appearance, "ios"));
     }
     return toPrototypeResult(
-      await this.request(
-        "show_prototype",
-        {
-          spec,
-          ...(options.reset === true ? { reset: true } : {}),
-          ...(appearance === undefined ? {} : { appearance }),
-        },
-        options.timeoutMs,
-      ),
+      await this.request("show_prototype", showMessage(spec, options), options.timeoutMs),
     );
   }
 
@@ -288,6 +291,13 @@ export class IosPrototypeTransport implements PrototypeTransport {
   }
 
   async patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
+    if (prototypeShaderFields(prototypeShaderPatchSpec(patch.ops)).length) {
+      return {
+        success: false,
+        delivery: "unsent",
+        error: prototypeShadersUnsupportedMessage([], "ios"),
+      };
+    }
     if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
       return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
     }
@@ -345,6 +355,11 @@ export class IosPrototypeTransport implements PrototypeTransport {
     asset: PrototypeAssetUpload,
     options: PrototypeAssetRequestOptions = {},
   ): Promise<PrototypeAssetResult> {
+    if (asset.mimeType === PROTOTYPE_SHADER_MIME_TYPE) {
+      throw new ActionableError(
+        "iOS prototype agents refuse application/vnd.automobile.agsl assets: custom shaders are Android-only.",
+      );
+    }
     const problem = prototypeAssetUploadProblem(asset);
     if (problem !== null) {
       throw new ActionableError(`Invalid prototype asset: ${problem}`);
@@ -450,4 +465,14 @@ export class IosPrototypeTransport implements PrototypeTransport {
       };
     }
   }
+}
+
+/** Show overrides share the message envelope, never the spec. */
+function showMessage(spec: PrototypeSpec, options: PrototypeShowOptions) {
+  return {
+    spec,
+    ...(options.reset === true ? { reset: true } : {}),
+    ...(options.appearance === undefined ? {} : { appearance: options.appearance }),
+    ...(spec.strings && options.locale !== undefined ? { locale: options.locale } : {}),
+  };
 }

@@ -41,9 +41,6 @@ export interface SessionCreationHost {
     upsertSettled?: () => void,
   ): Promise<void>;
   readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
-  unlessBeingReplaced(
-    release: SessionReleaseSnapshot | undefined,
-  ): SessionReleaseSnapshot | undefined;
   terminalReleaseFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -148,9 +145,8 @@ export class SessionCreation {
         throw error;
       }
       const current = await this.host.readPersistedSession(session.sessionId);
-      const terminalRelease = this.host.unlessBeingReplaced(
-        current && this.host.terminalReleaseFromPersisted(session.sessionId, current),
-      );
+      const terminalRelease =
+        current && this.host.terminalReleaseFromPersisted(session.sessionId, current);
       if (terminalRelease) {
         this.host.sessionSlots.setTerminalSnapshot(session.sessionId, terminalRelease);
         throw new TerminalSessionError(session.sessionId, terminalRelease);
@@ -190,9 +186,7 @@ export class SessionCreation {
     // A plan run minting its label writes over the row its previous run left, terminal or not.
     const persistedTerminalRelease = this.host.planLabels.isMinting(session.sessionId)
       ? undefined
-      : this.host.unlessBeingReplaced(
-          await this.host.getPersistedTerminalRelease(session.sessionId),
-        );
+      : await this.host.getPersistedTerminalRelease(session.sessionId);
     if (persistedTerminalRelease) {
       this.host.sessionSlots.setTerminalSnapshot(session.sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);

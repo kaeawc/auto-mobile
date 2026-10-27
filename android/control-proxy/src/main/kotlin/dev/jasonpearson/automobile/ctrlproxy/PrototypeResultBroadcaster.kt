@@ -87,6 +87,12 @@ internal class PrototypeResultBroadcaster(
       )
     }
 
+  private val shownBackdrops = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+  override fun noteShownBackdrop(requestId: String?, backdrop: String) {
+    shownBackdrops[requestId.orEmpty()] = backdrop
+  }
+
   override suspend fun sendShownNavigation(
     requestId: String?,
     missingAssets: List<String>,
@@ -105,6 +111,7 @@ internal class PrototypeResultBroadcaster(
         pages = pages,
         stacks = stacks,
         hiddenReason = hiddenReason,
+        backdrop = shownBackdrops.remove(requestId.orEmpty()),
       )
     }
 
@@ -127,6 +134,7 @@ internal class PrototypeResultBroadcaster(
         pages = pages,
         stacks = stacks,
         hiddenReason = hiddenReason,
+        backdrop = shownBackdrops.remove(requestId.orEmpty()),
         degradedEffects = degradedEffects,
       )
     }

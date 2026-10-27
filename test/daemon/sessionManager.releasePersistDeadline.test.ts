@@ -1,3 +1,4 @@
+import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -566,21 +567,22 @@ describe("a superseded device-loss release leaves the live session's row active 
         .stable_identity_generation;
       const gate = Promise.withResolvers<void>();
       h.persistence.park = gate.promise;
-      let superseded = false;
+      // A durable intent commits the release before its row lands: the device is freed, the
+      // statement stays parked, and the lifted fence permits a new incarnation (#11799).
       const release = h.manager.releaseSessionUnlessSuperseded(
         "old",
         `device-disconnected:${device.deviceId}`,
-        { commitFence: () => !superseded },
+        { commitFence: () => true },
       );
       await flush();
       const snapshot = h.manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot("old")!;
-      superseded = true;
       await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-      await expect(release).resolves.toEqual({ superseded: true });
-      // Lifted fence permits a new incarnation. #12515: a different Session's upsert must
-      // stay protected even when this same daemon owned the old release.
+      await expect(release).resolves.toEqual({ superseded: false, deviceId: device.deviceId });
+      // #12515: a different Session's upsert must stay protected even when this same daemon
+      // owned the old release.
       h.persistence.park = undefined;
-      await h.manager.releaseSession("old", "plan-auto-release");
+      const lift = Reflect.get(h.manager, "liftTerminalFence") as (uuid: string) => void;
+      lift.call(h.manager, "old");
       await h.manager.createSession("old", device.deviceId, "android");
       const generation = (await h.persistence.getSession("old"))!.stable_identity_generation!;
       expect(generation).toBeGreaterThan(originalGeneration!);
@@ -605,7 +607,7 @@ describe("a superseded device-loss release leaves the live session's row active 
       expect(await h.manager.drainReleasePromises(5_000)).toBe(true);
       await h.timer.advanceTimeAsync(10_000);
       await flush();
-      expect(h.persistence.releaseWrites).toHaveLength(2);
+      expect(h.persistence.releaseWrites).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }
@@ -681,22 +683,13 @@ describe("a superseded device-loss release leaves the live session's row active 
     expect(summary.rehydrated).toEqual(["old"]);
   }
 
-  test("a slow terminal write overtaken by a newer identity confirmation is rewritten live", async () => {
+  test("a newer identity confirmation before the release commits leaves the row live", async () => {
     const h = await harness();
-    let releaseWrite!: () => void;
-    h.persistence.park = new Promise<void>((resolve) => {
-      releaseWrite = resolve;
-    });
-    let superseded = false;
     const release = h.manager.releaseSessionUnlessSuperseded(
       "old",
       `device-disconnected:${device.deviceId}`,
-      { commitFence: () => !superseded },
+      { commitFence: () => false },
     );
-    await flush();
-    // The serial is re-observed with a newer identity while the terminal write is in flight.
-    superseded = true;
-    releaseWrite();
     await expect(release).resolves.toEqual({ superseded: true });
     expect(h.manager.getSession("old")).not.toBeNull();
 
@@ -706,33 +699,53 @@ describe("a superseded device-loss release leaves the live session's row active 
     await expectRehydratedAfterRestart(h);
   });
 
-  test("a terminal write that lands after the deadline is rewritten live once it lands", async () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const h = await harness();
-      let releaseWrite!: () => void;
-      h.persistence.park = new Promise<void>((resolve) => {
-        releaseWrite = resolve;
-      });
-      let superseded = false;
-      const release = h.manager.releaseSessionUnlessSuperseded(
-        "old",
-        `device-disconnected:${device.deviceId}`,
-        { commitFence: () => !superseded },
-      );
-      await flush();
-      superseded = true;
-      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-      await expect(release).resolves.toEqual({ superseded: true });
+  // #11799 W5: no fence is evaluated once the row statement is issued (volatile) or the commit
+  // has passed (durable). Such a release has won; the identity confirmation arrives too late to undo it.
+  test.each(["durable", "volatile"] as const)(
+    "a slow %s terminal write overtaken by a newer identity confirmation has already won",
+    async (intent) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = await harness();
+        if (intent === "volatile") {
+          h.manager.attachTerminalReleaseJournal(new NoopTerminalReleaseJournal());
+        }
+        let releaseWrite!: () => void;
+        h.persistence.park = new Promise<void>((resolve) => {
+          releaseWrite = resolve;
+        });
+        let superseded = false;
+        const release = h.manager.releaseSessionUnlessSuperseded(
+          "old",
+          `device-disconnected:${device.deviceId}`,
+          { commitFence: () => !superseded },
+        );
+        await flush();
+        // The serial is re-observed with a newer identity while the terminal write is in flight.
+        superseded = true;
+        await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+        await expect(release).resolves.toEqual({ superseded: false, deviceId: device.deviceId });
+        expect(h.manager.getSession("old")).toBeNull();
 
-      releaseWrite();
-      await flush();
-      const row = await h.persistence.getSession!("old");
-      expect(row?.status).toBe("active");
-      expect(row?.release_reason).toBeNull();
-      await expectRehydratedAfterRestart(h);
-    } finally {
-      warn.mockRestore();
-    }
-  });
+        h.persistence.park = undefined;
+        releaseWrite();
+        await flush();
+        const row = await h.persistence.getSession!("old");
+        expect(row?.status).not.toBe("active");
+        expect(row?.release_reason).toBe(`device-disconnected:${device.deviceId}`);
+        // The next daemon does not revive a session whose terminal row landed.
+        const restarted = makeSessionManager({
+          timer: h.timer,
+          persistence: h.persistence,
+          fakeBarrier: true,
+        });
+        const summary = await restarted.rehydratePersistedSessions({
+          assignDeviceToSession: async () => device.deviceId,
+        });
+        expect(summary.rehydrated).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 });

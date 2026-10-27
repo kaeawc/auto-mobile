@@ -50,6 +50,12 @@ export interface DeviceInfo {
   architecture?: string;
   /** Pre-session virtual hardware inventory when the platform can inspect it. */
   capabilityInventory?: VirtualDeviceCapabilityInventory;
+  /**
+   * Android: guest RAM and cores the emulator actually used on its last launch (hardware-qemu.ini).
+   * `config.ini`'s hw.ramSize is only what was asked for; the system image can raise it (#15475).
+   */
+  effectiveRamMb?: number;
+  effectiveCpuCores?: number;
 }
 
 export type AvdNameProbeObservation = Pick<

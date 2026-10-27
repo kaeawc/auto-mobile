@@ -316,9 +316,17 @@ export class DeviceBootExecution {
       return await this.dependencies.deviceManager.startDevice(
         image,
         this.remaining(context, "starting the device"),
-        context.request.cameraPosterPath === undefined
+        context.request.cameraPosterPath === undefined &&
+          context.request.discardSnapshotOnExit !== true
           ? undefined
-          : { cameraPosterPath: context.request.cameraPosterPath },
+          : {
+              ...(context.request.cameraPosterPath === undefined
+                ? {}
+                : { cameraPosterPath: context.request.cameraPosterPath }),
+              ...(context.request.discardSnapshotOnExit === true
+                ? { discardSnapshotOnExit: true }
+                : {}),
+            },
       );
     } catch (error) {
       if (isEmulatorLaunchCancelledError(error) && error.process) {

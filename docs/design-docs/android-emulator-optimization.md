@@ -2,6 +2,8 @@
 
 Controls remain independent. No profiles or automatic package disabling.
 
+Host-side cost evidence and the device measurement plan: [Android emulator host cost](android-emulator-host-cost.md).
+
 ## Available controls
 
 The resource catalog, restoration receipt, and AVD hardware fields are documented

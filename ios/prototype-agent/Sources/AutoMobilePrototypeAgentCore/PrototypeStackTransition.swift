@@ -30,8 +30,9 @@ enum PrototypeStackNavigation {
         -> PrototypeStackAnimation
     {
         let transition = perAction ?? declared
-        guard specMotion != "none", transition != .none, direction != .reset else { return .none }
-        if reduceMotion || transition == .fade || (transition == .platform && direction == .replace) { return .fade }
+        let motion = PrototypeMotion(specMotion: specMotion, reduceMotion: reduceMotion)
+        guard motion.enabled, transition != .none, direction != .reset else { return .none }
+        if motion.fadeOnly || transition == .fade || (transition == .platform && direction == .replace) { return .fade }
         return .slide
     }
 }

@@ -84,29 +84,31 @@
         let gradient: PrototypeGradient
         let palette: PrototypePalette
 
+        func paint(in size: CGSize) -> AnyShapeStyle {
+            let width = Double(size.width)
+            let height = Double(size.height)
+            let stops = gradient.colorStops(palette: palette).map {
+                Gradient.Stop(color: Color($0.color), location: CGFloat($0.location))
+            }
+            switch gradient {
+            case let .linear(angle, _):
+                let line = PrototypeGradient.linearLine(angle: angle, width: width, height: height)
+                return AnyShapeStyle(LinearGradient(
+                    stops: stops,
+                    startPoint: UnitPoint(x: line.start.x, y: line.start.y),
+                    endPoint: UnitPoint(x: line.end.x, y: line.end.y)
+                ))
+            case .radial:
+                return AnyShapeStyle(RadialGradient(
+                    stops: stops, center: .center, startRadius: 0,
+                    endRadius: CGFloat(PrototypeGradient.radialRadius(width: width, height: height))
+                ))
+            }
+        }
+
         var body: some View {
             GeometryReader { proxy in
-                let width = Double(proxy.size.width)
-                let height = Double(proxy.size.height)
-                let stops = gradient.colorStops(palette: palette).map {
-                    Gradient.Stop(color: Color($0.color), location: CGFloat($0.location))
-                }
-                switch gradient {
-                case let .linear(angle, _):
-                    let line = PrototypeGradient.linearLine(angle: angle, width: width, height: height)
-                    Rectangle().fill(LinearGradient(
-                        stops: stops,
-                        startPoint: UnitPoint(x: line.start.x, y: line.start.y),
-                        endPoint: UnitPoint(x: line.end.x, y: line.end.y)
-                    ))
-                case .radial:
-                    Rectangle().fill(RadialGradient(
-                        stops: stops,
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: CGFloat(PrototypeGradient.radialRadius(width: width, height: height))
-                    ))
-                }
+                Rectangle().fill(paint(in: proxy.size))
             }
             .accessibilityHidden(true)
         }
@@ -147,6 +149,17 @@
         }
     }
 
+    private struct PrototypeSharedNamespaceKey: EnvironmentKey {
+        static let defaultValue: Namespace.ID? = nil
+    }
+
+    extension EnvironmentValues {
+        var prototypeSharedNamespace: Namespace.ID? {
+            get { self[PrototypeSharedNamespaceKey.self] }
+            set { self[PrototypeSharedNamespaceKey.self] = newValue }
+        }
+    }
+
     @MainActor
     struct NodeView: View {
         let node: PrototypeNode
@@ -161,6 +174,7 @@
         var inStackSlot = false
         /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
         var stackAxis: PrototypeAxis?
+        @Environment(\.prototypeSharedNamespace) private var sharedNamespace
         @FocusState private var controlFocused: Bool
         @Environment(\.pagerContext) private var pager
         @Environment(\.prototypePalette) private var palette
@@ -180,7 +194,7 @@
                 // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
                 // its child at the size it measured, and a row re-laid out at exactly its ideal width
                 // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
-                validatedContent.transition(transition.swiftUITransition)
+                sharedContent.transition(visibilityTransition)
             } else {
                 // Parents without that filter (a root, a scroll child, a pager page): the conditional
                 // lives in a stable container so the insertion/removal has one whose animation is
@@ -189,11 +203,38 @@
                 // The container passes its parent's proposal through, unlike a ZStack (see above).
                 PrototypeLayeredLayout(alignment: .topLeading) {
                     if isVisible {
-                        validatedContent.transition(transition.swiftUITransition)
+                        sharedContent.transition(visibilityTransition)
                     }
                 }
                 .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
             }
+        }
+
+        @ViewBuilder private var sharedContent: some View {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            let plan = PrototypeSharedElementPlan(
+                node: node,
+                profile: motion.profile,
+                conflictingKeys: node.sharedKey == nil || !motion.spatial ? [] : sharedConflicts
+            )
+            if plan.apply, let key = plan.key, let sharedNamespace {
+                validatedContent.matchedGeometryEffect(id: key, in: sharedNamespace, isSource: isVisible)
+            } else {
+                validatedContent
+            }
+        }
+
+        private var sharedConflicts: Set<String> {
+            guard let root = model.spec?.root else { return [] }
+            return PrototypeSharedElementPlan.conflictingKeys(in: root, holds: model.holds)
+        }
+
+        private var visibilityTransition: AnyTransition {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            // Explicit transition animation fades filtered children even when parent layout snaps.
+            return motion.fadeOnly && transition != .instant
+                ? transition.swiftUITransition.animation(.easeInOut(duration: 0.25))
+                : transition.swiftUITransition
         }
 
         @ViewBuilder private var validatedContent: some View {
@@ -231,12 +272,13 @@
         }
 
         /// `visibleWhen` uses the node's `transition` (the default for stacks); instant when motion is
-        /// off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
+        /// off for spec `motion: "none"`; reduced motion preserves fades (#10442).
         private var transition: PrototypeVisibilityTransition {
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
             return node.visibleWhen == nil ? .instant : motion.visibility(
                 transition: node.transition,
-                nodeType: node.type
+                nodeType: node.type,
+                shared: node.sharedKey != nil
             )
         }
 
@@ -273,7 +315,7 @@
             [
                 "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
                 "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar",
-                "menu",
+                "menu", "tooltip",
                 "select",
             ].contains(node.type)
         }
@@ -328,7 +370,9 @@
             case "text":
                 textView
             case "image":
-                imageView
+                imageView.modifier(PrototypeImageFilterModifier(
+                    parameters: PrototypeImageFilter(node.filter, palette: palette)
+                ))
             case "icon":
                 // Decorative unless it has an authored description or is tappable; the decorative
                 // case is a text glyph (see `PrototypeGlyph`) so no image element is exposed.
@@ -349,7 +393,7 @@
                 if node.axis != "horizontal", let refresh = node.refresh {
                     PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
                 } else {
-                    ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
+                    PrototypeFadingScroll(axis: node.axis, spec: node.fadeEdges) {
                         if let child = node.child { NodeView(node: child, model: model) }
                     }
                 }
@@ -398,6 +442,11 @@
                     title: interpolated(node.title),
                     text: node.text.map(interpolated)
                 )
+            // These bodies are reached only from the hoisted modal layer.
+            case "tooltip":
+                PrototypeTooltipBubble(node: node, model: model)
+            case "drawer":
+                if let child = node.child { NodeView(node: child, model: model) }
             case "menu":
                 PrototypeMenuView(node: node, model: model)
             case "select":
@@ -777,37 +826,16 @@
 
         // MARK: Style
 
-        /// A card draws the authored uniform radius (a theme token resolves to one); without it, Material's 12 pt.
-        private var cardCornerRadius: Double {
-            if case let .uniform(radius)? = style?.cornerRadius.map(shapes.resolve) { return radius }
-            return 12
-        }
-
-        private var cornerShape: UnevenRoundedRectangle {
+        /// A card draws the authored uniform radius (a theme token resolves to one); without it, Material's 12 pt (#15445).
+        private var cornerShape: PrototypeStyleShape {
+            var radius = style?.cornerRadius.map(shapes.resolve)
             if node.type == "card" {
-                return UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
-                    topLeading: cardCornerRadius, bottomLeading: cardCornerRadius,
-                    bottomTrailing: cardCornerRadius, topTrailing: cardCornerRadius
-                ))
+                switch radius {
+                case .uniform?: break
+                default: radius = .uniform(12)
+                }
             }
-            return authoredCornerShape
-        }
-
-        private var authoredCornerShape: UnevenRoundedRectangle {
-            switch style?.cornerRadius.map(shapes.resolve) {
-            case let .uniform(radius)?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
-                    topLeading: radius, bottomLeading: radius, bottomTrailing: radius, topTrailing: radius
-                ))
-            case .token?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
-            case let .corners(topStart, topEnd, bottomEnd, bottomStart)?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
-                    topLeading: topStart, bottomLeading: bottomStart, bottomTrailing: bottomEnd, topTrailing: topEnd
-                ))
-            case nil:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
-            }
+            return PrototypeStyleShape(radius: radius, continuous: style?.cornerStyle == "continuous")
         }
 
         private func styled(_ view: some View) -> some View {
@@ -830,29 +858,10 @@
                     ),
                     alignment: contentAlignment
                 ))
-                // The gradient is painted over the background colour, as on Android.
-                .background {
-                    if let gradient = style?.gradient {
-                        PrototypeGradientFill(gradient: gradient, palette: palette).clipShape(shape)
-                    }
-                }
-                .background(shape.fill(palette.color(style?.background) ?? .clear))
-                .modifier(PrototypeShimmerModifier(
-                    enabled: style?.shimmer == true,
-                    animated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled,
-                    shape: shape
+                .modifier(PrototypeStylePaintModifier(
+                    style: style, shape: shape, palette: palette,
+                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
                 ))
-                // A card's own shape is already rounded; clipping it to the node shape would cut its outline
-                // at the corners and its shadow away entirely (#15445).
-                .clipShape(node.type == "card" ? AnyShape(Rectangle()) : AnyShape(shape))
-                .overlay(
-                    shape.stroke(palette.color(style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
-                )
-                .shadow(
-                    color: (style?.elevation ?? 0) > 0 ? palette.color(style?.shadowColor) ?? .black
-                        .opacity(0.25) : .clear,
-                    radius: style?.elevation ?? 0
-                )
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
@@ -1202,7 +1211,7 @@
 
         /// Page changes animate unless spec `motion: "none"` or Reduce Motion is on (#10442).
         private var pageAnimation: Animation? {
-            PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
+            PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
                 ? .easeInOut(duration: 0.25) : nil
         }
 
@@ -1434,7 +1443,7 @@
         private var refreshing: Bool { model.state[refresh.stateKey]?.boolValue == true }
 
         var body: some View {
-            ScrollView(.vertical) {
+            PrototypeFadingScroll(axis: "vertical", spec: node.fadeEdges) {
                 if let child = node.child { NodeView(node: child, model: model) }
             }
             .refreshable {

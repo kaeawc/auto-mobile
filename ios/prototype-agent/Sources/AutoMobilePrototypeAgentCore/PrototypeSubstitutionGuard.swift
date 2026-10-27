@@ -204,6 +204,9 @@ private struct PrototypeSubstitutionGuard {
             try field(fields, "text", path: path, text: true, scope: scope)
             try part(fields["confirm"], path: "\(path).confirm", scope: scope)
             try part(fields["dismiss"], path: "\(path).dismiss", scope: scope)
+        case "tooltip":
+            try field(fields, "text", path: path, text: true, scope: scope)
+            try actions(fields, path: path, scope: scope, list: "onDismiss")
         case "snackbar":
             try field(fields, "text", path: path, text: true, scope: scope)
             try part(fields["action"], path: "\(path).action", scope: scope)

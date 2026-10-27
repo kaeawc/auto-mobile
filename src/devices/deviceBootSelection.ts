@@ -237,6 +237,8 @@ export function findEligibleExactBootedDevice(
 /** Inputs which affect device discovery, creation, and readiness, but not MCP sessions or automation setup. */
 export interface DeviceBootRequest {
   cameraPosterPath?: string;
+  /** Android: launch without saving a quick-boot snapshot on exit (#15477). */
+  discardSnapshotOnExit?: boolean;
   operationName?: string;
   platform: "android" | "ios";
   minOsVersion?: string;

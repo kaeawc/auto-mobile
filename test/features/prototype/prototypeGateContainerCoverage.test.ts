@@ -17,10 +17,24 @@ const platformCall = {
   ...label,
   onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
 };
+const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
+  prototype_tooltip_v1: {
+    type: "tooltip",
+    text: "Tip",
+    anchorTo: "target",
+    openWhen: { key: "liked", equals: true },
+  },
+  prototype_drawer_v1: {
+    type: "drawer",
+    edge: "start",
+    openWhen: { key: "liked", equals: true },
+    child: { type: "spacer" },
+  },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -59,7 +73,9 @@ const fixtures: Record<string, Node> = {
     child: label,
   },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
+  prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_shared_element_v1: { ...label, sharedKey: "hero" },
   prototype_stack_transitions_v1: {
     ...label,
     onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
@@ -112,6 +128,7 @@ const fixtures: Record<string, Node> = {
   },
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
+  prototype_platform_device_v1: deviceRead,
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -122,7 +139,7 @@ const containers: {
   wrap: (node: Node) => Node;
 }[] = [
   { name: "root", prefix: "root", wrap: (root) => ({ root }) },
-  ...["scroll", "dialog", "bottomSheet", "searchBar"].map((type) => ({
+  ...["scroll", "dialog", "bottomSheet", "searchBar", "drawer"].map((type) => ({
     name: type,
     field: "child",
     prefix: "root.child",
@@ -149,7 +166,7 @@ const containers: {
 
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
-const ROOT_LEVEL_GATES = ["prototype_storage_v1"];
+const ROOT_LEVEL_GATES = ["prototype_storage_v1", "prototype_reduced_motion_v1"];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
@@ -291,4 +308,12 @@ test("input checks on a textField do not trip any other capability gate", () => 
   expect(prototypeRequiredCapabilities(spec).map((gate) => gate.capability)).toEqual([
     "prototype_checks_v1",
   ]);
+});
+
+test("reduced motion gate reports only spec.motion", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_reduced_motion_v1",
+  )!;
+  expect(gate.fields({ motion: "reduced", root: label })).toEqual(["motion"]);
+  expect(gate.fields({ motion: "standard", root: { motion: "reduced" } })).toEqual([]);
 });

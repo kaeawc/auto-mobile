@@ -7,6 +7,55 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PrototypeRepeatTest {
+  @Test
+  fun `linkify binds each row before resolving its tapped match`() {
+    assertLinkifyRows("linkify-repeat-rows")
+  }
+
+  @Test
+  fun `linkify binds data rows before resolving tapped matches`() {
+    assertLinkifyRows("linkify-repeat-data-rows")
+  }
+
+  private fun assertLinkifyRows(name: String) {
+    val spec = fixture(name)
+    val rows = prototypeChildEntries(spec.root, "root").map { it.node as PrototypeTextNode }
+    for ((index, row) in rows.withIndex()) {
+      val id = if (index == 0) "a" else "b"
+      val onTap = row.linkify!!.onTap
+      assertTrue(onTap.toString().contains("\"match\":\"text\""))
+      val actions =
+        PrototypeLinkify.actions(onTap, PrototypeLinkify.Match("mention", row.text!!, 0, 4))
+      assertEquals("handle_$id", (actions[0] as PrototypeSetStateAction).key)
+      assertEquals(PrototypeScalar.Text(row.text!!), (actions[0] as PrototypeSetStateAction).value)
+      assertEquals("liked_$id", (actions[1] as PrototypeToggleAction).key)
+      assertEquals(
+        PrototypeScalar.Numeric(if (index == 0) 3.0 else 7.0),
+        (actions[2] as PrototypeSetStateAction).value,
+      )
+      val emit = actions[3] as PrototypeEmitAction
+      assertEquals("tap_${id}_$index", emit.name)
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement("{\"value\":\"$id\"}"),
+        emit.context!!["id"],
+      )
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement("{\"value\":$index}"),
+        emit.context!!["index"],
+      )
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement("{\"value\":\"mention\"}"),
+        emit.context!!["match"],
+      )
+      assertEquals(
+        kotlinx.serialization.json.Json.parseToJsonElement(
+          "{\"item\":\"id\",\"text\":\"{post.id}\",\"match\":\"text\"}",
+        ),
+        emit.payload,
+      )
+    }
+  }
+
   private val items =
     listOf(
       mapOf(

@@ -101,9 +101,7 @@ export class FakeDeviceSessionPersistence implements DaemonDeviceSessionStore {
     const rewrite = options.rewriteOverSupersededRelease;
     if (rewrite && !options.claimedRow && existing) {
       const terminal =
-        existing.release_reason !== null &&
-        isTerminalReleaseReason(existing.release_reason) &&
-        !rewrite.supersededReasons.includes(existing.release_reason);
+        existing.release_reason !== null && isTerminalReleaseReason(existing.release_reason);
       const peerOwned =
         existing.daemon_session_id !== null &&
         rewrite.livePeerDaemonSessionIds.includes(existing.daemon_session_id);

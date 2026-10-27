@@ -62,9 +62,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
@@ -294,13 +296,29 @@ internal fun RenderPrototypeProgress(node: PrototypeRenderNode, modifier: Modifi
   val source = node.source as? PrototypeProgressNode ?: return
   val fraction = prototypeProgressFraction(node.sliderValue, source.max)
   val circular = source.variant == "circular"
+  val indeterminate = source.stateKey == null
+  // In the reduced profile an indeterminate indicator rests at a fixed arc instead of looping, and
+  // keeps reporting itself as indeterminate to accessibility. The off profile is the default
+  // local (and what screenshot baselines render), so it keeps the stock indicator.
+  val rests =
+    indeterminate &&
+      LocalPrototypeMotion.current &&
+      LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
+  val restModifier = modifier.semantics {
+    progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+  }
   when {
-    source.stateKey == null && circular -> CircularProgressIndicator(modifier)
-    source.stateKey == null -> LinearProgressIndicator(modifier)
+    rests && circular -> CircularProgressIndicator({ INDETERMINATE_REST }, restModifier)
+    rests -> LinearProgressIndicator({ INDETERMINATE_REST }, restModifier)
+    indeterminate && circular -> CircularProgressIndicator(modifier)
+    indeterminate -> LinearProgressIndicator(modifier)
     circular -> CircularProgressIndicator({ fraction }, modifier)
     else -> LinearProgressIndicator({ fraction }, modifier)
   }
 }
+
+/** Where an indeterminate indicator rests when it does not loop. */
+private const val INDETERMINATE_REST = 0.3f
 
 /** The drawn fraction of a determinate progress: the bound value over `max` (default 1). */
 internal fun prototypeProgressFraction(value: Double, max: Double?): Float =

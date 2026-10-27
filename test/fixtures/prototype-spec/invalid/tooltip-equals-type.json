@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "tooltip",
+      "text": "Helpful hint",
+      "openWhen": {
+        "key": "open",
+        "equals": 1
+      },
+      "anchor": {
+        "type": "bounds",
+        "bounds": {
+          "x": 20,
+          "y": 40,
+          "width": 80,
+          "height": 48
+        }
+      }
+    }
+  },
+  "expectedPath": "root.openWhen.equals",
+  "expectedMessage": "Invalid boolean value"
+}

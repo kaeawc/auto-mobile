@@ -172,10 +172,14 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
         .optional()
         .describe("Android API 31+: Extra dim (secure reduce_bright_colors_activated)."),
       reset: z
-        .boolean()
+        .union([z.boolean(), z.literal("factory")])
         .optional()
         .describe(
-          "On Android, restore font scale, density and screen size to device defaults, and navigation " +
+          'Pass "factory" to restore platform defaults no matter which baselines were recorded, ' +
+            "including after a daemon restart or for changes made outside a session: light theme, " +
+            "iOS content size large, accessibility display preferences off, font scale 1.0, density " +
+            "and size defaults. Pass true for the baseline-only reset described next. " +
+            "On Android, restore font scale, density and screen size to device defaults, and navigation " +
             "mode and display cutout to the values recorded before they were first changed. Restore " +
             "night mode only to the value displayConfig replaced earlier in this process; otherwise " +
             "leave it unchanged. " +
@@ -186,7 +190,7 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
     })
     .strict(),
 ).superRefine((values, ctx) => {
-  if (values.reset === true && displayConfigFieldsPresent(values)) {
+  if (values.reset !== undefined && values.reset !== false && displayConfigFieldsPresent(values)) {
     ctx.addIssue({
       code: "custom",
       path: ["reset"],
@@ -233,7 +237,7 @@ export type DisplayConfigArgs = z.infer<typeof displayConfigSchema>;
 
 /** A displayConfig call is a setter when it carries reset or any display field. */
 function displayConfigArgsAreSet(args: DisplayConfigArgs): boolean {
-  return args.reset === true || displayConfigFieldsPresent(args);
+  return isResetRequest(args.reset) || displayConfigFieldsPresent(args);
 }
 
 /** Project the wire args onto the feature's set-input shape, dropping absent fields. */
@@ -247,8 +251,14 @@ function displayConfigSetInput(args: DisplayConfigArgs): SetDisplayConfigInput {
     ...(args.displayCutout !== undefined ? { displayCutout: args.displayCutout } : {}),
     ...accessibilityArgs(args),
     ...(args.contentSize !== undefined ? { contentSize: args.contentSize } : {}),
-    ...(args.reset !== undefined ? { reset: args.reset } : {}),
+    ...(args.reset !== undefined ? { reset: isResetRequest(args.reset) } : {}),
+    ...(args.reset === "factory" ? { factory: true } : {}),
   };
+}
+
+/** `reset: true` and `reset: "factory"` both reset; `false` is absent. */
+function isResetRequest(reset: boolean | "factory" | undefined): boolean {
+  return reset === true || reset === "factory";
 }
 
 /** The accessibility display preferences present in the wire args. */
@@ -283,7 +293,7 @@ export const displayConfigToolOptions = {
 
 /** The device settings a displayConfig call may change (#11145). */
 function displayConfigChangedSettings(args: DisplayConfigArgs): DeviceSettingKey[] {
-  if (args.reset === true) {
+  if (isResetRequest(args.reset)) {
     return ["fontScale", "contentSize", "density", "nightMode", ...ACCESSIBILITY_DISPLAY_FIELDS];
   }
   // Android records fontScale and the iOS Simulator its content size category; each platform
@@ -326,7 +336,8 @@ function sizeDisplayId(
   resolve: NonNullable<DisplayConfigToolDependencies["resolveDisplayId"]>,
   signal?: AbortSignal,
 ): Promise<number | undefined> {
-  const targetsSize = args.size !== undefined || args.reset === true || isDisplayConfigRead(args);
+  const targetsSize =
+    args.size !== undefined || isResetRequest(args.reset) || isDisplayConfigRead(args);
   return device.platform === "android" && args.display !== undefined && targetsSize
     ? resolve(device, args.display, signal)
     : Promise.resolve(undefined);
@@ -364,7 +375,8 @@ export function createDisplayConfigHandler(dependencies: DisplayConfigToolDepend
     };
     // Geometry writes (and reset, which can restore them) are session-owned: release restores them.
     const restorable =
-      args.reset === true || DISPLAY_GEOMETRY_FIELDS.some((field) => args[field] !== undefined);
+      isResetRequest(args.reset) ||
+      DISPLAY_GEOMETRY_FIELDS.some((field) => args[field] !== undefined);
     const sessionManager =
       restorable && args.sessionUuid
         ? (dependencies.sessionManager ?? (() => defaultDaemonContext.sessionManager()))()
@@ -388,4 +400,4 @@ export function createDisplayConfigHandler(dependencies: DisplayConfigToolDepend
 export const displayConfigHandler = createDisplayConfigHandler();
 
 export const DISPLAY_CONFIG_DESCRIPTION =
-  "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed.";
+  'Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image\'s overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed. reset: "factory" additionally forces platform defaults (light theme, iOS content size large, accessibility display preferences off) regardless of recorded baselines, including after a daemon restart.';

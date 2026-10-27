@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "border": {
+          "width": 1,
+          "color": "#000000",
+          "gradient": {
+            "type": "linear",
+            "angle": 45,
+            "stops": [
+              {
+                "color": {
+                  "light": "#FFFFFF",
+                  "dark": "#000000"
+                }
+              },
+              {
+                "color": "primary"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.border.color",
+  "expectedMessage": "Exactly one of color, gradient is required"
+}

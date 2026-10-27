@@ -385,7 +385,7 @@ internal object PrototypeBindableFields {
     }
 
     fun actions(data: JsonObject, path: String): T? {
-      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
+      for (field in listOf("onTap", "onLongPress", "onDoubleTap", "onDismiss")) {
         for ((action, actionPath) in objects(data, field, path)) {
           action(action, actionPath)?.let {
             return it
@@ -423,6 +423,7 @@ internal object PrototypeBindableFields {
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+        "tooltip" -> visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             part(entry, entryPath)
@@ -508,17 +509,29 @@ internal object PrototypeBindableFields {
       return null
     }
 
-    fun node(node: JsonObject, path: String): T? {
-      if ((node["type"] as? JsonPrimitive)?.content == "text") {
-        visitor.field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
+    private fun textParts(node: JsonObject, path: String): T? {
+      visitor.field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
+        return it
+      }
+      (node["linkify"] as? JsonObject)?.let { options ->
+        visitor.actions(options, "$path.linkify")?.let {
           return it
         }
-        for ((span, spanPath) in objects(node, "spans", path)) {
-          (visitor.field(span, "text", spanPath, PrototypeBindableKind.TEXT)
-              ?: visitor.actions(span, spanPath))
-            ?.let {
-              return it
-            }
+      }
+      for ((span, spanPath) in objects(node, "spans", path)) {
+        (visitor.field(span, "text", spanPath, PrototypeBindableKind.TEXT)
+            ?: visitor.actions(span, spanPath))
+          ?.let {
+            return it
+          }
+      }
+      return null
+    }
+
+    fun node(node: JsonObject, path: String): T? {
+      if ((node["type"] as? JsonPrimitive)?.content == "text") {
+        textParts(node, path)?.let {
+          return it
         }
       }
       return component(node, path)

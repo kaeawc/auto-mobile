@@ -9,10 +9,34 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 /** `linkify` (#14233): the shared detection cases and `{match}` binding. */
 class PrototypeLinkifyTest {
+  companion object {
+    private lateinit var repeatSpecs: List<String>
+
+    @BeforeAll
+    @JvmStatic
+    fun loadFixtures() {
+      repeatSpecs =
+        listOf("linkify-repeat-binding", "linkify-repeat-rows", "linkify-repeat-data-rows").map {
+          File(fixtureDirectory(), "valid/$it.json").readText()
+        }
+      // Keep JVM serializer initialization outside the per-test budget, as in the corpus suites.
+      PrototypeSpecValidator.validate(repeatSpecs[1])
+    }
+  }
+
+  @Test
+  fun `repeat-bound linkify fixtures validate`() {
+    for (spec in repeatSpecs) {
+      val result = PrototypeSpecValidator.validate(spec)
+      assertTrue(result is PrototypeSpecValidation.Success, result.toString())
+    }
+  }
+
   @Test
   fun `shared detection cases match`() {
     val cases =

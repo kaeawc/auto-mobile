@@ -102,6 +102,9 @@ enum PrototypeStacks {
     )
         -> String?
     {
+        if root.openModals(state: state, pages: pages, stacks: stacks).contains(where: { $0.type == "drawer" }) {
+            return nil
+        }
         let modalTypes = prototypeModalTypes.union(["bottomSheet"])
         var target: String?
         var modals: [PrototypeNode] = []

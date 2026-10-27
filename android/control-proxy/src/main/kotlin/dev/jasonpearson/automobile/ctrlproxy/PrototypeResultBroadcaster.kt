@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
+import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
@@ -104,6 +105,29 @@ internal class PrototypeResultBroadcaster(
         pages = pages,
         stacks = stacks,
         hiddenReason = hiddenReason,
+      )
+    }
+
+  override suspend fun sendShownDegraded(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot>,
+    hiddenReason: PrototypeHiddenReason?,
+    degradedEffects: List<PrototypeDegradedEffect>,
+  ) =
+    emit(requestId) {
+      prototypeResultFrame(
+        requestId,
+        true,
+        null,
+        missingAssets,
+        appearance,
+        pages = pages,
+        stacks = stacks,
+        hiddenReason = hiddenReason,
+        degradedEffects = degradedEffects,
       )
     }
 

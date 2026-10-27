@@ -1,0 +1,355 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "n0",
+          "style": {
+            "effects": [
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n1",
+          "style": {
+            "effects": [
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "ninth",
+          "style": {
+            "effects": [
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n0",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n1",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n2",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n3",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n4",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n5",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n6",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n7",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n8",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n9",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n10",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n11",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "n12",
+          "style": {
+            "effects": [
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              },
+              {
+                "type": "noise"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2]",
+  "expectedMessage": "Animated effect limit exceeded"
+}

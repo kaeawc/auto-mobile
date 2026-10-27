@@ -22,7 +22,7 @@
 
         private var identity: ObjectIdentifier { ObjectIdentifier(node) }
         private var geometry: PrototypeSwipe.Geometry { PrototypeSwipe.Geometry(actions: swipe, rowWidth: rowWidth) }
-        private var motion: Bool { PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled }
+        private var motion: Bool { PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial }
         private var colors: ComponentColors { ComponentColors(palette: palette) }
 
         var body: some View {

@@ -2,6 +2,11 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.prototype.PlatformCallResult
+import dev.jasonpearson.automobile.prototype.PlatformError
+import dev.jasonpearson.automobile.prototype.PlatformErrorCode
+import dev.jasonpearson.automobile.prototype.PrototypePlatform as RuntimePlatform
+import dev.jasonpearson.automobile.prototype.PrototypePlatformRegistry
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +46,7 @@ data class PrototypeRuntimeSnapshot(
   val shownErrors: Set<String> = emptySet(),
   /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
   val scrollRequests: Map<String, PrototypeScrollRequest> = emptyMap(),
+  val platformState: JsonObject = JsonObject(emptyMap()),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
@@ -48,6 +54,10 @@ data class PrototypeRuntimeSnapshot(
 
 @InternalAutoMobilePrototypeApi
 sealed interface PrototypeInteraction {
+  /** Device observation and restored pager positions do not extend the host's idle expiry. */
+  fun countsAsUserActivity(pages: Map<String, Int>): Boolean =
+    this !is DeviceState && (this !is PagerMotion || scrolling || pages[pager] != page)
+
   data class Guarded(val identity: String, val interaction: PrototypeInteraction) :
     PrototypeInteraction
 
@@ -58,6 +68,8 @@ sealed interface PrototypeInteraction {
   data object Back : PrototypeInteraction
 
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
+
+  data class DeviceState(val snapshot: JsonObject) : PrototypeInteraction
 
   data class TimerFire(val actions: List<PrototypeAction>) : PrototypeInteraction
 
@@ -161,6 +173,10 @@ class PrototypeRuntime(
   private val newRequestId: () -> String = { UUID.randomUUID().toString() },
   /** The device-wide cap on requests in flight; the controller shares one across its surfaces. */
   private val requestLimiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
+  initialPlatformState: JsonObject = JsonObject(emptyMap()),
+  platform: RuntimePlatform = RuntimePlatform.None,
+  platformLimiter: PrototypeRequestLimiter =
+    PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -180,14 +196,58 @@ class PrototypeRuntime(
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
 
+  private val platformState =
+    PrototypePlatformState(CoroutinePrototypeScheduler(requestScope), exclusively) { name, data ->
+        deliverPlatformEvent(name, data)
+      }
+      .also { if (initialPlatformState.isNotEmpty()) it.update(initialPlatformState) }
+  private var eventData: JsonObject? = null
+
+  private suspend fun deliverPlatformEvent(name: String, data: JsonObject) {
+    if (!current.active || name.substringBefore('.') !in current.spec.requires?.platform.orEmpty())
+      return
+    val previousEvent = eventData
+    eventData = data
+    try {
+      handle(PrototypeInteraction.Tap(current.spec.platform?.on?.get(name).orEmpty()))
+    } finally {
+      eventData = previousEvent
+    }
+    if (!current.active) return
+    var payload = buildJsonObject {
+      put("event", name)
+      put("data", data)
+    }
+    if (
+      payload.toString().toByteArray(Charsets.UTF_8).size >
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
+    ) {
+      payload = buildJsonObject {
+        put("event", name)
+        put("data", JsonObject(emptyMap()))
+        put("truncated", true)
+      }
+    }
+    emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)
+  }
+
   private val renderMapper = PrototypeRenderMapper()
 
   /** The running animations of this prototype's window, published in its window metadata. */
   @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
 
+  /** Effects that stopped animating over the frame budget (#15129), reported by `inspect`. */
+  @InternalAutoMobilePrototypeApi val effectHealth = PrototypeEffectHealth()
+
   @InternalAutoMobilePrototypeApi
   fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
-    renderMapper.map(snapshot.spec, snapshot.pages, snapshot.stacks, snapshot.shownErrors)
+    renderMapper.map(
+      snapshot.spec,
+      snapshot.pages,
+      snapshot.stacks,
+      snapshot.shownErrors,
+      snapshot.platformState,
+    )
 
   internal val renderMappingPasses: Int
     get() = renderMapper.mappingPasses
@@ -196,6 +256,7 @@ class PrototypeRuntime(
     MutableStateFlow(
       snapshot(spec, previousPages, previousStacks)
         .copy(
+          platformState = platformState.snapshot,
           revision = initialRevision,
           stateRevisions = spec.state.orEmpty().keys.associateWith { initialRevision },
         ),
@@ -203,6 +264,42 @@ class PrototypeRuntime(
   val snapshots = mutableSnapshot.asStateFlow()
   val current: PrototypeRuntimeSnapshot
     get() = snapshots.value
+
+  private val deviceModule =
+    PrototypeDeviceModule(initialPlatformState["device"] as? JsonObject ?: JsonObject(emptyMap()))
+  val platformRegistry =
+    PrototypePlatformRegistry(
+      listOf(deviceModule) + platform.registry.modules,
+    )
+  private val platformDispatcher =
+    PrototypePlatformDispatcher(
+      platformRegistry,
+      requestScope,
+      exclusively,
+      newRequestId,
+      clock,
+      ::finishPlatformCall,
+      ::deliverPlatformEvent,
+      ::publishModuleState,
+      warn,
+      platformLimiter,
+    )
+
+  /** Start streams only after the host has installed this runtime in its surface table. */
+  fun startPlatformModules() = platformDispatcher.subscribe()
+
+  /** Hosts call this under their lock before replacement, reset or dismissal. */
+  suspend fun cancelPlatformCalls() = platformDispatcher.cancel()
+
+  private fun publishModuleState(name: String, state: JsonObject) {
+    if (!current.active || (name == "device" && state.isEmpty())) return
+    val next = JsonObject(current.platformState + (name to state))
+    if (next.toString().toByteArray(Charsets.UTF_8).size > PrototypeDeviceContract.maxStateBytes) {
+      warn("Refused oversized platform state from $name")
+      return
+    }
+    mutableSnapshot.value = current.copy(platformState = next)
+  }
 
   fun replace(spec: PrototypeSpec) {
     if (!current.active) return
@@ -223,6 +320,7 @@ class PrototypeRuntime(
       textEpochs = before.textEpochs + changed.associateWith { (before.textEpochs[it] ?: 0) + 1 },
       revision = before.revision,
       stateRevisions = before.stateRevisions,
+      platformState = before.platformState,
     )
   }
 
@@ -338,6 +436,8 @@ class PrototypeRuntime(
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
 
   fun close() {
+    platformDispatcher.close()
+    platformState.close()
     mutableSnapshot.value = current.copy(active = false)
     timerEngine.cancelAll()
     cancelRequests()
@@ -379,8 +479,16 @@ class PrototypeRuntime(
       )
   }
 
+  private fun updateDeviceState(snapshot: JsonObject) {
+    if (platformState.update(snapshot)) {
+      deviceModule.update(platformState.snapshot.getValue("device").jsonObject)
+      publishModuleState("device", platformState.snapshot.getValue("device").jsonObject)
+    }
+  }
+
   private suspend fun handleInteraction(interaction: PrototypeInteraction) {
     when (interaction) {
+      is PrototypeInteraction.DeviceState -> updateDeviceState(interaction.snapshot)
       is PrototypeInteraction.Guarded -> {
         fun find(node: PrototypeRenderNode): PrototypeRenderNode? =
           if (node.identity == interaction.identity) node
@@ -535,6 +643,7 @@ class PrototypeRuntime(
         is PrototypeAppendDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
+        is PrototypePlatformAction -> startPlatformCall(action, touched)
         is PrototypeScrollToAction -> requestScroll(action)
         is PrototypeStartTimerAction -> timerEngine.start(action)
         is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
@@ -648,16 +757,25 @@ class PrototypeRuntime(
   /** Framework-free Back policy; the controller serializes this with other interactions. */
   suspend fun popTopmostStack(): Boolean {
     if (!current.active) return false
-    val id = stackPopTarget(renderModel().root, current.stacks) ?: return false
+    val root = renderModel().root
+    val drawer = modalPrototypeSheets(root).lastOrNull { it.role == "drawer" }
+    if (drawer != null) {
+      control(closing((drawer.source as PrototypeDrawerNode).openWhen), emptyList())
+      return true
+    }
+    val id = stackPopTarget(root, current.stacks) ?: return false
     changeStack(id) { _, path -> path.dropLast(1) }
     return true
   }
 
   /** Focus and Back dispatch use exactly the same visible target selection. */
   fun hasPoppableStack(model: PrototypeRenderModel = renderModel()): Boolean =
-    current.active && stackPopTarget(model.root, current.stacks) != null
+    current.active &&
+      (modalPrototypeSheets(model.root).any { it.role == "drawer" } ||
+        stackPopTarget(model.root, current.stacks) != null)
 
   internal fun backPreview(): PrototypeRuntimeSnapshot? {
+    if (modalPrototypeSheets(renderModel().root).any { it.role == "drawer" }) return null
     val id = stackPopTarget(renderModel().root, current.stacks) ?: return null
     val stack = current.stacks.getValue(id)
     return current.copy(
@@ -763,6 +881,7 @@ class PrototypeRuntime(
     if (!current.active) return
     storage?.record(current.spec)
     storage?.flush()
+    cancelPlatformCalls()
     close()
     emit(
       kind = PrototypeEventKind.DISMISSED,
@@ -797,6 +916,12 @@ class PrototypeRuntime(
 
       override fun data(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.spec.data, pointer)
+
+      override fun platform(pointer: String): JsonElement? =
+        PrototypeDataPointer.resolve(current.platformState, pointer)
+
+      override fun event(pointer: String): JsonElement? =
+        PrototypeDataPointer.resolve(eventData, pointer)
     }
 
   /**
@@ -931,6 +1056,135 @@ class PrototypeRuntime(
     else payload(null)
   }
 
+  private suspend fun startPlatformCall(
+    action: PrototypePlatformAction,
+    touched: MutableSet<String>,
+  ) {
+    val args = linkedMapOf<String, JsonElement>()
+    var invalid: String? = null
+    for ((name, binding) in action.args.orEmpty()) {
+      when (val resolved = PrototypeDataWriter.resolveValue(binding.jsonObject, bindingInputs())) {
+        is PrototypeDataValue.Resolved -> args[name] = resolved.value
+        is PrototypeDataValue.Failure -> {
+          invalid = resolved.error.message
+          break
+        }
+      }
+    }
+    // Resolve against the state before loading, matching request actions (including self-bindings).
+    action.statusKey?.let { if (writeStatus(it, "loading")) touched += it }
+    platformDispatcher.start(
+      action,
+      if (invalid == null) JsonObject(args) else null,
+      invalid,
+      eventData,
+    )
+  }
+
+  private fun platformCallPayload(
+    call: PrototypePlatformDispatcher.Pending,
+    error: PlatformError?,
+    durationMs: Long,
+  ) = buildJsonObject {
+    put("callId", call.id)
+    put("call", call.action.call)
+    put("outcome", if (error == null) "success" else "error")
+    put("durationMs", durationMs)
+    error?.let { failure ->
+      put(
+        "error",
+        buildJsonObject {
+          put("code", failure.code.wireValue)
+          put("message", failure.message.take(512))
+        },
+      )
+    }
+  }
+
+  /** Writes a call's result and metadata under `into`; returns the error to report. */
+  private suspend fun writePlatformResult(
+    call: PrototypePlatformDispatcher.Pending,
+    result: PlatformCallResult,
+    error: PlatformError?,
+    duration: Long,
+  ): PlatformError? {
+    val into = call.action.into ?: return error
+    val writes = mutableListOf<PrototypeDataWrite>()
+    if (result is PlatformCallResult.Success) writes += PrototypeDataWrite.Set(into, result.value)
+    writes +=
+      PrototypeDataWrite.Set(
+        PrototypeRequests.metaPath(into),
+        platformCallPayload(call, error, duration).let { JsonObject(it - "callId" - "call") },
+      )
+    val refused = trialDataWrites(writes)
+    if (refused == null) {
+      writes.forEach { applyDataWrite(it) }
+      return error
+    }
+    val reported =
+      error ?: PlatformError(PlatformErrorCode.PLATFORM_ERROR, refused.message.take(512))
+    applyDataWrite(
+      PrototypeDataWrite.Set(
+        PrototypeRequests.metaPath(into),
+        JsonObject(platformCallPayload(call, reported, duration) - "callId" - "call"),
+      ),
+    )
+    return reported
+  }
+
+  private suspend fun runPlatformFollowUp(
+    call: PrototypePlatformDispatcher.Pending,
+    error: PlatformError?,
+  ) {
+    if (error?.code == PlatformErrorCode.CANCELLED) return
+    val action = call.action
+    val actions = (if (error == null) action.onSuccess else action.onError).orEmpty()
+    if (actions.isEmpty() || !current.active || !requireValid(actions)) return
+    val previousEvent = eventData
+    eventData = call.eventContext
+    try {
+      run(actions, plannedWrites(actions, current.spec))
+    } catch (refused: IllegalArgumentException) {
+      warn("Refused platform follow-up: ${refused.message}")
+    } finally {
+      eventData = previousEvent
+    }
+  }
+
+  private suspend fun finishPlatformCall(
+    call: PrototypePlatformDispatcher.Pending,
+    result: PlatformCallResult,
+  ) {
+    try {
+      val initial = (result as? PlatformCallResult.Failure)?.error
+      val duration = (clock() - call.startedAt).coerceAtLeast(0)
+      if (!current.active) {
+        if (initial?.code == PlatformErrorCode.CANCELLED) {
+          val closed = PlatformError(PlatformErrorCode.CANCELLED, "Prototype closed")
+          emit(
+            PrototypeEventKind.EMIT,
+            PrototypePlatform.CALL_EVENT_NAME,
+            platformCallPayload(call, closed, duration),
+          )
+        }
+        return
+      }
+      val error = writePlatformResult(call, result, initial, duration)
+      call.action.statusKey?.let {
+        if (writeStatus(it, if (error == null) "success" else "error")) emitStateChange(listOf(it))
+      }
+      emit(
+        PrototypeEventKind.EMIT,
+        PrototypePlatform.CALL_EVENT_NAME,
+        platformCallPayload(call, error, duration),
+      )
+      runPlatformFollowUp(call, error)
+    } finally {
+      interactionRevision = null
+      if (current.active) storage?.record(current.spec)
+    }
+  }
+
   // ---- request action (#12528) ----
 
   /** A started request, kept until its response settles or it is superseded or cancelled. */
@@ -944,6 +1198,7 @@ class PrototypeRuntime(
     val startedAt: Long,
     val onSuccess: List<PrototypeAction>?,
     val onError: List<PrototypeAction>?,
+    val eventContext: JsonObject?,
   ) {
     lateinit var job: Job
 
@@ -1020,6 +1275,7 @@ class PrototypeRuntime(
         clock(),
         action.onSuccess,
         action.onError,
+        eventData,
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
@@ -1157,7 +1413,13 @@ class PrototypeRuntime(
         warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
         return
       }
-    run(followUps, writes)
+    val previousEvent = eventData
+    eventData = request.eventContext
+    try {
+      run(followUps, writes)
+    } finally {
+      eventData = previousEvent
+    }
   }
 
   private suspend fun sendRequestEvent(
@@ -1287,6 +1549,10 @@ class PrototypeRuntime(
           PrototypeStackSnapshot(path.ifEmpty { listOf(node.start) })
         },
     )
+
+  init {
+    platform.registry.modules.forEach { publishModuleState(it.name, it.state.value) }
+  }
 }
 
 private val runtimeJson = Json { classDiscriminator = "type" }
@@ -1304,6 +1570,7 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypeCardNode -> node.children
     is PrototypeScrollNode -> listOf(node.child)
     is PrototypeBottomSheetNode -> listOf(node.child)
+    is PrototypeDrawerNode -> listOf(node.child)
     is PrototypeDialogNode -> listOfNotNull(node.child)
     is PrototypeSearchBarNode -> listOfNotNull(node.child)
     else -> emptyList()

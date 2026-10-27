@@ -5,8 +5,10 @@ import android.view.Display
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
+import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
+import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -110,6 +112,21 @@ fun interface PrototypeResultSink : PrototypeReplySink {
     hiddenReason: PrototypeHiddenReason? = null,
   ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
+  /**
+   * A successful show that also reports [degradedEffects] (`prototype_effects_v1`). The default
+   * drops them, so sinks that predate the field keep answering as before.
+   */
+  @Suppress("LongParameterList") // Mirrors sendShownNavigation plus the one new field.
+  suspend fun sendShownDegraded(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot>,
+    hiddenReason: PrototypeHiddenReason?,
+    degradedEffects: List<PrototypeDegradedEffect>,
+  ) = sendShownNavigation(requestId, missingAssets, appearance, pages, stacks, hiddenReason)
+
   /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
   suspend fun sendCleared(requestId: String?, cleared: Int) = send(requestId, true, null)
 
@@ -184,7 +201,11 @@ class PrototypeController(
   private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
   /** Where requests wait for their response; they are cancelled when their prototype ends. */
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
+    dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
+  private val platformLimiter = PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight)
+
   val isShowing: Boolean
     get() = surfaces.values.any { it.host.isShowing }
 
@@ -362,6 +383,11 @@ class PrototypeController(
           hiddenReason = shownHiddenReason(shown),
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
+          degradedEffects =
+            prototypeEffectReport(
+              shown.runtime.renderModel(shown.runtime.current).root,
+              shown.runtime.effectHealth,
+            ),
         )
     }
 
@@ -424,6 +450,7 @@ class PrototypeController(
     val hiddenReason: PrototypeHiddenReason? = null,
     val pages: Map<String, Int>? = null,
     val stacks: Map<String, PrototypeStackSnapshot>? = null,
+    val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
   )
 
   private fun validate(spec: JsonObject): PrototypeSpec =
@@ -567,10 +594,13 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        platform = platform,
+        platformLimiter = platformLimiter,
         requestScope = requestScope,
         // A response lands between interactions, never in the middle of one.
         exclusively = { block -> settleRequest(runtime, block) },
         requestLimiter = requestLimiter,
+        initialPlatformState = surfaceHost.initialDeviceState(request),
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -616,6 +646,7 @@ class PrototypeController(
     reused?.runtime?.flushStorage()
     // A same-id show without a reset keeps its requests in flight; a reset or another id cancels.
     if (preservePages && reused === previous) reused?.runtime?.handOverRequests(runtime)
+    reused?.runtime?.cancelPlatformCalls()
     reused?.runtime?.close()
     idle.cancel()
     val retainedRequest =
@@ -644,6 +675,7 @@ class PrototypeController(
         remove(validated.id)
         put(validated.id, surface)
       }
+    runtime.startPlatformModules()
     if (blocked) runtime.pauseTimers()
     armIdle(runtime)
     // The accepted show succeeds even if a sibling host cannot detach. Its closed runtime stays
@@ -658,6 +690,7 @@ class PrototypeController(
   /** Replacement closes silently, just as the former single runtime did. */
   private suspend fun retire(surface: Surface, notifyDismissed: Boolean = false) {
     surface.runtime.flushStorage()
+    surface.runtime.cancelPlatformCalls()
     surface.runtime.close()
     surface.idle.cancel()
     surface.foreground.release()
@@ -797,14 +830,7 @@ class PrototypeController(
       if (destroyed || !runtime.current.active || surfaceOf(runtime) == null) return@withLock
       PrototypeTrace.asyncSection(PrototypeTrace.INTERACT) {
         try {
-          // Compose reports its initial/restored settled page; that is rendering, not idle
-          // activity.
-          if (
-            (interaction !is PrototypeInteraction.PagerMotion ||
-              interaction.scrolling ||
-              runtime.current.pages[interaction.pager] != interaction.page)
-          )
-            armIdle(runtime)
+          if (interaction.countsAsUserActivity(runtime.current.pages)) armIdle(runtime)
           runtime.handle(interaction)
           syncAfterChange(runtime)
         } catch (error: CancellationException) {
@@ -866,7 +892,17 @@ class PrototypeController(
       val revision =
         outcome.revision ?: surfaces[patchId]?.runtime?.current?.takeIf { it.active }?.revision
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
-    } else if (error == null && appearance != null)
+    } else if (error == null && appearance != null && outcome.degradedEffects.isNotEmpty())
+      sink.sendShownDegraded(
+        requestId,
+        missing,
+        appearance,
+        outcome.pages.orEmpty(),
+        outcome.stacks.orEmpty(),
+        outcome.hiddenReason,
+        outcome.degradedEffects,
+      )
+    else if (error == null && appearance != null)
       sink.sendShownNavigation(
         requestId,
         missing,
@@ -1005,6 +1041,8 @@ class PrototypeController(
       appearance = surface.theme.value.appearance,
       storage = runtime.storage?.report(),
       timers = runtime.timerReports(),
+      degradedEffects =
+        prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
     )
   }
 

@@ -69,6 +69,7 @@ enum PrototypeStateValidator {
     private static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
         nodes.append(node)
         actions += node.onTap ?? []
+        actions += node.onDismiss ?? []
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
@@ -283,7 +284,14 @@ enum PrototypeStateValidator {
 
     /// Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean.
     static func openWhenError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
-        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
+        let names = [
+            "bottomSheet": "Sheet",
+            "dialog": "Dialog",
+            "snackbar": "Snackbar",
+            "menu": "Menu",
+            "tooltip": "Tooltip",
+            "drawer": "Drawer",
+        ]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
         return stored
             .boolValue == nil ? .init(field: "openWhen.key", message: "\(name) requires a boolean state key") : nil

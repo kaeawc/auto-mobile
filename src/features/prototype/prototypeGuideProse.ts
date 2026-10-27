@@ -28,7 +28,7 @@ fling) runs the swiped side's first entry and closes the row. Only one row is op
 tap on an open row closes it instead of running its \`onTap\`. Revealed buttons get the test tag
 \`<rowTestTag>.swipe.<index>\`, counting \`start\` entries first and then \`end\`; they exist only while
 the row is open. Every entry is also an accessibility action (TalkBack custom action, VoiceOver
-action) on the row, so assistive technology can run it without swiping. Reduced motion or spec
+action) on the row, so assistive technology can run it without swiping. The reduced profile snaps row settling; spec
 \`motion: "none"\` snaps instead of animating. Put swipeActions on repeated rows; a row inside a
 horizontal \`pager\` or a \`carousel\` is refused because their drag would compete.
 
@@ -82,7 +82,8 @@ Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optiona
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
-Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. A stack's
+Transitions snap under \`motion: "none"\` or Android animator/transition scale 0, and fade under
+\`motion: "reduced"\` or iOS Reduce Motion. A stack's
 \`transition\` accepts only those four values and no longer animates the stack's own visibility
 (earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
 are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
@@ -161,8 +162,8 @@ are reported in \`platformNotes\`.
 missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
 it cannot be combined with \`equals\`, \`notEquals\`, \`gt\` or \`lt\`, and it applies to data
 conditions only. Style \`shimmer: true\` on a \`box\`, \`row\`, \`column\` or \`card\` sweeps an
-animated highlight over its background and reads "Loading" to accessibility; it is static under
-\`motion: "none"\` or animator scale 0. The canonical trio uses a request's \`statusKey\`:
+animated highlight over its background and reads "Loading" to accessibility; it stays at its rest pose under
+\`motion: "reduced"\`, iOS Reduce Motion, \`motion: "none"\` or Android animator/transition scale 0. The canonical trio uses a request's \`statusKey\`:
 
 - **Loading:** a column with \`visibleWhen: {key: "feedStatus", equals: "loading"}\` that repeats a
   few literal placeholder rows styled \`{shimmer: true, height: {dp: 56}, background:
@@ -174,6 +175,33 @@ animated highlight over its background and reads "Loading" to accessibility; it 
 
 The rows themselves repeat over \`{path: "/feed"}\`. The iOS agent draws shimmer too.
 
+## Style effects
+
+(needs \`prototype_effects_v1\`; no connected device advertises it yet, so the host refuses a spec
+with \`style.effects\` until a renderer ships) \`style.effects\` is 1 to 4 paint-only looks drawn in
+order inside the node's own bounds: \`noise\`, \`gradientMesh\`, \`shimmer\`, \`glow\`,
+\`vignette\`, \`blur\`, \`pixelate\`, \`chromaticAberration\`, \`wave\` and \`ripple\`, each with typed,
+bounded params. Shader source is never accepted. Any effect may loop with \`animate:
+{periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
+across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
+
+## Motion profiles and shared elements
+
+\`motion\` is \`standard\` (default), \`reduced\` or \`none\`. Explicit \`motion: "reduced"\`
+requires \`prototype_reduced_motion_v1\`. iOS Reduce Motion selects the reduced profile;
+Android animator scale or transition scale 0 selects off. Spec \`none\` or system off wins over
+reduced. Reduced replaces spatial animation (slides, scale, container size, presses, swipe-row
+settling, pager scrolling and shared morphs) with a crossfade or snap with fade. Shimmer and
+other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
+Off makes every change instant.
+
+\`sharedKey\` requires \`prototype_shared_element_v1\` and \`visibleWhen\` on the same node.
+Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each key labels exactly two nodes, at most 16 distinct
+keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
+inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
+not visible together. Full motion morphs the pair's bounds between different content; reduced
+uses ordinary visibility fades and off swaps instantly.
+
 ## Motion v2
 
 (needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default
@@ -184,7 +212,8 @@ node's centre without moving siblings. \`transition\` also takes \`slideStart\` 
 (slide in from that edge, mirrored right to left: drawers) and \`scale\`. An \`image\` with
 \`zoomable: {maxScale}\` (1-8) pinches, pans when zoomed and toggles 1x/2x on a double tap, with
 accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
-\`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
+\`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial changes
+snap or crossfade; color and alpha still animate. The iOS agent does not support Motion v2 yet (#14684).
 
 ## Choreography
 
@@ -195,7 +224,8 @@ before the enter starts) besides the plain names, and \`blurReplace\`: a blur-an
 enter one after another in layout order, each \`ms\` apart, including the children a \`repeat\` makes.
 A child's own \`transition.delayMs\` adds to its stagger wait, and no child may wait more than 600 ms
 in all (a literal \`repeat\` is counted; a data-bound one is clamped on the device). Delays are zero
-under \`motion: "none"\` or animator scale 0. Delays apply to enters only. The iOS agent does not
+under \`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial
+transitions become fades. Delays apply to enters only. The iOS agent does not
 support it yet.
 
 ## Charts
@@ -288,11 +318,19 @@ show and subsequent host-local status report the effective value as \`lastResult
 it is absent for sheet/floating windows, dismiss, failed show and adopted prototypes.
 
 
+## Tooltip and drawer
+
+\`tooltip\` requires \`prototype_tooltip_v1\`, boolean \`openWhen: {key, equals}\`, nonblank \`text\`, and exactly one of \`anchorTo\` (a unique node id in the same spec, other than itself) or \`anchor\` (the existing element selector or bounds anchor). Element anchors are resolved by the host to a target rect; native renderers hoist the tooltip as an overlay, not ordinary anchored content. IDs are literal: repeated targets with multiple instances and duplicate component-instance ids are ambiguous and rejected; a repeat with no items supplies no target.
+
+Optional \`caret\` is \`auto\` (default), \`top\`, \`bottom\`, \`start\` or \`end\`: it names the bubble edge pointing at the target, so \`top\` places the bubble below the target. Auto chooses a side with room; auto and explicit sides flip to the opposite side when needed to stay inside the window. Optional strict \`spotlight: {padding?, cornerRadius?}\` draws the scrim role with a rounded hole around the target: integer dp 0..64, defaults 8 and 12 respectively. Without spotlight there is no scrim. Tapping outside the bubble on the spotlight scrim, or tapping the bubble without \`onTap\`, writes \`!equals\` to the open key, then runs optional \`onDismiss\` (1..32 actions). Bubble and scrim tags are \`<testTag>\` and \`<testTag>.close\`. Use one boolean per step for a coach-mark tour; a step's \`onTap\` uses \`setState\` to close its key and open the next step's key. Numeric equality is not supported by \`openWhen\`.
+
+\`drawer\` requires \`prototype_drawer_v1\`, \`edge: "start"|"end"\`, boolean \`openWhen: {key, equals}\` and a \`child\` node. Start/end follow layout direction. The renderer fixes panel width; there is no width field. Optional \`scrim\` accepts the same color value (including mode pairs) as bottomSheet and defaults to the scrim role. Optional \`dismissOnSwipe\` defaults to true, as for bottomSheet. Both nodes accept the common node fields, including \`onTap\`, but no long-press or double-tap handlers.
+
 ## Menu and select
 
 \`menu\` and \`select\` require \`prototype_menus_v1\`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 
-A \`menu\` requires \`openWhen: {key, equals}\` with a boolean equality and 1–16 strict \`items\`. Each item is \`{label, icon?, trailingText?, enabled?, onTap?}\` or exactly \`{type:"divider"}\`. Labels and trailing text are nonempty, icons use the existing icon names, and \`onTap\` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes \`!equals\` to the open key; item actions run after closing.
+A \`menu\` requires \`openWhen: {key, equals}\` with a boolean equality and 1–16 strict \`items\`. Each item is \`{label, icon?, trailingText?, enabled?, onTap?}\` or exactly \`{type:"divider"}\`. Labels and trailing text are nonempty, icons use the existing icon names, and \`onTap\` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window; it opens above its anchor when it does not fit below. An enabled item or outside tap writes \`!equals\` to the open key; item actions run after closing.
 
 A \`select\` requires a string \`stateKey\` and 2–32 \`{value,label}\` options with unique nonempty values and nonempty labels; its optional label is nonempty. It shows the current option’s label, or empty text when no option matches, and a trailing expand indicator. Expansion is local view state. Choosing an option writes the string key, emits the same \`change\` payload as \`radioGroup\`, and collapses the list. Tapping the field again or outside also collapses it. Both nodes support repeat templates and reusable \`use\` components: state keys, menu item labels/trailing text/actions and select labels/option labels bind placeholders.
 
@@ -356,7 +394,8 @@ Grammar:
 - Placeholders are bound in a template child's \`text\`, the label/title/text fields of components
   (button, fab, segmentedButton options, topAppBar, dialog, menu item labels/trailingText, select labels/options, snackbar), state condition operands
   (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
-  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
+  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched. A show or patch lists a placeholder
+  in such a field as \`placeholderFindings\` (for example \`chip.label\` or \`badge.text\`).
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
   \`openWhen.key\`, condition \`key\`s and the \`key\` of \`setState\`, \`toggle\`, \`increment\` and
   \`decrement\`, so \`"key": "liked_{item.id}"\` gives each row its own state. Every bound key must
@@ -675,7 +714,13 @@ every limit counts the expanded tree.
   \`root.children[2] (use postCard) → components.postCard.root.children[1].label\`.
 `;
 
-export const GUIDE_APPEARANCE = `## Light and dark mode
+export const GUIDE_APPEARANCE = `## Style polish
+
+Layered style.shadows (1-3 strict {color,radius,spread?,offset?,inner?}, radius 0-1000 dp, spread and offset axes -1000..1000; omitted spread/offset/inner mean 0/{x:0,y:0}/false), style.cornerStyle circular|continuous (default circular), style.border {width,color? ,gradient?} with exactly one of color or gradient, scroll.fadeEdges {top?,bottom?,start?,end?} (0-1000 dp, at least one), and image.filter {saturation?,tint?} (saturation 0-2, at least one) require prototype_style_polish_v2. shadows excludes elevation and shadowColor. Fades appear only where scrolling remains; start/end mirror in RTL. Colour pairs in shadows and tint, and pairs or role names in border gradient stops also require prototype_theme_modes_v1.
+
+Rendering order: transform, press scale, size, alpha, drop shadows (shadows/elevation before the clip), clip (cornerRadius + cornerStyle), background, gradient, shimmer, border (color or gradient), inner shadows.
+
+## Light and dark mode
 
 A shown prototype has exactly one resolved mode, light or dark. Roles, per-mode values and the
 scheme all read that one mode, on Android and on iOS.
@@ -826,7 +871,8 @@ Authoring choices:
   (#12139).* \`repeat\` expands to real nodes that count against the node limit.
 - **\`motion: "none"\`.** It removes the visibility animations, size animations and press springs
   (changes become instant) and a hidden \`visibleWhen\` node is simply absent, so it is the right
-  choice for automated checks. Motion is also off when the system animation scale is 0.
+  choice for automated checks. Motion is also off when Android animator or transition scale is 0. The reduced profile
+  keeps fades and color/alpha animation while removing spatial movement and ambient loops.
 - **Window format.** On Android an opaque fullscreen prototype is still composited as a
   translucent layer, whatever the spec says. *Being changed (#12140).*
 - **Accessibility events.** The Android accessibility service resolves an event's window type once

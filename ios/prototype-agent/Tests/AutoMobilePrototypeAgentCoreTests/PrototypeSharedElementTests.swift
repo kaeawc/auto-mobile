@@ -67,6 +67,7 @@ final class PrototypeSharedElementTests: XCTestCase {
         XCTAssertFalse(PrototypeSharedElementPlan(node: first, profile: .full, conflictingKeys: ["hero"]).apply)
         XCTAssertTrue(PrototypeSharedElementPlan(node: first, profile: .full, conflictingKeys: []).apply)
     }
+
     func testElementAndBoundsDecisionsForEveryProfile() throws {
         for kind in ["element", "bounds"] {
             let node = try JSONDecoder().decode(PrototypeNode.self, from: Data("""
@@ -82,11 +83,25 @@ final class PrototypeSharedElementTests: XCTestCase {
         }
     }
 
+    func testRejectsSiblingTemplatesOnTheFeedSide() throws {
+        let fixture = try PrototypeSpecFixtures.invalid("shared-v2-repeat-siblings")
+        let data = try JSONEncoder().encode(fixture.spec)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data)) { error in
+            XCTAssertEqual(
+                error as? PrototypeLoadError,
+                .invalidSpec(path: fixture.expectedPath, message: fixture.expectedMessage ?? "")
+            )
+        }
+    }
+
     func testRepeatKeysResolveBeforePlanningFeedToDetail() throws {
         let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
-        let data = try Data(contentsOf: directory.appendingPathComponent("test/fixtures/prototype-spec/valid/shared-v2-repeat.json"))
+        let data = try Data(
+            contentsOf: directory
+                .appendingPathComponent("test/fixtures/prototype-spec/valid/shared-v2-repeat.json")
+        )
         try PrototypeSpecStrictValidator.validate(data: data)
         let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
         let feed = try XCTUnwrap(spec.root.children?.first?.children)
@@ -95,5 +110,4 @@ final class PrototypeSharedElementTests: XCTestCase {
         XCTAssertEqual(detail.resolvedSharedKey, "story-one")
         XCTAssertEqual(PrototypeSharedElementPlan(node: detail, profile: .full).crossfade, true)
     }
-
 }

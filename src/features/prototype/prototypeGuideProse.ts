@@ -200,7 +200,7 @@ Off makes every change instant.
 a container with changing content and crossfades both sides. \`sharedKey\` remains the
 \`prototype_shared_element_v1\` bounds alias; a node cannot set both. Literal v2 keys allow
 letters, digits, underscore and hyphen, starting with a letter or underscore (1-64 characters).
-A spec has at most 16 resolved keys. Literal keys pair exactly two nodes, neither nested in the
+A spec has at most 16 resolved keys, including unmatched feed items. Literal keys pair exactly two nodes, neither nested in the
 other. Inside repeat children, use \`shared: {key: "story-{item.id}", as: "bounds"}\` with
 \`repeat.key: "id"\`: placeholders must name that same field; index and constant keys are refused.
 Each item resolves a distinct key, used at most twice; unmatched feed items remain ordinary cards.

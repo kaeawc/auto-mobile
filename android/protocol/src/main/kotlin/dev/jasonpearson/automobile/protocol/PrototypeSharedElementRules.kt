@@ -12,6 +12,7 @@ internal object PrototypeSharedElementRules {
     val boundary: String,
     val kind: String,
     val templated: Boolean,
+    val repeatPath: String?,
   )
 
   fun error(context: PrototypeStateChecks.Context): PrototypeSpecError? {
@@ -45,7 +46,14 @@ internal object PrototypeSharedElementRules {
       return it
     }
     val occurrence =
-      Occurrence(path, at, boundary(context, path), shared?.text("as") ?: "bounds", '{' in key)
+      Occurrence(
+        path,
+        at,
+        boundary(context, path),
+        shared?.text("as") ?: "bounds",
+        '{' in key,
+        resolvedKeys.repeatPath,
+      )
     for (resolved in resolvedKeys.values) {
       val prior = pairs.getOrPut(resolved) { mutableListOf() }
       pairError(resolved, occurrence, prior, pairs.size)?.let {
@@ -59,6 +67,7 @@ internal object PrototypeSharedElementRules {
   private data class Keys(
     val values: List<String> = emptyList(),
     val error: PrototypeSpecError? = null,
+    val repeatPath: String? = null,
   )
 
   private fun keys(
@@ -98,7 +107,7 @@ internal object PrototypeSharedElementRules {
       )
     if (keys.toSet().size != keys.size)
       return Keys(error = fail(at, "shared key resolves to multiple nodes on the same side"))
-    return Keys(keys)
+    return Keys(keys, repeatPath = parent?.path?.takeUnless { it == path })
   }
 
   private fun templateError(
@@ -149,6 +158,8 @@ internal object PrototypeSharedElementRules {
   ): PrototypeSpecError? =
     when {
       count > 16 -> fail(entry.at, "a spec allows at most 16 sharedKey values")
+      entry.repeatPath != null && prior.any { it.repeatPath == entry.repeatPath } ->
+        fail(entry.at, "shared key resolves to multiple nodes on the same side")
       prior.size == 2 -> fail(entry.at, pairMessage(key))
       prior.any { entry.path.startsWith("${it.path}.") } ->
         fail(entry.at, "sharedKey nodes cannot be nested in each other")

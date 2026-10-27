@@ -213,7 +213,12 @@
         @ViewBuilder private var sharedContent: some View {
             let plan = sharedPlan
             if plan.apply, let key = plan.key, let sharedNamespace {
-                validatedContent.matchedGeometryEffect(id: key, in: sharedNamespace, properties: .frame, isSource: isVisible)
+                validatedContent.matchedGeometryEffect(
+                    id: key,
+                    in: sharedNamespace,
+                    properties: .frame,
+                    isSource: isVisible
+                )
             } else {
                 validatedContent
             }
@@ -236,7 +241,7 @@
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
             // Explicit transition animation fades filtered children even when parent layout snaps.
             let plan = sharedPlan
-            if plan.apply { return plan.crossfade ? .opacity : .identity }
+            if node.shared != nil, plan.apply { return plan.crossfade ? .opacity : .identity }
             return motion.fadeOnly && transition != .instant
                 ? transition.swiftUITransition.animation(.easeInOut(duration: 0.25))
                 : transition.swiftUITransition

@@ -854,7 +854,7 @@ to the state-key characters, with a 64-character resolved limit. Literal keys pa
 nodes. Inside repeat children, a key template must reference the field named by `repeat.key`,
 without index or other-field placeholders. Each instance must resolve a distinct key; at most
 two nodes can use each resolved key. Unmatched repeat items remain ordinary cards. A spec has
-at most 16 resolved keys. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
+at most 16 resolved keys, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
 boundary (including two separate modals). Shared elements across pager pages and `stack` screens
 are not supported.
 
@@ -872,7 +872,6 @@ have unmatched keys until their corresponding detail is shown.
 
 ```json
 {
-  "id": "feed",
   "window": { "placement": { "type": "fullscreen" } },
   "state": { "open": false },
   "root": {

@@ -410,7 +410,8 @@ transition as a real tap, including on part identifiers.
   `@Namespace` per hosting root, under `full` only. `PrototypeSharedElementPlan` selects frame
   matching for `element` and frame matching plus a crossfade for `bounds`. Both kinds crossfade
   under `reduced` and swap under `off`. Repeat children bind `story-{item.id}` only with
-  `repeat.key: "id"`; resolved keys must be unique per side. Unmatched feed items render normally.
+  `repeat.key: "id"`; resolved keys must be unique per side. Unmatched feed items render normally
+  and count toward the spec-wide limit of 16 resolved keys.
   Pairs cannot nest or cross dialog/bottomSheet boundaries; a pair split across hosting roots
   (for example an anchored window layer) does not match geometry.
   The feed-card-to-detail-column spec in [Shared element morphs](../android/prototype-ux.md#shared-element-morphs-15115-prototype_shared_element_v1)

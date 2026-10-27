@@ -734,6 +734,7 @@
     "shared-v2-repeat-index.json",
     "shared-v2-repeat-no-key.json",
     "shared-v2-repeat-other-field.json",
+    "shared-v2-repeat-siblings.json",
     "shared-v2-template-outside.json",
     "sheet-height-over-max.json",
     "sheet-nonboolean.json",

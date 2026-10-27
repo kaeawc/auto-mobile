@@ -31,6 +31,7 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case locationResult = "location_result"
     case hingeAngleResult = "hinge_angle_result"
     case appearanceResult = "appearance_result"
+    case siriResult = "siri_result"
     case clipboardResult = "clipboard_result"
     case currentFocusResult = "current_focus_result"
     case traversalOrderResult = "traversal_order_result"

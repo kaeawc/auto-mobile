@@ -98,6 +98,17 @@
     "list-paging.json",
     "list-prepend-data.json",
     "loading-states.json",
+    "loop-eight-nodes.json",
+    "loop-eight-with-shimmer.json",
+    "loop-lower-bounds.json",
+    "loop-pulse-default.json",
+    "loop-pulse-finite.json",
+    "loop-pulse-infinite.json",
+    "loop-repeat-eight.json",
+    "loop-spin-default.json",
+    "loop-spin-finite.json",
+    "loop-spin-infinite.json",
+    "loop-upper-bounds.json",
     "material-app-bar-dialog-pickers.json",
     "material-controls.json",
     "material-slider-chip-card.json",
@@ -815,6 +826,21 @@
     "long-press-dangling-pager.json",
     "long-press-empty-list.json",
     "long-press-on-button.json",
+    "loop-effect-undeclared.json",
+    "loop-iterations-0.json",
+    "loop-iterations-1.json",
+    "loop-iterations-2.json",
+    "loop-nine-nodes.json",
+    "loop-periodMs-0.json",
+    "loop-periodMs-1.json",
+    "loop-periodMs-2.json",
+    "loop-pulse-style.json",
+    "loop-pulse-styleWhen.json",
+    "loop-repeat-cap-before-rest.json",
+    "loop-repeat-nine.json",
+    "loop-spin-style.json",
+    "loop-spin-styleWhen.json",
+    "loop-unknown-field.json",
     "max-height-over-max.json",
     "max-width-over-max.json",
     "media-data-empty-object.json",
@@ -1479,6 +1505,7 @@
     "strict-gate-prototype_lazy_list_v1.json",
     "strict-gate-prototype_linkify_v1.json",
     "strict-gate-prototype_loading_states_v1.json",
+    "strict-gate-prototype_loops_v1.json",
     "strict-gate-prototype_menus_v1.json",
     "strict-gate-prototype_motion_tokens_v1.json",
     "strict-gate-prototype_motion_v2.json",
@@ -1996,6 +2023,15 @@
     "checks-form.json": ["prototype_checks_v1"],
     "checks-rules.json": ["prototype_checks_v1"],
     "choreography.json": ["prototype_choreography_v1", "prototype_motion_v2"],
+    "clipboard-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-has-text.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-paste-button.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-paste.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1"
+    ],
+    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
     "color-role-and-corner-tokens.json": [],
     "component-gallery.json": [],
     "content-description.json": [],
@@ -2045,6 +2081,9 @@
     "gestures.json": ["prototype_gestures_v1"],
     "grid-adaptive-min-width.json": ["prototype_flow_grid_v1"],
     "grid-fixed-columns-span.json": ["prototype_flow_grid_v1"],
+    "icon-effects-integer-spellings.json": ["prototype_icon_effects_v1"],
+    "icon-effects-repeat.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
+    "icon-effects.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
     "integer-json-spellings.json": [],
     "keyframes-alpha-pulse.json": ["prototype_keyframes_v1"],
     "keyframes-data-trigger.json": ["prototype_data_model_v1", "prototype_keyframes_v1"],
@@ -2095,6 +2134,17 @@
       "prototype_lazy_list_v1"
     ],
     "loading-states.json": ["prototype_data_model_v1", "prototype_loading_states_v1"],
+    "loop-eight-nodes.json": ["prototype_loops_v1"],
+    "loop-eight-with-shimmer.json": ["prototype_loading_states_v1", "prototype_loops_v1"],
+    "loop-lower-bounds.json": ["prototype_loops_v1"],
+    "loop-pulse-default.json": ["prototype_loops_v1"],
+    "loop-pulse-finite.json": ["prototype_loops_v1"],
+    "loop-pulse-infinite.json": ["prototype_loops_v1"],
+    "loop-repeat-eight.json": ["prototype_loops_v1"],
+    "loop-spin-default.json": ["prototype_loops_v1"],
+    "loop-spin-finite.json": ["prototype_loops_v1"],
+    "loop-spin-infinite.json": ["prototype_loops_v1"],
+    "loop-upper-bounds.json": ["prototype_loops_v1"],
     "material-app-bar-dialog-pickers.json": [],
     "material-controls.json": [],
     "material-slider-chip-card.json": [],
@@ -2108,6 +2158,9 @@
     "media-tab-item-data.json": ["prototype_data_model_v1", "prototype_platform_media_items_v1"],
     "menu-overflow.json": ["prototype_menus_v1"],
     "motion-none.json": [],
+    "motion-tokens-default.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-fast.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-slow.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
     "motion-v2.json": ["prototype_motion_v2"],
     "motion3-alpha.json": ["prototype_motion_v2"],
     "motion3-expressive.json": ["prototype_motion_v3"],
@@ -2150,6 +2203,56 @@
       "prototype_lazy_list_v1"
     ],
     "press-scale.json": [],
+    "realtime-channels.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-data-writes.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_v1"
+    ],
+    "realtime-opaque-looking-id.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-review-boundaries.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_device_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1",
+      "prototype_text_field_options_v1"
+    ],
+    "realtime-review-channel-at-limit.json": [
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-review-legacy-bindings.json": [
+      "prototype_platform_device_v1",
+      "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-review-menu-bindings.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_menus_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-sse.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_device_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
     "reduced-motion.json": ["prototype_reduced_motion_v1"],
     "repeat-component-labels.json": [],
     "repeat-exact-node-limit.json": [],
@@ -2161,6 +2264,57 @@
       "prototype_network_device_v1",
       "prototype_network_v1"
     ],
+    "request-upload-16-parts.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-data.json": [
+      "prototype_data_model_v1",
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
+    "request-upload-file.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-form.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-progress-only.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-progress.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-review-form-data-keys.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
+    "request-upload.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "routes-bindings.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1",
+      "prototype_storage_v1"
+    ],
+    "routes-boundaries.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
+    "routes-integration-list-refresh.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1",
+      "prototype_refresh_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "routes-literal-anchor-selector.json": ["prototype_tooltip_v1"],
+    "routes-literal-chart-series.json": ["prototype_chart_v1", "prototype_data_model_v1"],
+    "routes-literal-fields.json": ["prototype_text_field_options_v1"],
+    "routes-literal-items-label.json": [],
+    "routes-literal-list-item.json": [],
+    "routes-literal-options.json": ["prototype_menus_v1"],
+    "routes-literal-scroll-target.json": [
+      "prototype_chat_scroll_v1",
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_text_field_actions_v1"
+    ],
+    "routes-long-param-name.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "routes-menu-bound-keys.json": [
+      "prototype_menus_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "routes-repeat-alias-backcompat.json": [],
+    "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
     "row-weight-size-bounds.json": [],
     "scroll-motion-all.json": ["prototype_scroll_motion_v1"],
     "scroll-motion-exact-cap.json": ["prototype_scroll_motion_v1"],
@@ -2174,13 +2328,18 @@
     "set-state-matching-values.json": [],
     "set-state-repeat-templated-value.json": [],
     "set-state-unbound-key.json": [],
+    "share-alias-item.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-bound.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-contact.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-file-name-128-bytes.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-file-placeholders.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-files.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-full.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-templated-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-text.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-url-grapheme-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-url-grapheme-path.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "shared-element-16-keys.json": ["prototype_shared_element_v1"],
     "shared-element.json": ["prototype_shared_element_v1"],
     "shared-v2-alias.json": ["prototype_shared_element_v1", "prototype_shared_element_v2"],
@@ -2191,6 +2350,29 @@
     "shared-v2-same-dialog.json": ["prototype_shared_element_v2"],
     "sheet-bindings.json": [],
     "stack-navigation.json": ["prototype_stack_v1"],
+    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
+    "stack-patterns-zoom-idle.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom-shared-v2.json": [
+      "prototype_shared_element_v2",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom.json": [
+      "prototype_shared_element_v1",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
     "stack-transitions.json": ["prototype_stack_transitions_v1", "prototype_stack_v1"],
     "strict-action-depth-boundary.json": ["prototype_network_v1"],
     "strict-bom.json": [],
@@ -2441,154 +2623,10 @@
     "transition-slide.json": [],
     "width-dp-at-max.json": [],
     "window-dead-taps.json": [],
+    "window-motion.json": ["prototype_window_motion_v1"],
     "z-effects-all-types.json": ["prototype_effects_v1"],
     "z-effects-animated-phase.json": ["prototype_effects_v1"],
     "z-effects-at-limits.json": ["prototype_effects_v1"],
-    "z-effects-style-when.json": ["prototype_effects_v1"],
-    "routes-bindings.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1",
-      "prototype_storage_v1"
-    ],
-    "routes-boundaries.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
-    "routes-integration-list-refresh.json": [
-      "prototype_data_model_v1",
-      "prototype_lazy_list_v1",
-      "prototype_refresh_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1"
-    ],
-    "routes-literal-anchor-selector.json": ["prototype_tooltip_v1"],
-    "routes-literal-chart-series.json": ["prototype_chart_v1", "prototype_data_model_v1"],
-    "routes-literal-fields.json": ["prototype_text_field_options_v1"],
-    "routes-literal-items-label.json": [],
-    "routes-literal-list-item.json": [],
-    "routes-literal-options.json": ["prototype_menus_v1"],
-    "routes-literal-scroll-target.json": [
-      "prototype_chat_scroll_v1",
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_text_field_actions_v1"
-    ],
-    "routes-long-param-name.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes-menu-bound-keys.json": [
-      "prototype_menus_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1"
-    ],
-    "routes-repeat-alias-backcompat.json": [],
-    "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
-    "window-motion.json": ["prototype_window_motion_v1"],
-    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
-    "stack-patterns-zoom-idle.json": [
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "stack-patterns-zoom.json": [
-      "prototype_shared_element_v1",
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "stack-patterns.json": [
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "stack-patterns-zoom-shared-v2.json": [
-      "prototype_shared_element_v2",
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "realtime-channels.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-data-writes.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_v1"
-    ],
-    "realtime-opaque-looking-id.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_lazy_list_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-review-boundaries.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_device_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1",
-      "prototype_text_field_options_v1"
-    ],
-    "realtime-review-legacy-bindings.json": [
-      "prototype_platform_device_v1",
-      "prototype_platform_test_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-review-menu-bindings.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_menus_v1",
-      "prototype_platform_device_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-sse.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_device_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "clipboard-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-has-text.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-paste-button.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-paste.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_clipboard_v1",
-      "prototype_platform_v1"
-    ],
-    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "icon-effects-repeat.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
-    "icon-effects.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
-    "icon-effects-integer-spellings.json": ["prototype_icon_effects_v1"],
-    "realtime-review-channel-at-limit.json": [
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "request-upload-16-parts.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-data.json": [
-      "prototype_data_model_v1",
-      "prototype_network_upload_v1",
-      "prototype_network_v1"
-    ],
-    "request-upload-file.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-form.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-progress-only.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-progress.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-review-form-data-keys.json": [
-      "prototype_network_upload_v1",
-      "prototype_network_v1"
-    ],
-    "share-file-name-128-bytes.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-url-grapheme-path.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-url-grapheme-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-alias-item.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "motion-tokens-fast.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "motion-tokens-default.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "motion-tokens-slow.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"]
+    "z-effects-style-when.json": ["prototype_effects_v1"]
   }
 }

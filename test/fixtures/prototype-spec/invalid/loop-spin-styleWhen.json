@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "loop": {
+        "effect": "spin",
+        "periodMs": 800
+      },
+      "styleWhen": [
+        {
+          "when": {
+            "key": "on",
+            "equals": true
+          },
+          "style": {
+            "rotation": 1
+          }
+        }
+      ]
+    },
+    "state": {
+      "on": true
+    }
+  },
+  "expectedPath": "root.loop",
+  "expectedMessage": "spin loop cannot set style.rotation"
+}

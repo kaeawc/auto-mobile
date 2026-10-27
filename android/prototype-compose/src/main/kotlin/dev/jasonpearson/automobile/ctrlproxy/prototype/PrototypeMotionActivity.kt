@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -28,7 +29,20 @@ data class PrototypeMotionState(val active: Int, val loops: Int) {
  * accessibility capture thread, so every access is synchronized.
  */
 @InternalAutoMobilePrototypeApi
-class PrototypeMotionActivity {
+class PrototypeMotionActivity(
+  private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+  private val captureHoldMs: Long = 1500L,
+) {
+  private val captureUntil = mutableLongStateOf(Long.MIN_VALUE)
+
+  /** Renewed by a hierarchy metadata read; snapshot state invalidates the loop draw immediately. */
+  fun holdForCapture() {
+    synchronized(this) { captureUntil.longValue = clock() + captureHoldMs }
+  }
+
+  /** Read during drawing, with an injected monotonic clock for bounded, delay-free tests. */
+  fun captureHeld(): Boolean = synchronized(this) { clock() < captureUntil.longValue }
+
   private val settling = HashSet<Any>()
   private val looping = HashSet<Any>()
 
@@ -48,6 +62,12 @@ class PrototypeMotionActivity {
       settling.remove(owner)
       looping.remove(owner)
     }
+  }
+
+  /** The metadata publication boundary, shared by live and exiting windows. */
+  fun snapshotForCapture(): PrototypeMotionState {
+    holdForCapture()
+    return snapshot()
   }
 
   fun snapshot(): PrototypeMotionState =

@@ -33,6 +33,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",
+            "prototype_loops_v1", // Attention loops are Android only until #14684.
             "prototype_motion_v3", // Android only until #14684.
             "prototype_window_motion_v1",
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",

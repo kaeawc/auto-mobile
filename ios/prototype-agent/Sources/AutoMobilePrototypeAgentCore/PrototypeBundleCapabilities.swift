@@ -206,6 +206,7 @@ enum PrototypeBundleCapabilities {
             }
             if key == "animate", child.objectFields?["tempo"] != nil { names.insert("prototype_motion_tokens_v1") }
             if key == "keyframes" { names.insert("prototype_keyframes_v1"); continue }
+            if key == "loop" { names.insert("prototype_loops_v1"); continue }
             if key == "style", child.objectFields?["shader"] != nil { names.insert("prototype_custom_shaders_v1") }
             if key == "style", child.objectFields?["effects"] != nil { names.insert("prototype_effects_v1") }
             if key == "style", child.objectFields?["runSpacing"] != nil { names.insert("prototype_flow_grid_v1") }

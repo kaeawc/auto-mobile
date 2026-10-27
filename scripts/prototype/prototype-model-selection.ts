@@ -50,6 +50,7 @@ export const prototypeModelSelection = {
   channelRoute: { languages: ["kotlin"], fieldTypes: { when: { kotlin: "JsonElement" } } },
   iconEffectTrigger: {},
   iconEffect: {},
+  loop: { languages: ["kotlin"] },
   press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
@@ -67,7 +68,7 @@ export const prototypeModelSelection = {
     ...nodeModelOptions,
     kotlinBase: {
       ...nodeModelOptions.kotlinBase,
-      fields: [...nodeModelOptions.kotlinBase.fields, "keyframes"],
+      fields: [...nodeModelOptions.kotlinBase.fields, "keyframes", "loop"],
     },
   },
   routeEntry: { languages: ["kotlin"] },

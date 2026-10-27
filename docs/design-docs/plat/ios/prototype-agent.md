@@ -1244,6 +1244,12 @@ until unmounted because SF Symbols provides no completion callback. iOS has no
 shared motion-active wire signal or shimmer reporter yet; this local signal is
 not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
 
+Node `loop: {effect: "pulse" | "spin", periodMs, iterations?}` is validated against the shared
+contract, including integer period 400–4000 ms, finite iterations 1–20 or `"infinite"`, the
+eight-node expanded-tree limit, and identity rest-pose conflicts in style and conditional styles.
+The agent renders no attention loops and does not advertise `prototype_loops_v1`; the host
+refuses a loop spec against it. Shimmer does not consume the attention-loop limit.
+
 Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.
 
 ### Motion tokens

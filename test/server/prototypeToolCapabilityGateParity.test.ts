@@ -197,6 +197,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ...fixture({ ...label, animate: { tempo: "fast" } }),
     with: ["prototype_motion_v2"],
   },
+  prototype_loops_v1: fixture({ ...label, loop: { effect: "pulse", periodMs: 800 } }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_keyframes_v1: fixture({
     ...label,

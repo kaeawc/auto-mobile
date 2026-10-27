@@ -1,0 +1,16 @@
+{
+  "id": "loops",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Attention",
+    "loop": {
+      "effect": "spin",
+      "periodMs": 800
+    }
+  }
+}

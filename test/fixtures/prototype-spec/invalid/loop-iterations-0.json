@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Attention",
+      "loop": {
+        "effect": "pulse",
+        "periodMs": 800,
+        "iterations": 0
+      }
+    }
+  },
+  "expectedPath": "root.loop.iterations",
+  "expectedMessage": "Invalid number value"
+}

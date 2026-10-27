@@ -1,0 +1,89 @@
+{
+  "spec": {
+    "id": "loops",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        },
+        {
+          "type": "text",
+          "text": "Attention",
+          "loop": {
+            "effect": "pulse",
+            "periodMs": 800
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[8].loop",
+  "expectedMessage": "Loop node limit exceeded"
+}

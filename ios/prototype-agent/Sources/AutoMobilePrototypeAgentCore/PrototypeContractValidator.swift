@@ -56,6 +56,7 @@ struct PrototypeContractValidator {
     var nodes = 0
     var images = 0
     var effects = PrototypeEffectUses()
+    var loopNodes = 0
     var keyframeNodes = 0
     var referenceDepth: [String: Int] = [:]
 
@@ -190,6 +191,7 @@ struct PrototypeContractValidator {
             if keyframeNodes > (limits["MAX_PROTOTYPE_KEYFRAME_NODES"] ?? 0) {
                 throw Self.invalid("\(path).keyframes", "Keyframe node limit exceeded")
             }
+            try PrototypeLoops.charge(node, path: path, count: &loopNodes)
             effects.add(PrototypeEffectUses(node: node))
             if effects.total > (limits["MAX_PROTOTYPE_EFFECTS"] ?? 0) {
                 throw Self.invalid(path, "Effect limit exceeded")

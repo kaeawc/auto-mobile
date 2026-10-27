@@ -1,0 +1,17 @@
+{
+  "id": "loops",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Attention",
+    "loop": {
+      "effect": "pulse",
+      "periodMs": 400,
+      "iterations": 1
+    }
+  }
+}

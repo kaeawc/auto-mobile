@@ -70,6 +70,7 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "iOS agent keeps the transition type only; the host refuses delays, stagger and blurReplace (#15247)",
     prototype_custom_shaders_v1:
       "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
+    prototype_loops_v1: "Attention loops are Android only until #14684",
     prototype_motion_v3: "Expressive, press and layout animate are Android only until #14684",
     prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
     prototype_motion_v2:

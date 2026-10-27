@@ -226,7 +226,18 @@ interface PrototypeSpecCapabilityGate {
 }
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
+import {
+  PROTOTYPE_LOOPS_CAPABILITY,
+  prototypeLoopFields,
+  prototypeLoopsUnsupportedMessage,
+} from "./prototypeLoops";
+
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_LOOPS_CAPABILITY,
+    fields: prototypeLoopFields,
+    unsupportedMessage: prototypeLoopsUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_MOTION_TOKENS_CAPABILITY,
     fields: prototypeMotionTokenFields,

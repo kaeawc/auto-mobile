@@ -1,3 +1,4 @@
+import { prototypeMotionErrors } from "./prototypeMotionValidation";
 import { prototypeMotionObjectError } from "./prototypeMotionTokens";
 import { prototypeRoutesError } from "./prototypeRoutes";
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
@@ -20,9 +21,6 @@ import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
 import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
-import { prototypeChoreographyError } from "./prototypeChoreography";
-import { prototypeMotionV3Error } from "./prototypeMotionV3";
-import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { prototypePlatformError, prototypeReservedTestTagError } from "./prototypePlatform";
@@ -31,7 +29,8 @@ import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
-import { chargeKeyframeNode, prototypeKeyframesError } from "./prototypeKeyframes";
+import { chargeMotionNode } from "./prototypeMotionBudget";
+import { prototypeKeyframesError } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { jsonCost } from "./prototypeJsonCost";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -163,9 +162,9 @@ function chargeNodeBudgets(
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
   }
-  const keyframeLimit = chargeKeyframeNode(node, context, contract.limits, path);
-  if (keyframeLimit) {
-    return fail(keyframeLimit.path, keyframeLimit.message);
+  const motionLimit = chargeMotionNode(node, context, contract.limits, path);
+  if (motionLimit) {
+    return fail(motionLimit.path, motionLimit.message);
   }
   const uses = effectUses(node);
   context.effects += uses.total;
@@ -834,15 +833,6 @@ function hostVocabularyError(
   );
 }
 
-/** Motion and choreography share one set of located nodes. */
-function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
-  return (
-    prototypeMotionV3Error(nodes) ??
-    prototypeMotionV2Error(nodes) ??
-    prototypeChoreographyError(nodes)
-  );
-}
-
 /** Cross-node references share the component-expanded tree and repeat cardinalities. */
 function nodeReferenceErrors(
   context: Context,
@@ -870,7 +860,7 @@ function behaviourErrors(
     hostVocabularyError(value, context) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
-    motionErrors(context.nodes) ??
+    prototypeMotionErrors(context.nodes) ??
     prototypeKeyframesError(context.nodes, data) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??

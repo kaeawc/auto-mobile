@@ -22494,6 +22494,35 @@
                       "required": ["key", "as"],
                       "additionalProperties": false
                     },
+                    "loop": {
+                      "type": "object",
+                      "properties": {
+                        "effect": {
+                          "type": "string",
+                          "enum": ["pulse", "spin"]
+                        },
+                        "periodMs": {
+                          "type": "integer",
+                          "minimum": 400,
+                          "maximum": 4000
+                        },
+                        "iterations": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "infinite"
+                            },
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 20
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["effect", "periodMs"],
+                      "additionalProperties": false
+                    },
                     "keyframes": {
                       "type": "object",
                       "properties": {
@@ -22952,6 +22981,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -23094,6 +23126,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -23190,6 +23225,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -23280,6 +23318,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -23388,6 +23429,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -23488,6 +23532,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -23650,6 +23697,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -23796,6 +23846,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -23946,6 +23999,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -24022,6 +24078,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -24297,6 +24356,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -24404,6 +24466,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -24497,6 +24562,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -24587,6 +24655,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -24666,6 +24737,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -24757,6 +24831,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -24867,6 +24944,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -24970,6 +25050,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -25111,6 +25194,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -25213,6 +25299,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -25303,6 +25392,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -25398,6 +25490,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -25484,6 +25579,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -25575,6 +25673,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -25675,6 +25776,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -25780,6 +25884,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -25861,6 +25968,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -25941,6 +26051,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -26028,6 +26141,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -26157,6 +26273,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -26278,6 +26397,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -26394,6 +26516,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -26486,6 +26611,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -26610,6 +26738,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -26701,6 +26832,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -26797,6 +26931,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -26885,6 +27022,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -27049,6 +27189,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -27175,6 +27318,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
@@ -27307,6 +27453,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -27427,6 +27576,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -27544,6 +27696,9 @@
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
+                    },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
@@ -27643,6 +27798,9 @@
                     },
                     "shared": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "loop": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/loop"
                     },
                     "keyframes": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"

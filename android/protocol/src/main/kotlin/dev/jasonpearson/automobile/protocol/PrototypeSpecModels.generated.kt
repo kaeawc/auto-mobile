@@ -65,6 +65,13 @@ data class PrototypeIconEffect(
 )
 
 @Serializable
+data class PrototypeLoop(
+  val effect: String,
+  val periodMs: Int,
+  val iterations: PrototypeIconEffectRepeat? = null,
+)
+
+@Serializable
 data class PrototypePress(
   val scale: Double? = null,
   val alpha: Double? = null,
@@ -361,6 +368,7 @@ sealed class PrototypeNode {
   abstract val onAppear: List<PrototypeAction>?
   abstract val semantics: PrototypeSemantics?
   abstract val keyframes: JsonObject?
+  abstract val loop: PrototypeLoop?
 }
 
 @SerialName("box")
@@ -388,6 +396,7 @@ data class PrototypeBoxNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   /** Spaces the enters of `visibleWhen` children apart (#15247). */
@@ -419,6 +428,7 @@ data class PrototypeRowNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val swipeActions: PrototypeSwipeActions? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
@@ -451,6 +461,7 @@ data class PrototypeColumnNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   /** Spaces the enters of `visibleWhen` children apart (#15247). */
@@ -480,6 +491,7 @@ data class PrototypeFlowNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val maxLines: Int? = null,
@@ -508,6 +520,7 @@ data class PrototypeGridNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val columns: PrototypeGridColumns,
@@ -541,6 +554,7 @@ data class PrototypeCarouselNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
   val variant: String? = null,
@@ -573,6 +587,7 @@ data class PrototypeTextNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val text: String? = null,
   val spans: List<PrototypeTextSpan>? = null,
   /** Mentions, hashtags and URLs in [text] as links (`prototype_linkify_v1`, #14233). */
@@ -605,6 +620,7 @@ data class PrototypeImageNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
   val asset: PrototypeModeValue,
   val contentScale: String = "fit",
@@ -638,6 +654,7 @@ data class PrototypeIconNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val effect: PrototypeIconEffect? = null,
   val name: String,
   /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
@@ -667,6 +684,7 @@ data class PrototypeSpacerNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
 ) : PrototypeNode()
 
 @SerialName("textField")
@@ -692,6 +710,7 @@ data class PrototypeTextFieldNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val placeholder: String? = null,
   val label: String? = null,
@@ -737,6 +756,7 @@ data class PrototypeSwitchNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val label: String? = null,
   val checks: List<PrototypeCheck>? = null,
@@ -767,6 +787,7 @@ data class PrototypeCheckboxNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val label: String? = null,
   val checks: List<PrototypeCheck>? = null,
@@ -797,6 +818,7 @@ data class PrototypeButtonNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val label: String,
   val variant: String = "filled",
   val icon: String? = null,
@@ -826,6 +848,7 @@ data class PrototypeRadioGroupNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
   val checks: List<PrototypeCheck>? = null,
@@ -856,6 +879,7 @@ data class PrototypeSelectNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
   val label: String? = null,
@@ -884,6 +908,7 @@ data class PrototypeListItemNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val headline: String,
   val supporting: String? = null,
   val leadingIcon: String? = null,
@@ -915,6 +940,7 @@ data class PrototypeSliderNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val label: String? = null,
   val min: Double,
@@ -948,6 +974,7 @@ data class PrototypeChipNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val label: String,
   val variant: String? = null,
   val stateKey: String? = null,
@@ -979,6 +1006,7 @@ data class PrototypeCardNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val variant: String = "filled",
   val children: List<PrototypeNode>,
 ) : PrototypeNode()
@@ -1007,6 +1035,7 @@ data class PrototypeIconButtonNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val icon: String,
   val variant: String = "standard",
   val enabledWhen: PrototypeCondition? = null,
@@ -1036,6 +1065,7 @@ data class PrototypeFabNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val icon: String,
   val label: String? = null,
   val size: String = "regular",
@@ -1066,6 +1096,7 @@ data class PrototypeSegmentedButtonNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
 ) : PrototypeNode()
@@ -1094,6 +1125,7 @@ data class PrototypeTopAppBarNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val title: String,
   val variant: String = "small",
   val navigationIcon: PrototypeAppBarAction? = null,
@@ -1126,6 +1158,7 @@ data class PrototypeDividerNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val orientation: String = "horizontal",
 ) : PrototypeNode()
 
@@ -1153,6 +1186,7 @@ data class PrototypeBadgeNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val text: String? = null,
 ) : PrototypeNode()
 
@@ -1183,6 +1217,7 @@ data class PrototypeProgressNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val variant: String = "linear",
   val stateKey: String? = null,
   val max: Double? = null,
@@ -1215,6 +1250,7 @@ data class PrototypeDialogNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val openWhen: PrototypeSheetCondition,
   val title: String? = null,
   val text: String? = null,
@@ -1247,6 +1283,7 @@ data class PrototypeMenuNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val openWhen: PrototypeSheetCondition,
   val items: List<PrototypeMenuItem>,
 ) : PrototypeNode()
@@ -1279,6 +1316,7 @@ data class PrototypeSnackbarNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val openWhen: PrototypeSheetCondition,
   val text: String,
   val action: PrototypeDialogButton? = null,
@@ -1309,6 +1347,7 @@ data class PrototypeTimePickerNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val hourKey: String,
   val minuteKey: String,
   val is24Hour: Boolean? = null,
@@ -1341,6 +1380,7 @@ data class PrototypeDatePickerNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
@@ -1370,6 +1410,7 @@ data class PrototypeScrollNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val axis: String = "vertical",
   val refresh: PrototypeScrollRefresh? = null,
   /** Chat lists (`prototype_chat_scroll_v1`, #14232): anchored at the end of its content. */
@@ -1407,6 +1448,7 @@ data class PrototypePagerNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val children: List<PrototypeNode>,
   val axis: String? = null,
   val pageSpacing: Double? = null,
@@ -1439,6 +1481,7 @@ data class PrototypeTabBarNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
@@ -1470,6 +1513,7 @@ data class PrototypeBottomNavNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
@@ -1500,6 +1544,7 @@ data class PrototypeBottomSheetNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val child: PrototypeNode,
   val openWhen: PrototypeSheetCondition,
   val detents: List<PrototypeDetent>,
@@ -1531,6 +1576,7 @@ data class PrototypeSearchBarNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val stateKey: String,
   val placeholder: String? = null,
   val leadingIcon: String? = null,
@@ -1564,6 +1610,7 @@ data class PrototypeStackNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val start: String,
   val screens: Map<String, PrototypeNode>,
   val routes: Map<String, PrototypeRoute>? = null,
@@ -1597,6 +1644,7 @@ data class PrototypeChartNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val variant: String,
   val series: List<PrototypeChartSeries>,
   val yRange: PrototypeChartRange? = null,
@@ -1627,6 +1675,7 @@ data class PrototypeTooltipNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val openWhen: PrototypeSheetCondition,
   val text: String,
   val anchorTo: String? = null,
@@ -1658,6 +1707,7 @@ data class PrototypeDrawerNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val child: PrototypeNode,
   val edge: String,
   val openWhen: PrototypeSheetCondition,
@@ -1688,6 +1738,7 @@ data class PrototypeListNode(
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
   override val keyframes: JsonObject? = null,
+  override val loop: PrototypeLoop? = null,
   val axis: String = "vertical",
   val refresh: PrototypeScrollRefresh? = null,
   val repeat: PrototypeRepeat,

@@ -814,7 +814,9 @@
       "delayMs": 10
     },
     "keyframes": {
-      "trigger": { "key": "enabled" },
+      "trigger": {
+        "key": "enabled"
+      },
       "durationMs": 600,
       "tracks": {
         "scale": [
@@ -871,6 +873,11 @@
     "press": {
       "scale": 0.9,
       "alpha": 0.8
+    },
+    "loop": {
+      "effect": "spin",
+      "periodMs": 800,
+      "iterations": 2
     }
   },
   "actionRequestFilled": {
@@ -976,5 +983,10 @@
     },
     "filename": "photo.png",
     "contentType": "image/png"
+  },
+  "loop": {
+    "effect": "pulse",
+    "periodMs": 1200,
+    "iterations": "infinite"
   }
 }

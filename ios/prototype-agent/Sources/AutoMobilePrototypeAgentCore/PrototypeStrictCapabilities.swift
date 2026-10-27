@@ -174,6 +174,7 @@ enum PrototypeStrictCapabilities {
                 if key == "empty" || key == "shimmer" { need("loading_states") }
                 if key == "effects" { need("effects") }
                 if key == "keyframes" { need("keyframes") }
+                if key == "loop" { need("loops") }
                 if key == "animate", child.objectFields?["tempo"] != nil { need("motion_tokens") }
                 let transitionType = child.objectFields?["type"]?.stringValue ?? child.stringValue ?? ""
                 if ["animate", "scale", "rotation", "zoomable"]
@@ -197,7 +198,7 @@ enum PrototypeStrictCapabilities {
                 if key == "linkify" {
                     if let actions = child
                         .objectFields?["onTap"] { scan(actions, field: "onTap", routeAlias: routeAlias) }
-                } else if !["series", "effects", "keyframes", "scrollLinked", "scrollTransition", "press"]
+                } else if !["series", "effects", "keyframes", "loop", "scrollLinked", "scrollTransition", "press"]
                     .contains(key) { scan(child, field: key, routeAlias: routeAlias) }
             }
         }

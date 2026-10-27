@@ -50,10 +50,14 @@ internal fun Modifier.prototypeShimmer(enabled: Boolean): Modifier {
       infiniteRepeatable(tween(SHIMMER_MS, easing = LinearEasing), RepeatMode.Restart),
       label = "prototypeShimmerProgress",
     )
+  val activity = LocalPrototypeMotionActivity.current
   return busy.drawWithContent {
     drawContent()
+    // Retain the frame dependency while held so the band resumes at the deadline.
+    val phase = progress
+    if (activity?.captureHeld() == true) return@drawWithContent
     val band = size.width / 2
-    val centre = prototypeShimmerCentre(progress, size.width, band)
+    val centre = prototypeShimmerCentre(phase, size.width, band)
     drawRect(
       Brush.linearGradient(
         listOf(Color.Transparent, Color.White.copy(alpha = SHIMMER_ALPHA), Color.Transparent),

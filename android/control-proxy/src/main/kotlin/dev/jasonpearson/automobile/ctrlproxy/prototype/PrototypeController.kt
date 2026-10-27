@@ -264,7 +264,7 @@ class PrototypeController(
           palettes = listOf(prototypeShownPalette(shown)),
           appearance = shown.appearance,
         )
-        .copy(motion = runtime.motionActivity.snapshot())
+        .copy(motion = runtime.motionActivity.snapshotForCapture())
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype window metadata unavailable", error)
       null

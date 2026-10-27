@@ -20,6 +20,7 @@ internal object PrototypeRepeatTree {
     var images: Int = 0,
     var effects: Int = 0,
     var animatedEffects: Int = 0,
+    var loopNodes: Int = 0,
     var keyframeNodes: Int = 0,
   )
 
@@ -170,6 +171,8 @@ internal object PrototypeRepeatTree {
         ++budget.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
     )
       return fail("$path.keyframes", "Keyframe node limit exceeded")
+    if ("loop" in node && ++budget.loopNodes > PrototypeSpecValidator.MAX_PROTOTYPE_LOOPS)
+      return fail("$path.loop", "Loop node limit exceeded")
     PrototypeEffectRules.chargeExpanded(node, at, budget)?.let {
       return it
     }

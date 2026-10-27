@@ -37,6 +37,7 @@ object AutoMobilePrototype {
       "prototype_format_v1",
       "prototype_gestures_v1",
       "prototype_keyframes_v1",
+      "prototype_loops_v1",
       "prototype_motion_tokens_v1",
       "prototype_lazy_list_v1",
       "prototype_icon_effects_v1",

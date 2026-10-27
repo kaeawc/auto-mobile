@@ -15,6 +15,7 @@ struct PrototypeStrictRepeats {
     var nodes = 0
     var images = 0
     var effects = PrototypeEffectUses()
+    var loopNodes = 0
     var keyframeNodes = 0
 
     static func children(_ node: [String: JSONValue], path: String) -> [PrototypeLocatedValue] {
@@ -261,6 +262,7 @@ struct PrototypeStrictRepeats {
         if keyframeNodes > PrototypeContractValidator.limit("MAX_PROTOTYPE_KEYFRAME_NODES") {
             throw PrototypeContractValidator.invalid("\(path).keyframes", "Keyframe node limit exceeded")
         }
+        try PrototypeLoops.charge(node, path: path, count: &loopNodes)
         effects.add(PrototypeEffectUses(node: node))
         if effects.total > PrototypeContractValidator.limit("MAX_PROTOTYPE_EFFECTS") {
             throw PrototypeContractValidator.invalid(at, "Expanded effect limit exceeded")

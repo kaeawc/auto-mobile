@@ -39,6 +39,7 @@ internal object PrototypeBundleNodeCapabilities {
     }
     mark("motion_tokens_v1", (n["animate"] as? JsonObject)?.containsKey("tempo") == true)
     mark("keyframes_v1", "keyframes" in n)
+    mark("loops_v1", "loop" in n)
     mark("semantics_v1", "semantics" in n)
     mark("platform_namespace_v1", "ios" in n || "android" in n)
     mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)

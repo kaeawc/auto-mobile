@@ -158,6 +158,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "rotaryScroll",
       "selectAllText",
       "shake",
+      "siri",
       "swipeAt",
       "swipeOn",
       "systemTray",

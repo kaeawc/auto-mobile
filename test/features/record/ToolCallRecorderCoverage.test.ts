@@ -156,6 +156,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "setSensor",
   "setUIState",
   "shake",
+  "siri",
   "statusBar",
   "swipeAt",
   "swipeOn",

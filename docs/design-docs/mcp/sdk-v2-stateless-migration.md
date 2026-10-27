@@ -79,8 +79,16 @@ The SDK factory reuses `createStatelessMcpServer`, carrying the era and request 
 an isolated async context. Modern discovery advertises the Tasks extension; legacy initialize
 advertisement remains conditional on the client's declaration. Both paths share cancellation
 indexing, request-scope execution cancellation, keyless binding cleanup, and shutdown tracking.
-The stdio proxy keeps its existing hand-built server and does not read this flag. No shared
-cache scope, TTL, or cache policy is configured here.
+Modern discovery advertises `tools.listChanged` and `resources.listChanged`. Each endpoint
+lazily creates one in-memory event bus on its first modern request and bridges the process-wide
+list-change broadcaster onto it. All per-request SDK handlers share that bus, so
+`subscriptions/listen` can acknowledge and filter tools/resources list changes across requests.
+The bridge detaches once admission stops and all requests close, or when the endpoint is cleared.
+Listen streams use the same cancellation index, shutdown snapshot, disconnect abort, and
+endpoint keepalive as other modern requests; SDK keepalive is disabled. Resource-URI updates
+are not bridged and modern resources do not advertise `subscribe`. Cache hints remain private,
+with a 5s tools-list TTL for clients without a listen stream. The stdio proxy keeps its existing
+hand-built server and does not read this flag.
 
 ## Control-socket forwards in process (slice L, #11820)
 
@@ -294,7 +302,7 @@ skip the socket's admission queue: a poll never waits behind a long call on the 
 lost daemon connection is reconnected and the request asked once more; a daemon that stays
 unreachable is an error, never an invented status. Device-binding tools are not relayed as
 declared until the proxy binds the session from a completed task's result.
-`notifications/tasks` push and `subscriptions/listen` are out of scope (polling only).
+`notifications/tasks` push is out of scope (task polling only).
 
 ## Open questions and resolutions
 
@@ -305,7 +313,7 @@ declared until the proxy binds the session from a completed task's result.
 | 3   | Where do `InMemoryTransport`, `StreamableHTTPError`, the ping request schema and `toJsonSchemaCompat` live in v2?          | Resolved in step 1: handlers use method strings, the ping shim is gone, `toJsonSchemaCompat` is replaced by `zod-to-json-schema` called directly, loopback errors are mapped in `LoopbackMcpClient`.                    |
 | 4   | CJS to ESM interop risk from the spike.                                                                                    | Resolved: current version is 2.3.1, both packages ship CommonJS builds, and the repo bundles them at build time.                                                                                                        |
 | 5   | Do direct desktop HTTP clients lose implicit device binding?                                                               | Resolved by owner decision (2026-10-17): desktop sends one generated id per app session in the session-key header (slice K, #13046).                                                                                    |
-| 6   | `subscriptions/listen` support across hosts.                                                                               | Pending, out of scope: the internal push plus polling stands.                                                                                                                                                           |
+| 6   | `subscriptions/listen` support across hosts.                                                                               | Opt-in modern daemon HTTP clients receive tools/resources list changes on a shared endpoint bus; the stdio proxy retains internal push plus polling.                                                                    |
 
 ## Appendix: original spike assessment (2026-07-29)
 

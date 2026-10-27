@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import {
@@ -6,6 +6,9 @@ import {
   McpServer,
   type McpServerFactory,
   type McpHandlerRequestOptions,
+  type CreateMcpHandlerOptions,
+  type ServerEvent,
+  type ServerEventBus,
 } from "@modelcontextprotocol/server";
 import { ENV, readEnvBool } from "../../src/config/env";
 import {
@@ -14,6 +17,7 @@ import {
   type StatelessMcpRequestScope,
 } from "../../src/daemon/statelessMcpHttpEndpoint";
 import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
+import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -61,6 +65,19 @@ const modernBody = {
   },
 };
 
+const listenBody = {
+  ...modernBody,
+  method: "subscriptions/listen",
+  params: { ...modernBody.params, notifications: { toolsListChanged: true } },
+};
+
+const endpoints: Array<{ clear(): void }> = [];
+afterEach(() => {
+  for (const endpoint of endpoints.splice(0)) {
+    endpoint.clear();
+  }
+});
+
 function claimedInput(body: unknown) {
   return { httpMethod: "POST", body } as Parameters<typeof classifyInboundRequest>[0];
 }
@@ -80,6 +97,11 @@ function harness(flag?: string, block = false) {
   const legacyHandle = mock(async () => {});
   const createTransport = mock(() => ({ handleRequest: legacyHandle, close: async () => {} }));
   const classify = mock(classifyInboundRequest);
+  const bus = {
+    publish: mock((_event: ServerEvent) => {}),
+    subscribe: mock((_listener: (event: ServerEvent) => void) => () => {}),
+  } satisfies ServerEventBus;
+  const createEventBus = mock(() => bus);
   const forget = mock((_scope: string) => {});
   const cancel = mock(async (_scope: string, _reason: unknown) => 1);
   const closed = mock(async () => {});
@@ -112,7 +134,7 @@ function harness(flag?: string, block = false) {
       );
     },
   );
-  const createHandler = mock((factory: McpServerFactory) => ({
+  const createHandler = mock((factory: McpServerFactory, _options: CreateMcpHandlerOptions) => ({
     fetch: (req: Request, options?: McpHandlerRequestOptions) => fetch(factory, req, options),
     close: async () => {
       await closed();
@@ -129,11 +151,18 @@ function harness(flag?: string, block = false) {
     keepaliveIntervalMs: 1000,
     createServer,
     createTransport,
-    modern: { enabled: () => readEnvBool(ENV.MCP_MODERN_ERA, env), classify, createHandler },
+    modern: {
+      enabled: () => readEnvBool(ENV.MCP_MODERN_ERA, env),
+      classify,
+      createHandler,
+      createEventBus,
+      maxListenStreams: 1,
+    },
     cancelScopeExecutions: cancel,
     forgetScopeBindings: forget,
     closeReason: () => "shutdown-test",
   });
+  endpoints.push(endpoint);
   const error = mock(() => {});
   const request = (key?: string): McpHttpRequestLike => ({
     method: "POST",
@@ -151,6 +180,8 @@ function harness(flag?: string, block = false) {
     legacyHandle,
     classify,
     createHandler,
+    bus,
+    createEventBus,
     forget,
     cancel,
     closed,
@@ -172,11 +203,20 @@ describe("opt-in modern HTTP routing", () => {
     "flag %s never enters either SDK routing primitive",
     async (flag) => {
       const h = harness(flag);
-      await h.endpoint.handle(h.request(), new FakeResponse(), modernBody, h.error);
-      expect(h.classify).not.toHaveBeenCalled();
-      expect(h.createHandler).not.toHaveBeenCalled();
-      expect(h.legacyHandle).toHaveBeenCalledTimes(1);
-      await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+      const subscribe = spyOn(ListChangedBroadcaster, "subscribe");
+      try {
+        await h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
+        ListChangedBroadcaster.emit("tools");
+        expect(subscribe).not.toHaveBeenCalled();
+        expect(h.createEventBus).not.toHaveBeenCalled();
+        expect(h.bus.publish).not.toHaveBeenCalled();
+        expect(h.classify).not.toHaveBeenCalled();
+        expect(h.createHandler).not.toHaveBeenCalled();
+        expect(h.legacyHandle).toHaveBeenCalledTimes(1);
+        await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+      } finally {
+        subscribe.mockRestore();
+      }
     },
   );
 
@@ -192,6 +232,7 @@ describe("opt-in modern HTTP routing", () => {
         legacy: "reject",
         responseMode: "sse",
         keepAliveMs: 0,
+        bus: h.bus,
       });
       expect(h.createTransport).not.toHaveBeenCalled();
       expect(h.bodies[0]).toBe(modernBody);
@@ -208,6 +249,41 @@ describe("opt-in modern HTTP routing", () => {
       expect(h.error).not.toHaveBeenCalled();
     },
   );
+
+  test("one lazy endpoint bus bridges both list changes across per-request handlers", async () => {
+    const h = harness("1");
+    const subscribe = spyOn(ListChangedBroadcaster, "subscribe");
+    try {
+      expect(h.createEventBus).not.toHaveBeenCalled();
+      expect(subscribe).not.toHaveBeenCalled();
+      for (let i = 0; i < 2; i++) {
+        await h.endpoint.handle(h.request(), new FakeResponse(), modernBody, h.error);
+        expect(h.createHandler.mock.calls[i][1].bus).toBe(h.bus);
+      }
+      expect(h.createEventBus).toHaveBeenCalledTimes(1);
+      expect(subscribe).toHaveBeenCalledTimes(1);
+      ListChangedBroadcaster.emit("tools");
+      ListChangedBroadcaster.emit("resources");
+      expect(h.bus.publish.mock.calls).toEqual([
+        [{ kind: "tools_list_changed" }],
+        [{ kind: "resources_list_changed" }],
+      ]);
+      h.endpoint.stopAccepting();
+      ListChangedBroadcaster.emit("tools");
+      expect(h.bus.publish).toHaveBeenCalledTimes(2);
+    } finally {
+      subscribe.mockRestore();
+    }
+  });
+
+  test("disposing an idle endpoint detaches its bridge idempotently", async () => {
+    const h = harness("1");
+    await h.endpoint.handle(h.request(), new FakeResponse(), modernBody, h.error);
+    h.endpoint.clear();
+    h.endpoint.clear();
+    ListChangedBroadcaster.emit("resources");
+    expect(h.bus.publish).not.toHaveBeenCalled();
+  });
 
   test("overlapping fetches keep each factory's session key and request scope", async () => {
     const h = harness("1");
@@ -265,11 +341,14 @@ describe("opt-in modern HTTP routing", () => {
     await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
   });
 
-  test("shutdown snapshot cancels modern executions and forgets keyless bindings once", async () => {
+  test("shutdown closes a listen stream and detaches the bridge only when idle", async () => {
     const h = harness("1", true);
-    const pending = h.endpoint.handle(h.request(), new FakeResponse(), modernBody, h.error);
+    const res = new FakeResponse();
+    const pending = h.endpoint.handle(h.request(), res, listenBody, h.error);
     await h.fetched;
     h.endpoint.stopAccepting();
+    ListChangedBroadcaster.emit("tools");
+    expect(h.bus.publish).toHaveBeenCalledTimes(1);
     const [tracked] = h.endpoint.inFlightRequests();
     expect(tracked.requestScopeId).toBe("scope-1");
     await tracked.close();
@@ -279,15 +358,36 @@ describe("opt-in modern HTTP routing", () => {
     expect(h.closed).toHaveBeenCalledTimes(1);
     expect(h.requests[0].signal.aborted).toBe(true);
     expect(h.endpoint.inFlightCount).toBe(0);
+    expect(res.writableEnded).toBe(true);
+    expect(h.timer.getMsUntilNextDueEvent()).toBeUndefined();
+    ListChangedBroadcaster.emit("tools");
+    expect(h.bus.publish).toHaveBeenCalledTimes(1);
     const later = new FakeResponse();
     await h.endpoint.handle(h.request(), later, modernBody, h.error);
     expect(later.status).toBe(503);
     expect(h.createHandler).toHaveBeenCalledTimes(1);
   });
 
+  test("listen streams past the endpoint cap are refused, and the slot frees on close", async () => {
+    const h = harness("1", true);
+    const first = h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
+    await h.fetched;
+    const refused = new FakeResponse();
+    await h.endpoint.handle(h.request(), refused, listenBody, h.error);
+    expect(refused.status).toBe(429);
+    expect(h.createHandler).toHaveBeenCalledTimes(1);
+    await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+    await first;
+    const again = h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
+    await Promise.all(Array.from({ length: 10 }, () => Promise.resolve()));
+    expect(h.createHandler).toHaveBeenCalledTimes(2);
+    await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+    await again;
+  });
+
   test("a separate keyed cancellation POST reaches the modern in-flight index", async () => {
     const h = harness("true", true);
-    const pending = h.endpoint.handle(h.request("key"), new FakeResponse(), modernBody, h.error);
+    const pending = h.endpoint.handle(h.request("key"), new FakeResponse(), listenBody, h.error);
     await h.fetched;
     await h.endpoint.handle(
       h.request("key"),
@@ -305,28 +405,36 @@ describe("opt-in modern HTTP routing", () => {
     await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
   });
 
-  test("client disconnect closes a modern request and its keepalive", async () => {
-    const h = harness("true", true);
-    const req = h.request();
-    const res = new FakeResponse();
-    const pending = h.endpoint.handle(req, res, modernBody, h.error);
-    await h.fetched;
-    // Let fetch return its response headers before advancing the injected timer.
-    await Promise.resolve();
-    await Promise.resolve();
-    h.timer.advanceTime(1000);
-    expect(res.body).toContain(":keepalive");
-    req.socket?.once("close", () => {
+  test.each(["socket", "response"])(
+    "%s close aborts a listen stream and its keepalive",
+    async (source) => {
+      const h = harness("true", true);
+      const req = h.request();
+      const res = new FakeResponse();
+      const pending = h.endpoint.handle(req, res, listenBody, h.error);
+      await h.fetched;
+      // Let fetch return its response headers before advancing the injected timer.
+      await Promise.resolve();
+      await Promise.resolve();
+      h.timer.advanceTime(1000);
+      expect(res.body).toContain(":keepalive");
+      // Repeated keepalives leave the long-lived request open.
+      h.timer.advanceTime(10_000);
+      expect(h.endpoint.inFlightCount).toBe(1);
+      expect(h.requests[0].signal.aborted).toBe(false);
       res.destroyed = true;
-    });
-    if (req.socket instanceof EventEmitter) {
-      req.socket.emit("close");
-    }
-    await pending;
-    expect(h.closed).toHaveBeenCalledTimes(1);
-    const body = res.body;
-    h.timer.advanceTime(1000);
-    expect(res.body).toBe(body);
-    expect(h.forget).toHaveBeenCalledTimes(1);
-  });
+      if (source === "response") {
+        res.emit("close");
+      } else if (req.socket instanceof EventEmitter) {
+        req.socket.emit("close");
+      }
+      await pending;
+      expect(h.closed).toHaveBeenCalledTimes(1);
+      expect(h.requests[0].signal.aborted).toBe(true);
+      const body = res.body;
+      h.timer.advanceTime(1000);
+      expect(res.body).toBe(body);
+      expect(h.forget).toHaveBeenCalledTimes(1);
+    },
+  );
 });

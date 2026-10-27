@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import contract from "../../schemas/prototype-spec-contract.json";
 
-/** The embedded dylib has no resource bundle; preserve the canonical contract verbatim. */
+/** The embedded dylib has no resource bundle; include motionTokens with the complete canonical contract. */
 export function renderPrototypeSpecContractData(): string {
   return [
     "// Generated from schemas/prototype-spec-contract.json; do not edit.",

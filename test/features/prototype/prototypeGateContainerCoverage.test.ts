@@ -131,6 +131,7 @@ const fixtures: Record<string, Node> = {
   },
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v3: { ...label, animate: {}, style: { cornerRadius: 8 } },
+  prototype_motion_tokens_v1: { ...label, animate: { tempo: "fast" } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_shared_element_v2: { ...label, shared: { key: "hero", as: "bounds" } },
   prototype_shared_element_v1: { ...label, sharedKey: "hero" },

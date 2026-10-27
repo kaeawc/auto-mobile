@@ -299,6 +299,15 @@ const definitions: Record<string, Rule> = contract.definitions;
  * The validator and anchor walkers are private and cannot be reused; this uses their dot/index
  * notation and walks depth first in contract field order. Validated device specs only.
  */
+function skipsOccurrences(value: unknown, rule: Rule): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    rule.name === "iosNamespace" ||
+    rule.name === "androidNamespace"
+  );
+}
+
 function occurrences(
   value: unknown,
   rule: Rule,
@@ -306,12 +315,7 @@ function occurrences(
   found: Occurrence[],
   nodeType?: string,
 ): void {
-  if (
-    value === undefined ||
-    value === null ||
-    rule.name === "iosNamespace" ||
-    rule.name === "androidNamespace"
-  ) {
+  if (skipsOccurrences(value, rule)) {
     return;
   }
   switch (rule.kind) {

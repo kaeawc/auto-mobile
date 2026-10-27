@@ -880,6 +880,10 @@ function behaviourErrors(
   );
 }
 
+function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
+  return walk(value, definitions.spec, "", context, 0) ?? excludeAccessoryReferences(context);
+}
+
 function validateValue(
   value: unknown,
   options: PrototypeStrictOptions,
@@ -898,8 +902,7 @@ function validateValue(
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     prototypeLazyListLimitError(value) ??
-    walk(value, definitions.spec, "", context, 0) ??
-    excludeAccessoryReferences(context) ??
+    walkedError(value, context) ??
     prototypeRoutesError(value, context.nodes, context.actions) ??
     prototypeSharedElementError(context.nodes, repeats, context.actions) ??
     layoutErrors(value, context, repeats) ??

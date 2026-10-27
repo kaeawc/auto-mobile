@@ -534,6 +534,8 @@ struct Style: Decodable {
     let shadowColor: PrototypeModeValue?
     var shadows: [Shadow]? = nil
     var cornerStyle: String? = nil
+    var surface: String? = nil
+    var glass: PrototypeGlassOptions? = nil
     let offset: Offset?
     let lineHeight: Double?
     let letterSpacing: Double?
@@ -581,6 +583,8 @@ struct Style: Decodable {
             shadowColor: prototype.shadowColor ?? shadowColor,
             shadows: prototype.shadows ?? shadows,
             cornerStyle: prototype.cornerStyle ?? cornerStyle,
+            surface: prototype.surface ?? surface,
+            glass: prototype.glass ?? glass,
             offset: prototype.offset ?? offset,
             lineHeight: prototype.lineHeight ?? lineHeight,
             letterSpacing: prototype.letterSpacing ?? letterSpacing,
@@ -596,7 +600,7 @@ struct Style: Decodable {
     /// Whether the author painted the node, so a component's default container must not cover it
     /// (Android's `authoredFill`).
     var hasAuthoredFill: Bool {
-        background != nil || gradient != nil
+        background != nil || gradient != nil || surface == "glass"
     }
 
     /// The scale a tappable node draws at: `pressScale` while pressed, 1 otherwise.
@@ -808,6 +812,8 @@ final class PrototypeNode: Decodable {
     let asset: PrototypeModeValue?
     let filter: ImageFilter?
     let fadeEdges: FadeEdges?
+    let edgeEffect: String?
+    let ios: IosNamespace?
     let contentScale: String?
     let effect: IconEffect?
     let name: String?
@@ -948,7 +954,7 @@ final class PrototypeNode: Decodable {
              dismissOnSwipe, supportingText, errorWhen, errorText, keyboardType, secure, multiline, minLines, maxLength,
              trailingIcon,
              imeAction, yRange, xLabels, goal
-        case filter, fadeEdges
+        case filter, fadeEdges, edgeEffect, ios
         case chartSeries = "series"
     }
 
@@ -984,6 +990,8 @@ final class PrototypeNode: Decodable {
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
         filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
         fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
+        edgeEffect = try container.decodeIfPresent(String.self, forKey: .edgeEffect)
+        ios = try container.decodeIfPresent(IosNamespace.self, forKey: .ios)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
         effect = try container.decodeIfPresent(IconEffect.self, forKey: .effect)
         name = try container.decodeIfPresent(String.self, forKey: .name)

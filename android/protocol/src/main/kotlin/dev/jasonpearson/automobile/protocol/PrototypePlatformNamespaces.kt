@@ -29,7 +29,17 @@ private fun stripNamespaceKeys(value: JsonElement): JsonElement =
   } ?: value
 
 private fun stripNodeNamespaces(value: JsonElement): JsonElement {
-  val node = stripNamespaceKeys(value) as? JsonObject ?: return value
+  val source = value as? JsonObject ?: return value
+  val ios = source["ios"] as? JsonObject
+  val glass = setOf("glassGroup", "glassUnion", "glassTransition", "backgroundExtension")
+  // Preserve foreign glass metadata so a typed round-trip retains group-scoped shared IDs.
+  // Android still ignores it for rendering and does not advertise glass.
+  val node =
+    JsonObject(
+      source.filterKeys {
+        it != "android" && (it != "ios" || ios?.keys?.any { key -> key in glass } == true)
+      },
+    )
   return JsonObject(
     node.mapValues { (key, child) ->
       when (key) {

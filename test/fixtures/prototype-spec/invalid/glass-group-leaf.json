@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Leaf",
+      "ios": {
+        "glassGroup": {
+          "spacing": 1
+        }
+      }
+    }
+  },
+  "expectedPath": "root.ios.glassGroup",
+  "expectedMessage": "glassGroup requires a container node"
+}

@@ -1,3 +1,4 @@
+import { prototypeGlassFields, prototypeScrollEdgeEffectFields } from "./prototypeGlass";
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
 import { PROTOTYPE_CONTENT_TRANSITION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
@@ -215,6 +216,18 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: "prototype_glass_v1",
+    fields: prototypeGlassFields,
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_glass_v1, required by ${fields[0]}. Nothing was shown. Glass needs iOS 26 or later, or an Android renderer with real backdrop blur.`,
+  },
+  {
+    capability: "prototype_scroll_edge_effect_v1",
+    fields: prototypeScrollEdgeEffectFields,
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_scroll_edge_effect_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
   {
     capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,
     fields: prototypeContentTransitionFields,

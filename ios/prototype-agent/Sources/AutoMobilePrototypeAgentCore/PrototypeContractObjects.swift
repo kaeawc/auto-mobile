@@ -32,6 +32,7 @@ extension PrototypeContractValidator {
             else if field["optional"] != .bool(true) { throw Self.invalid(childPath, "Required property") }
         }
         let kind = ["style", "fadeEdges", "imageFilter"].first { rule == definitions[$0]?.objectFields } ?? ""
+        try PrototypeGlass.validateObject(data, kind: kind, path: path)
         try PrototypeStylePolishV2.validateObject(data, kind: kind, path: path)
         try Self.constraints(data, rule: rule, path: path)
     }

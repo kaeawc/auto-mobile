@@ -44,6 +44,7 @@ enum PrototypeBundleCapabilities {
             if let root = component.objectFields?["root"] { pending.append(root) }
         }
         while let node = pending.popLast()?.objectFields {
+            names.formUnion(PrototypeGlass.capabilities(node))
             if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
             if node["semantics"] != nil { need("semantics") }

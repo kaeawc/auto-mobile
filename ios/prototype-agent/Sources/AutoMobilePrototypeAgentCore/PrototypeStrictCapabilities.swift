@@ -48,6 +48,7 @@ enum PrototypeStrictCapabilities {
                 .contains(where: { !PrototypeRoutes.fields($0.text).isEmpty }) { need("routes") }
             var own = fields
             PrototypeRepeat.bindTextFields(&own) { text in textBinding(text); return text }
+            result.formUnion(PrototypeGlass.capabilities(fields))
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }

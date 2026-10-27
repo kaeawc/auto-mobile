@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "styleWhen": [
+        {
+          "when": {
+            "key": "active",
+            "equals": true
+          },
+          "style": {
+            "surface": "glass",
+            "glass": {
+              "tint": "primary"
+            }
+          }
+        }
+      ],
+      "children": []
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_glass_v1"
+}

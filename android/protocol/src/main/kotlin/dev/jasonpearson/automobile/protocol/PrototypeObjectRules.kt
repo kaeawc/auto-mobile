@@ -38,7 +38,8 @@ internal object PrototypeObjectRules {
       return it
     }
     val kind = listOf("style", "fadeEdges", "imageFilter").firstOrNull { rule === definitions[it] }
-    return PrototypeStylePolishV2Rules.objectError(data, kind ?: "", path)
+    return PrototypeGlassRules.objectError(data, kind ?: "", path)
+      ?: PrototypeStylePolishV2Rules.objectError(data, kind ?: "", path)
       ?: objectConstraint(data, rule, path)
   }
 

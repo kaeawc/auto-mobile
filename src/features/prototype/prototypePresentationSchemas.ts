@@ -355,6 +355,15 @@ export const styleSchema = z
     maxHeight: z.number().finite().min(0).max(10000).optional(),
     padding: paddingSchema.optional(),
     background: colorValueSchema.optional(),
+    surface: z.enum(["glass"]).optional(),
+    glass: z
+      .object({
+        variant: z.enum(["regular", "clear"]).optional(),
+        tint: colorValueSchema.optional(),
+        interactive: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     cornerRadius: z
       .union([
         z.number().finite().min(0).max(10000),
@@ -416,15 +425,25 @@ export const styleSchema = z
     textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
   .strict()
-  .refine(
-    (value) =>
-      value.shadows === undefined ||
-      (value.elevation === undefined && value.shadowColor === undefined),
-    {
-      path: ["shadows"],
-      message: "shadows cannot be combined with elevation or shadowColor",
-    },
-  );
+  .superRefine((value, context) => {
+    if (value.glass !== undefined && value.surface !== "glass") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["glass"],
+        message: 'glass requires surface: "glass"',
+      });
+    }
+    if (
+      value.shadows !== undefined &&
+      (value.elevation !== undefined || value.shadowColor !== undefined)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["shadows"],
+        message: "shadows cannot be combined with elevation or shadowColor",
+      });
+    }
+  });
 
 export const styleWhenEntrySchema = z
   .object({ when: conditionSchema, style: styleSchema })

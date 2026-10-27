@@ -31,7 +31,7 @@ enum PrototypeSharedElementRules {
                     "shared and sharedKey cannot both be set"
                 )
             }
-            let source = sources.contains(key)
+            let source = sources.contains(key) || PrototypeGlass.shared(node, nodes: nodes)
             guard node.value["visibleWhen"] != nil || source else {
                 throw PrototypeContractValidator.invalid(at, "sharedKey requires visibleWhen on the same node")
             }

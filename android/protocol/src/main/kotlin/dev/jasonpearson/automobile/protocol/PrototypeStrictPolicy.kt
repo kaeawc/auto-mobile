@@ -563,6 +563,7 @@ private fun polishFeatures(
   need: (String) -> Unit,
 ) {
   if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
+  result.addAll(PrototypeGlassRules.capabilities(fields))
   if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
   if (PrototypeStylePolishV2Rules.required(fields))
     result.add(PrototypeStylePolishV2Rules.CAPABILITY)

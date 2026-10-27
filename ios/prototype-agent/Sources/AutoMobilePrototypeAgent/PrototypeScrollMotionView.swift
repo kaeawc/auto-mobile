@@ -19,8 +19,13 @@
         /// Replaces the child when the caller wraps it, as the chat-list scroll does with its sentinels.
         var inner: AnyView?
         private var coordinate: ObjectIdentifier { ObjectIdentifier(node) }
+        private var fadeEdges: FadeEdges? {
+            if #available(iOS 26, *) { return node.fadeEdges }
+            return PrototypeGlass.edgeFades(effect: node.edgeEffect, axis: node.axis, authored: node.fadeEdges)
+        }
+
         var body: some View {
-            PrototypeFadingScroll(axis: node.axis, spec: node.fadeEdges) {
+            PrototypeFadingScroll(axis: node.axis, spec: fadeEdges) {
                 PrototypeBarScrollContent(node: node, model: model) {
                     if let content = inner ?? node.child.map({ AnyView(NodeView(node: $0, model: model)) }) {
                         content
@@ -34,6 +39,7 @@
                     }
                 }
             }
+            .modifier(PrototypeScrollEdgeEffectModifier(effect: node.edgeEffect, axis: node.axis))
             .coordinateSpace(name: coordinate)
             .onPreferenceChange(PrototypeScrollOffsetPreference.self) { offsets in
                 if let offset = offsets[coordinate] { model.scrollOffsets[coordinate] = max(0, offset) }

@@ -67,6 +67,7 @@ function styleFields(value: unknown, path: string): string[] {
     ...list(record(record(style.border)?.gradient)?.stops).flatMap((stop, index) =>
       newlyThemedColor(record(stop)?.color, `${path}.border.gradient.stops[${index}].color`),
     ),
+    ...pairAt(record(style.glass)?.tint, `${path}.glass.tint`),
     ...pairAt(record(style.border)?.color, `${path}.border.color`),
     ...list(record(style.gradient)?.stops).flatMap((stop, index) =>
       newlyThemedColor(record(stop)?.color, `${path}.gradient.stops[${index}].color`),

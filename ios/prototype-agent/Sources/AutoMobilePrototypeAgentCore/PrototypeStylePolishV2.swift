@@ -20,6 +20,7 @@ enum PrototypeStylePolishV2 {
     static func themedColors(_ node: [String: JSONValue]) -> Bool {
         if node["filter"]?.objectFields?["tint"]?.objectFields != nil { return true }
         if themedBorder(node) { return true }
+        if styles(node).contains(where: { $0["glass"]?.objectFields?["tint"]?.objectFields != nil }) { return true }
         return styles(node).contains { style in
             guard case let .array(shadows)? = style["shadows"] else { return false }
             return shadows.contains { $0.objectFields?["color"]?.objectFields != nil }

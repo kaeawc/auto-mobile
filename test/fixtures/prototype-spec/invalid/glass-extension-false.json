@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "hero",
+      "ios": {
+        "backgroundExtension": false
+      }
+    }
+  },
+  "expectedPath": "root.ios.backgroundExtension",
+  "expectedMessage": "Invalid enum value"
+}

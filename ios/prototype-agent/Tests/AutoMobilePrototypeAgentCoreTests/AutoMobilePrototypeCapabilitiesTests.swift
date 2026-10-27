@@ -11,13 +11,13 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "test/fixtures/prototype-capabilities/spec-capabilities.json"
         ))
         let required = try Set(JSONDecoder().decode([String].self, from: data))
-        struct OS: OSVersionProvider { let majorVersion = 18 }
+        struct OS: OSVersionProvider { let majorVersion = 26 }
         let supported = Set(PrototypeAgentProtocol.advertisedCapabilities(os: OS()))
         // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
         // when supported. The platform vocabulary (#14294) runs on the module registry (#14296),
         // and the `test` module is a placeholder no production runtime ever advertises.
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
-        // transition choreography (#15247), and neither does any platform-namespace field (#15257). Android window and
+        // transition choreography (#15247). Android window and
         // modal motion (#15113) is Android-only (iOS is #14684). The haptics and sound platform
         // modules (#14329) are advertised through the platform registry the agent builds at launch,
         // not through the static list this test reads.
@@ -28,7 +28,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // Realtime transport, routing and lifecycle remain owed by the runtime slices.
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_routes_v1",
-            "prototype_platform_test_v1", "prototype_platform_namespace_v1",
+            "prototype_platform_test_v1",
             "prototype_platform_share_v1", // Contract only; system share sheet runtime is owed.
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",

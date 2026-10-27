@@ -6,6 +6,7 @@ import kotlinx.serialization.json.*
 internal object PrototypeBundleNodeCapabilities {
   fun collect(n: JsonObject): Set<String> {
     val caps = linkedSetOf<String>()
+    caps.addAll(PrototypeGlassRules.capabilities(n))
     if (PrototypeStylePolishV2Rules.required(n)) caps.add(PrototypeStylePolishV2Rules.CAPABILITY)
     val type = text(n["type"])
     val typed =
@@ -140,6 +141,7 @@ internal object PrototypeBundleNodeCapabilities {
 
   private fun themedStyle(style: JsonObject): Boolean {
     val paired = listOf("background", "color", "shadowColor").any { style[it] is JsonObject }
+    val glass = (style["glass"] as? JsonObject)?.get("tint") is JsonObject
     val border = (style["border"] as? JsonObject)?.get("color") is JsonObject
     val stops = ((style["gradient"] as? JsonObject)?.get("stops") as? JsonArray).orEmpty()
     val shadows =
@@ -150,7 +152,8 @@ internal object PrototypeBundleNodeCapabilities {
       (((style["border"] as? JsonObject)?.get("gradient") as? JsonObject)?.get("stops")
           as? JsonArray)
         .orEmpty()
-    return shadows ||
+    return glass ||
+      shadows ||
       borderStops.any { themed((it as? JsonObject)?.get("color")) } ||
       paired ||
       border ||

@@ -1,3 +1,4 @@
+import { isPrototypeGlassShared } from "./prototypeGlass";
 import {
   PROTOTYPE_REDUCED_MOTION_CAPABILITY,
   PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
@@ -158,7 +159,7 @@ function addSharedNode(
     return undefined;
   }
   const at = `${path}.${shared ? "shared.key" : "sharedKey"}`;
-  const source = sources.has(String(shared?.key ?? node.sharedKey));
+  const source = isSharedSource(located, nodes, sources);
   const usage = sharedUsageError(node, path, at, source);
   if (usage) {
     return usage;
@@ -181,6 +182,14 @@ function addSharedNode(
     prior.push(entry);
   }
   return undefined;
+}
+
+function isSharedSource(located: Located, nodes: Located[], sources: Set<string>): boolean {
+  const { value: node, path } = located;
+  return (
+    sources.has(String(record(node.shared)?.key ?? node.sharedKey)) ||
+    isPrototypeGlassShared(node, path, nodes)
+  );
 }
 
 function sharedUsageError(

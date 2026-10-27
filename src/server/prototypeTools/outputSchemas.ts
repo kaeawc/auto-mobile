@@ -359,6 +359,7 @@ export const prototypeOutputSchema = z.object({
           "strings.fallback",
           "design.fallback",
           "platformNamespace",
+          "scroll.edgeEffect",
           "menu",
           "select",
         ]),

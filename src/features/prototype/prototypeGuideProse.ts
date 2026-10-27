@@ -12,7 +12,7 @@ available, and finally a platform namespace as the last resort. Every namespace 
 \`why\` explaining its lack of portable meaning.
 Optional \`ios\` and \`android\` objects may appear on any node, \`window\` or \`theme\`.
 The other platform’s block is ignored with a \`platformNotes\` entry. Own-platform blocks
-require \`prototype_platform_namespace_v1\`; current renderers do not implement these fields.
+require \`prototype_platform_namespace_v1\`; iOS renders the glass namespace fields described below.
 
 ## Gestures
 
@@ -820,6 +820,8 @@ every limit counts the expanded tree.
 `;
 
 export const GUIDE_APPEARANCE = `## Style polish
+
+Glass: style.surface "glass" and strict style.glass {variant?:regular|clear,tint?:colour,interactive?:boolean} need prototype_glass_v1 (iOS 26+ only today; older iOS and Android refuse it). glass requires surface "glass"; cornerRadius shapes it, absent means capsule. ios.glassGroup {spacing:0..200} is for column/row/box/flow/grid/list/listItem; descendant glass shared keys morph in that group. ios.glassUnion (ASCII id, 1..64), ios.glassTransition matchedGeometry|materialize|identity need a base glass surface; ios.backgroundExtension:true is image-only. All need the glass and platform namespace gates on iOS; Android ignores ios fields with platformNotes paths. Android rendering is deferred, with real blur required at API 31+ and no glass below API 31. scroll.edgeEffect soft|hard|none needs prototype_scroll_edge_effect_v1: iOS 26 native; older iOS shares fadeEdges (24/8 dp defaults, authored lengths win, none disables). System accessibility settings control glass appearance; assert structure/bounds.
 
 Layered style.shadows (1-3 strict {color,radius,spread?,offset?,inner?}, radius 0-1000 dp, spread and offset axes -1000..1000; omitted spread/offset/inner mean 0/{x:0,y:0}/false), style.cornerStyle circular|continuous (default circular), style.border {width,color? ,gradient?} with exactly one of color or gradient, scroll.fadeEdges {top?,bottom?,start?,end?} (0-1000 dp, at least one), and image.filter {saturation?,tint?} (saturation 0-2, at least one) require prototype_style_polish_v2. shadows excludes elevation and shadowColor. Fades appear only where scrolling remains; start/end mirror in RTL. Colour pairs in shadows and tint, and pairs or role names in border gradient stops also require prototype_theme_modes_v1.
 

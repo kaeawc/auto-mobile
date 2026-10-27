@@ -45,7 +45,7 @@ internal object PrototypeSharedElementRules {
     val at = "$path.${if (shared != null) "shared.key" else "sharedKey"}"
     if (shared != null && "sharedKey" in node)
       return fail("$path.shared", "shared and sharedKey cannot both be set")
-    val source = key in sources
+    val source = key in sources || PrototypeGlassRules.shared(node, path, context.nodes)
     if ("visibleWhen" !in node && !source)
       return fail(at, "sharedKey requires visibleWhen on the same node")
     val resolvedKeys = keys(context, path, key, shared != null, at)

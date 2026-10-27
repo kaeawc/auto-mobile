@@ -19243,6 +19243,31 @@
                 "ios": {
                   "type": "object",
                   "properties": {
+                    "glassGroup": {
+                      "type": "object",
+                      "properties": {
+                        "spacing": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 200
+                        }
+                      },
+                      "required": ["spacing"],
+                      "additionalProperties": false
+                    },
+                    "glassUnion": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                    },
+                    "glassTransition": {
+                      "type": "string",
+                      "enum": ["matchedGeometry", "materialize", "identity"]
+                    },
+                    "backgroundExtension": {
+                      "type": "boolean",
+                      "const": true
+                    },
                     "buttonStyle": {
                       "type": "string",
                       "enum": ["glass", "glassProminent"]
@@ -21473,6 +21498,26 @@
                         },
                         "background": {
                           "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                        },
+                        "surface": {
+                          "type": "string",
+                          "enum": ["glass"]
+                        },
+                        "glass": {
+                          "type": "object",
+                          "properties": {
+                            "variant": {
+                              "type": "string",
+                              "enum": ["regular", "clear"]
+                            },
+                            "tint": {
+                              "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
+                            },
+                            "interactive": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
                         },
                         "cornerRadius": {
                           "anyOf": [
@@ -26904,6 +26949,10 @@
                       },
                       "additionalProperties": false
                     },
+                    "edgeEffect": {
+                      "type": "string",
+                      "enum": ["soft", "hard", "none"]
+                    },
                     "reverse": {
                       "type": "boolean"
                     },
@@ -28340,6 +28389,7 @@
                   "strings.fallback",
                   "design.fallback",
                   "platformNamespace",
+                  "scroll.edgeEffect",
                   "menu",
                   "select"
                 ]

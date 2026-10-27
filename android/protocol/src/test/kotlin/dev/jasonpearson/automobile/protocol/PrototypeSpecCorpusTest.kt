@@ -218,9 +218,9 @@ class PrototypeSpecCorpusTest {
       assertEquals(type in gestureTypes, "onLongPress" in fields, type)
       assertEquals(type in gestureTypes, "onDoubleTap" in fields, type)
     }
-    // Platform namespaces are validated by the contract, then stripped before the typed decode
-    // (#15257): no renderer reads them yet, so the models deliberately omit them.
-    val stripped = setOf("ios", "android")
+    // Android fields remain contract-only. Foreign iOS glass metadata is retained so
+    // group-scoped shared IDs survive typed round trips, without being rendered.
+    val stripped = setOf("android")
     for ((type, variant) in variants) {
       assertEquals(
         variant.jsonObject.getValue("fields").jsonObject.keys - stripped,

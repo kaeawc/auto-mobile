@@ -1244,3 +1244,27 @@ shared motion-active wire signal or shimmer reporter yet; this local signal is
 not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
 
 Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.
+
+## Glass and scroll edges
+
+The agent advertises `prototype_glass_v1` only on iOS 26+, and
+`prototype_scroll_edge_effect_v1` on every supported OS. Glass namespace fields
+also require `prototype_platform_namespace_v1` (advertised on iOS 26+). Specs and library bundles are
+validated before rendering and must satisfy these gates, including conditional
+styles and hidden templates. iOS 17–25 refuse glass; no material substitute is
+used.
+
+`style.surface: "glass"` applies Liquid Glass regular/clear, optional colour tint
+and interactive feedback, after layout and paint. `cornerRadius` selects the
+shape; absent means Capsule. `ios.glassGroup` owns a GlassEffectContainer and
+namespace; descendant glass nodes use `shared.key` for glassEffectID,
+`ios.glassUnion` for union identity and `ios.glassTransition` for the native
+transition. Nested groups scope their own IDs. `ios.backgroundExtension: true`
+on images uses backgroundExtensionEffect.
+
+`scroll.edgeEffect` uses scrollEdgeEffectStyle on iOS 26 (none hides the effect).
+Older systems reuse the existing scrollability-aware fade mask: soft 24 dp,
+hard 8 dp, authored fadeEdges lengths taking precedence, none disabling fades.
+Reduce Transparency and Increase Contrast use system behaviour. Tests assert
+structure and bounds with pinned settings; group morphing and the visual result
+still require an iOS 26 simulator check. Android rendering is a separate slice.

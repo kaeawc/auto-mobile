@@ -1548,6 +1548,18 @@ simulated?}`, `data` cut to the 4 KiB emit budget with `truncated: true`. Await 
 requests (`prototypePlatformEvent.ts`). Authored emit names cannot start with `prototype_`, which
 generalizes the single reserved `prototype_request` name.
 
+**Device state.** The `device` module exposes `/platform/device/widthClass` on both
+platforms: Android reports Material `compact` (<600dp), `medium` (600–839dp), or
+`expanded` (>=840dp); iOS reports `compact` or `regular` directly from
+`horizontalSizeClass`, independent of window width. There is no `sizeClass` key;
+`heightClass` and `posture` remain Android-only. Declare `device` in
+`requires.platform` and branch on `/device/os` for platform-specific layouts.
+The contract's `value` rule supplies the default and `valueByPlatform` overrides
+it for the named platform. Spec validators have no target-platform input and
+accept the union of those rules for `equals` and `notEquals`, so portable specs
+can contain branches for either platform. Consequently, an `expanded` comparison
+is valid portable syntax even when loaded on iOS; it never matches an iOS snapshot.
+
 **Capabilities.** `prototype_platform_v1` gates `requires`, `platform.on`, the `platform` action and
 `{platform}` reads; each module adds `prototype_platform_<module>_v1`, and a later op or event gets
 a `_v2` gate that checks the fields that version introduced. The gates are generated from

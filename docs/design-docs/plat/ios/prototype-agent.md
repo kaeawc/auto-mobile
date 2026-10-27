@@ -77,18 +77,18 @@ weighted stacks mirror under RTL via SwiftUI Layout; sizes are fractional points
 effects renders on any iOS 17 simulator (Android's API-floor table does not apply), through
 `PrototypeEffectsView.swift`:
 
-| `type`                | SwiftUI                                                                          |
-| --------------------- | -------------------------------------------------------------------------------- |
-| `noise`               | `Rectangle().fill(ShaderLibrary.noise(...))`, over the content                   |
-| `gradientMesh`        | `Rectangle().fill(ShaderLibrary.gradientMesh(...))`, behind the content          |
-| `shimmer`             | a `LinearGradient` band, over the content                                        |
-| `glow`                | a blurred inward `strokeBorder`, over the content                                |
-| `vignette`            | a `RadialGradient`, over the content                                             |
-| `blur`                | `.blur(radius:)` on the node's own background and content                        |
-| `pixelate`            | `layerEffect`                                                                    |
-| `chromaticAberration` | `layerEffect`                                                                    |
-| `wave`                | `distortionEffect`                                                               |
-| `ripple`              | `distortionEffect`                                                               |
+| `type`                | SwiftUI                                                                 |
+| --------------------- | ----------------------------------------------------------------------- |
+| `noise`               | `Rectangle().fill(ShaderLibrary.noise(...))`, over the content          |
+| `gradientMesh`        | `Rectangle().fill(ShaderLibrary.gradientMesh(...))`, behind the content |
+| `shimmer`             | a `LinearGradient` band, over the content                               |
+| `glow`                | a blurred inward `strokeBorder`, over the content                       |
+| `vignette`            | a `RadialGradient`, over the content                                    |
+| `blur`                | `.blur(radius:)` on the node's own background and content               |
+| `pixelate`            | `layerEffect`                                                           |
+| `chromaticAberration` | `layerEffect`                                                           |
+| `wave`                | `distortionEffect`                                                      |
+| `ripple`              | `distortionEffect`                                                      |
 
 - **Metal presets.** `ios/prototype-agent/Shaders/PrototypeEffects.metal` holds the shaders. SwiftPM
   does not compile `.metal`, and `ShaderLibrary` loads only precompiled libraries from a bundle or from

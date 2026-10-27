@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
+import { canonicalJson, compareCodeUnits } from "./canonicalJson";
+import { payloadTypeAccepted } from "./payloadTypes";
+
+export { compareCodeUnits };
 
 export const ATTESTATION_ENVELOPE_VERSION = 1 as const;
 export const TREE_INPUT_HASH_ALGORITHM = "tree-entries-sha256-v0-placeholder";
-// No envelope signing algorithm is specified yet; reject all until one is explicitly approved.
+// The envelope scheme is specified (Ed25519, ./envelopeSigning.ts, docs/design-docs/ci/attestation-envelope.md)
+// but no algorithm is enabled until the owner approves it (#11974): reject all until then.
 export const SUPPORTED_SIGNATURE_ALGORITHMS: readonly string[] = Object.freeze([]);
 export type AttestationVerdict = "skip" | "advisory" | "ignore";
 /** Epoch milliseconds, adapted from the shared Timer at composition boundaries. */
@@ -91,25 +96,8 @@ export interface AttestationEnvelope {
   signature: AttestationSignature | null;
 }
 
-export function compareCodeUnits(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
-function sortValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(sortValue);
-  }
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([a], [b]) => compareCodeUnits(a, b))
-        .map(([key, item]) => [key, sortValue(item)]),
-    );
-  }
-  return value;
-}
 export function canonicalizePayload(p: AttestationPayload): string {
-  return JSON.stringify(sortValue(p));
+  return canonicalJson(p);
 }
 export function attestationId(env: AttestationEnvelope): string {
   return createHash("sha256").update(canonicalizePayload(env.payload)).digest("hex");
@@ -174,10 +162,10 @@ export function parseEnvelope(raw: unknown): ParseResult {
   }
   if (
     typeof p.payloadType !== "string" ||
-    p.payloadType !== `auto-mobile.prepush.${p.lane}` ||
     typeof p.payloadVersion !== "number" ||
     !Number.isInteger(p.payloadVersion) ||
-    p.payloadVersion !== 1 ||
+    p.payloadType !== `auto-mobile.prepush.${p.lane}` ||
+    !payloadTypeAccepted(p.payloadType, p.payloadVersion, Number(p.tier)) ||
     typeof p.inputHash !== "string" ||
     !isSha256Hex(p.inputHash) ||
     typeof p.inputHashAlgorithm !== "string" ||

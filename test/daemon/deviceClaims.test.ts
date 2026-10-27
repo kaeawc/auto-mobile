@@ -19,6 +19,7 @@ import {
 import { DeviceClaimMirrorHub } from "../../src/daemon/deviceClaimMirrorHub";
 import { BINDING_REGISTRY_MIGRATIONS } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import * as migration from "../../src/daemon/sessionBroker/registry/migrations/2026_10_26_014_device_claims";
+import * as metadataMigration from "../../src/daemon/sessionBroker/registry/migrations/2026_10_27_015_device_claims_metadata";
 import {
   SqliteDeviceClaims,
   type DeviceClaimTables,
@@ -50,6 +51,7 @@ describe("the device_claims table", () => {
       [Table in keyof DeviceClaimTables]: DeviceClaimTables[Table];
     }>();
     await migration.up(db as Kysely<unknown>);
+    await metadataMigration.up(db as Kysely<unknown>);
   });
   afterAll(async () => {
     await db.destroy();
@@ -59,8 +61,17 @@ describe("the device_claims table", () => {
     claims = new SqliteDeviceClaims(db);
   });
 
-  test("the migration belongs to the host binding registry", () => {
+  test("the migrations belong to the host binding registry", () => {
     expect(BINDING_REGISTRY_MIGRATIONS["2026_10_26_014_device_claims"]).toBe(migration);
+    expect(BINDING_REGISTRY_MIGRATIONS["2026_10_27_015_device_claims_metadata"]).toBe(
+      metadataMigration,
+    );
+  });
+
+  test("the owner's control-socket record survives a round trip", async () => {
+    const withSocket = { ...CLAIM, metadata: '{"socketPath":"/s.sock","acquiredAt":1}' };
+    await claims.upsert(withSocket);
+    expect(await claims.get("android", "emulator-5554")).toEqual(withSocket);
   });
 
   test("an upsert replaces the row for the device and reads back unchanged", async () => {
@@ -154,6 +165,23 @@ describe("the claims mirror", () => {
     mirror.released("emulator-5554", OWNER);
     await mirror.idle();
     expect(store.rows.size).toBe(0);
+  });
+
+  test("the owner's control-socket record reaches the table, and a reused PID reads as no row", async () => {
+    const store = new FakeDeviceClaims();
+    const mirror = mirrorOver(() => store);
+    mirror.claimed("emulator-5554", { ...OWNER, metadata: "socket-record" });
+    await mirror.idle();
+    expect((await store.get("android", "emulator-5554"))?.metadata).toBe("socket-record");
+    expect((await mirror.read("emulator-5554"))?.pid).toBe(OWNER.pid);
+    const reused = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: () => store,
+      timer: new FakeTimer(),
+      generationVerdict: () => "different",
+    });
+    expect(await reused.read("emulator-5554")).toBeUndefined();
+    expect(await mirrorOver(() => undefined).read("emulator-5554")).toBeUndefined();
   });
 
   test("a store that is not open yet records nothing and never throws", async () => {

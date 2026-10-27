@@ -269,3 +269,17 @@ step writes a row into the result table (route, capability, root or emulator req
 on a stock API 31+ device without root, hover works, p50 cold start under 1.5 s, and every failure
 mode above reports instead of hanging. A fail on any keeps `adb input stylus` as the stylus tap and
 swipe route and leaves this one hover-only.
+
+## Rich stylus on tapAt, swipeAt and dragPath (#13099)
+
+The nested `pointer` option keeps its shape and gains `tilt`, `orientation` (radians) and `buttons`
+(`primary`, `secondary`); `pressure` may be any 0..1. A plain stylus (`pressure` omitted or 1) still uses
+`adb input stylus`, so existing calls are unchanged. Anything the shell cannot inject, and every stylus
+`dragPath` (per-point `pressure` and `tilt`, holds as repeats of the first and last point), goes through
+`dispatchRichStylus` and the instrumentation route. `strokeRequest` sets only the features the request
+needs (`variablePressure`, `extendedAxes`, `path`), so a refusal names the real reason, and the refusal
+comes before the display fence and any dispatch hook. A failure after dispatch is
+`StylusOutcomeIndeterminateError` (do not retry) unless the route says nothing was sent
+(`PointerNotSentError`). `doubleTap` and panel selection are still refused with a stylus.
+The acceptance item that a stylus `tapAt` with pressure reaches the probe screen with that pressure
+needs a device (#13082).

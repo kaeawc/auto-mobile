@@ -326,7 +326,6 @@ export class SessionManagerWiring {
         this.persistedAdmission.isReissuablePersistedSession(...args),
       recoverPersistedRow: (...args) => this.facade.recoverPersistedRow(...args),
       readPersistedSession: (...args) => this.persistedAdmission.readPersistedSession(...args),
-      unlessBeingReplaced: (...args) => this.persistedAdmission.unlessBeingReplaced(...args),
       terminalReleaseFromPersisted: (...args) =>
         this.persistedAdmission.terminalReleaseFromPersisted(...args),
       recoveredRowOwner: (...args) => this.facade.recoveredRowOwner(...args),

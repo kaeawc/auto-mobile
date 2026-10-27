@@ -661,9 +661,13 @@ and the three call sites that reasserted a live row when a late terminal write l
 rewritten. What remains is the rebind/activity overlap repair (`oweSupersededRowReassert(session,
 [])`, its retries, drain and activity hook). The superseded-reason plumbing that the overlap repair
 still carries (`remember`, `expectReassert`'s reasons, the statement guard's `supersededReasons`)
-is always empty from production callers now; removing it is W5c. W5c should also settle one gap the W5b review found: `restoreReleasedRowAfterReassert`
-writes whatever terminal fence is present, which includes a durable release's fence raised before
-its final check if the supersede-revocation loop awaits and the release then declines.
+was always empty from production callers, and W5c removes it: the ledger no longer remembers reasons
+(`remember`, `isOwedFor`, `isBeingRewritten`, the owed entry's reasons), `reassertSupersededLiveRow`
+takes only the session, and the live-row rewrite's statement guard refuses every terminal row. What
+stays is the release write's `supersededReasons`, which carries only a terminal upgrade's own earlier
+reasons (`predecessors`). W5c also closes the gap the W5b review found: a finishing rewrite restores
+a terminal fence's row only for a volatile release (whose row was written first) or one that has
+committed, never for a durable release that has not committed and may still decline.
 
 ## 7. Risks
 

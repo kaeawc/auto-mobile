@@ -6,17 +6,11 @@ import {
   type ObserveResult,
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { AndroidCtrlProxyClient } from "../observe/android";
-import {
-  HOVER_INPUT_CAPABILITY,
-  STYLUS_INPUT_CAPABILITY,
-} from "../observe/android/ctrlProxyProtocol/capabilities";
 import { layerGestureRefusal } from "../observe/hierarchyLayer";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import {
@@ -31,9 +25,8 @@ import { DRAG_PATH_DEFAULT_SEGMENT_MS, assertDragPathFitsRequestBudget } from ".
 import type { PointerEnvironment, PointerInjector } from "./pointer/PointerInjector";
 import { createInstrumentationDispatch } from "./pointer/instrumentationDispatch";
 import { defaultPointerRoutes } from "./pointer/pointerRoutes";
-import { pointerCapabilities, selectPointerRoute } from "./pointer/selectPointerRoute";
-
-const API_READ_TIMEOUT_MS = 5000;
+import { readPointerEnvironment } from "./pointer/readPointerEnvironment";
+import { selectPointerRoute } from "./pointer/selectPointerRoute";
 
 export interface HoverAtDependencies extends DisplayFenceDependencies {
   timer?: Timer;
@@ -81,48 +74,10 @@ export class HoverAt extends BaseVisualChange {
         instrumentation: createInstrumentationDispatch(this.adb),
       });
     this.readEnvironment =
-      dependencies.readPointerEnvironment ?? ((signal) => this.readDeviceEnvironment(signal));
+      dependencies.readPointerEnvironment ??
+      ((signal) => readPointerEnvironment(this.device, this.adb, signal));
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
-  }
-
-  /** Best effort: a runner that cannot be asked advertises nothing, which refuses the hover. */
-  private async readDeviceEnvironment(signal?: AbortSignal): Promise<PointerEnvironment> {
-    // An established runner connection only: with none, no capability is advertised and the hover is refused.
-    const client = AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId);
-    const advertised = new Set<string>();
-    try {
-      for (const capability of [HOVER_INPUT_CAPABILITY, STYLUS_INPUT_CAPABILITY]) {
-        if (client && (await client.supportsCommand(capability))) {
-          advertised.add(capability);
-        }
-      }
-    } catch (error) {
-      if (signal?.aborted) {
-        throw error;
-      }
-      logger.warn(
-        `[hoverAt] could not read the runner's capabilities: ${errorMessage(error)}`,
-        error,
-      );
-    }
-    const apiLevel = await readAndroidDeviceApiLevel(
-      this.adb,
-      API_READ_TIMEOUT_MS,
-      undefined,
-      signal,
-    ).catch((error: unknown) => {
-      if (signal?.aborted) {
-        throw error;
-      }
-      logger.warn(`[hoverAt] could not read the Android API level: ${errorMessage(error)}`, error);
-      return null;
-    });
-    return {
-      platform: "android",
-      apiLevel: apiLevel ?? undefined,
-      capabilities: pointerCapabilities((name) => advertised.has(name)),
-    };
   }
 
   async execute(

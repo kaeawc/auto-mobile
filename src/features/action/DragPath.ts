@@ -34,6 +34,9 @@ import {
   resolveDragPathPoints,
 } from "./dragPathPlan";
 import { runDragPathStroke, type StrokeClient } from "./dragPathStroke";
+import { INSTRUMENTATION_OVERHEAD_MS } from "./pointer/instrumentationDispatch";
+import { dispatchRichStylus, strokeRequest, type RichStylusOptions } from "./pointer/richStylus";
+import { DRAG_PATH_DEFAULT_SEGMENT_MS } from "./dragPathPlan";
 
 export interface DragPathDependencies extends DisplayFenceDependencies {
   timer?: Timer;
@@ -42,6 +45,8 @@ export interface DragPathDependencies extends DisplayFenceDependencies {
   idGenerator?: IdGenerator;
   lastRenderedObservation?: RenderedObservationReader;
   snapshotReferences?: SnapshotReferenceStore;
+  /** Stylus routes and device facts; the defaults use the instrumentation route and the live device. */
+  stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 }
 
 /** The iOS runner follows a whole timed path in one request. */
@@ -60,6 +65,7 @@ export class DragPath extends BaseVisualChange {
   private readonly idGenerator: IdGenerator;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly snapshotReferences: SnapshotReferenceStore;
+  private readonly stylusRoutes: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 
   constructor(
     device: BootedDevice,
@@ -72,6 +78,7 @@ export class DragPath extends BaseVisualChange {
     this.idGenerator = dependencies.idGenerator ?? new NodeIdGenerator();
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
+    this.stylusRoutes = dependencies.stylus ?? {};
   }
 
   private get androidClient() {
@@ -91,6 +98,10 @@ export class DragPath extends BaseVisualChange {
     const { signal, progress } = call;
     if (this.device.platform !== "android" && this.device.platform !== "ios") {
       throw unsupportedPlatformError(this.device.platform, "dragPath");
+    }
+    const stylusRefusal = this.stylusRefusal(options);
+    if (stylusRefusal) {
+      return failure(stylusRefusal);
     }
     const perf = createGlobalPerformanceTracker();
     perf.serial("dragPath");
@@ -175,6 +186,9 @@ export class DragPath extends BaseVisualChange {
       return prepared.refusal;
     }
     const { plan } = prepared;
+    if (options.pointer) {
+      return this.driveStylus(options, plan, call, displayId, assertCurrent);
+    }
     if (this.device.platform === "ios") {
       return this.driveIos(plan, observation, call, displayId, assertCurrent);
     }
@@ -219,6 +233,82 @@ export class DragPath extends BaseVisualChange {
       points: plan.vertices,
       plannedDurationMs: plan.totalMs,
       moveCount: stroke.moveCount,
+    };
+  }
+
+  /** Refusals that need no device facts, so they come before any observation: nothing was sent. */
+  private stylusRefusal(options: DragPathOptions): string | undefined {
+    if (!options.pointer) {
+      return undefined;
+    }
+    if (this.device.platform !== "android") {
+      return 'dragPath with pointer: { toolType: "stylus" } is Android-only. No input was sent.';
+    }
+    return options.display === undefined
+      ? undefined
+      : "dragPath with a stylus drives the default display only; omit display. No input was sent.";
+  }
+
+  /**
+   * A stylus path through the instrumentation route (#13099): the plan's vertices become waypoints with
+   * the authored per-point pressure and tilt, and the holds become repeats of the first and last point.
+   * Refused before any input when the device lacks the route; never a finger.
+   */
+  private async driveStylus(
+    options: DragPathOptions,
+    plan: DragPathPlan,
+    call: ActionCall,
+    displayId: number | undefined,
+    assertCurrent: (() => void) | undefined,
+  ): Promise<DragPathResult> {
+    // Cold start and teardown of the instrumentation count against the request budget too.
+    assertDragPathFitsRequestBudget(
+      plan.totalMs + INSTRUMENTATION_OVERHEAD_MS,
+      call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
+    );
+    const authored = options.points;
+    const waypoints = plan.vertices.map((vertex, index) => ({
+      ...vertex,
+      durationMs:
+        index === 0 ? undefined : (authored[index]?.durationMs ?? DRAG_PATH_DEFAULT_SEGMENT_MS),
+      pressure: authored[index]?.pressure,
+      tilt: authored[index]?.tilt,
+    }));
+    const first = waypoints[0];
+    const last = waypoints[waypoints.length - 1];
+    if (plan.holdMs > 0) {
+      waypoints.splice(1, 0, { ...first, durationMs: plan.holdMs });
+    }
+    if (plan.releaseHoldMs > 0) {
+      waypoints.push({ ...last, durationMs: plan.releaseHoldMs });
+    }
+    try {
+      await dispatchRichStylus(
+        this.device,
+        this.adb,
+        strokeRequest(options.pointer!, waypoints, { path: true }),
+        {
+          ...this.stylusRoutes,
+          signal: call.signal,
+          assertCurrent,
+        },
+      );
+    } catch (error) {
+      if (call.signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`[dragPath] stylus stroke failed: ${errorMessage(error)}`, error);
+      return {
+        success: false,
+        points: plan.vertices,
+        error: `dragPath failed: ${errorMessage(error)}`,
+      };
+    }
+    return {
+      success: true,
+      points: plan.vertices,
+      plannedDurationMs: plan.totalMs,
+      moveCount: waypoints.length - 1,
     };
   }
 

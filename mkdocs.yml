@@ -109,6 +109,7 @@ not_in_nav: |
   /design-docs/plat/android/android17-playground-audit.md
   /design-docs/plat/android/dependency-injection.md
   /release/ios-simulator-continuity.md
+  /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
   /decisions/mcp-sdk-v2-split-packages.md
@@ -130,6 +131,7 @@ nav:
       - "Keystore metadata": using/keystore-metadata.md
       - "SDK capabilities": using/sdk-capabilities.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
+      - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
@@ -170,6 +172,7 @@ nav:
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
+      - "CI attestation signing envelope": design-docs/ci/attestation-envelope.md
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md

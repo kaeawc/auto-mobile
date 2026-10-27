@@ -11,7 +11,8 @@ setup() {
 
 # action|majors|reason: exactly these majors may coexist; any other major still fails.
 ALLOWED_SPLITS=(
-  "actions/upload-artifact|6 7|gradle-task-run pins v7.0.1 through Dependabot while the workflows are on v6"
+  "actions/upload-artifact|4 6 7|build-desktop-conveyor.yml (desktop packaging) is still on v4; gradle-task-run pins v7.0.1 through Dependabot"
+  "actions/setup-java|4 5|build-desktop-conveyor.yml (desktop packaging) is still on v4"
 )
 
 # Prints "action major" for every tag-pinned `uses:` under .github/.

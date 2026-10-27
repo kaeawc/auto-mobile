@@ -107,7 +107,7 @@ jobs:
           fi
 
       - name: "Set up JDK 21"
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
@@ -176,7 +176,7 @@ jobs:
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
 
       - name: "Upload Conveyor site + packages"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: automobile-desktop-conveyor
           # Conveyor writes `make site` output to ./output relative to the CWD (the repo root the

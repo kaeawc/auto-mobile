@@ -22,6 +22,8 @@ const android: BootedDevice = {
 };
 const spec: PrototypeSpec = {
   id: "panel",
+  // These assertions isolate platform differences from the separately tested default-design notes.
+  theme: { design: "material" },
   window: { placement: { type: "fullscreen" }, opacity: 1 },
   state: { open: true },
   root: {
@@ -108,6 +110,29 @@ describe("prototype tool platform notes", () => {
       paths: [`root.${foreign}`, `window.${foreign}`, `theme.${foreign}`],
       detail: `${foreign} namespace blocks are ignored on ${device.platform}.`,
     });
+  });
+  test("default design notes use the connected iOS coverage, while Android stays Material", async () => {
+    agent.handshake.capabilities.push("prototype_design_ios_switch_v1");
+    const authored = {
+      id: spec.id,
+      window: spec.window,
+      state: { on: true },
+      root: {
+        type: "column",
+        children: [
+          { type: "switch", stateKey: "on" },
+          { type: "card", children: [] },
+        ],
+      },
+    };
+    const result = await call({ action: "show", spec: authored });
+    expect(result.payload).toMatchObject({ success: true });
+    expect(
+      result.payload.platformNotes?.find((note) => note.construct === "design.fallback"),
+    ).toMatchObject({ paths: ["root.children[1]"], values: ["switch"] });
+    const other = await call({ action: "show", spec: authored }, android);
+    expect(other.payload.success).toBe(true);
+    expect(other.payload.platformNotes).toBeUndefined();
   });
   test("successful iOS show returns all five typed notes", async () => {
     const { payload } = await call({ action: "show", spec });

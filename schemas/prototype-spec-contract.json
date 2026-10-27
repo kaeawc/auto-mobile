@@ -21197,16 +21197,19 @@
       "android": "material"
     },
     "switch": {
-      "ios": "material",
-      "android": "material"
+      "ios": "native",
+      "android": "material",
+      "parts": ["self"]
     },
     "checkbox": {
-      "ios": "material",
-      "android": "material"
+      "ios": "native",
+      "android": "material",
+      "parts": ["self"]
     },
     "button": {
       "ios": "native",
-      "android": "material"
+      "android": "material",
+      "parts": ["self"]
     },
     "radioGroup": {
       "ios": "material",
@@ -21214,7 +21217,8 @@
     },
     "select": {
       "ios": "material",
-      "android": "material"
+      "android": "material",
+      "reason": "Custom drawing preserves per-item identifiers unavailable from the native control (owner decision 4)."
     },
     "listItem": {
       "ios": "material",
@@ -21222,7 +21226,8 @@
     },
     "slider": {
       "ios": "native",
-      "android": "material"
+      "android": "material",
+      "parts": ["self"]
     },
     "chip": {
       "ios": "material",
@@ -21242,7 +21247,8 @@
     },
     "segmentedButton": {
       "ios": "material",
-      "android": "material"
+      "android": "material",
+      "reason": "Custom drawing preserves per-item identifiers unavailable from the native control (owner decision 4)."
     },
     "topAppBar": {
       "ios": "material",
@@ -21266,7 +21272,8 @@
     },
     "menu": {
       "ios": "material",
-      "android": "material"
+      "android": "material",
+      "reason": "Custom drawing preserves per-item identifiers unavailable from the native control (owner decision 4)."
     },
     "snackbar": {
       "ios": "material",
@@ -21274,11 +21281,13 @@
     },
     "timePicker": {
       "ios": "native",
-      "android": "material"
+      "android": "material",
+      "parts": ["self"]
     },
     "datePicker": {
       "ios": "native",
-      "android": "material"
+      "android": "material",
+      "parts": ["self"]
     },
     "scroll": {
       "ios": "neutral",
@@ -21290,11 +21299,13 @@
     },
     "tabBar": {
       "ios": "material",
-      "android": "material"
+      "android": "material",
+      "reason": "Custom drawing preserves per-item identifiers unavailable from the native control (owner decision 4)."
     },
     "bottomNav": {
       "ios": "material",
-      "android": "material"
+      "android": "material",
+      "reason": "Custom drawing preserves per-item identifiers unavailable from the native control (owner decision 4)."
     },
     "bottomSheet": {
       "ios": "material",
@@ -21326,7 +21337,8 @@
     },
     "pasteButton": {
       "ios": "native",
-      "android": "material"
+      "android": "material",
+      "parts": ["self"]
     }
   },
   "stringFields": [

@@ -273,12 +273,12 @@ theme from authored backgrounds (it would be circular); set `theme.mode` or
 
 ### Design coverage
 
-The contract's `designCoverage` table records the current drawing for each node. `neutral`
-means layout or content with no design language of its own. Android's platform look is Material.
-On iOS, explicit `theme.design: "platform"` reports `design.fallback` platform notes for Material
-nodes (first 20 paths, with `total` when larger). Omission and `material` report no design fallback
-notes. The four native entries already use SwiftUI controls; changing the default changes no drawing.
-There are no iOS prototype screenshot baselines to re-record.
+`designCoverage` records each node's drawing; `neutral` carries no design language. Android remains Material.
+On iOS, omitted or explicit `theme.design: "platform"` reports `design.fallback` notes for nodes
+without native coverage advertised by the connected agent (first 20 paths, `total` when larger;
+`values` lists the agent's native node types). Material design and Android report no design fallback
+notes. Switch and checkbox use Toggle for platform design and custom drawing for material.
+Parts `self` declares the node's own `testTag`, with no private native subparts.
 
 | Node            | iOS      | Android  | Parts |
 | --------------- | -------- | -------- | ----- |
@@ -286,14 +286,14 @@ There are no iOS prototype screenshot baselines to re-record.
 | bottomNav       | material | material | —     |
 | bottomSheet     | material | material | —     |
 | box             | neutral  | neutral  | —     |
-| button          | native   | material | —     |
+| button          | native   | material | self  |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
 | chart           | material | material | —     |
-| checkbox        | material | material | —     |
+| checkbox        | native   | material | self  |
 | chip            | material | material | —     |
 | column          | neutral  | neutral  | —     |
-| datePicker      | native   | material | —     |
+| datePicker      | native   | material | self  |
 | dialog          | material | material | —     |
 | drawer          | material | material | —     |
 | tooltip         | material | material | —     |
@@ -308,7 +308,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | listItem        | material | material | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |
-| pasteButton     | native   | material | —     |
+| pasteButton     | native   | material | self  |
 | progress        | material | material | —     |
 | radioGroup      | material | material | —     |
 | row             | neutral  | neutral  | —     |
@@ -316,15 +316,15 @@ There are no iOS prototype screenshot baselines to re-record.
 | searchBar       | material | material | —     |
 | segmentedButton | material | material | —     |
 | select          | material | material | —     |
-| slider          | native   | material | —     |
+| slider          | native   | material | self  |
 | snackbar        | material | material | —     |
 | spacer          | neutral  | neutral  | —     |
 | stack           | neutral  | neutral  | —     |
-| switch          | material | material | —     |
+| switch          | native   | material | self  |
 | tabBar          | material | material | —     |
 | text            | neutral  | neutral  | —     |
 | textField       | material | material | —     |
-| timePicker      | native   | material | —     |
+| timePicker      | native   | material | self  |
 | topAppBar       | material | material | —     |
 
 ### Light and dark values

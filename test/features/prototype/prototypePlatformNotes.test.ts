@@ -23,6 +23,8 @@ const swift = readFileSync(
 const noCapabilities = () => false;
 const specFor = (root: PrototypeNode): PrototypeSpec => ({
   id: "panel",
+  // These assertions isolate platform differences from the separately tested default-design notes.
+  theme: { design: "material" },
   window: { placement: { type: "fullscreen" }, opacity: 1 },
   root,
 });

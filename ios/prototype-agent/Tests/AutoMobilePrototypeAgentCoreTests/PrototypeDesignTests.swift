@@ -49,15 +49,56 @@ final class PrototypeDesignTests: XCTestCase {
         let contract = try JSONDecoder().decode(Contract.self, from: Data(prototypeSpecContractData.utf8))
         let variants = try XCTUnwrap(contract.definitions["node"]?.objectFields?["variants"]?.objectFields)
         XCTAssertEqual(Set(contract.designCoverage.keys), Set(variants.keys))
-        // The renderer's Button styles, Slider and date/time DatePicker controls already exist.
-        XCTAssertEqual(
-            Set(contract.designCoverage.filter { $0.value.ios == "native" }.keys),
-            ["button", "slider", "datePicker", "timePicker", "pasteButton"]
-        )
-        for entry in contract.designCoverage.values {
+        for (type, entry) in contract.designCoverage {
             XCTAssertTrue(["native", "material", "neutral"].contains(entry.ios))
             XCTAssertTrue(["material", "neutral"].contains(entry.android))
-            if entry.ios == "native" { XCTAssertTrue(entry.parts?.isEmpty ?? true) }
+            if entry.ios == "native" {
+                let parts = try XCTUnwrap(PrototypeComponentLook.registeredParts[type])
+                XCTAssertFalse(parts.isEmpty)
+                XCTAssertEqual(entry.parts, parts)
+                XCTAssertEqual(PrototypeComponentLook.resolve(type: type, design: nil), .platform)
+                XCTAssertEqual(PrototypeComponentLook.resolve(type: type, design: .material), .material)
+                for part in parts {
+                    XCTAssertEqual(PrototypeComponentLook.identifier(testTag: "tag", part: part), "tag")
+                    XCTAssertNil(PrototypeComponentLook.identifier(testTag: nil, part: part))
+                }
+                XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities().contains(
+                    PrototypeComponentLook.capability(for: type)
+                ))
+            } else {
+                XCTAssertEqual(PrototypeComponentLook.resolve(type: type, design: .platform), .material)
+            }
+        }
+        XCTAssertEqual(
+            Set(PrototypeComponentLook.registeredParts.keys),
+            Set(contract.designCoverage.filter { $0.value.ios == "native" }.keys)
+        )
+    }
+
+    func testNativeCoverageAdvertisementUsesOSFiltering() {
+        struct OS: OSVersionProvider { let majorVersion: Int }
+        let capability = PrototypeComponentLook.capability(for: "switch")
+        let minimumOS = [capability: 26]
+        let older = PrototypeAgentProtocol.advertisedCapabilities(os: OS(majorVersion: 17), minimumOS: minimumOS)
+        XCTAssertFalse(older.contains(capability))
+        XCTAssertTrue(older.contains(PrototypeComponentLook.capability(for: "button")))
+        XCTAssertTrue(
+            PrototypeAgentProtocol.advertisedCapabilities(os: OS(majorVersion: 26), minimumOS: minimumOS)
+                .contains(capability)
+        )
+        XCTAssertEqual(PrototypeComponentLook.resolve(type: "unregistered", design: .platform), .material)
+    }
+
+    func testToggleMotionPolicy() {
+        XCTAssertEqual(PrototypeComponentLook.toggleDurationMs(profile: .off), 0)
+        XCTAssertEqual(PrototypeComponentLook.toggleDurationMs(profile: .full), 300)
+        XCTAssertEqual(PrototypeComponentLook.toggleDurationMs(profile: .reduced), 300)
+    }
+
+    func testPerItemFallbacksHaveReasons() {
+        for type in ["segmentedButton", "tabBar", "bottomNav", "menu", "select"] {
+            XCTAssertEqual(PrototypeComponentLook.coverage[type]?.ios, "material")
+            XCTAssertFalse(PrototypeComponentLook.coverage[type]?.reason?.isEmpty ?? true)
         }
     }
 }

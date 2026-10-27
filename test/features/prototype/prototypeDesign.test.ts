@@ -6,6 +6,8 @@ import {
   effectiveDesign,
   designFallbackPaths,
   prototypeDesignCoverage,
+  prototypeDesignNativeCapability,
+  prototypeNativeDesignNodes,
 } from "../../../src/features/prototype/prototypeDesign";
 import { prototypePlatformNotes } from "../../../src/features/prototype/prototypePlatformNotes";
 import { prototypeSpecSchema } from "../../../src/features/prototype/prototypeSpec";
@@ -68,11 +70,7 @@ test("fallback paths traverse screens, repeat templates and component definition
       },
       components: { Card: { root: { type: "card", children: [{ type: "textField" }] } } },
     }),
-  ).toEqual([
-    'root.screens["home"].children[1]',
-    "components.Card.root",
-    "components.Card.root.children[0]",
-  ]);
+  ).toEqual(["components.Card.root", "components.Card.root.children[0]"]);
 });
 
 test("native coverage is exactly today's SwiftUI control set", () => {
@@ -81,7 +79,7 @@ test("native coverage is exactly today's SwiftUI control set", () => {
       .filter(([, v]) => v.ios === "native")
       .map(([k]) => k)
       .sort(),
-  ).toEqual(["button", "datePicker", "pasteButton", "slider", "timePicker"]);
+  ).toEqual(["button", "checkbox", "datePicker", "pasteButton", "slider", "switch", "timePicker"]);
 });
 
 for (const doc of ["android/prototype-ux.md", "ios/prototype-agent.md"]) {
@@ -109,14 +107,14 @@ for (const doc of ["android/prototype-ux.md", "ios/prototype-agent.md"]) {
   });
 }
 
-test("iOS design notes cap paths, Android and non-explicit designs stay silent", () => {
+test("iOS default design notes cap paths; Android and material stay silent", () => {
   const input = {
     ...base,
     theme: { design: "platform" },
     state: { on: true },
     root: {
       type: "column",
-      children: Array.from({ length: 22 }, () => ({ type: "switch", stateKey: "on" })),
+      children: Array.from({ length: 22 }, () => ({ type: "card", children: [] })),
     },
   };
   const spec = prototypeSpecSchema.parse(input);
@@ -129,11 +127,12 @@ test("iOS design notes cap paths, Android and non-explicit designs stay silent",
     effect: "substituted",
     paths: Array.from({ length: 20 }, (_, i) => `root.children[${i}]`),
     total: 22,
+    values: prototypeNativeDesignNodes(() => true),
     detail:
-      "These nodes have no native iOS coverage yet and keep the Material drawing (see designCoverage).",
+      "These nodes keep the Material drawing. Native iOS nodes advertised by this agent are listed in values (see designCoverage).",
   });
   expect(prototypePlatformNotes(spec, "android", () => true)).toEqual([]);
-  for (const theme of [undefined, { design: "material" }]) {
+  for (const theme of [{ design: "material" }]) {
     expect(
       prototypePlatformNotes(
         prototypeSpecSchema.parse({ ...input, theme }),
@@ -141,5 +140,33 @@ test("iOS design notes cap paths, Android and non-explicit designs stay silent",
         () => true,
       ).some((note) => note.construct === "design.fallback"),
     ).toBe(false);
+  }
+});
+
+test("omitted design uses the connected agent's advertised native nodes", () => {
+  const spec = prototypeSpecSchema.parse({
+    ...base,
+    state: { on: true },
+    root: { type: "switch", stateKey: "on" },
+  });
+  const supports = (capability: string) => capability === prototypeDesignNativeCapability("button");
+  const note = prototypePlatformNotes(spec, "ios", supports).find(
+    (entry) => entry.construct === "design.fallback",
+  );
+  expect(note?.paths).toEqual(["root"]);
+  expect(note?.values).toEqual(["button"]);
+  expect(designFallbackPaths(spec, () => true)).toEqual([]);
+  expect(prototypePlatformNotes(spec, "android", supports)).toEqual([]);
+});
+
+test("native coverage declares reachable control parts; per-item fallbacks explain why", () => {
+  for (const entry of Object.values(prototypeDesignCoverage)) {
+    if (entry.ios === "native") {
+      expect(entry.parts).toEqual(["self"]);
+    }
+  }
+  for (const type of ["segmentedButton", "tabBar", "bottomNav", "menu", "select"] as const) {
+    expect(prototypeDesignCoverage[type].ios).toBe("material");
+    expect(prototypeDesignCoverage[type].reason).toContain("per-item identifiers");
   }
 });

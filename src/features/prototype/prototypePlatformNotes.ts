@@ -1,4 +1,4 @@
-import { designFallbackPaths } from "./prototypeDesign";
+import { designFallbackPaths, prototypeNativeDesignNodes } from "./prototypeDesign";
 import { prototypeStringsFallbackKeys } from "./prototypeStrings";
 import { prototypePlatformNamespaceFields } from "./prototypePlatformNamespace";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
@@ -45,7 +45,7 @@ export interface PrototypePlatformNote {
   paths: string[];
   /** Total occurrences when more than the cap were found. */
   total?: number;
-  /** icon.name: sorted distinct placeholders; strings.fallback: up to 20 referenced keys. */
+  /** icon.name: sorted distinct placeholders; strings.fallback: up to 20 referenced keys; design.fallback: advertised native iOS node types. */
   values?: string[];
   detail: string;
 }
@@ -468,7 +468,7 @@ export function prototypePlatformNotes(
           },
         ];
   });
-  const fallbackPaths = designFallbackPaths(spec);
+  const fallbackPaths = designFallbackPaths(spec, supports);
   if (fallbackPaths.length) {
     notes.push({
       platform: "ios",
@@ -476,8 +476,9 @@ export function prototypePlatformNotes(
       effect: "substituted",
       paths: fallbackPaths.slice(0, 20),
       ...(fallbackPaths.length > 20 ? { total: fallbackPaths.length } : {}),
+      values: prototypeNativeDesignNodes(supports),
       detail:
-        "These nodes have no native iOS coverage yet and keep the Material drawing (see designCoverage).",
+        "These nodes keep the Material drawing. Native iOS nodes advertised by this agent are listed in values (see designCoverage).",
     });
   }
   return [

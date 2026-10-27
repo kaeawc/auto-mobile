@@ -769,51 +769,9 @@
 
         // MARK: Controls
 
-        private var isOn: Bool {
-            model.state[node.stateKey ?? ""]?.boolValue ?? false
-        }
+        private var switchView: some View { PrototypeToggleView(node: node, model: model) }
 
-        private func toggleBound() {
-            guard let key = node.stateKey else { return }
-            model.toggle(key, then: node.onTap ?? [])
-        }
-
-        /// One element per switch, shaped exactly like a list row with a trailing switch: the button
-        /// is the element, named by its label text, with the toggle trait and an on/off value. The
-        /// track is drawn in SwiftUI; a `Toggle` hosts a `UISwitch` whose own elements XCUITest listed
-        /// beside the combined one. `accessibilityElement(children: .ignore)` on the button wrapped it
-        /// in a second element: XCUITest listed the button (tappable, untagged) and the wrapper (the
-        /// testTag, label and value, not tappable) at the same bounds (#10899).
-        private var switchView: some View {
-            Button(action: toggleBound) {
-                HStack(spacing: 8) {
-                    if let label = node.label {
-                        Text(label).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    PrototypeSwitchTrack(isOn: isOn)
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(isOn ? "1" : "0")
-            .accessibilityAddTraits(.isToggle)
-        }
-
-        /// iOS has no checkbox control: a button whose checked square reads as selected.
-        private var checkboxView: some View {
-            Button(action: toggleBound) {
-                HStack(spacing: 8) {
-                    PrototypeGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
-                    if let label = node.label { Text(label) }
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(isOn ? "checked" : "unchecked")
-            .accessibilityAddTraits(isOn ? .isSelected : [])
-        }
+        private var checkboxView: some View { PrototypeToggleView(node: node, model: model) }
 
         /// Filled (default), tonal, elevated, outlined or text, with an optional leading icon.
         @ViewBuilder private var buttonView: some View {
@@ -990,7 +948,8 @@
                 ))
                 .modifier(IdentifierModifier(
                     // The search bar's editable field owns the node identifier.
-                    identifier: node.type == "searchBar" ? nil : node.testTag,
+                    identifier: node.type == "searchBar" ? nil : PrototypeComponentLook
+                        .identifier(testTag: node.testTag),
                     label: accessibilityLabelOverride,
                     grouping: grouping,
                     semantics: node.semantics,

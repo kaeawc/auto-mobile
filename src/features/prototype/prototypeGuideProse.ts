@@ -1,3 +1,5 @@
+import { GUIDE_NATIVE_DESIGN } from "./prototypeGuideProseMore";
+
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
@@ -840,12 +842,7 @@ Rendering order: transform, press scale, size, alpha, drop shadows (shadows/elev
 
 ## Light and dark mode
 
-Theme design: \`theme.design\` accepts \`material\` or \`platform\` (default). Explicit platform
-requires \`prototype_design_platform_v1\`; omission silently keeps today's drawing on older renderers.
-Android platform look is Material. On iOS button, slider, datePicker and timePicker already use
-native controls; layout/content nodes are neutral and other nodes retain Material drawing.
-Explicit platform requests report \`design.fallback\` notes for those nodes (first 20 paths, plus
-\`total\` beyond); omitted design and material do not. See the contract's \`designCoverage\` table.
+${GUIDE_NATIVE_DESIGN}
 
 A shown prototype has exactly one resolved mode, light or dark. Roles, per-mode values and the
 scheme all read that one mode, on Android and on iOS.

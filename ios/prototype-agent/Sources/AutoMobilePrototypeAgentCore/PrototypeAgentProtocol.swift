@@ -87,7 +87,7 @@ enum PrototypeAgentProtocol {
         "prototype_platform_device_v1",
         advanceClockRequest,
         deadTapCapability,
-    ]
+    ] + PrototypeComponentLook.capabilities
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.

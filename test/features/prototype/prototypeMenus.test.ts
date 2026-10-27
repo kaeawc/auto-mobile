@@ -318,7 +318,10 @@ test("only node positions require the menu capability", () => {
   ).toEqual(["root.children[0]", "root.children[1].child"]);
 });
 test("iOS always reports in-window rendering for menu/select", () => {
-  const parsed = prototypeSpecSchema.parse(spec({ type: "row", children: [menu, select] }));
+  const parsed = prototypeSpecSchema.parse({
+    ...spec({ type: "row", children: [menu, select] }),
+    theme: { design: "material" },
+  });
   expect(prototypePlatformNotes(parsed, "ios", () => true)).toMatchObject([
     { construct: "menu", effect: "substituted", paths: ["root.children[0]"] },
     { construct: "select", effect: "substituted", paths: ["root.children[1]"] },

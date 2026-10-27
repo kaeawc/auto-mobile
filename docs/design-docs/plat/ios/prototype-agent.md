@@ -10,11 +10,11 @@ device-verified" below remain open. `scripts/ios/prototype-agent-demo.ts` is a s
 ## Native look
 
 `theme.design` accepts `material` and `platform`, defaulting to `platform`. Explicit platform
-requests require `prototype_design_platform_v1`. Omitted design falls back silently on older agents.
-The contract's coverage is below; `neutral` nodes carry no design language. Material entries keep
-their current drawing and explicit platform requests report `design.fallback` notes. Button uses
-SwiftUI bordered/borderedProminent/borderless styles; slider, datePicker and timePicker already
-use native controls. No rendering changes accompany this default.
+requests require `prototype_design_platform_v1`; omitted design remains accepted on older agents.
+`neutral` nodes carry no design language; Material entries keep their drawing. Omitted and explicit
+platform design report `design.fallback` from the agent's advertised per-control coverage.
+Button, slider, datePicker, timePicker and pasteButton use native controls. Switch and checkbox use
+Toggle (checkbox style for checkbox); explicit material keeps their custom drawing.
 
 | Node            | iOS      | Android  | Parts |
 | --------------- | -------- | -------- | ----- |
@@ -22,14 +22,14 @@ use native controls. No rendering changes accompany this default.
 | bottomNav       | material | material | —     |
 | bottomSheet     | material | material | —     |
 | box             | neutral  | neutral  | —     |
-| button          | native   | material | —     |
+| button          | native   | material | self  |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
 | chart           | material | material | —     |
-| checkbox        | material | material | —     |
+| checkbox        | native   | material | self  |
 | chip            | material | material | —     |
 | column          | neutral  | neutral  | —     |
-| datePicker      | native   | material | —     |
+| datePicker      | native   | material | self  |
 | dialog          | material | material | —     |
 | drawer          | material | material | —     |
 | tooltip         | material | material | —     |
@@ -44,7 +44,7 @@ use native controls. No rendering changes accompany this default.
 | listItem        | material | material | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |
-| pasteButton     | native   | material | —     |
+| pasteButton     | native   | material | self  |
 | progress        | material | material | —     |
 | radioGroup      | material | material | —     |
 | row             | neutral  | neutral  | —     |
@@ -52,24 +52,24 @@ use native controls. No rendering changes accompany this default.
 | searchBar       | material | material | —     |
 | segmentedButton | material | material | —     |
 | select          | material | material | —     |
-| slider          | native   | material | —     |
+| slider          | native   | material | self  |
 | snackbar        | material | material | —     |
 | spacer          | neutral  | neutral  | —     |
 | stack           | neutral  | neutral  | —     |
-| switch          | material | material | —     |
+| switch          | native   | material | self  |
 | tabBar          | material | material | —     |
 | text            | neutral  | neutral  | —     |
 | textField       | material | material | —     |
-| timePicker      | native   | material | —     |
+| timePicker      | native   | material | self  |
 | topAppBar       | material | material | —     |
 
-Before a node becomes `native`, simulator verification must establish the testability contract:
+Native coverage declares this testability contract, whose UI behavior needs simulator verification:
 its `testTag` and every `<testTag>.<part>` remain reachable by `observe` and `tapOn`, observed bounds
 match the control, motion-off settles in one frame, and active motion emits the motion-active signal.
-The current native controls expose no additional authored part suffixes. Further native controls
-and a MaterialLook/PlatformLook renderer split are follow-ups. Segmented Picker, TabView and Menu
-remain custom-drawn because they cannot preserve per-item identifiers; segmentedButton, tabBar,
-bottomNav, menu and select therefore remain Material.
+`parts: ["self"]` declares only the node's `testTag`, not private native subviews or suffixes.
+`PrototypeComponentLook` checks coverage and parts. Toggles snap with motion off, else track 300 ms activity.
+Pure tests cover decisions, identifiers and activity; reachability and bounds need simulator checks.
+SegmentedButton, tabBar, bottomNav, menu and select preserve per-item ids through custom drawing.
 
 ## Embedded input validation
 
@@ -594,7 +594,7 @@ transition as a real tap, including on part identifiers.
 
 | Node                            | iOS drawing                                                                                                              |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `switch`, `checkbox`            | One toggle element with SwiftUI-drawn track (no `UISwitch`); checkbox is a button that reads as selected                 |
+| `switch`, `checkbox`            | Platform: native Toggle (checkbox style for checkbox); material: custom track or checked-square button                   |
 | `button`                        | `.borderedProminent` filled, `.bordered` tonal/outlined/elevated, `.borderless` text; optional leading SF Symbol         |
 | `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                                |
 | `chip`                          | Rounded button; filter chip toggles its key and reads as selected                                                        |

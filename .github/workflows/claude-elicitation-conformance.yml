@@ -1,0 +1,55 @@
+name: "Claude Code Elicitation Conformance (Advisory)"
+
+# Settles which elicitation path a stdio Claude Code takes for the ambiguous-device question: the
+# legacy `elicitation/create` push or the 2026-07-28 `input_required` retry (#15591, #13945). It
+# drives the real npm-published binary, headless, against a stub MCP server and a fake local API
+# in a throwaway HOME, so no device, key or real ~/.claude is involved. Nightly and on dispatch;
+# not a required check and nothing depends on it.
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+    inputs:
+      claude_code_version:
+        description: "npm version or dist-tag of @anthropic-ai/claude-code"
+        default: "latest"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  claude-elicitation:
+    name: "Claude Code elicitation conformance (Advisory)"
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'kaeawc/auto-mobile'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Install Claude Code
+        env:
+          CLAUDE_CODE_VERSION: ${{ inputs.claude_code_version || 'latest' }}
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/claude-code"
+          npm install --prefix "$prefix" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          echo "CLAUDE_CODE_BIN=$prefix/node_modules/.bin/claude" >> "$GITHUB_ENV"
+      - name: Run the conformance driver
+        run: bun scripts/conformance/claude-elicitation/run.ts "$CLAUDE_CODE_BIN" | tee claude-elicitation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-elicitation-conformance
+          path: claude-elicitation.json
+          if-no-files-found: ignore

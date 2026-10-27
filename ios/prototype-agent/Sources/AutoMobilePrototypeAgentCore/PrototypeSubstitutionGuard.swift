@@ -175,7 +175,7 @@ private struct PrototypeSubstitutionGuard {
             }
         }
         try actions(fields, path: path, scope: scope)
-        for key in ["stateKey", "hourKey", "minuteKey"] {
+        for key in ["stateKey", "hourKey", "minuteKey", "atEndKey"] {
             try field(fields, key, path: path, scope: scope)
         }
         if case let .object(part)? = fields["trailing"] {
@@ -263,7 +263,7 @@ private struct PrototypeSubstitutionGuard {
     )
         throws
     {
-        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
+        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onStartReached", "onAppear"] {
             guard case let .array(entries)? = fields[name] else { continue }
             for (index, entry) in entries.enumerated() {
                 guard case let .object(action) = entry else { continue }

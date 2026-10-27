@@ -46,6 +46,9 @@ enum PrototypeStateValidator {
         }
         for node in nodes {
             if let rejection = refreshError(node, state) { return rejection.message }
+            if node.type == "scroll", let key = node.atEndKey, state[key]?.boolValue == nil {
+                return "Chat scroll requires a declared boolean atEndKey"
+            }
         }
         return actionRejection(actions, state: state)
     }
@@ -73,6 +76,7 @@ enum PrototypeStateValidator {
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
+        actions += node.onStartReached ?? []
         actions += (node.swipeActions?.entries ?? []).flatMap(\.action.onTap)
         actions += node.trailingIcon?.onTap ?? []
         actions += node.refresh?.onRefresh ?? []

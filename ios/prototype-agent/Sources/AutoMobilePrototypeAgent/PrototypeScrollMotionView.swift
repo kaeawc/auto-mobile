@@ -16,12 +16,14 @@
     struct PrototypeMotionScroll: View {
         let node: PrototypeNode
         let model: PrototypeModel
+        /// Replaces the child when the caller wraps it, as the chat-list scroll does with its sentinels.
+        var inner: AnyView?
         private var coordinate: ObjectIdentifier { ObjectIdentifier(node) }
         var body: some View {
             PrototypeFadingScroll(axis: node.axis, spec: node.fadeEdges) {
                 PrototypeBarScrollContent(node: node, model: model) {
-                    if let child = node.child {
-                        NodeView(node: child, model: model)
+                    if inner != nil || node.child != nil {
+                        (inner ?? AnyView(NodeView(node: node.child!, model: model)))
                             .background(GeometryReader { geometry in
                                 let origin = geometry.frame(in: .named(coordinate)).origin
                                 Color.clear.preference(

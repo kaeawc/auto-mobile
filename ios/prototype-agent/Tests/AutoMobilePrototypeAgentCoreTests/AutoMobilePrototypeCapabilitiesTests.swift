@@ -13,14 +13,14 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         let required = try Set(JSONDecoder().decode([String].self, from: data))
         let supported = Set(AutoMobilePrototypeCapabilities.supported)
         // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
-        // when supported. The `test` module is a placeholder no production runtime advertises.
-        // Chat-list scrolls (#14232) are drawn on Android only so far (#14671);
+        // when supported. The platform vocabulary (#14294) runs on the module registry (#14296),
+        // and the `test` module is a placeholder no production runtime ever advertises.
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
         // transition choreography (#15247). Style effects (#15128) have a validated contract and
         // no renderer yet.
         let exclusions: Set<String> = [
             "prototype_platform_test_v1",
-            "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
+            "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1",
         ]
         XCTAssertTrue(supported.contains("prototype_lazy_list_v1"))

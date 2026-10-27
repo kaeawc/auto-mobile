@@ -104,6 +104,8 @@ struct PrototypeSession {
     private var stateRevisions: [String: Int] = [:]
     /// Bumped when the drawn tree is rebuilt (a data write or a patch), so the model replaces its spec.
     private(set) var structureRevision = 0
+    private(set) var scrollRequests: [String: PrototypeScrollRequest] = [:]
+    private var scrollSequence = 0
     private(set) var pages: [String: Int] = [:]
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
     private(set) var stackChanges: [String: PrototypeStackChange] = [:]
@@ -231,6 +233,7 @@ struct PrototypeSession {
     ) {
         listEnds = [:]
         timerCommands.append(.cancelAll)
+        scrollRequests = [:]
         appearanceOverride = appearance
         localeOverride = locale
         let spec = (try? spec.replacingLocale(effectiveLocales)) ?? spec
@@ -516,6 +519,13 @@ struct PrototypeSession {
                 events += runEmit(action)
             case "push", "pop", "popToRoot", "replace":
                 events += runStack(action)
+            case "scrollTo":
+                if let id = action.scroll, let target = action.to.flatMap(PrototypeScrollTarget.init) {
+                    scrollSequence += 1
+                    scrollRequests[id] = PrototypeScrollRequest(
+                        target: target, animated: action.animated ?? true, sequence: scrollSequence
+                    )
+                }
             case "setPage":
                 events += runSetPage(action)
             case "setData", "appendData", "prependData", "removeData":

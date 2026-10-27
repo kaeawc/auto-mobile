@@ -59,6 +59,7 @@
         /// Which swipe-actions row is open; opening one closes the others. Presentation only.
         private(set) var swipe = PrototypeSwipeCoordinator()
         private(set) var shownErrors: Set<String> = []
+        private(set) var scrollRequests: [String: PrototypeScrollRequest] = [:]
         private(set) var pages: [String: Int] = [:]
         struct StackDrag {
             let target: String
@@ -106,6 +107,7 @@
             escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
             if state != next.state { state = next.state }
             if shownErrors != next.shownErrors { shownErrors = next.shownErrors }
+            if scrollRequests != next.scrollRequests { scrollRequests = next.scrollRequests }
             if pages != next.pages { pages = next.pages }
             if let drag = stackDrag, next.stackChanges[drag.target]?.revision != drag.revision { stackDrag = nil }
             if stackChanges != next.stackChanges { stackChanges = next.stackChanges }
@@ -477,6 +479,18 @@
 
         func listVisible(_ node: PrototypeNode, appearedKey: String? = nil, disappearedKey: String? = nil) {
             apply(activity: false) { $0.listVisible(node, appearedKey: appearedKey, disappearedKey: disappearedKey) }
+        }
+
+        func scrollEdges(_ node: PrototypeNode, atEnd: Bool?, reachedStart: Bool) {
+            guard atEnd != nil || reachedStart else { return }
+            apply(activity: false) { session in
+                var events: [PrototypeEvent] = []
+                if let key = node.atEndKey, let atEnd {
+                    events += session.setStates([(key, .bool(atEnd))])
+                }
+                if reachedStart { events += session.run(node.onStartReached ?? []) }
+                return events
+            }
         }
 
         func run(_ actions: [PrototypeAction]) {

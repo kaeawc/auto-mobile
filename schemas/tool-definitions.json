@@ -24296,6 +24296,80 @@
                     "contentDescription": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "sharedKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/sharedKey"
+                    },
+                    "press": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/press"
+                    },
+                    "shared": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "animate": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["pasteButton"]
+                    },
+                    "into": {
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                    }
+                  },
+                  "required": ["type", "into"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/window/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/window/properties/android"
+                    },
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -25817,7 +25891,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/30/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -25897,7 +25971,7 @@
                       "enum": ["tooltip"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/30/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
@@ -26014,7 +26088,7 @@
                       "enum": ["start", "end"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/30/properties/openWhen"
                     },
                     "scrim": {
                       "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
@@ -26100,7 +26174,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/30/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -26110,10 +26184,10 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/30/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/30/properties/confirm/properties/onTap"
                               },
                               "icon": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
@@ -26220,14 +26294,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/30/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/30/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -26567,10 +26641,10 @@
                       "maxItems": 1
                     },
                     "header": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/37/properties/children/items"
                     },
                     "footer": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/37/properties/children/items"
                     }
                   },
                   "required": ["type", "repeat", "children"],
@@ -26652,7 +26726,7 @@
                       "default": "vertical"
                     },
                     "refresh": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/36/properties/refresh"
+                      "$ref": "#/properties/spec/properties/root/anyOf/37/properties/refresh"
                     },
                     "fadeEdges": {
                       "type": "object",
@@ -26932,7 +27006,7 @@
                                 "maxItems": 32
                               },
                               "onBack": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/39/properties/routes/allOf/0/additionalProperties/properties/onEnter"
+                                "$ref": "#/properties/spec/properties/root/anyOf/40/properties/routes/allOf/0/additionalProperties/properties/onEnter"
                               }
                             },
                             "additionalProperties": false
@@ -27140,7 +27214,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/40/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/41/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -27227,7 +27301,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/29/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/30/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -41637,6 +41711,11 @@
           "additionalProperties": false
         },
         "pressRecognized": {
+          "description": "Long press heuristic: a context menu, text selection, or new window appeared. False means none was seen, not that a tap was sent",
+          "type": "boolean"
+        },
+        "longClickAdvertised": {
+          "description": "Android long press: whether the pressed node advertises a long-click action. False means it has no long-click handler, so the app handles the hold like a tap",
           "type": "boolean"
         },
         "contextMenuOpened": {

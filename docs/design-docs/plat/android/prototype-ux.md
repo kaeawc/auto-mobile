@@ -308,6 +308,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | listItem        | material | material | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |
+| pasteButton     | native   | material | —     |
 | progress        | material | material | —     |
 | radioGroup      | material | material | —     |
 | row             | neutral  | neutral  | —     |
@@ -2286,8 +2287,10 @@ requests, navigation and other effects are refused. Routes and onOpen/onClose/on
 have handler event scope: `{event: ""}` reads the whole event and a nonempty RFC 6901 pointer
 reads a member. Root `platform.on` supports realtime.status and realtime.frame as well.
 `realtime.connect/disconnect` take a declared channel selector; `realtime.send` also takes a body
-value binding and requires a WebSocket channel. A selector is a literal string or `{value: id}`;
-dynamic channel selection is refused so validation can prove the declaration and kind.
+value binding and requires a WebSocket channel. A selector is a literal string or `{value: id}`. Literal argument strings are nonempty and
+limited to 64 UTF-8 bytes; declared IDs use the ASCII state-key grammar, so their byte and
+character limits coincide. Dynamic channel selection is refused so validation can prove the
+declaration and kind.
 Callbacks refuse requests, navigation and realtime.connect, including in nested action lists;
 realtime.send and realtime.disconnect remain allowed. Library bundles refuse host channels
 (including the default via) and secure state bindings in channel URLs, headers and action payloads,

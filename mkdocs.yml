@@ -187,6 +187,7 @@ nav:
       - "Daemon": design-docs/mcp/daemon.md
       - "Push-stream backpressure": push-stream-backpressure.md
       - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
+      - "MCP SDK v2 adoption survey": design-docs/mcp/sdk-v2-adoption-survey.md
       - "Elicitation for an ambiguous device": design-docs/mcp/elicitation-ambiguous-device.md
       - "Live observe App shell": design-docs/mcp/observe-app-shell.md
       - "Session state record": design-docs/session-state-record.md

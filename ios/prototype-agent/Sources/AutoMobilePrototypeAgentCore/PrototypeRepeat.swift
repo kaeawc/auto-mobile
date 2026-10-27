@@ -545,6 +545,9 @@ struct PrototypeRepeatInstance {
         guard case var .object(fields) = node else { return node }
         PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
         bindComponentActions(&fields)
+        if fields["type"] == .string("pasteButton"), let into = fields["into"]?.stringValue {
+            fields["into"] = .string(bindDataPath(into))
+        }
         if case let .array(actions)? = fields["onStartReached"] {
             fields["onStartReached"] = .array(actions.map(bindAction))
         }

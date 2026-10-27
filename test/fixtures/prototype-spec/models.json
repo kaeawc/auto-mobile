@@ -939,6 +939,10 @@
     },
     "maxItems": 200
   },
+  "nodePasteButton": {
+    "type": "pasteButton",
+    "into": "/data/pasted"
+  },
   "actionSetStack": {
     "type": "setStack",
     "stack": "targetStack",

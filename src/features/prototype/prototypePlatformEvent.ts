@@ -27,6 +27,9 @@ export interface PrototypePlatformCallEventPayload {
   call: string;
   outcome: "success" | "error";
   durationMs: number;
+  /** Clipboard audit metadata contains no clipboard text. */
+  op?: "copy" | "paste" | "hasText";
+  bytes?: number;
   /** Present for every `error` outcome. */
   error?: { code: (typeof PROTOTYPE_PLATFORM_ERROR_CODES)[number]; message: string };
   simulated?: true;
@@ -51,6 +54,8 @@ const callPayloadSchema = z
     call: qualifiedName,
     outcome: z.enum(["success", "error"]),
     durationMs: z.number().finite().nonnegative(),
+    op: z.enum(["copy", "paste", "hasText"]).optional(),
+    bytes: z.number().int().nonnegative().optional(),
     error: z
       .object({ code: z.enum(PROTOTYPE_PLATFORM_ERROR_CODES), message: z.string().max(512) })
       .strict()

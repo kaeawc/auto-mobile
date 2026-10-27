@@ -7,11 +7,17 @@ import type { PointerRequest } from "./PointerInjector";
 export const POINTER_INSTRUMENTATION_COMPONENT =
   "dev.jasonpearson.automobile.ctrlproxy/.pointer.PointerInstrumentation";
 
+/** The first Android release whose `am instrument` has `--no-restart` (see the design note). */
+export const POINTER_INSTRUMENTATION_MIN_SDK = 33;
+
 const REQUEST_VERSION = 1;
 /** The segment time a point without `durationMs` takes (the same default as `dragPath`). */
 const DEFAULT_SEGMENT_MS = 200;
 /** Process start, UiAutomation connect and teardown, on top of the planned event time. */
-const INSTRUMENTATION_OVERHEAD_MS = 15_000;
+export const INSTRUMENTATION_OVERHEAD_MS = 15_000;
+
+/** A failure that happened before anything reached the device: retry-safe. */
+export class PointerNotSentError extends ActionableError {}
 
 export interface PointerInstrumentationResult {
   success: boolean;
@@ -79,12 +85,12 @@ export function parsePointerInstrumentationOutput(
 /** Why a run that reported no result failed, from the shell output, as an actionable error. */
 function unreportedFailure(output: string): ActionableError {
   if (/Unable to find instrumentation|INSTRUMENTATION_FAILED|does not exist/i.test(output)) {
-    return new ActionableError(
+    return new PointerNotSentError(
       "The connected CtrlProxy does not include the pointer instrumentation; update CtrlProxy. No input was sent.",
     );
   }
   if (/Unknown option|--no-restart/i.test(output)) {
-    return new ActionableError(
+    return new PointerNotSentError(
       "This Android version's `am instrument` has no --no-restart, which keeps the injection from restarting CtrlProxy; hover and stylus injection need Android 13 or newer. No input was sent.",
     );
   }

@@ -1,0 +1,17 @@
+name: B
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v6
+      - run: make build
+  lint:
+    runs-on: macos-latest
+    steps:
+      - run: make lint
+  only-b:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo b

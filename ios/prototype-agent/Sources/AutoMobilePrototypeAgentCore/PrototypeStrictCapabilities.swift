@@ -111,7 +111,8 @@ enum PrototypeStrictCapabilities {
             if type == "platform" { need("platform") }
             for (key, child) in fields {
                 if key == "strings" { continue }
-                if key == "payload" || (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
+                if key == "payload" ||
+                    (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
                 if key == "repeat" {
                     if child.objectFields?["derive"] != nil { need("format") }
                     if let repeatSpec = child.objectFields,
@@ -146,7 +147,8 @@ enum PrototypeStrictCapabilities {
                 // An effect's own `animate`, colours and params are not spec features of their own.
                 if key == "linkify" {
                     if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
-                } else if !["series", "effects", "scrollLinked", "scrollTransition"].contains(key) { scan(child, field: key) }
+                } else if !["series", "effects", "scrollLinked", "scrollTransition"]
+                    .contains(key) { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }

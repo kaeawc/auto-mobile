@@ -63,6 +63,15 @@ Extending to confirmations needs data on which clients declare elicitation and h
 
 ### MRTR limits (modern era)
 
-- A tool call that runs as a task (the client declared the Tasks extension and the tool is
-  task-eligible) returns its task handle immediately, so the device question is not asked on that
-  call; the ambiguity refusal appears in the task's result.
+- A modern tool call that runs as a task returns its task handle immediately. Inside the task's
+  work, an ambiguity refusal pauses it in `input_required`; `tasks/get` inlines the question as
+  `inputRequests.deviceChoice`, and only the creating session's owner key may answer through
+  `tasks/update`. The original request envelope must declare form elicitation, and the call
+  must omit `deviceId`. The same accepted-content schema validates the choice against the
+  backend's candidates before one retry. A declined, cancelled, invalid or empty answer for
+  `deviceChoice` completes with the original refusal and never asks again. An update omitting
+  the key leaves the task waiting. Cancelling the task while it waits settles it as cancelled.
+- Task questions use the task's input waiter rather than MRTR `requestState` or the legacy
+  20-second elicitation timeout. An unattended client leaves the task in `input_required`
+  until answered, cancelled or expired by its task TTL. Running tasks currently advertise
+  `ttlMs: null`, so there is no automatic input deadline. Legacy task calls are unchanged.

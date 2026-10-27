@@ -344,12 +344,12 @@ function installDeviceReadiness(options: McpServerOptions): void {
 }
 
 /**
- * The capabilities one request's server advertises. A modern request has no notification stream
- * until subscriptions/listen is wired (#13947), so it claims no resource subscriptions.
+ * The capabilities one request's server advertises. Modern listen streams receive resource
+ * subscriptions and list changes through the endpoint's shared event bus.
  */
 function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities {
   return {
-    resources: era === "modern" ? { listChanged: true } : { subscribe: true, listChanged: true },
+    resources: { subscribe: true, listChanged: true },
     tools: era === "modern" ? { listChanged: true } : {},
     prompts: {},
     ...(era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),

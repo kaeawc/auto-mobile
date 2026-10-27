@@ -197,6 +197,7 @@ export class SessionManagerWiring {
         this.restoreHealth.revokeSupersededIdentityReplacement(...args),
       abandonSupersededRelease: (...args) => this.releaseCommit.abandonSupersededRelease(...args),
       releaseHeartbeatTimeoutMs: (...args) => this.releaseCommit.releaseHeartbeatTimeoutMs(...args),
+      fenceTerminalRelease: (...args) => this.releasePersistence.fenceTerminalRelease(...args),
       persistTerminalReleaseWithinDeadline: (...args) =>
         this.releaseCommit.persistTerminalReleaseWithinDeadline(...args),
       abandonReleaseSupersededAfterPersist: (...args) =>
@@ -291,6 +292,7 @@ export class SessionManagerWiring {
       deferRebindOverrides: (...args) => this.rebinding.deferRebindOverrides(...args),
       releaseWritePrecondition: (...args) =>
         this.releasePersistence.releaseWritePrecondition(...args),
+      recordTerminalReleaseIntent: (...args) => this.releaseWrite.recordTerminalIntent(...args),
       issueReleaseRow: (...args) => this.releasePersistence.issueReleaseRow(...args),
       releaseRowFallback: (...args) => this.releasePersistence.releaseRowFallback(...args),
       trackLateReleaseWrite: (...args) => this.releasePersistence.trackLateReleaseWrite(...args),

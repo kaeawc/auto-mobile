@@ -25,7 +25,8 @@ const KINDS: FaultKind[] = ["reject", "hang-until-released", "delay", "crash-aft
 const SCENARIOS = [
   "terminal release",
   "non-terminal release",
-  "terminal superseded by rebind and lift",
+  "terminal superseded by rebind and lift (volatile journal)",
+  "terminal declined at the final fence",
   "forced stuck release",
   "create after lift with parked terminal",
   "shutdown drain with failing write",
@@ -67,6 +68,8 @@ class Run {
     at?: number,
     kind?: FaultKind,
     readonly persistence = new FakeDeviceSessionPersistence(),
+    /** The journal's intents are volatile: the release writes its row before it commits. */
+    private readonly volatileJournal = false,
   ) {
     this.plan = new FaultPlan(this.timer, at, kind, (fault, resume) => {
       // A synchronous FS wait freezes this process, including JS deadlines and callbacks.
@@ -104,7 +107,9 @@ class Run {
       this.effects.push(`record:${intent.reason}:${durability}`);
       return durability;
     };
-    manager.attachTerminalReleaseJournal(journal);
+    if (!this.volatileJournal) {
+      manager.attachTerminalReleaseJournal(journal);
+    }
     manager.onSessionRelease((_id, _device, reason) => this.effects.push(`notice:${reason}`));
     return manager;
   }
@@ -205,6 +210,18 @@ class Run {
     await flush();
   }
 
+  /** A durable release whose final supersede fence declines: it has no row to undo (#11799). */
+  async declineAtCommit(): Promise<void> {
+    let calls = 0;
+    const release = this.manager.releaseSessionUnlessSuperseded(
+      UUID,
+      `device-disconnected:${DEVICE}`,
+      { commitFence: () => ++calls < 2 },
+    );
+    await this.complete(() => release);
+    await this.complete(() => this.manager.rebindSession(UUID, "fake-rebound", "android"));
+  }
+
   async force(reason: SessionReleaseReason = "heartbeat-timeout"): Promise<void> {
     const teardown = Promise.withResolvers<Promise<void>[]>();
     Reflect.set(
@@ -297,7 +314,10 @@ class Run {
     }
     const row = await this.persistence.getSession(UUID);
     const live = this.manager.findSession(UUID);
-    const liveScenario = scenario.includes("superseded") || scenario.includes("create after");
+    const liveScenario =
+      scenario.includes("superseded") ||
+      scenario.includes("declined") ||
+      scenario.includes("create after");
     if (liveScenario) {
       if (
         !live ||
@@ -343,7 +363,12 @@ class Run {
 }
 
 async function simulate(scenario: Scenario, at?: number, kind?: FaultKind): Promise<Result> {
-  const run = new Run(at, kind);
+  const run = new Run(
+    at,
+    kind,
+    undefined,
+    scenario === "terminal superseded by rebind and lift (volatile journal)",
+  );
   await run.create();
   run.persistence.faultPlan = run.plan;
   run.files.faultPlan = run.plan;
@@ -357,8 +382,11 @@ async function simulate(scenario: Scenario, at?: number, kind?: FaultKind): Prom
       case "non-terminal release":
         await run.complete(() => run.manager.releaseSession(UUID, "plan-auto-release"));
         break;
-      case "terminal superseded by rebind and lift":
+      case "terminal superseded by rebind and lift (volatile journal)":
         await run.supersede(false);
+        break;
+      case "terminal declined at the final fence":
+        await run.declineAtCommit();
         break;
       case "create after lift with parked terminal":
         await run.supersede(true);

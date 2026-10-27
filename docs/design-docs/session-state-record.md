@@ -618,8 +618,30 @@ and replay the committed disk prefix via `rehydratePersistedSessions`.
 | W1  | Journal hardening, independent: `record()` returns `durable`/`volatile`; directory fsync on first create (skipped on win32 like compaction); warn on mid-file corruption; Noop returns `volatile`; verify and pin restart ordering of `markStaleActiveSessionsExpired` vs journal replay | S    | Journal unit tests with `FakeTerminalReleaseJournalFileSystem`: failed append gives `volatile`, crash simulation, torn and mid-file corruption; restart-ordering test including the `deadlineAt` break case where unapplied intents meet the stale-active sweep |
 | W2  | `SessionRowWriter` for release rows only; replaces `pendingTerminalReleaseRetries`, `lateReleaseWrites`, `pendingNonTerminalReleaseSnapshots`; same ordering (terminal row before commit); adds the terminal generation guard (Q2 risk 3), named in the PR title                         | L    | `releaseRowRetry`, `releasePersistDeadline`, `rowInvariant` unchanged; fault injection failing each write kind at each await; regression test for same-UUID overwrite                                                                                           |
 | W3  | Create / rebind / activity-repair writes move to the writer; superseded-row fields and `OwedSupersededRowReassert` deleted                                                                                                                                                               | L    | `supersededRowReassertRetry`, `rowWritesRemainingCases`; fault injection extended                                                                                                                                                                               |
-| W4  | Behaviour change, isolated: terminal write after the final fence when `journal.record` is `durable` (§5); the only PR that changes ordering                                                                                                                                              | M    | Crash after free; record failure falls back to write-first; supersede after commit is refused; Linux and macOS CI                                                                                                                                               |
+| W4  | Behaviour change, isolated: terminal write after the final fence when `journal.record` is `durable` (§5); the only PR that changes ordering                                                                                                                                              | M    | Crash after free; record failure falls back to write-first; supersede after commit is refused; Linux and macOS CI                                                                                                                                               | **Status: landed for durable intents (#11799 W4)**; see "W4 as landed" below. |
 | W5  | Delete `abandonReleaseSupersededAfterPersist`, `reassertSupersededLiveRow` and the dead rewrite chain                                                                                                                                                                                    | S    | Dead-code check; full row-invariant suites                                                                                                                                                                                                                      |
+
+### W4 as landed
+
+A terminal release whose `journal.record` returned `durable` now fences and records its intent
+synchronously (`fenceTerminalRelease`), runs the final supersede fence, commits the removal, and only
+then writes the row (`persistCommittedTerminalRelease`). The device is freed (`notifySessionRelease`)
+without waiting for the row; the release still awaits the row afterwards, bounded by the persist
+deadline, so `drainReleasePromises` and the late-write tracking are unchanged. A final fence that
+declines lifts the fence and resolves the intent in one turn and has nothing to undo, so
+`abandonReleaseSupersededAfterPersist` is called with `rowWritten = false` and rewrites nothing.
+
+A row write that fails after the commit cannot keep the session: the device is already freed, the
+retry is scheduled (`scheduleTerminalReleaseRetry`), and the release rejects with the write error.
+Before W4 the session stayed published and the device held until a later release retried.
+
+A `volatile` intent keeps the write-first order exactly as before, including the final fence after
+the row landed and the rewrite chain behind it. Decision (open decision 2, Windows): `volatile` is the
+right answer where the directory fsync is skipped; no weaker guarantee is documented. W5 removes the
+chain by dropping the post-persist re-check for volatile releases (a supersede after the row landed
+is refused: the release already won) and deleting `supersededRows.ts`' release-driven half; the
+rebind and activity overlap repair stays and is re-modelled as the writer replacing an unwritten
+`live` desire.
 
 ## 7. Risks
 

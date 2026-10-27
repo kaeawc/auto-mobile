@@ -323,6 +323,9 @@ export async function runSessionRowInterleaving(
   }
 
   const sessionId = `row-invariant-${seed}`;
+  // A sweep and a regression case run the same seed on one database: start from no row, since
+  // the releases that win now leave a terminal row where a declined one left a live one.
+  await db.deleteFrom("device_sessions").where("session_uuid", "=", sessionId).execute();
   const deviceLoss: ReleaseReason = `device-disconnected:${DEVICES[0]}`;
   const trace: string[] = [];
   const violations: string[] = [];

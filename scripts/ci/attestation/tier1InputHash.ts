@@ -1,8 +1,5 @@
-import {
-  TREE_INPUT_HASH_ALGORITHM,
-  type AttestationLane,
-  type AttestationPayload,
-} from "./attestationSchema";
+import { type AttestationLane, type AttestationPayload } from "./attestationSchema";
+import { TIER2_INPUT_HASH_ALGORITHM, TIER3_INPUT_HASH_ALGORITHM } from "./tier23InputHash";
 import {
   canonicalEnvironmentInputs,
   canonicalInputEntries,
@@ -12,12 +9,13 @@ import {
 
 export const TIER1_INPUT_HASH_ALGORITHM = "tier1-node-tree-env-sha256-v1";
 
-/**
- * The input hash algorithm a lane's attestation must carry (#11976). Tiers 2 and 3 keep the plain
- * tree-entries hash until their own payloads land.
- */
+/** The input hash algorithm a lane's attestation must carry (#11976, #11977, #11978). */
 export function expectedInputHashAlgorithm(lane: AttestationLane): string {
-  return lane === "node" ? TIER1_INPUT_HASH_ALGORITHM : TREE_INPUT_HASH_ALGORITHM;
+  return {
+    node: TIER1_INPUT_HASH_ALGORITHM,
+    android: TIER2_INPUT_HASH_ALGORITHM,
+    ios: TIER3_INPUT_HASH_ALGORITHM,
+  }[lane];
 }
 
 /**

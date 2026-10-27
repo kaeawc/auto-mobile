@@ -1,5 +1,6 @@
+import { arch, platform } from "node:os";
+import { tier3InputHash } from "../../../../scripts/ci/attestation/tier23InputHash";
 import { beforeEach, afterEach, expect, mock, spyOn, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { logger } from "../../../../src/utils/logger";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -273,7 +274,11 @@ test("gate hash matches producer's lane entries, not the repository tree ID", as
   })).recompute(3, "/repo");
   expect(gateHash).toEqual({
     treeHash: "tree",
-    inputHash: createHash("sha256").update('["ios/a.swift","123","100644"]\n').digest("hex"),
+    inputHash: tier3InputHash({
+      entries: [{ path: "ios/a.swift", id: "123", mode: "100644" }],
+      host: { os: platform(), arch: arch() },
+      env: process.env,
+    }),
   });
 });
 

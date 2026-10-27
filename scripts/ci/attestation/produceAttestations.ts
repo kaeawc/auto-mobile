@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalInputEntries } from "./inputCanonical";
-import { TIER1_INPUT_HASH_ALGORITHM, tier1InputHash, type HostDescriptor } from "./tier1InputHash";
+import { expectedInputHashAlgorithm, tier1InputHash, type HostDescriptor } from "./tier1InputHash";
+import { tier2InputHash, tier3InputHash } from "./tier23InputHash";
 import {
   TREE_INPUT_HASH_ALGORITHM,
   Clock,
@@ -52,30 +53,29 @@ export interface InputHasher {
   hash(lane: AttestationLane, probe: TreeProbe): Promise<{ hash: string; algorithm: string }>;
 }
 /**
- * The hash a lane's attestation carries: tier 1's folds the host and the variables the tasks read
- * into the tree entries (#11976); the other lanes hash tree entries alone for now.
+ * The hash a lane's attestation carries: the lane's tracked inputs, the host and the variables its
+ * tasks read (#11976 to #11978).
  */
 export class LaneInputHasher implements InputHasher {
   constructor(
     private readonly host: HostDescriptor,
     private readonly env: Readonly<Record<string, string | undefined>>,
-    private readonly treeEntries: InputHasher = new TreeEntriesInputHasher(),
   ) {}
   async hash(
     lane: AttestationLane,
     probe: TreeProbe,
   ): Promise<{ hash: string; algorithm: string }> {
-    if (lane !== "node") {
-      return this.treeEntries.hash(lane, probe);
-    }
-    const entries = await probe.inputEntries(LANE_INPUT_PATHS.node);
+    const entries = await probe.inputEntries(LANE_INPUT_PATHS[lane]);
     if (entries.length === 0) {
       throw new Error("empty input entries");
     }
-    return {
-      hash: tier1InputHash({ entries, host: this.host, env: this.env }),
-      algorithm: TIER1_INPUT_HASH_ALGORITHM,
+    const host = { os: this.host.os, arch: this.host.arch };
+    const hashes = {
+      node: () => tier1InputHash({ entries, host: this.host, env: this.env }),
+      android: () => tier2InputHash({ entries, host, env: this.env }),
+      ios: () => tier3InputHash({ entries, host, env: this.env }),
     };
+    return { hash: hashes[lane](), algorithm: expectedInputHashAlgorithm(lane) };
   }
 }
 export class TreeEntriesInputHasher implements InputHasher {

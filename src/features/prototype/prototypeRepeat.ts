@@ -1,4 +1,5 @@
 import { effectUses } from "./prototypeEffects";
+import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -295,20 +296,9 @@ interface Child {
 }
 
 function childrenOf(node: Raw, path: string): Child[] {
-  if (node.type === "stack") {
-    return Object.entries(record(node.screens) ?? {}).flatMap(([name, value]) => {
-      const child = record(value);
-      return child ? [{ node: child, path: `${path}.screens[${JSON.stringify(name)}]` }] : [];
-    });
-  }
-  const single = record(node.child);
-  if (single) {
-    return [{ node: single, path: `${path}.child` }];
-  }
-  const list = Array.isArray(node.children) ? (node.children as unknown[]) : [];
-  return list.flatMap((entry, index) => {
-    const child = record(entry);
-    return child ? [{ node: child, path: `${path}.children[${index}]` }] : [];
+  return prototypeNodeChildren(node).flatMap(({ value, suffix }) => {
+    const child = record(value);
+    return child ? [{ node: child, path: `${path}${suffix}` }] : [];
   });
 }
 
@@ -335,22 +325,31 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
     : undefined;
 }
 
+function templateNodeError(node: Raw, path: string): RepeatError | undefined {
+  if (node.type === "list") {
+    return fail(path, "A list cannot sit inside a repeat template");
+  }
+  if (node.repeat !== undefined) {
+    return fail(`${path}.repeat`, "Nested repeat is not supported");
+  }
+  if (node.type === "stack") {
+    return fail(path, "Stack cannot appear inside a repeat template");
+  }
+  if (node.type === "pager") {
+    return fail(path, "Pager cannot appear inside a repeat template");
+  }
+  return undefined;
+}
+
 function templateErrors(
   node: Raw,
   path: string,
   state: RepeatState,
   scope?: Scope,
 ): RepeatError | undefined {
-  if (scope) {
-    if (node.repeat !== undefined) {
-      return fail(`${path}.repeat`, "Nested repeat is not supported");
-    }
-    if (node.type === "stack") {
-      return fail(path, "Stack cannot appear inside a repeat template");
-    }
-    if (node.type === "pager") {
-      return fail(path, "Pager cannot appear inside a repeat template");
-    }
+  const nesting = scope ? templateNodeError(node, path) : undefined;
+  if (nesting) {
+    return nesting;
   }
   const own = scope
     ? checkOwnFields(node, path, scope, state)
@@ -365,7 +364,12 @@ function templateErrors(
   const ownScope = scopeOf(node, path, state.data);
   const childScope = ownScope ?? scope;
   for (const child of childrenOf(node, path)) {
-    const error = templateErrors(child.node, child.path, state, childScope);
+    const error = templateErrors(
+      child.node,
+      child.path,
+      state,
+      node.type === "list" && !child.path.startsWith(`${path}.children[`) ? scope : childScope,
+    );
     if (error) {
       return error;
     }
@@ -400,8 +404,13 @@ function repeatSourceErrors(node: Raw, path: string, state: RepeatState): Repeat
     if (!Array.isArray(items)) {
       return fail(at, "Repeat path does not resolve to an array");
     }
-    if (items.length > MAX_REPEAT_ITEMS) {
-      return fail(at, `Repeat path resolves to more than ${MAX_REPEAT_ITEMS} items`);
+    const maximum =
+      node.type === "list" ? contract.limits.MAX_PROTOTYPE_LIST_ITEMS : MAX_REPEAT_ITEMS;
+    if (items.length > maximum) {
+      return fail(at, `Repeat path resolves to more than ${maximum} items`);
+    }
+    if (node.type === "list" && typeof node.maxItems === "number" && items.length > node.maxItems) {
+      return fail(at, "List data has more items than maxItems");
     }
     const invalid = items.findIndex((item) => !record(item));
     if (invalid >= 0) {
@@ -497,7 +506,7 @@ function expandedErrors(
     return fail(at, "Expanded animated effect limit exceeded");
   }
   const scope = scopeOf(node, path, data);
-  const instances = scope ? scope.items.length : 1;
+  const instances = scope && node.type !== "list" ? scope.items.length : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
     for (const child of childrenOf(node, path)) {

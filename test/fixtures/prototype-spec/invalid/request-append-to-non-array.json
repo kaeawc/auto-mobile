@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "feed",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "items": [],
+      "page": {}
+    },
+    "root": {
+      "type": "button",
+      "label": "Load",
+      "onTap": [
+        {
+          "type": "request",
+          "url": "http://localhost/feed",
+          "append": {
+            "from": "/items",
+            "to": "/data/page"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].append.to",
+  "expectedMessage": "append.to must name an array"
+}

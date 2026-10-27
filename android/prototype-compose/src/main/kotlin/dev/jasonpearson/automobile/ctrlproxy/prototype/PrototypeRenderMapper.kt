@@ -85,7 +85,10 @@ internal class PrototypeRenderMapper {
             previous = previousNodes,
             stacks = stacks,
             validity =
-              prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
+              prototypeValidity(
+                checkedPrototypeNodes(resolved.root, resolved.data),
+                resolved.state.orEmpty(),
+              ),
             shownErrors = shownErrors,
             data = resolved.data,
           )

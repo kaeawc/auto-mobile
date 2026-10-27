@@ -171,4 +171,5 @@ export const prototypeTypeRefs = {
   imageAsset: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   semantics: { swift: "PrototypeSemantics" },
   effect: { kotlin: "JsonObject" },
+  listRepeat: { kotlin: "PrototypeRepeat" },
 } as const satisfies TypeRefs;

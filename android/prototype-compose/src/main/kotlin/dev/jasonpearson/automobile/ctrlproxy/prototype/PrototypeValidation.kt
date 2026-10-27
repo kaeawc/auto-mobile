@@ -10,6 +10,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeFabNode
 import dev.jasonpearson.automobile.protocol.PrototypeIconButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
+import dev.jasonpearson.automobile.protocol.PrototypeListNode
+import dev.jasonpearson.automobile.protocol.PrototypeListRows
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
@@ -73,10 +75,21 @@ internal fun PrototypeNode.checkedKeys(): List<String> =
   }
 
 /** Includes bound repeat instances and data-resolved nodes, in authored order. */
-internal fun checkedPrototypeNodes(root: PrototypeNode): List<PrototypeNode> = buildList {
+internal fun checkedPrototypeNodes(
+  root: PrototypeNode,
+  data: kotlinx.serialization.json.JsonObject? = null,
+): List<PrototypeNode> = buildList {
   fun visit(node: PrototypeNode, path: String) {
     if (node.checks().isNotEmpty()) add(node)
-    prototypeChildEntries(node, path).forEach { visit(it.node, it.path) }
+    if (node is PrototypeListNode) {
+      node.header?.let { visit(it, "$path.header") }
+      if (node.children.any(::hasPrototypeChecks)) {
+        PrototypeListRows.items(node, data).forEachIndexed { index, item ->
+          visit(bindPrototypeListRow(node, item, index), "$path.repeat[$index].children[0]")
+        }
+      }
+      node.footer?.let { visit(it, "$path.footer") }
+    } else prototypeChildEntries(node, path).forEach { visit(it.node, it.path) }
   }
   visit(root, "root")
 }
@@ -104,3 +117,7 @@ internal fun prototypeShownError(
       PrototypeChecks.evaluate(state[key], node.checks(), prototypeNodeRole(node))
         .firstFailingMessage
   }
+
+/** Skip binding rows entirely for the usual display-only list. */
+private fun hasPrototypeChecks(node: PrototypeNode): Boolean =
+  node.checks().isNotEmpty() || prototypeDescendants(node).any(::hasPrototypeChecks)

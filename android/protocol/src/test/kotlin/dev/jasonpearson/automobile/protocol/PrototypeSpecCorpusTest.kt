@@ -101,6 +101,22 @@ class PrototypeSpecCorpusTest {
         fixture.getValue("expectedPath").jsonPrimitive.content,
         (result as PrototypeSpecValidation.Failure).error.path,
       )
+      val messageCase =
+        listOf(
+            "list-",
+            "request-append-to-",
+            "node-list",
+            "listRepeat",
+            "action-request-append",
+            "lazy_list",
+          )
+          .any(file.name::contains)
+      if (messageCase && fixture.containsKey("expectedMessage")) {
+        assertEquals(
+          fixture.getValue("expectedMessage").jsonPrimitive.content,
+          result.error.message,
+        )
+      }
     }
   }
 

@@ -34,6 +34,10 @@ internal object PrototypeBundleCapabilities {
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
     when (text(action["type"])) {
       "request" -> {
+        if ("append" in action) {
+          caps.add("prototype_lazy_list_v1")
+          caps.add("prototype_data_model_v1")
+        }
         caps.add("prototype_network_v1")
         if (text(action["via"]) == "device") caps.add("prototype_network_device_v1")
       }

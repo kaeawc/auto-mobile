@@ -13,6 +13,7 @@ internal object PrototypeBundleNodeCapabilities {
         "carousel" to "carousel_v1",
         "searchBar" to "search_bar_v1",
         "chart" to "chart_v1",
+        "list" to "lazy_list_v1",
         "stack" to "stack_v1",
         "menu" to "menus_v1",
         "tooltip" to "tooltip_v1",
@@ -74,6 +75,7 @@ internal object PrototypeBundleNodeCapabilities {
             "carousel_v1" to setOf("indicator"),
             "pager_options_v1" to setOf("axis", "pageSpacing", "peek", "pageSize"),
           )
+        "list" -> mapOf("refresh_v1" to setOf("refresh"))
         "scroll" ->
           mapOf(
             "refresh_v1" to setOf("refresh"),

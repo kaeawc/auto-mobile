@@ -336,6 +336,10 @@ function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void 
     action.body = mapBinding(action.body, `${path}.body`, visit);
   }
   mapField(action, "into", path, "requestInto", visit);
+  const append = record(action.append);
+  if (append) {
+    mapField(append, "to", `${path}.append`, "requestInto", visit);
+  }
   mapField(action, "statusKey", path, "key", visit);
   for (const field of ["onSuccess", "onError"]) {
     mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
@@ -361,7 +365,7 @@ function mapPlatformAction(action: Raw, path: string, visit: FieldVisitor): void
 }
 
 function mapActions(data: Raw, path: string, visit: FieldVisitor): void {
-  for (const field of ["onTap", "onLongPress", "onDoubleTap"]) {
+  for (const field of ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onStartReached"]) {
     mapList(data, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   }
 }

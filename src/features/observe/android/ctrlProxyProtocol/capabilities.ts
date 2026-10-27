@@ -100,6 +100,8 @@ export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 export const PROTOTYPE_CHOREOGRAPHY_CAPABILITY = "prototype_choreography_v1";
 /** Draws `style.effects`: closed, paint-only looks such as noise, glow and blur (#15128). */
 export const PROTOTYPE_EFFECTS_CAPABILITY = "prototype_effects_v1";
+/** Lazy list nodes and request.append; advertised together with the data model capability. */
+export const PROTOTYPE_LAZY_LIST_CAPABILITY = "prototype_lazy_list_v1";
 /** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
 export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */

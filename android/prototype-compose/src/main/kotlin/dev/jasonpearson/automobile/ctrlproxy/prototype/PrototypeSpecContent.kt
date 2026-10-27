@@ -177,6 +177,7 @@ fun PrototypeRuntimeContent(
       val scrollStores = remember { PrototypeStackScrollStores() }
       scrollStores.retain(snapshot.stacks.mapValues { it.value.path })
       CompositionLocalProvider(
+        LocalPrototypeListEndTriggers provides runtime.listEndTriggers,
         LocalPrototypeStackScrollStores provides scrollStores,
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeScrollRequests provides snapshot.scrollRequests,
@@ -214,6 +215,9 @@ fun PrototypeSpecContent(
     val menuLayers = remember { PrototypeMenuLayers() }
     val menuParents = remember(root) { prototypeMenuParents(root) }
     CompositionLocalProvider(
+      LocalPrototypeListEndTriggers provides
+        (LocalPrototypeListEndTriggers.current
+          ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
       LocalPrototypeAnchorLocals provides anchorLocals,
       LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
       LocalPrototypeMenuLayers provides menuLayers,
@@ -834,6 +838,8 @@ private fun RenderPrototypeNodeContent(
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
+    "list" ->
+      RenderPrototypeLazyList(node, modifier, interact) { RenderPrototypeNode(it, interact) }
     "chart" -> RenderPrototypeChart(node, modifier)
     "timePicker" ->
       PrototypeCheckedControl(node, parentModifier) {
@@ -1560,6 +1566,7 @@ private val SEMANTICS_FREE_CONTAINERS =
     "grid",
     "carousel",
     "scroll",
+    "list",
     "pager",
     "stack",
     "spacer",

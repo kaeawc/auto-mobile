@@ -55,7 +55,8 @@ enum PrototypeRepeat {
     /// Expands every `repeat` in the node tree rooted at `node`.
     static func expand(_ node: JSONValue) -> JSONValue {
         guard case var .object(fields) = node else { return node }
-        if case let .array(children)? = fields["children"] {
+        let lazy = fields["type"] == .string("list")
+        if !lazy, case let .array(children)? = fields["children"] {
             let expanded: [JSONValue] = if case let .object(spec)? = fields["repeat"] {
                 instances(of: spec).flatMap { instance in children.map { instance.bind($0) } }
             } else {
@@ -63,8 +64,10 @@ enum PrototypeRepeat {
             }
             fields["children"] = .array(expanded.map(expand))
         }
-        fields["repeat"] = nil
-        if let child = fields["child"] { fields["child"] = expand(child) }
+        if !lazy { fields["repeat"] = nil }
+        for name in ["child", "header", "footer"] {
+            if let child = fields[name] { fields[name] = expand(child) }
+        }
         if case let .object(screens)? = fields["screens"] {
             fields["screens"] = .object(screens.mapValues(expand))
         }
@@ -248,9 +251,22 @@ extension PrototypeRepeat {
         throws
     {
         guard case let .object(fields) = node else { return }
-        try validateEmitActions(fields["onTap"], path: "\(path).onTap", scope: scope)
+        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached"] {
+            try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
+        }
         if let linkify = fields["linkify"]?.objectFields {
             try validateEmitActions(linkify["onTap"], path: "\(path).linkify.onTap", scope: scope, matchBindings: true)
+        }
+        if let refresh = fields["refresh"]?.objectFields {
+            try validateEmitActions(refresh["onRefresh"], path: "\(path).refresh.onRefresh", scope: scope)
+        }
+        for name in ["header", "footer"] {
+            if let child = fields[name] { try validateEmitContexts(
+                child,
+                path: "\(path).\(name)",
+                scope: scope,
+                repeats: &repeats
+            ) }
         }
         // Existing composite-part action locations, matching Instance.bindComponentActions.
         for part in ["navigationIcon", "confirm", "dismiss", "action"] {
@@ -548,6 +564,10 @@ struct PrototypeRepeatInstance {
         bindString("url", in: &fields)
         bindString("statusKey", in: &fields)
         if case let .string(path)? = fields["into"] { fields["into"] = .string(bindDataPath(path)) }
+        if var append = fields["append"]?.objectFields, let to = append["to"]?.stringValue {
+            append["to"] = .string(bindDataPath(to))
+            fields["append"] = .object(append)
+        }
         for entries in ["headers", "query"] {
             guard case let .object(values)? = fields[entries] else { continue }
             fields[entries] = .object(values.mapValues { value in

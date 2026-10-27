@@ -350,6 +350,8 @@
                 checkboxView
             case "button":
                 buttonView
+            case "list":
+                PrototypeLazyListView(node: node, model: model).id(model.showRevision)
             case "scroll":
                 if node.axis != "horizontal", let refresh = node.refresh {
                     PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
@@ -1436,6 +1438,74 @@
             }
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
+        }
+    }
+
+    /// Row identity belongs to the data key; lazy stacks alone decide which row views exist.
+    private struct PrototypeLazyListCell: View {
+        let node: PrototypeNode
+        let model: PrototypeModel
+        let index: Int
+        let key: String
+        @State private var decoder = PrototypeLazyList.RowDecoder()
+
+        var body: some View {
+            if let row = decoder.decode(node: node, data: model.spec?.data, index: index) {
+                NodeView(node: row.node, model: model)
+                    .onAppear { model.listVisible(node, appearedKey: key) }
+                    .onDisappear { model.listVisible(node, disappearedKey: key) }
+            }
+        }
+    }
+
+    private struct PrototypeLazyListView: View {
+        let node: PrototypeNode
+        let model: PrototypeModel
+        @State private var pulling = false
+
+        @ViewBuilder
+        private func content(keys: [String]) -> some View {
+            if let header = node.header { NodeView(node: header, model: model) }
+            ForEach(Array(keys.enumerated()), id: \.element) { index, key in
+                PrototypeLazyListCell(node: node, model: model, index: index, key: key)
+            }
+            if let footer = node.footer { NodeView(node: footer, model: model) }
+        }
+
+        private func scroll(keys: [String]) -> some View {
+            ScrollView(node.axis == "horizontal" ? .horizontal : .vertical, showsIndicators: true) {
+                Group {
+                    if node.axis == "horizontal" {
+                        LazyHStack(spacing: node.spacing.map { CGFloat($0) }) { content(keys: keys) }
+                    } else {
+                        LazyVStack(spacing: node.spacing.map { CGFloat($0) }) { content(keys: keys) }
+                    }
+                }
+                .padding(CGFloat(node.contentPadding ?? 0))
+            }
+            .onChange(of: keys) { _, _ in model.listVisible(node) }
+        }
+
+        var body: some View {
+            let keys = PrototypeLazyList.keys(node: node, data: model.spec?.data)
+            if node.axis != "horizontal", let refresh = node.refresh {
+                scroll(keys: keys).refreshable {
+                    guard model.state[refresh.stateKey]?.boolValue != true else { return }
+                    pulling = true
+                    model.run(PrototypeRefresh.actions(for: refresh))
+                    await PrototypeRefresh.awaitCompletion(
+                        isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                        isCancelled: { Task.isCancelled },
+                        sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+                    )
+                    pulling = false
+                }
+                .overlay(alignment: .top) {
+                    if model.state[refresh.stateKey]?.boolValue == true, !pulling {
+                        ProgressView().padding(.top, 8)
+                    }
+                }
+            } else { scroll(keys: keys) }
         }
     }
 

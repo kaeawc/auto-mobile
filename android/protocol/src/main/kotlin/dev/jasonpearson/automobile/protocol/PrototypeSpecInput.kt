@@ -127,8 +127,7 @@ internal object PrototypeSpecInput {
     context.root = value
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
-      walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
-        ?: gridSpanErrors(context)
+      structuralError(value, context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)
@@ -149,6 +148,12 @@ internal object PrototypeSpecInput {
       PrototypeSpecValidation.Failure(fail("", "Internal model/contract mismatch"))
     }
   }
+
+  private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
+    PrototypeLazyListRules.limitError(value)
+      ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+      ?: gridSpanErrors(context)
+      ?: PrototypeLazyListRules.error(context)
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
   // accepts only integer lexical tokens, so normalize validated integer fields structurally.

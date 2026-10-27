@@ -16,6 +16,10 @@ import kotlinx.serialization.json.put
 
 /** RFC 6901 pointers relative to the read-only data object. Invalid input is always missing. */
 object PrototypeDataPointer {
+  /** Segment-aware overlap for validated RFC 6901 paths, including `/data` write targets. */
+  fun overlaps(first: String, second: String): Boolean =
+    first == second || first.startsWith("$second/") || second.startsWith("$first/")
+
   fun isValid(pointer: String): Boolean {
     if (pointer.length !in 1..PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH) return false
     if (!pointer.startsWith('/')) return false
@@ -152,7 +156,12 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
       source(pointer)
         .orEmpty()
         .filterIsInstance<JsonObject>()
-        .take(PrototypeSpecValidator.maxRepeatItems)
+        .take(
+          maxOf(
+            PrototypeSpecValidator.maxRepeatItems,
+            PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
+          ),
+        )
         .sumOf { item ->
           maxOf(
             1,
@@ -168,11 +177,19 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
       source(pointer)
         .orEmpty()
         .filterIsInstance<JsonObject>()
-        .take(PrototypeSpecValidator.maxRepeatItems)
+        .take(
+          maxOf(
+            PrototypeSpecValidator.maxRepeatItems,
+            PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
+          ),
+        )
         .map(PrototypeDataValues::project)
     }
 
-  fun array(pointer: String): JsonArray = arrays.getOrPut(pointer) { JsonArray(items(pointer)) }
+  fun array(pointer: String): JsonArray =
+    arrays.getOrPut(pointer) {
+      JsonArray(items(pointer).take(PrototypeSpecValidator.maxRepeatItems))
+    }
 }
 
 /** Authored text is scanned once; replacement values are never scanned again. */
@@ -282,7 +299,9 @@ object PrototypeDataResolver {
       JsonObject(
         own.mapValues { (key, value) ->
           when (key) {
-            "repeat" -> resolveRepeat(value, repeats)
+            "repeat" ->
+              if ((root["type"] as? JsonPrimitive)?.content == "list") value
+              else resolveRepeat(value, repeats)
             "enabledWhen",
             "visibleWhen" -> resolveCondition(value, data, platform)
             "styleWhen" -> resolveStyles(value, data, platform)
@@ -385,6 +404,12 @@ object PrototypeDataResolver {
       }
 
   private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
+    val extras =
+      listOf("header", "footer")
+        .mapNotNull { key ->
+          (node[key] as? JsonObject)?.let { key to transform(it) }
+        }
+        .toMap()
     val child = node["child"] as? JsonObject
     if (child != null) return JsonObject(node + ("child" to transform(child)))
     val screens = node["screens"] as? JsonObject
@@ -401,6 +426,7 @@ object PrototypeDataResolver {
     val children = node["children"] as? JsonArray ?: return node
     return JsonObject(
       node +
+        extras +
         ("children" to
           JsonArray(
             children.map { entry ->
@@ -461,6 +487,9 @@ private object PrototypeBindingScan {
     val screensBound =
       (node["screens"] as? JsonObject)?.values?.filterIsInstance<JsonObject>()?.any(::hasBindings)
         ?: false
-    return hasOwnBindings(node) || nested || screensBound
+    return hasOwnBindings(node) ||
+      nested ||
+      screensBound ||
+      listOf("header", "footer").any { (node[it] as? JsonObject)?.let(::hasBindings) == true }
   }
 }

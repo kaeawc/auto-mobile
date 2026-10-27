@@ -72,6 +72,9 @@ struct PrototypeContractValidator {
             throw invalid("$", "Embedded structural contract is unavailable")
         }
         var validator = Self(definitions: contract.definitions, limits: contract.limits)
+        if let fields = value.objectFields, let root = fields["root"] {
+            try PrototypeLazyList.validateLimits(root: root, data: fields["data"]?.objectFields)
+        }
         try validator.walk(value, rule: spec, path: "", depth: 0)
         return validator
     }

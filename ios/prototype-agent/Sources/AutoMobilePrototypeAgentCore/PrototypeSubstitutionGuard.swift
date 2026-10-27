@@ -28,6 +28,9 @@ private struct PrototypeSubstitutionGuard {
         if scope != nil, fields["repeat"] != nil {
             throw PrototypeLimits.violation("\(path).repeat", "Nested repeat is not supported")
         }
+        for name in ["header", "footer"] {
+            if let child = fields[name] { try visit(child, path: "\(path).\(name)", scope: scope) }
+        }
         try ownFields(fields, path: path, scope: scope)
         let childScope = ownScope(fields) ?? scope
         if case let .array(children)? = fields["children"] {
@@ -227,7 +230,7 @@ private struct PrototypeSubstitutionGuard {
     )
         throws
     {
-        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap"] {
+        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap", "onEndReached"] {
             guard case let .array(entries)? = fields[name] else { continue }
             for (index, entry) in entries.enumerated() {
                 guard case let .object(action) = entry else { continue }

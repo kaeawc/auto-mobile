@@ -17,6 +17,7 @@ enum PrototypeLimits {
     static let maxDepth = 24
     static let maxTextSpans = 64
     static let maxRepeatItems = 128
+    static let maxListItems = PrototypeContractValidator.limit("MAX_PROTOTYPE_LIST_ITEMS")
     static let maxRepeatPathCells = 65536
     static let maxSubstitutedTextLength = 16384
     static let maxSubstitutedTextTotal = 4_194_304
@@ -151,6 +152,9 @@ enum PrototypeLimits {
                     throw violation("\(path).repeat.items.path", "Repeat path cell limit exceeded")
                 }
             }
+            for name in ["header", "footer"] {
+                if let child = fields[name] { try visitCells(child, path: "\(path).\(name)", depth: depth + 1) }
+            }
             if let child = fields["child"] {
                 try visitCells(child, path: "\(path).child", depth: depth + 1)
             } else if case let .array(children)? = fields["children"] {
@@ -177,7 +181,9 @@ enum PrototypeLimits {
             guard depth < maxDepth else { return }
             try guardObjectChildren(value, path: childPath, depth: depth + 1)
         }
-        if let value = fields["child"] { try child(value, at: "\(path).child") }
+        for name in ["child", "header", "footer"] {
+            if let value = fields[name] { try child(value, at: "\(path).\(name)") }
+        }
         if case let .array(children)? = fields["children"] {
             for (index, value) in children.enumerated() {
                 try child(value, at: "\(path).children[\(index)]")
@@ -229,7 +235,7 @@ enum PrototypeLimits {
         if authored { try guardTextSpans(fields, path: path) }
         if authored, hasUncountedTemplate(fields) { return }
         if case let .array(children)? = fields["children"] {
-            if case let .object(spec)? = fields["repeat"] {
+            if case let .object(spec)? = fields["repeat"], fields["type"] != .string("list") {
                 try visitLiteralChildren(
                     spec, children: children, path: path, depth: depth, authored: authored, count: &count
                 )
@@ -241,8 +247,14 @@ enum PrototypeLimits {
                 }
             }
         }
-        if let child = fields["child"] {
-            try visit(child, path: "\(path).child", depth: depth + 1, authored: authored, count: &count)
+        for name in ["child", "header", "footer"] {
+            if let child = fields[name] { try visit(
+                child,
+                path: "\(path).\(name)",
+                depth: depth + 1,
+                authored: authored,
+                count: &count
+            ) }
         }
         try visitScreens(fields, path: path, depth: depth, authored: authored, count: &count)
     }
@@ -269,6 +281,7 @@ enum PrototypeLimits {
     }
 
     private static func hasUncountedTemplate(_ fields: [String: JSONValue]) -> Bool {
+        if fields["type"] == .string("list") { return false }
         guard case let .object(spec)? = fields["repeat"] else { return false }
         guard case let .array(items)? = spec["items"] else { return true }
         return items.isEmpty
@@ -328,6 +341,18 @@ enum PrototypeLimits {
                 child, path: "\(path).child", depth: depth + 1, template: childTemplate, count: &count,
                 insideRepeat: insideRepeat || fields["repeat"] != nil
             )
+        }
+        for name in ["header", "footer"] {
+            if let child = fields[name] {
+                try visitAuthoredTemplates(
+                    child,
+                    path: "\(path).\(name)",
+                    depth: depth + 1,
+                    template: childTemplate,
+                    count: &count,
+                    insideRepeat: insideRepeat
+                )
+            }
         }
         try visitAuthoredScreens(
             fields,

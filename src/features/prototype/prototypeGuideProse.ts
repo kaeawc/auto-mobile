@@ -211,6 +211,29 @@ in all (a literal \`repeat\` is counted; a data-bound one is clamped on the devi
 under \`motion: "none"\` or animator scale 0. Delays apply to enters only. The iOS agent does not
 support it yet.
 
+## Lazy lists
+
+\`list {repeat:{items:{path},as,key},children:[row],axis?,header?,footer?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?}\`
+is a lazy scrolling collection (needs \`prototype_lazy_list_v1\` and \`prototype_data_model_v1\`).
+The path resolves to at most 500 objects; \`key\` is required, projected and unique. Empty arrays
+are valid. Axis defaults to vertical; spacing/padding are nonnegative dp. One row template and
+optional header/footer each count once toward node/image limits, while per-item binding and text
+budgets still apply. Header/footer are ordinary nodes outside the row scope. Never nest lists,
+put a list in a repeat, or put a same-axis scroll above/below a list. Rows cannot nest repeats/pagers.
+Only composed rows are in \`observe\`; use \`swipeOn\` to reach more. Row keys preserve identity.
+\`onEndReached\` fires for nonempty rows within \`endThreshold\` of the end (1–50, default 3), once
+per \`(rowCount,lastRowKey)\` signature; empty/no-change pages never refire. Signature state survives
+recomposition and resets on show. \`endThreshold\` needs \`onEndReached\`. Vertical \`refresh\` uses
+scroll.refresh semantics and a declared boolean key (also needs \`prototype_refresh_v1\`).
+\`maxItems\` (1–500) requires initial data to fit; appending trims oldest rows atomically before
+final data limits. The smallest cap among lists sharing the exact data path wins.
+\`request.append:{from,to}\` (same lazy-list capability) extracts a response array from an object
+member at \`from\`, extends the existing \`/data/...\` array \`to\`, and writes the remaining response
+to optional \`into\`. These paths must not overlap. Any failure rolls back all writes and returns
+\`invalid_response\`. Extend events precede into/meta/status/request/onSuccess events; change
+payloads are \`{op:"append"|"extend",value,maxItems?,revision}\`. \`prependData\` and per-stack-entry
+scroll state are not yet supported. Device acceptance and benchmarks remain unverified.
+
 ## Charts
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
@@ -347,7 +370,7 @@ they need the same capability. A carousel has no page index, event or \`setPage\
 
 A \`box\`, \`row\`, \`column\`, \`flow\`, \`grid\` or \`carousel\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
 are instantiated once per item, in order, as siblings inside the same container (the container
-itself is not repeated). A list is a \`column\` with \`repeat\` whose single child is the row template.
+itself is not repeated). For eagerly composed rows use a \`column\` with \`repeat\`; for lazy rows use the \`list\` node.
 
 \`\`\`json
 {
@@ -886,7 +909,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
 | \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |
-| \`Expanded node limit exceeded\` | Fewer items or a smaller template; the limit counts every instance. |
+| \`Expanded node limit exceeded\` | Fewer items or a smaller template; ordinary repeats count every instance; lazy list templates count once. |
 | \`maxRuns requires everyMs\` | Supply everyMs or remove maxRuns. |
 | \`Too many distinct timer ids\` | Use at most eight distinct startTimer ids, including nested actions and components. |
 | a \`stateKey\` rejected | The key must be initialised in \`state\` with the type the node binds (string, boolean, number). |

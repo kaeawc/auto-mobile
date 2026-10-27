@@ -23,6 +23,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1",
         ]
+        XCTAssertTrue(supported.contains("prototype_lazy_list_v1"))
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")
         XCTAssertTrue(exclusions.isDisjoint(with: supported), "Remove exclusions once supported")
         XCTAssertEqual(required.subtracting(supported).subtracting(exclusions).sorted(), [])

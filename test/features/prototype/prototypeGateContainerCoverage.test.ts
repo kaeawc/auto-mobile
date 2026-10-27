@@ -82,6 +82,11 @@ const fixtures: Record<string, Node> = {
     onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
   },
   prototype_choreography_v1: { ...label, transition: { type: "fade", delayMs: 100 } },
+  prototype_lazy_list_v1: {
+    type: "list",
+    repeat: { items: { path: "/rows" }, as: "row", key: "id" },
+    children: [label],
+  },
   prototype_chart_v1: {
     type: "chart",
     variant: "line",
@@ -146,11 +151,17 @@ const containers: {
     prefix: "root.child",
     wrap: (child: Node) => ({ root: { type, child } }),
   })),
-  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager"].map((type) => ({
+  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager", "list"].map((type) => ({
     name: type,
     field: "children",
     prefix: "root.children[0]",
     wrap: (node: Node) => ({ root: { type, children: [node] } }),
+  })),
+  ...["header", "footer"].map((field) => ({
+    name: "list",
+    field,
+    prefix: `root.${field}`,
+    wrap: (node: Node) => ({ root: { type: "list", [field]: node } }),
   })),
   {
     name: "stack",
@@ -224,7 +235,14 @@ function referencesNode(rule: unknown): boolean {
 
 test("contract node-reference fields are covered by both the iterator and container matrix", () => {
   const node = { type: "text" };
-  const actual = prototypeNodeChildren({ child: node, children: [node], screens: { home: node } });
+  const actual = prototypeNodeChildren({
+    type: "list",
+    child: node,
+    children: [node],
+    screens: { home: node },
+    header: node,
+    footer: node,
+  });
   const suffixes = actual.map(({ suffix }) => suffix);
   for (const [variant, definition] of Object.entries(contract.definitions.node.variants)) {
     for (const [field, definitionField] of Object.entries(definition.fields)) {

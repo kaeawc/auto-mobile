@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import { prototypeDataPathPointer } from "./prototypeData";
-import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";
+import { prototypeJsonSchema } from "./prototypeJson";
 
 /**
  * A device `/data` write (`setData`, `appendData`, `removeData`) is reported as a `change` event
@@ -10,31 +10,36 @@ import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";
  * array appended to) and `payload` is this object. `validity` may accompany it; `state` and
  * `pages` are the usual snapshot.
  */
-export interface PrototypeDataWriteEventPayload {
-  op: "set" | "append" | "remove";
-  /**
-   * The written value (set, append). Absent for a remove, or when the value is too large for the
-   * event: the host then cannot mirror the write and stops tracking the spec.
-   */
-  value?: PrototypeJson;
-  /**
-   * The device revision after the write. A host patch whose `baseRevision` is older and whose
-   * `/data` paths overlap `name` is refused with a conflict instead of overwriting the write.
-   */
-  revision: number;
-}
-
 const revisionSchema = z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const payloadSchema = z.union([
   z
     .object({
-      op: z.enum(["set", "append"]),
+      op: z.literal("set"),
       value: prototypeJsonSchema.optional(),
+      revision: revisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("append"),
+      value: prototypeJsonSchema.optional(),
+      maxItems: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+      revision: revisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("extend"),
+      // Absent when the page did not fit the emit byte budget; the host then stops tracking.
+      value: z.array(prototypeJsonSchema).optional(),
+      maxItems: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
       revision: revisionSchema,
     })
     .strict(),
   z.object({ op: z.literal("remove"), revision: revisionSchema }).strict(),
 ]);
+
+export type PrototypeDataWriteEventPayload = z.infer<typeof payloadSchema>;
 
 export type PrototypeDataWriteEvent = PrototypeDataWriteEventPayload & { path: string };
 

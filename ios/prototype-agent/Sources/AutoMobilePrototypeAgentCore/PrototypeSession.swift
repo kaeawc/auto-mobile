@@ -1,4 +1,10 @@
 import Foundation
+import os
+
+private let requestCompletionLog = Logger(
+    subsystem: "dev.jasonpearson.automobile.prototype-agent",
+    category: "prototype"
+)
 
 /// Why an embedded prototype went away.
 /// This enum may gain cases; include a default branch when switching over it.
@@ -126,6 +132,9 @@ struct PrototypeSession {
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
     private var nonStateBytes = 0
+    /// End-edge trackers survive tree rebuilds and are reset by every show.
+    private var listEnds: [String: PrototypeListEndDriver] = [:]
+
     private(set) var localeOverride: String?
     private(set) var deviceLocales: [String] = []
     var effectiveLocales: [String] { localeOverride.map { [$0] } ?? deviceLocales }
@@ -182,6 +191,7 @@ struct PrototypeSession {
         specBytes: Int? = nil,
         restoredState: [String: JSONValue]? = nil
     ) {
+        listEnds = [:]
         timerCommands.append(.cancelAll)
         appearanceOverride = appearance
         localeOverride = locale
@@ -505,8 +515,16 @@ struct PrototypeSession {
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
         let data: [String: JSONValue]
-        switch PrototypeDataWrite.apply(spec.data, op: operation, path: path, value: value) {
-        case let .success(written): data = written
+        let maxItems = operation == .append || operation == .extend
+            ? PrototypeLazyList.listMaxItems(spec: spec, dataPath: path) : nil
+        switch PrototypeDataWrite.applyWindowed(
+            spec.data,
+            op: operation,
+            path: path,
+            value: value,
+            maxItems: maxItems.map(Double.init)
+        ) {
+        case let .success(written): data = written.data
         case let .failure(failure): return .failure(failure)
         }
         guard let rebuilt = try? spec.replacingData(data) else {
@@ -524,6 +542,7 @@ struct PrototypeSession {
         let revision = dataRevision + 1
         revisions[rebuilt.id] = revision
         var payload: [String: JSONValue] = ["op": .string(operation.rawValue), "revision": .number(Double(revision))]
+        if let maxItems { payload["maxItems"] = .number(Double(maxItems)) }
         // The value is left out when the event would not fit the emit payload limit, so the host,
         // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).
         if let value, PrototypeEmitContext.fits(.object(payload.merging(["value": value]) { $1 })) {
@@ -930,8 +949,8 @@ extension PrototypeSession {
     /// A `request` action. Bindings resolve against the committed state and data; a request that
     /// cannot be built or is refused completes at once as an error. Otherwise the status key moves
     /// to `loading` and a start command is issued; the response arrives later through
-    /// `completeRequest`. Starting a request to an `into` that already has one in flight cancels
-    /// the older (the latest wins).
+    /// `completeRequest`. Starting a request cancels older requests with overlapping write targets
+    /// (the latest wins).
     private mutating func runRequest(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let spec else { return [] }
         let inputs = EmitContextInputs(
@@ -943,8 +962,14 @@ extension PrototypeSession {
         )
         var events: [PrototypeEvent] = []
         let into = action.into
-        if let into, let older = requests.inFlight(into: into) {
-            events += cancelRequest(older, message: "Superseded by a newer request to \(into)")
+        let targets = [into, action.append?.to].compactMap { $0 }
+        for older in requests.inFlight(overlapping: targets) {
+            let target = targets.first { target in
+                [older.into, older.append?.to].compactMap { $0 }.contains { path in
+                    path == target || path.hasPrefix("\(target)/") || target.hasPrefix("\(path)/")
+                }
+            } ?? targets.first ?? ""
+            events += cancelRequest(older, message: "Superseded by a newer request to \(target)")
         }
         let urlText = PrototypeRequestResolver.urlText(action, inputs: inputs)
         let resolved = PrototypeRequestResolver.resolve(action, urlText: urlText, inputs: inputs)
@@ -968,7 +993,8 @@ extension PrototypeSession {
             into: into,
             statusKey: action.statusKey,
             onSuccess: action.onSuccess ?? [],
-            onError: action.onError ?? []
+            onError: action.onError ?? [],
+            append: action.append
         )
         if case let .failure(error) = resolved {
             return events + finishRequest(inFlight, .failed(error, durationMs: 0))
@@ -1000,6 +1026,7 @@ extension PrototypeSession {
     )
         -> [PrototypeEvent]
     {
+        if inFlight.append != nil { return finishAppendRequest(inFlight, response) }
         var meta = PrototypeRequestMeta(response)
         var events: [PrototypeEvent] = []
         var minimalMeta = false
@@ -1121,4 +1148,80 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
     func state(_ key: String) -> JSONValue? { state[key] }
     func page(_ id: String) -> Int? { pages[id] }
     func data(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(dataModel, pointer: pointer) }
+}
+
+extension PrototypeSession {
+    /// Both visibility and content changes enter the same synchronous session transition.
+    mutating func listVisible(
+        _ node: PrototypeNode,
+        appearedKey: String? = nil,
+        disappearedKey: String? = nil
+    )
+        -> [PrototypeEvent]
+    {
+        guard isShown, let actions = node.onEndReached else { return [] }
+        let keys = PrototypeLazyList.keys(node: node, data: data)
+        var driver = listEnds[node.nodePath] ?? PrototypeListEndDriver(endThreshold: node.endThreshold ?? 3)
+        let fires = driver.update(appearedKey: appearedKey, disappearedKey: disappearedKey, rowKeys: keys)
+        listEnds[node.nodePath] = driver
+        return fires ? run(actions) : []
+    }
+
+    /// Preflight with the shared outcome, then stage replayable writes on a value copy. No await or
+    /// external callback can interleave a host data write between the append and its metadata.
+    private mutating func finishAppendRequest(
+        _ request: PrototypeInFlightRequest, _ response: PrototypeRequestResponse
+    )
+        -> [PrototypeEvent]
+    {
+        guard let spec, var append = request.append else { return [] }
+        append.maxItems = PrototypeLazyList.listMaxItems(spec: spec, dataPath: append.to).map(Double.init)
+        let outcome = PrototypeRequestOutcome.apply(
+            spec.data ?? [:],
+            into: request.into,
+            response: response,
+            append: append
+        )
+        var meta = outcome.meta
+        var staged = self
+        var events: [PrototypeEvent] = []
+        do {
+            if outcome.status == "success", case let .received(_, _, body, _) = response {
+                let items = PrototypeDataPointer.resolve(body, tokens: PrototypeDataPointer.tokens(append.from)[...])
+                switch staged.commitDataWrite(.extend, path: append.to, value: items) {
+                case let .success(written): events += written
+                case let .failure(error): throw PrototypeRequestError(.invalidResponse, "append.to \(error.message)")
+                }
+                if let into = request.into, let pointer = PrototypeDataWrite.pointer(ofPath: into) {
+                    let rest = PrototypeDataPointer.resolve(outcome.data, pointer: pointer)
+                    events += try staged.commitDataWrite(.set, path: into, value: rest).get()
+                }
+            }
+            if let into = request.into {
+                guard let written = staged.writeRequestMeta(meta, beside: into, minimal: outcome.status == "error")
+                else { throw PrototypeRequestError(.invalidResponse, PrototypeRequestOutcome.noRoomForMeta) }
+                events += written
+            }
+            self = staged
+        } catch {
+            events = []
+            if let requestError = error as? PrototypeRequestError { meta.error = requestError }
+            else if let writeError = error as? PrototypeDataWriteFailure {
+                meta.error = .init(.invalidResponse, writeError.message)
+            } else {
+                requestCompletionLog
+                    .warning("Request append completion failed: \(String(describing: error), privacy: .private)")
+                meta.error = .init(.invalidResponse, "Request append completion could not rebuild the prototype")
+            }
+            if let into = request.into { events += writeRequestMeta(meta, beside: into, minimal: true) ?? [] }
+        }
+        let failed = meta.error != nil
+        events += writeRequestStatus(request.statusKey, failed ? "error" : "success")
+        events += emit(
+            kind: "emit",
+            name: PrototypeRequestEvent.name,
+            payload: PrototypeRequestEvent.payload(job: request.job, into: request.into, meta: meta)
+        )
+        return events + run(failed ? request.onError : request.onSuccess)
+    }
 }

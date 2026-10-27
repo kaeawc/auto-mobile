@@ -53,6 +53,12 @@ data class PrototypeTooltipSpotlight(
   val cornerRadius: Int? = null,
 )
 
+@Serializable
+data class PrototypeActionRequestAppend(
+  val from: String,
+  val to: String,
+)
+
 @Serializable sealed class PrototypeAction
 
 @SerialName("emit")
@@ -167,6 +173,7 @@ data class PrototypeRequestAction(
   val timeoutMs: Int? = null,
   val onSuccess: List<PrototypeAction>? = null,
   val onError: List<PrototypeAction>? = null,
+  val append: PrototypeActionRequestAppend? = null,
 ) : PrototypeAction()
 
 /**
@@ -1235,6 +1242,34 @@ data class PrototypeDrawerNode(
   val openWhen: PrototypeSheetCondition,
   val scrim: PrototypeModeValue? = null,
   val dismissOnSwipe: Boolean? = null,
+) : PrototypeNode()
+
+@SerialName("list")
+@Serializable
+data class PrototypeListNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: PrototypeTransition? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val axis: String? = null,
+  val refresh: PrototypeScrollRefresh? = null,
+  val repeat: PrototypeRepeat,
+  val children: List<PrototypeNode>,
+  val header: PrototypeNode? = null,
+  val footer: PrototypeNode? = null,
+  val spacing: Double? = null,
+  val contentPadding: Double? = null,
+  val onEndReached: List<PrototypeAction>? = null,
+  val endThreshold: Int? = null,
+  val maxItems: Int? = null,
 ) : PrototypeNode()
 
 @Serializable

@@ -22,6 +22,7 @@ import {
   prototypeJsonSchema,
   type PrototypeJson,
 } from "./prototypeJson";
+import * as lazyList from "./prototypeLazyListSchema";
 import { prototypeChartShape } from "./prototypeChartSchema";
 import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
@@ -573,9 +574,8 @@ const datePickerBaseSchema = z
     stateKey: stateKeyFieldSchema,
   })
   .strict();
-const scrollRefreshSchema = z
-  .object({ stateKey: stateKeySchema, onRefresh: z.array(actionSchema).min(1).max(32) })
-  .strict();
+const scrollRefreshSchema = lazyList.refresh(actionSchema);
+const listBaseSchema = lazyList.base(commonNodeShape, actionSchema, scrollRefreshSchema);
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -705,6 +705,7 @@ export type PrototypeNode =
   | z.infer<typeof snackbarBaseSchema>
   | z.infer<typeof timePickerBaseSchema>
   | z.infer<typeof datePickerBaseSchema>
+  | (z.infer<typeof listBaseSchema> & lazyList.Slots<PrototypeNode>)
   | (z.infer<typeof scrollBaseSchema> & { child: PrototypeNode })
   | (z.infer<typeof pagerBaseSchema> & { children: PrototypeNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -784,6 +785,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       snackbarBaseSchema,
       timePickerBaseSchema,
       datePickerBaseSchema,
+      listBaseSchema.extend(lazyList.children(z.lazy(() => prototypeNodeSchema))),
       scrollBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
       pagerBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(1) }),
       stackBaseSchema.extend({
@@ -899,6 +901,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "snackbar",
   "timePicker",
   "datePicker",
+  "list",
   "scroll",
   "pager",
   "stack",

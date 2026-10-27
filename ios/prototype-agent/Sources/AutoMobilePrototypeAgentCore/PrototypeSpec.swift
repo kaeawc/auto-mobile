@@ -125,6 +125,7 @@ struct PrototypeSpec: Decodable {
         } else {
             data = nil
         }
+        try PrototypeLazyList.validateLimits(root: container.decode(JSONValue.self, forKey: .root), data: data)
         if let data { try PrototypeLimits.guardData(data) }
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
@@ -178,6 +179,7 @@ struct PrototypeSpec: Decodable {
             spec: ["root": raw].merging(strings.map { ["strings": $0] } ?? [:]) { $1 },
             nodes: stringNodes(raw)
         )
+        try PrototypeLazyList.validate(root: raw, data: data, state: menuState)
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeRequestValidator.validate(raw, state: menuState)
@@ -239,6 +241,7 @@ struct PrototypeSpec: Decodable {
     )
         throws -> PrototypeSpec
     {
+        try PrototypeLazyList.validateLimits(root: raw, data: data)
         if let data { try PrototypeLimits.guardData(data) }
         let rebuilt = try Self.buildRoot(
             raw, data: data, menuState: state ?? [:], strings: strings, locales: locales, platform: platformState
@@ -585,6 +588,7 @@ struct PrototypeAction: Decodable, Sendable {
     let query: [String: JSONValue]?
     let body: JSONValue?
     let into: String?
+    let append: PrototypeRequestAppend?
     let statusKey: String?
     let via: String?
     let timeoutMs: Double?
@@ -600,7 +604,8 @@ struct PrototypeAction: Decodable, Sendable {
         case type, name, payload, context, pager, page, stack, screen, transition, path, key, value
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
-        case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
+        case requireValid, method, url, headers, query, body, into, append, statusKey, via, timeoutMs, onSuccess,
+             onError
     }
 
     init(
@@ -608,7 +613,8 @@ struct PrototypeAction: Decodable, Sendable {
         page: JSONValue?, stack: String?, screen: String?, path: String?, key: String?, value: JSONValue?,
         by incrementAmount: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
         headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
-        into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
+        into: String? = nil, append: PrototypeRequestAppend? = nil, statusKey: String? = nil, via: String? = nil,
+        timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
         actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil
@@ -638,6 +644,7 @@ struct PrototypeAction: Decodable, Sendable {
         self.query = query
         self.body = body
         self.into = into
+        self.append = append
         self.statusKey = statusKey
         self.via = via
         self.timeoutMs = timeoutMs
@@ -759,6 +766,8 @@ struct PrototypeOption: Decodable, Equatable {
 
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
 final class PrototypeNode: Decodable {
+    /// Structural identity retained across data-driven tree rebuilds.
+    let nodePath: String
     let type: String
     let id: String?
     let testTag: String?
@@ -836,6 +845,15 @@ final class PrototypeNode: Decodable {
     let openWhen: Condition?
     /// Pull-to-refresh on a vertical `scroll` (`prototype_refresh_v1`).
     let refresh: PrototypeScrollRefresh?
+    let listRepeat: PrototypeListRepeat?
+    let listRowTemplate: JSONValue?
+    let header: PrototypeNode?
+    let footer: PrototypeNode?
+    let spacing: Double?
+    let contentPadding: Double?
+    let onEndReached: [PrototypeAction]?
+    let endThreshold: Int?
+    let maxItems: Int?
     let detents: [Detent]?
     let scrim: PrototypeModeValue?
     let dragHandle: Bool?
@@ -905,7 +923,8 @@ final class PrototypeNode: Decodable {
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
         case leadingIcon, trailing, swipeActions
-        case refresh
+        case refresh, header, footer, spacing, contentPadding, onEndReached, endThreshold, maxItems
+        case listRepeat = "repeat"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
@@ -916,6 +935,10 @@ final class PrototypeNode: Decodable {
     }
 
     init(from decoder: Decoder) throws {
+        nodePath = decoder.codingPath.reduce(into: "") { path, key in
+            if let index = key.intValue { path += "[\(index)]" }
+            else { path += (path.isEmpty ? "" : ".") + key.stringValue }
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedType = try container.decode(String.self, forKey: .type)
         type = decodedType
@@ -959,6 +982,17 @@ final class PrototypeNode: Decodable {
         edge = try container.decodeIfPresent(String.self, forKey: .edge)
         openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
         refresh = try container.decodeIfPresent(PrototypeScrollRefresh.self, forKey: .refresh)
+        listRowTemplate = decodedType == "list" ? try container.decodeIfPresent([JSONValue].self, forKey: .children)?
+            .first : nil
+        listRepeat = decodedType == "list" ? try container
+            .decodeIfPresent(PrototypeListRepeat.self, forKey: .listRepeat) : nil
+        header = try container.decodeIfPresent(PrototypeNode.self, forKey: .header)
+        footer = try container.decodeIfPresent(PrototypeNode.self, forKey: .footer)
+        spacing = try container.decodeIfPresent(Double.self, forKey: .spacing)
+        contentPadding = try container.decodeIfPresent(Double.self, forKey: .contentPadding)
+        onEndReached = try container.decodeIfPresent([PrototypeAction].self, forKey: .onEndReached)
+        endThreshold = try container.decodeIfPresent(Int.self, forKey: .endThreshold)
+        maxItems = try container.decodeIfPresent(Int.self, forKey: .maxItems)
         detents = try container.decodeIfPresent([Detent].self, forKey: .detents)
         scrim = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .scrim)
         dragHandle = try container.decodeIfPresent(Bool.self, forKey: .dragHandle)
@@ -1037,6 +1071,8 @@ final class PrototypeNode: Decodable {
         }
         children?.forEach { $0.collectPagers(into: &counts) }
         child?.collectPagers(into: &counts)
+        header?.collectPagers(into: &counts)
+        footer?.collectPagers(into: &counts)
         screens?.values.forEach { $0.collectPagers(into: &counts) }
     }
 
@@ -1056,6 +1092,8 @@ final class PrototypeNode: Decodable {
         ids.formUnion(fontAssetIds())
         children?.forEach { $0.collectFontAssets(into: &ids) }
         child?.collectFontAssets(into: &ids)
+        header?.collectFontAssets(into: &ids)
+        footer?.collectFontAssets(into: &ids)
         screens?.values.forEach { $0.collectFontAssets(into: &ids) }
     }
 
@@ -1067,6 +1105,8 @@ final class PrototypeNode: Decodable {
         items?.compactMap(\.image).forEach { ids.formUnion($0.values) }
         children?.forEach { $0.collectAssets(into: &ids) }
         child?.collectAssets(into: &ids)
+        header?.collectAssets(into: &ids)
+        footer?.collectAssets(into: &ids)
         screens?.values.forEach { $0.collectAssets(into: &ids) }
     }
 }

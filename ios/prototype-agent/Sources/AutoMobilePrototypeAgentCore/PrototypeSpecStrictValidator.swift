@@ -13,6 +13,8 @@ public enum PrototypeSpecStrictValidator {
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
             try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
+            try PrototypeLazyList.validate(root: root, data: modelData, state: state)
+            try PrototypeLazyList.validateAppend(actions: context.actions, data: modelData)
             try PrototypeStrictSemantics.layout(context)
             var repeats = PrototypeStrictRepeats(data: modelData)
             try repeats.templates(root.objectFields ?? [:], path: "root")
@@ -52,7 +54,11 @@ public enum PrototypeSpecStrictValidator {
             if let supportedCapabilities,
                !PrototypeStrictCapabilities.required(fields).isSubset(of: supportedCapabilities)
             {
-                throw PrototypeContractValidator.invalid("$", "Unsupported capabilities")
+                let missing = PrototypeStrictCapabilities.required(fields).subtracting(supportedCapabilities).sorted()
+                throw PrototypeContractValidator.invalid(
+                    "$",
+                    "Unsupported capabilities: " + missing.joined(separator: ", ")
+                )
             }
             if library, let window = fields["window"]?.objectFields {
                 if window["layer"] ==

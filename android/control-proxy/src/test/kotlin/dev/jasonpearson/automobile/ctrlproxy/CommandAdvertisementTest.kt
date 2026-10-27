@@ -69,6 +69,7 @@ class CommandAdvertisementTest {
       "prototype_choreography_v1",
       "prototype_stack_transitions_v1",
       "prototype_chart_v1",
+      "prototype_lazy_list_v1",
       "prototype_linkify_v1",
       "prototype_chat_scroll_v1",
       "prototype_drawer_v1",

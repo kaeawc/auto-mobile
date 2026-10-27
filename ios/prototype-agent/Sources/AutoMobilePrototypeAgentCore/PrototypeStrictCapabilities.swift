@@ -40,6 +40,7 @@ enum PrototypeStrictCapabilities {
                 "carousel": "carousel",
                 "searchBar": "search_bar",
                 "chart": "chart",
+                "list": "lazy_list",
                 "menu": "menus",
                 "tooltip": "tooltip",
                 "drawer": "drawer",
@@ -78,6 +79,7 @@ enum PrototypeStrictCapabilities {
                .contains(where: { fields[$0] != nil }) { need("chat_scroll") }
             if type == "request" {
                 need("network")
+                if fields["append"] != nil { need("lazy_list") }
                 if fields["via"] == .string("device") { need("network_device") }
                 if let url = fields["url"]?.stringValue { textBinding(url) }
                 for key in ["headers", "query"] {

@@ -112,7 +112,7 @@ webrtc-integration-test                11      9       9     81%
 shared jobs: 16
 ```
 
-The three jobs this lane moved to composite actions on both workflows (\`android-device-webrtc\`,
+The four jobs this lane moved to composite actions on both workflows (\`android-device-webrtc\`,
 \`webrtc-integration-test\`, \`build-android-control-proxy\`, \`junit-runner-unit-tests\`) are caller-sized
 now: 9 to 20 lines, the rest being the job's own gating. The shared-percentage column no longer
 measures duplication for them, only that the caller wraps the same few lines.

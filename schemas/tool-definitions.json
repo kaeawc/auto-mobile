@@ -27014,6 +27014,21 @@
             },
             "label": {
               "type": "string"
+            },
+            "display": {
+              "description": "iOS multi-screen device (iPhone Duo): the panel the app was on when it answered. Absent on single-screen devices, older apps and ambiguous sizes.",
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": ["inner", "cover", "rear", "external", "unknown"]
+                }
+              },
+              "required": ["key", "role"],
+              "additionalProperties": false
             }
           },
           "required": ["app", "libraryId", "label"],

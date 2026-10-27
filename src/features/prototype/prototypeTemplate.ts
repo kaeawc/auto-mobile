@@ -277,15 +277,18 @@ function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {
   }
 }
 
-function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+function mapRouteAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (["push", "replace", "setStack"].includes(String(action.type))) {
-    if (action.type === "setStack" || action.params !== undefined)
+    if (action.type === "setStack" || action.params !== undefined) {
       visit(action, path, "routeFeature");
+    }
     const entries =
       action.type === "setStack" && Array.isArray(action.path) ? action.path : [action];
     const mapped = entries.map((raw, index) => {
       const entry = record(raw) ? { ...record(raw)! } : undefined;
-      if (!entry || !record(entry.params)) return raw;
+      if (!entry || !record(entry.params)) {
+        return raw;
+      }
       const prefix =
         action.type === "setStack" ? `${path}.path[${index}].params` : `${path}.params`;
       entry.params = Object.fromEntries(
@@ -298,10 +301,19 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       );
       return entry;
     });
-    if (action.type === "setStack") action.path = mapped;
-    else action.params = record(mapped[0])?.params;
+    if (action.type === "setStack") {
+      action.path = mapped;
+    } else {
+      action.params = record(mapped[0])?.params;
+    }
   }
-  if (action.type === "pop" && action.force !== undefined) visit(action, path, "routeFeature");
+  if (action.type === "pop" && action.force !== undefined) {
+    visit(action, path, "routeFeature");
+  }
+}
+
+function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+  mapRouteAction(action, path, visit);
   if (["setData", "appendData", "prependData", "removeData"].includes(String(action.type))) {
     mapDataAction(action, path, visit);
     return action;
@@ -555,20 +567,22 @@ export function mapBindableFields(
   mapNodeKeys(copy, path, visit);
   if (copy.type === "stack") {
     const routes = record(copy.routes);
-    if (routes)
+    if (routes) {
       copy.routes = Object.fromEntries(
         Object.entries(routes)
           .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
           .map(([name, raw]) => {
             const route = { ...record(raw) };
             const routePath = memberPath(`${path}.routes`, name);
-            for (const field of ["onEnter", "onBack"])
+            for (const field of ["onEnter", "onBack"]) {
               mapList(route, field, routePath, (action, actionPath) =>
                 mapAction(action, actionPath, visit),
               );
+            }
             return [name, route];
           }),
       );
+    }
   }
   return copy;
 }

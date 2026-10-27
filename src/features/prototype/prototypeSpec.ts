@@ -1,6 +1,5 @@
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
-import { routeParamsSchema } from "./prototypeRouteSchema";
-import { prototypeContractPatterns } from "./prototypeContractPatterns";
+import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
@@ -155,18 +154,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z
     .object({ type: z.enum(["pop"]), stack: z.string().min(1), force: z.boolean().optional() })
     .strict(),
-  z
-    .object({
-      type: z.enum(["setStack"]),
-      stack: z.string().min(1),
-      path: z
-        .array(
-          z.object({ screen: z.string().min(1), params: routeParamsSchema.optional() }).strict(),
-        )
-        .min(1)
-        .max(contract.limits.MAX_PROTOTYPE_STACK_DEPTH),
-    })
-    .strict(),
+  setStackActionSchema,
   z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
   z
     .object({
@@ -694,20 +682,7 @@ const bottomSheetBaseSchema = z
     dismissOnSwipe: z.boolean().optional(),
   })
   .strict();
-const routeSchema = z
-  .object({
-    params: z
-      .record(
-        z.string().regex(prototypeContractPatterns.pathKey),
-        z.enum(["string", "number", "boolean"]),
-      )
-      .and(z.unknown())
-      .refine((value) => Object.keys(value).length <= 16)
-      .optional(),
-    onEnter: z.array(actionSchema).min(1).max(32).optional(),
-    onBack: z.array(actionSchema).min(1).max(32).optional(),
-  })
-  .strict();
+const routeSchema = buildRouteSchema(actionSchema);
 const stackBaseSchema = z
   .object({
     ...commonNodeShape,

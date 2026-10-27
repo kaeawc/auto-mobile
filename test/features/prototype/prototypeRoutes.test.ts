@@ -19,7 +19,9 @@ for (const { name, fixture } of invalid) {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.path).toBe(fixture.expectedPath);
-      if (fixture.expectedMessage) expect(result.error.message).toBe(fixture.expectedMessage);
+      if (fixture.expectedMessage) {
+        expect(result.error.message).toBe(fixture.expectedMessage);
+      }
     }
   });
 }

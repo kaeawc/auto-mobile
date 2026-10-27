@@ -153,7 +153,9 @@ function checkStorageKey(
   if (storageKey.startsWith("stack:")) {
     let declared = false;
     walkPrototypeNodes(root, (node) => {
-      if (node.type === "stack" && node.id === storageKey.slice(6)) declared = true;
+      if (node.type === "stack" && node.id === storageKey.slice(6)) {
+        declared = true;
+      }
     });
     return declared ? { bytes: 0 } : { message: "Unknown storage stack" };
   }

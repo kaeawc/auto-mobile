@@ -1,0 +1,55 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      },
+      "routes": {
+        "detail": {}
+      }
+    },
+    "requires": {
+      "platform": ["test"]
+    },
+    "platform": {
+      "on": {
+        "test.tick": [
+          {
+            "type": "setStack",
+            "stack": "nav",
+            "path": [
+              {
+                "screen": "detail"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_platform_test_v1",
+      "prototype_platform_v1",
+      "prototype_stack_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_routes_v1"
+}

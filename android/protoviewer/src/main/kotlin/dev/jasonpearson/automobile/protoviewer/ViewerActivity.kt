@@ -56,7 +56,7 @@ class ViewerActivity : ComponentActivity() {
     get() = (application as ProtoViewerApplication).services
 
   private val interactions = Mutex()
-  private var runtime: PrototypeRuntime? = null
+  private var runtime by mutableStateOf<PrototypeRuntime?>(null)
   private var watchdog: PrototypeScheduledTask? = null
   private var renderFailed = false
   private var content by mutableStateOf<ViewerContent?>(null)
@@ -139,6 +139,7 @@ class ViewerActivity : ComponentActivity() {
               }
             },
           )
+        runtime?.let { ViewerEffectsNote(it) }
       }
     }
     if (confirmReset)

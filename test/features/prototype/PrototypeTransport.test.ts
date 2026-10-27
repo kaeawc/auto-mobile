@@ -284,3 +284,41 @@ test("Android patch transport forwards the request and timeout", async () => {
   });
   expect(proxy.patchRequests).toEqual([patch]);
 });
+
+import { ctrlProxyRequests } from "../../../src/features/observe/android/ctrlProxyProtocol/requestBuilders";
+test("show request serializes locale alongside appearance only for strings", () => {
+  const translated = { ...spec, strings: { default: { title: "Title" } } };
+  expect(
+    ctrlProxyRequests.showPrototype({
+      requestId: "r",
+      spec: translated,
+      locale: "fr-CA",
+      appearance: "dark",
+    }),
+  ).toEqual({
+    type: "show_prototype",
+    requestId: "r",
+    spec: translated,
+    locale: "fr-CA",
+    appearance: "dark",
+  });
+  expect(
+    ctrlProxyRequests.showPrototype({ requestId: "r", spec, locale: "fr" }),
+  ).not.toHaveProperty("locale");
+  expect(ctrlProxyRequests.showPrototype({ requestId: "r", spec: translated })).not.toHaveProperty(
+    "locale",
+  );
+});
+test("iOS transport carries locale top level only for strings and states it afresh", async () => {
+  const agent = new FakePrototypeAgentClient();
+  const transport = new IosPrototypeTransport(agent);
+  const translated = { ...spec, strings: { default: { title: "Title" } } };
+  await transport.show(translated, { locale: "fr" });
+  await transport.show(translated);
+  await transport.show(spec, { locale: "fr" });
+  expect(agent.requests.map((request) => request.body)).toEqual([
+    { spec: translated, locale: "fr" },
+    { spec: translated },
+    { spec },
+  ]);
+});

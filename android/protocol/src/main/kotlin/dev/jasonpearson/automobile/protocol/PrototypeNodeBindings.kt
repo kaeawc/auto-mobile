@@ -82,7 +82,10 @@ internal object PrototypeNodeBindings {
     path: String,
     stored: JsonPrimitive?,
   ): PrototypeSpecError? {
-    if (value.text("type") !in setOf("tabBar", "bottomNav")) return null
+    if (
+      value.text("type") !in setOf("tabBar", "bottomNav", "pager") || value.text("stateKey") == null
+    )
+      return null
     val number = stored?.takeIf { !it.isString }?.doubleOrNull
     return if (!isNonnegativeInteger(number))
       fail("$path.stateKey", "Selection requires a nonnegative integer state key")

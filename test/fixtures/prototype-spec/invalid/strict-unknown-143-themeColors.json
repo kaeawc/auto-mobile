@@ -1,0 +1,66 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "theme": {
+      "mode": "light",
+      "colors": {
+        "primary": "#00285A",
+        "onPrimary": "#25838F",
+        "primaryContainer": "#4ADEC4",
+        "onPrimaryContainer": "#6F39F9",
+        "inversePrimary": "#94942E",
+        "secondary": "#B9EF63",
+        "onSecondary": "#DE4A98",
+        "secondaryContainer": "#03A5CD",
+        "onSecondaryContainer": "#280002",
+        "tertiary": "#4D5B37",
+        "onTertiary": "#72B66C",
+        "tertiaryContainer": "#9711A1",
+        "onTertiaryContainer": "#BC6CD6",
+        "background": "#E1C70B",
+        "onBackground": "#062240",
+        "surface": "#2B7D75",
+        "onSurface": "#50D8AA",
+        "surfaceVariant": "#7533DF",
+        "onSurfaceVariant": "#9A8E14",
+        "surfaceTint": "#BFE949",
+        "inverseSurface": "#E4447E",
+        "inverseOnSurface": "#099FB3",
+        "error": "#2EFAE8",
+        "onError": "#53551D",
+        "errorContainer": "#78B052",
+        "onErrorContainer": "#9D0B87",
+        "outline": "#C266BC",
+        "outlineVariant": "#E7C1F1",
+        "scrim": "#0C1C26",
+        "surfaceBright": "#31775B",
+        "surfaceDim": "#56D290",
+        "surfaceContainer": "#7B2DC5",
+        "surfaceContainerHigh": "#A088FA",
+        "surfaceContainerHighest": "#C5E32F",
+        "surfaceContainerLow": "#EA3E64",
+        "surfaceContainerLowest": "#0F9999",
+        "zzzUnknown": true
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "style": {
+            "color": "onSurface"
+          },
+          "type": "text",
+          "text": "Every colour role"
+        }
+      ]
+    }
+  },
+  "expectedPath": "theme.colors.zzzUnknown"
+}

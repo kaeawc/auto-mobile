@@ -2,8 +2,15 @@ import Foundation
 
 extension PrototypeLimits {
     /// Checks authored fields before either data resolution or repeat expansion allocates text.
-    static func guardSubstitutedText(_ root: JSONValue, data: [String: JSONValue]?) throws {
-        var guarder = PrototypeSubstitutionGuard(data: data)
+    static func guardSubstitutedText(
+        _ root: JSONValue,
+        data: [String: JSONValue]?,
+        derived: PrototypeDerivedContext? = nil,
+        state: [String: JSONValue] = [:]
+    )
+        throws
+    {
+        var guarder = PrototypeSubstitutionGuard(data: data, derived: derived, state: state)
         try guarder.visit(root, path: "root", scope: nil)
     }
 }
@@ -15,11 +22,15 @@ private struct PrototypeSubstitutionGuard {
     }
 
     let data: [String: JSONValue]?
+    let derived: PrototypeDerivedContext?
+    let state: [String: JSONValue]
     private var repeats: PrototypeRepeatData
     private var total = 0
 
-    init(data: [String: JSONValue]?) {
+    init(data: [String: JSONValue]?, derived: PrototypeDerivedContext?, state: [String: JSONValue]) {
         self.data = data
+        self.derived = derived
+        self.state = state
         repeats = PrototypeRepeatData(data: data)
     }
 
@@ -27,6 +38,9 @@ private struct PrototypeSubstitutionGuard {
         guard case let .object(fields) = node else { return }
         if scope != nil, fields["repeat"] != nil {
             throw PrototypeLimits.violation("\(path).repeat", "Nested repeat is not supported")
+        }
+        for name in ["header", "footer"] {
+            if let child = fields[name] { try visit(child, path: "\(path).\(name)", scope: scope) }
         }
         try ownFields(fields, path: path, scope: scope)
         let childScope = ownScope(fields) ?? scope
@@ -58,8 +72,21 @@ private struct PrototypeSubstitutionGuard {
             source = spec["items"]
         }
         guard case let .array(items)? = source else { return Scope(alias: alias, items: []) }
+        let derive = (
+            try? spec["derive"]
+                .map { try JSONDecoder().decode([String: PrototypeDerivedEntry].self, from: JSONEncoder().encode($0)) }
+        ) ??
+            [:]
         return Scope(alias: alias, items: items.map { item in
-            if case let .object(fields) = item { return fields }
+            if case let .object(fields) = item {
+                guard let derived else { return fields }
+                return PrototypeDerivedValues.project(
+                    fields,
+                    derive: derive,
+                    formatter: derived.formatter,
+                    environment: derived.environment
+                )
+            }
             return [:]
         })
     }
@@ -74,7 +101,13 @@ private struct PrototypeSubstitutionGuard {
         var bound = authored
         var dataRecognized = false
         if text {
-            let substitution = PrototypeDataText.substitutionLength(authored, data: data)
+            let dataSubstitution = PrototypeDataText.substitutionLength(authored, data: data)
+            let spans = PrototypeDerivedText.spans(authored)
+            // Derived values are bounded at render time; only their authored tokens count here.
+            let substitution = (
+                recognized: dataSubstitution.recognized || !spans.isEmpty,
+                length: dataSubstitution.length
+            )
             if substitution.length > PrototypeLimits.maxSubstitutedTextLength {
                 throw PrototypeLimits.violation(fieldPath, "Substituted text length limit exceeded")
             }
@@ -129,8 +162,10 @@ private struct PrototypeSubstitutionGuard {
 
     private mutating func ownFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
         try componentFields(fields, path: path, scope: scope)
-        if let condition = fields["visibleWhen"] {
-            try conditionFields(condition, path: "\(path).visibleWhen", scope: scope)
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
+            if let condition = fields[key] {
+                try conditionFields(condition, path: "\(path).\(key)", scope: scope)
+            }
         }
         if case let .array(styles)? = fields["styleWhen"] {
             for (index, style) in styles.enumerated() {
@@ -140,7 +175,7 @@ private struct PrototypeSubstitutionGuard {
             }
         }
         try actions(fields, path: path, scope: scope)
-        for key in ["stateKey", "hourKey", "minuteKey"] {
+        for key in ["stateKey", "hourKey", "minuteKey", "atEndKey"] {
             try field(fields, key, path: path, scope: scope)
         }
         if case let .object(part)? = fields["trailing"] {
@@ -194,6 +229,7 @@ private struct PrototypeSubstitutionGuard {
             try optionFields(fields, path: path, scope: scope)
         case "textField":
             try part(fields["trailingIcon"], path: "\(path).trailingIcon", scope: scope)
+            try field(fields, "errorText", path: path, text: true, scope: scope)
             try actions(fields, path: path, scope: scope, list: "onSubmit")
         case "row", "listItem":
             try swipeFields(fields, path: path, scope: scope)
@@ -204,6 +240,9 @@ private struct PrototypeSubstitutionGuard {
             try field(fields, "text", path: path, text: true, scope: scope)
             try part(fields["confirm"], path: "\(path).confirm", scope: scope)
             try part(fields["dismiss"], path: "\(path).dismiss", scope: scope)
+        case "tooltip":
+            try field(fields, "text", path: path, text: true, scope: scope)
+            try actions(fields, path: path, scope: scope, list: "onDismiss")
         case "snackbar":
             try field(fields, "text", path: path, text: true, scope: scope)
             try part(fields["action"], path: "\(path).action", scope: scope)
@@ -224,7 +263,14 @@ private struct PrototypeSubstitutionGuard {
     )
         throws
     {
-        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap"] {
+        for name in list.map({ [$0] }) ?? [
+            "onTap",
+            "onLongPress",
+            "onDoubleTap",
+            "onEndReached",
+            "onStartReached",
+            "onAppear",
+        ] {
             guard case let .array(entries)? = fields[name] else { continue }
             for (index, entry) in entries.enumerated() {
                 guard case let .object(action) = entry else { continue }
@@ -239,7 +285,7 @@ private struct PrototypeSubstitutionGuard {
             try field(action, "key", path: path, scope: scope)
             try field(action, "value", path: path, scope: scope)
         case "emit": try field(action, "name", path: path, scope: scope)
-        case "setData", "appendData", "removeData": try field(action, "path", path: path, scope: scope)
+        case "setData", "appendData", "prependData", "removeData": try field(action, "path", path: path, scope: scope)
         case "startTimer":
             try actions(action, path: path, scope: scope, list: "actions")
         case "request":
@@ -263,6 +309,7 @@ private struct PrototypeSubstitutionGuard {
         try field(fields, "key", path: path, scope: scope)
         if fields["data"] == nil {
             for key in ["equals", "notEquals"] { try field(fields, key, path: path, scope: scope) }
+            for key in ["contains", "startsWith"] { try field(fields, key, path: path, scope: scope) }
         }
         if let negated = fields["not"] {
             try conditionFields(negated, path: "\(path).not", scope: scope)

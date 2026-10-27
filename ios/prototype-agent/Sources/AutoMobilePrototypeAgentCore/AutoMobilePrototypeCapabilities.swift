@@ -24,9 +24,13 @@ extension PrototypeAgentProtocol {
     /// The capabilities to advertise on this OS: the full list minus those whose minimum is newer.
     static func advertisedCapabilities(
         os: any OSVersionProvider = ProcessInfoOSVersion(),
-        minimumOS: [String: Int] = PrototypeCapabilityMinimumOS.table
-    ) -> [String] {
-        capabilities.filter { (minimumOS[$0] ?? 0) <= os.majorVersion }
+        minimumOS: [String: Int] = PrototypeCapabilityMinimumOS.table,
+        registryCapabilities: [String] = []
+    )
+        -> [String]
+    {
+        (capabilities + registryCapabilities.filter { !capabilities.contains($0) }.sorted())
+            .filter { (minimumOS[$0] ?? 0) <= os.majorVersion }
     }
 }
 

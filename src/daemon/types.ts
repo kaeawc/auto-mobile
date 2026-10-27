@@ -440,6 +440,11 @@ export interface DaemonNotification {
    * binding only when this exactly equals its bound (base) session UUID.
    */
   sessionId?: string;
+  previousDeviceId?: string;
+  deviceId?: string;
+  stableDeviceId?: string;
+  avdName?: string;
+  generation?: number;
   /** Diagnostic release reason for `notifications/session/released`. */
   reason?: string;
   /** True only for an idle release reason; absent otherwise. */

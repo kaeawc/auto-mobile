@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "box",
+          "children": [
+            {
+              "type": "text",
+              "text": "Hero",
+              "sharedKey": "hero",
+              "visibleWhen": {
+                "key": "open",
+                "equals": true
+              }
+            }
+          ],
+          "sharedKey": "hero",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].children[0].sharedKey",
+  "expectedMessage": "sharedKey nodes cannot be nested in each other"
+}

@@ -11,8 +11,8 @@ export function prototypeNodeChildren(
     }
   };
   for (const [key, value] of Object.entries(node)) {
-    if (key === "child") {
-      add(value, ".child");
+    if (key === "child" || (node.type === "list" && ["header", "footer"].includes(key))) {
+      add(value, `.${key}`);
     }
     if (key === "children" && Array.isArray(value)) {
       value.forEach((child, index) => add(child, `.children[${index}]`));

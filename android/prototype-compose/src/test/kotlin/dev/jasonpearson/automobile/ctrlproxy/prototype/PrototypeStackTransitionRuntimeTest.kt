@@ -30,7 +30,7 @@ class PrototypeStackTransitionRuntimeTest {
       )
     suspend fun act(action: PrototypeAction) =
       runtime.handle(PrototypeInteraction.Tap(listOf(action)))
-    act(PrototypePushAction("nav", "detail", PrototypeStackTransition.NONE))
+    act(PrototypePushAction("nav", "detail", PrototypeStackTransition.NONE.value))
     assertEquals("push", runtime.current.stackChange?.direction)
     assertEquals(PrototypeStackTransition.NONE, runtime.current.stackChange?.override)
     val preview = checkNotNull(runtime.backPreview())
@@ -39,7 +39,7 @@ class PrototypeStackTransitionRuntimeTest {
     runtime.handle(PrototypeInteraction.Back)
     assertEquals("pop", runtime.current.stackChange?.direction)
     assertNull(runtime.current.stackChange?.override)
-    act(PrototypeReplaceAction("nav", "detail", PrototypeStackTransition.FADE))
+    act(PrototypeReplaceAction("nav", "detail", PrototypeStackTransition.FADE.value))
     assertEquals("replace", runtime.current.stackChange?.direction)
     assertEquals(PrototypeStackTransition.FADE, runtime.current.stackChange?.override)
     act(PrototypePopToRootAction("nav"))

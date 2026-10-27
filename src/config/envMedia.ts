@@ -2,6 +2,12 @@ import type { EnvVarSpec } from "./envSpec";
 
 /** Observation, screenshot, video, WebRTC and logging variables. */
 export const MEDIA_ENV = {
+  PROTOTYPE_CUSTOM_SHADERS: {
+    name: "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS",
+    kind: "string",
+    default: "off",
+    doc: "Enable Android prototype AGSL assets and style.shader only with the exact value 1.",
+  },
   SCREENSHOT_CACHE_MB: {
     name: "AUTOMOBILE_SCREENSHOT_CACHE_MB",
     kind: "number",

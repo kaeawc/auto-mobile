@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{t:title}",
+      "semantics": {
+        "heading": true,
+        "label": "{t:title}",
+        "hint": "{t:hint}",
+        "traits": ["selected"]
+      }
+    },
+    "strings": {
+      "default": {},
+      "EN": {},
+      "en": {}
+    }
+  },
+  "expectedPath": "strings.en",
+  "expectedMessage": "Duplicate locale tag"
+}

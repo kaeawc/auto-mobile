@@ -16,6 +16,10 @@ import kotlinx.serialization.json.put
 
 /** RFC 6901 pointers relative to the read-only data object. Invalid input is always missing. */
 object PrototypeDataPointer {
+  /** Segment-aware overlap for validated RFC 6901 paths, including `/data` write targets. */
+  fun overlaps(first: String, second: String): Boolean =
+    first == second || first.startsWith("$second/") || second.startsWith("$first/")
+
   fun isValid(pointer: String): Boolean {
     if (pointer.length !in 1..PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH) return false
     if (!pointer.startsWith('/')) return false
@@ -152,7 +156,12 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
       source(pointer)
         .orEmpty()
         .filterIsInstance<JsonObject>()
-        .take(PrototypeSpecValidator.maxRepeatItems)
+        .take(
+          maxOf(
+            PrototypeSpecValidator.maxRepeatItems,
+            PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
+          ),
+        )
         .sumOf { item ->
           maxOf(
             1,
@@ -168,24 +177,33 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
       source(pointer)
         .orEmpty()
         .filterIsInstance<JsonObject>()
-        .take(PrototypeSpecValidator.maxRepeatItems)
+        .take(
+          maxOf(
+            PrototypeSpecValidator.maxRepeatItems,
+            PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
+          ),
+        )
         .map(PrototypeDataValues::project)
     }
 
-  fun array(pointer: String): JsonArray = arrays.getOrPut(pointer) { JsonArray(items(pointer)) }
+  fun array(pointer: String): JsonArray =
+    arrays.getOrPut(pointer) {
+      JsonArray(items(pointer).take(PrototypeSpecValidator.maxRepeatItems))
+    }
 }
 
 /** Authored text is scanned once; replacement values are never scanned again. */
 internal object PrototypeDataText {
   private data class Placeholder(val start: Int, val end: Int, val pointer: String)
 
-  private fun placeholders(text: String): List<Placeholder> {
+  private fun placeholders(text: String, namespace: String = "data"): List<Placeholder> {
     val found = mutableListOf<Placeholder>()
     var cursor = 0
     while (cursor < text.length) {
-      val close = closingBrace(text, cursor)
+      val close = closingBrace(text, cursor, namespace)
       val inner = if (close < 0) "" else text.substring(cursor + 1, close)
-      val pointer = if (inner.startsWith("data:")) inner.substring("data:".length) else ""
+      val pointer =
+        if (inner.startsWith("$namespace:")) inner.substring(namespace.length + 1) else ""
       if (PrototypeDataPointer.isValid(pointer)) {
         found.add(Placeholder(cursor, close + 1, pointer))
         cursor = close + 1
@@ -196,17 +214,23 @@ internal object PrototypeDataText {
     return found
   }
 
-  private fun closingBrace(text: String, cursor: Int): Int {
-    if (text[cursor] != '{' || !text.startsWith("data:", cursor + 1)) return -1
+  private fun closingBrace(text: String, cursor: Int, namespace: String): Int {
+    if (text[cursor] != '{' || !text.startsWith("$namespace:", cursor + 1)) return -1
     val end =
-      minOf(text.length, cursor + 2 + 5 + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
+      minOf(
+        text.length,
+        cursor + 3 + namespace.length + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
+      )
     for (index in cursor + 1 until end) {
       if (text[index] == '}') return index
     }
     return -1
   }
 
-  fun hasBinding(text: String): Boolean = placeholders(text).isNotEmpty()
+  fun hasBinding(text: String): Boolean = hasBinding(text, "data")
+
+  fun hasBinding(text: String, namespace: String): Boolean =
+    placeholders(text, namespace).isNotEmpty()
 
   fun boundedBind(
     text: String,
@@ -229,6 +253,21 @@ internal object PrototypeDataText {
       PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, pointer))
     }
 
+  fun bindSources(text: String, data: JsonObject?, platform: JsonObject?): String {
+    val sources =
+      placeholders(text).map { it to data } + placeholders(text, "platform").map { it to platform }
+    return buildString {
+      var cursor = 0
+      for ((span, source) in sources.sortedBy { it.first.start }) {
+        if (span.start < cursor) continue
+        append(text.substring(cursor, span.start))
+        append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer)))
+        cursor = span.end
+      }
+      append(text.substring(cursor))
+    }
+  }
+
   private fun bind(
     text: String,
     spans: List<Placeholder>,
@@ -246,35 +285,39 @@ internal object PrototypeDataText {
 
 /** Pure, one-time resolution before repeat expansion and state interpolation. */
 object PrototypeDataResolver {
-  fun resolveRoot(root: JsonObject, data: JsonObject?): JsonObject =
-    resolveRoot(root, data, PrototypeRepeatData(data))
+  fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
+    resolveRoot(root, data, PrototypeRepeatData(data), platform)
 
   private fun resolveRoot(
     root: JsonObject,
     data: JsonObject?,
     repeats: PrototypeRepeatData,
+    platform: JsonObject?,
   ): JsonObject {
-    val own = textFields(root, data)
+    val own = textFields(root, data, platform)
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
           when (key) {
-            "repeat" -> resolveRepeat(value, repeats)
+            "repeat" ->
+              if ((root["type"] as? JsonPrimitive)?.content == "list") value
+              else resolveRepeat(value, repeats)
             "enabledWhen",
-            "visibleWhen" -> resolveCondition(value, data)
-            "styleWhen" -> resolveStyles(value, data)
+            "visibleWhen",
+            "errorWhen" -> resolveCondition(value, data, platform)
+            "styleWhen" -> resolveStyles(value, data, platform)
             else -> value
           }
         },
       )
-    return mapChildren(resolved) { resolveRoot(it, data, repeats) }
+    return mapChildren(resolved) { resolveRoot(it, data, repeats, platform) }
   }
 
-  fun resolve(spec: PrototypeSpec): PrototypeSpec {
+  fun resolve(spec: PrototypeSpec, platform: JsonObject? = null): PrototypeSpec {
     val json = PrototypeSpecValidator.json
     val root = json.encodeToJsonElement(PrototypeNode.serializer(), spec.root).jsonObject
-    if (!hasBindings(root)) return spec
-    val resolved = json.decodeFromJsonElement<PrototypeNode>(resolveRoot(root, spec.data))
+    if (!PrototypeBindingScan.hasBindings(root)) return spec
+    val resolved = json.decodeFromJsonElement<PrototypeNode>(resolveRoot(root, spec.data, platform))
     return spec.copy(root = resolved)
   }
 
@@ -285,8 +328,17 @@ object PrototypeDataResolver {
     return JsonObject(repeat + ("items" to repeats.array(pointer)))
   }
 
-  private fun resolveCondition(value: JsonElement, data: JsonObject?): JsonElement {
+  private fun resolveCondition(
+    value: JsonElement,
+    data: JsonObject?,
+    platform: JsonObject?,
+  ): JsonElement {
     val condition = value as? JsonObject ?: return value
+    if (condition.containsKey("platform")) {
+      val translated =
+        JsonObject(condition - "platform" + ("data" to condition.getValue("platform")))
+      return resolveCondition(translated, platform, null)
+    }
     if (condition.containsKey("data")) {
       val form = if (PrototypeDataValues.holds(condition, data)) "all" else "any"
       return buildJsonObject { put(form, JsonArray(emptyList())) }
@@ -294,33 +346,36 @@ object PrototypeDataResolver {
     return JsonObject(
       condition.mapValues { (key, member) ->
         when (key) {
-          "not" -> resolveCondition(member, data)
+          "not" -> resolveCondition(member, data, platform)
           "all",
-          "any" -> JsonArray((member as? JsonArray).orEmpty().map { resolveCondition(it, data) })
+          "any" ->
+            JsonArray((member as? JsonArray).orEmpty().map { resolveCondition(it, data, platform) })
           else -> member
         }
       },
     )
   }
 
-  private fun resolveStyles(value: JsonElement, data: JsonObject?): JsonElement =
+  private fun resolveStyles(
+    value: JsonElement,
+    data: JsonObject?,
+    platform: JsonObject?,
+  ): JsonElement =
     JsonArray(
       (value as? JsonArray).orEmpty().map { entry ->
         val style = entry as? JsonObject
         val condition = style?.get("when")
         if (style == null || condition == null) entry
-        else JsonObject(style + ("when" to resolveCondition(condition, data)))
+        else JsonObject(style + ("when" to resolveCondition(condition, data, platform)))
       },
     )
 
-  private fun textFields(node: JsonObject, data: JsonObject?): JsonObject {
+  private fun textFields(node: JsonObject, data: JsonObject?, platform: JsonObject?): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
     PrototypeBindableFields.first<Boolean>(node, "") { value, path, kind ->
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-      if (
-        kind == PrototypeBindableKind.TEXT && text != null && PrototypeDataText.hasBinding(text)
-      ) {
-        replacements[path] = JsonPrimitive(PrototypeDataText.bind(text, data))
+      if (kind == PrototypeBindableKind.TEXT && text != null) {
+        replacements[path] = JsonPrimitive(PrototypeDataText.bindSources(text, data, platform))
       }
       null
     }
@@ -350,6 +405,12 @@ object PrototypeDataResolver {
       }
 
   private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
+    val extras =
+      listOf("header", "footer")
+        .mapNotNull { key ->
+          (node[key] as? JsonObject)?.let { key to transform(it) }
+        }
+        .toMap()
     val child = node["child"] as? JsonObject
     if (child != null) return JsonObject(node + ("child" to transform(child)))
     val screens = node["screens"] as? JsonObject
@@ -366,6 +427,7 @@ object PrototypeDataResolver {
     val children = node["children"] as? JsonArray ?: return node
     return JsonObject(
       node +
+        extras +
         ("children" to
           JsonArray(
             children.map { entry ->
@@ -374,39 +436,51 @@ object PrototypeDataResolver {
           )),
     )
   }
+}
 
+/** Whether a prototype node tree uses any data or platform binding. */
+private object PrototypeBindingScan {
   private fun conditionBound(value: JsonElement?): Boolean {
     val condition = value as? JsonObject ?: return false
     return condition.containsKey("data") ||
+      condition.containsKey("platform") ||
       conditionBound(condition["not"]) ||
       listOf("all", "any").any { form ->
         (condition[form] as? JsonArray).orEmpty().any(::conditionBound)
       }
   }
 
-  private fun hasBindings(node: JsonObject): Boolean {
+  private fun fieldBound(value: JsonElement?, kind: PrototypeBindableKind): Boolean {
+    if (kind == PrototypeBindableKind.EMIT_BINDING) {
+      return (value as? JsonObject)?.containsKey("data") == true
+    }
+    val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
+    return kind == PrototypeBindableKind.TEXT && text != null && textBound(text)
+  }
+
+  private fun textBound(text: String): Boolean =
+    PrototypeDataText.hasBinding(text) ||
+      PrototypeDataText.hasBinding(text, "platform") ||
+      "{t:" in text
+
+  private fun hasOwnBindings(node: JsonObject): Boolean {
     val textBound =
       PrototypeBindableFields.first<Boolean>(node, "") { value, _, kind ->
-        if (
-          kind == PrototypeBindableKind.EMIT_BINDING &&
-            (value as? JsonObject)?.containsKey("data") == true
-        )
-          return@first true
-        val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-        if (kind == PrototypeBindableKind.TEXT && text?.let(PrototypeDataText::hasBinding) == true)
-          true
-        else null
+        if (fieldBound(value, kind)) true else null
       } == true
     val stylesBound =
       (node["styleWhen"] as? JsonArray).orEmpty().any {
         conditionBound((it as? JsonObject)?.get("when"))
       }
-    val own =
-      (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
-        textBound ||
-        conditionBound(node["enabledWhen"]) ||
-        conditionBound(node["visibleWhen"]) ||
-        stylesBound
+    return (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
+      textBound ||
+      conditionBound(node["enabledWhen"]) ||
+      conditionBound(node["visibleWhen"]) ||
+      conditionBound(node["errorWhen"]) ||
+      stylesBound
+  }
+
+  fun hasBindings(node: JsonObject): Boolean {
     val child = node["child"] as? JsonObject
     val nested =
       if (child != null) hasBindings(child)
@@ -415,6 +489,9 @@ object PrototypeDataResolver {
     val screensBound =
       (node["screens"] as? JsonObject)?.values?.filterIsInstance<JsonObject>()?.any(::hasBindings)
         ?: false
-    return own || nested || screensBound
+    return hasOwnBindings(node) ||
+      nested ||
+      screensBound ||
+      listOf("header", "footer").any { (node[it] as? JsonObject)?.let(::hasBindings) == true }
   }
 }

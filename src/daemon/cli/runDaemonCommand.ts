@@ -1,3 +1,4 @@
+import { sessionDeviceInfo } from "../sessionDeviceBinding";
 import { z } from "zod";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
@@ -619,6 +620,7 @@ async function querySessionInfo(rawArgs: string[], manager: DaemonManager): Prom
         JSON.stringify({
           sessionId: session.sessionId,
           assignedDevice: session.assignedDevice,
+          ...sessionDeviceInfo(session),
           createdAt: session.createdAt,
           lastUsedAt: session.lastUsedAt,
           expiresAt: session.expiresAt,

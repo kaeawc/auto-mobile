@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "id": "target",
+          "label": "Help"
+        },
+        {
+          "type": "tooltip",
+          "text": "Helpful hint",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "anchorTo": "target",
+          "onDismiss": [
+            {
+              "type": "setState",
+              "key": "open",
+              "value": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onDismiss[0].value",
+  "expectedMessage": "setState value does not fit the control bound to \"open\": Tooltip requires a boolean state key"
+}

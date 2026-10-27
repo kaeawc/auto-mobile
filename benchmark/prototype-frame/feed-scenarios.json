@@ -1,0 +1,27 @@
+[
+  { "name": "feed-idle", "repeat": 1, "settleMs": 0, "durationMs": 3000, "steps": [] },
+  {
+    "name": "feed-scroll-down",
+    "repeat": 2,
+    "settleMs": 600,
+    "steps": [
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "up" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "up" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "down" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "down" }
+    ]
+  },
+  {
+    "name": "feed-fling-roundtrip",
+    "repeat": 1,
+    "settleMs": 600,
+    "steps": [
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "up" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "up" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "up" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "down" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "down" },
+      { "tool": "swipeOn", "text": "Benchmark feed", "direction": "down" }
+    ]
+  }
+]

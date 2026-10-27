@@ -9,9 +9,22 @@ const NAVIGATION_PRESS_BUTTONS = new Set([
   "power",
   "action",
   "camera",
+  // The rotary press activates the focused item, which usually navigates (#14920).
+  "rotary_select",
   ...ANDROID_SYSTEM_ACTION_BUTTONS,
 ]);
-const IN_PLACE_PRESS_BUTTONS = new Set(["menu", "volume_up", "volume_down"]);
+const IN_PLACE_PRESS_BUTTONS = new Set([
+  "menu",
+  "volume_up",
+  "volume_down",
+  // Rotary rotation and nudges move focus only.
+  "rotary_rotate_cw",
+  "rotary_rotate_ccw",
+  "rotary_nudge_up",
+  "rotary_nudge_down",
+  "rotary_nudge_left",
+  "rotary_nudge_right",
+]);
 
 export function isNavigationPressButton(button: unknown): boolean {
   return typeof button === "string" && NAVIGATION_PRESS_BUTTONS.has(button.toLowerCase());

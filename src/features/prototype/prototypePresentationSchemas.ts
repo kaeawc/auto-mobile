@@ -3,6 +3,7 @@ import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { pointerSchema, stateKeySchema } from "./prototypeActionValues";
+import { createEffectSchema } from "./prototypeEffectsSchema";
 
 // Icon names are the closed list of Material icons the Android renderer bundles
 // (androidx material-icons-extended); the shared contract is the single source.
@@ -82,6 +83,10 @@ export type PrototypeCondition =
   | { platform: string; lt: number }
   | { key: string; equals: string | number | boolean }
   | { key: string; notEquals: string | number | boolean }
+  | { key: string; contains: string }
+  | { key: string; startsWith: string }
+  | { key: string; lengthGt: number }
+  | { key: string; lengthLt: number }
   | { key: string; gt: number }
   | { key: string; lt: number }
   | { all: PrototypeCondition[] }
@@ -108,6 +113,10 @@ export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
       z.object({ platform: pointerSchema, lt: z.number().finite() }).strict(),
       z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
+      z.object({ key: stateKeySchema, contains: z.string().min(1).max(256) }).strict(),
+      z.object({ key: stateKeySchema, startsWith: z.string().min(1).max(256) }).strict(),
+      z.object({ key: stateKeySchema, lengthGt: z.number().int().min(0).max(100000) }).strict(),
+      z.object({ key: stateKeySchema, lengthLt: z.number().int().min(0).max(100000) }).strict(),
       z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
       z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
       z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
@@ -226,18 +235,15 @@ export const colorValueSchema = z.union([
   z.object({ light: colorTokenSchema, dark: colorTokenSchema }).strict(),
 ]);
 
-/** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
+/**
+ * An uploaded image asset id, a `{light, dark}` pair of ids (#11218), or `{data: "/pointer"}`
+ * naming a device media item id in `/data` (#14192).
+ */
 export const imageAssetSchema = z.union([
   z.string().min(1),
   z.object({ light: z.string().min(1), dark: z.string().min(1) }).strict(),
+  z.object({ data: z.string().regex(prototypeContractPatterns.pointer) }).strict(),
 ]);
-
-export const borderSchema = z
-  .object({
-    width: z.number().finite().min(0).max(10000),
-    color: colorValueSchema,
-  })
-  .strict();
 
 export const gradientStopSchema = z
   .object({ color: colorValueSchema, position: z.number().finite().min(0).max(1).optional() })
@@ -259,6 +265,52 @@ export const gradientSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 
+export const borderSchema = z
+  .object({
+    width: z.number().finite().min(0).max(10000),
+    color: colorValueSchema.optional(),
+    gradient: gradientSchema.optional(),
+  })
+  .strict()
+  .refine((value) => (value.color !== undefined) !== (value.gradient !== undefined), {
+    path: ["color"],
+    message: "Exactly one of color, gradient is required",
+  });
+
+export const shadowSchema = z
+  .object({
+    color: colorValueSchema,
+    radius: z.number().finite().min(0).max(1000),
+    spread: z.number().finite().min(-1000).max(1000).optional(),
+    offset: z
+      .object({
+        x: z.number().finite().min(-1000).max(1000),
+        y: z.number().finite().min(-1000).max(1000),
+      })
+      .strict()
+      .optional(),
+    inner: z.boolean().optional(),
+  })
+  .strict();
+
+export const fadeEdgesSchema = z
+  .object({
+    top: z.number().finite().min(0).max(1000).optional(),
+    bottom: z.number().finite().min(0).max(1000).optional(),
+    start: z.number().finite().min(0).max(1000).optional(),
+    end: z.number().finite().min(0).max(1000).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, "At least one fade edge is required");
+
+export const imageFilterSchema = z
+  .object({
+    saturation: z.number().finite().min(0).max(2).optional(),
+    tint: colorValueSchema.optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, "At least one image filter field is required");
+
 /** Material 3 type roles a text node's `textStyle` can name. */
 export const TEXT_STYLE_ROLES = [
   "displayLarge",
@@ -277,6 +329,20 @@ export const TEXT_STYLE_ROLES = [
   "labelMedium",
   "labelSmall",
 ] as const;
+
+export const prototypeShaderSchema = z
+  .object({
+    asset: z.string().min(1).max(256),
+    uniforms: z
+      .record(
+        z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$(?![\s\S])/),
+        z.number().finite().min(-1000000).max(1000000),
+      )
+      .and(z.unknown())
+      .refine((value) => Object.keys(value).length <= 16)
+      .optional(),
+  })
+  .strict();
 
 export const styleSchema = z
   .object({
@@ -299,6 +365,8 @@ export const styleSchema = z
     border: borderSchema.optional(),
     elevation: z.number().finite().min(0).max(1000).optional(),
     shadowColor: colorValueSchema.optional(),
+    shadows: z.array(shadowSchema).min(1).max(3).optional(),
+    cornerStyle: z.enum(["circular", "continuous"]).optional(),
     gradient: gradientSchema.optional(),
     aspectRatio: z.number().finite().min(1e-6).max(10000).optional(),
     offset: offsetSchema.optional(),
@@ -306,8 +374,11 @@ export const styleSchema = z
     pressScale: z.number().finite().min(0.5).max(1).optional(),
     // An animated highlight sweep over the background of a loading placeholder (#14207).
     shimmer: z.boolean().optional(),
+    shader: prototypeShaderSchema.optional(),
     scale: z.number().finite().min(0).max(4).optional(),
     rotation: z.number().finite().min(-360).max(360).optional(),
+    // Paint-only looks, applied in order; gated by prototype_effects_v1 (#15128).
+    effects: z.array(createEffectSchema(colorValueSchema)).min(1).max(4).optional(),
     alignment: z
       .enum([
         "topStart",
@@ -344,7 +415,16 @@ export const styleSchema = z
       .optional(),
     textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.shadows === undefined ||
+      (value.elevation === undefined && value.shadowColor === undefined),
+    {
+      path: ["shadows"],
+      message: "shadows cannot be combined with elevation or shadowColor",
+    },
+  );
 
 export const styleWhenEntrySchema = z
   .object({ when: conditionSchema, style: styleSchema })

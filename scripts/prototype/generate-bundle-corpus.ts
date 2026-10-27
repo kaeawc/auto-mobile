@@ -15,6 +15,7 @@ import {
   manifestCases,
   assetCases,
   boundaryCases,
+  shaderCases,
   makeCorpusCase,
 } from "./bundleCorpusCases";
 import {
@@ -126,6 +127,7 @@ export function generateBundleCorpus() {
       ...manifestCases(),
       ...assetCases(),
       ...boundaryCases(),
+      ...shaderCases(),
     ],
   };
 }

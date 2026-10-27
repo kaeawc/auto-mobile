@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "a",
+          "testTag": "a"
+        },
+        {
+          "type": "text",
+          "text": "b"
+        },
+        {
+          "type": "text",
+          "text": "c",
+          "testTag": "automobile-prototype-dismiss"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2].testTag"
+}

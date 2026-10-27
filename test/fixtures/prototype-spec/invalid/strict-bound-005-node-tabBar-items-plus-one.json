@@ -1,0 +1,192 @@
+{
+  "spec": {
+    "id": "bars",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "topAppBar",
+          "onScroll": "exitUntilCollapsed",
+          "scroll": "feed",
+          "title": "Feed",
+          "variant": "large"
+        },
+        {
+          "id": "feed",
+          "type": "scroll",
+          "axis": "vertical",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
+        },
+        {
+          "type": "bottomNav",
+          "onScroll": "hide",
+          "scroll": "feed",
+          "items": [
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Search",
+              "icon": "search"
+            }
+          ],
+          "stateKey": "tab"
+        },
+        {
+          "type": "tabBar",
+          "onScroll": "minimize",
+          "scroll": "feed",
+          "items": [
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            },
+            {
+              "label": "Home",
+              "icon": "home"
+            }
+          ],
+          "stateKey": "tab"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[3].items"
+}

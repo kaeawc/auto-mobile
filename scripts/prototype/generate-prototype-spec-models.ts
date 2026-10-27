@@ -7,20 +7,13 @@ import { renderObject } from "./prototype-model-rendering";
 import { renderUnion } from "./prototype-model-unions";
 export { escapeModelIdentifier } from "./prototype-model-rendering";
 
-export type ModelLanguage = "kotlin" | "swift";
-export interface ModelOptions {
-  readonly languages?: readonly ModelLanguage[];
-  readonly swiftName?: string;
-  readonly kotlinName?: string;
-  readonly swiftConformances?: readonly string[];
-  readonly variantNames?: Readonly<Record<string, string>>;
-  readonly variantDocs?: Readonly<Record<string, string>>;
-  readonly doc?: string;
-}
-export type TypeRefs = Readonly<
-  Record<string, { readonly kotlin?: string; readonly swift?: string }>
->;
-export type ModelSelection = Readonly<Record<string, ModelOptions>>;
+import type { ModelSelection, TypeRefs } from "./prototype-model-selection";
+export type {
+  ModelLanguage,
+  ModelOptions,
+  ModelSelection,
+  TypeRefs,
+} from "./prototype-model-selection";
 export interface ModelSources {
   kotlin: string;
   swift: string;
@@ -60,6 +53,7 @@ export function renderPrototypeSpecModels(
   ) {
     kotlin.splice(kotlin.length - 1, 0, "import kotlinx.serialization.SerialName");
   }
+  const kotlinImports = new Set<string>();
   for (const [name, options] of Object.entries(selection)) {
     const definition = source.definitions[name];
     if (!definition) {
@@ -67,6 +61,7 @@ export function renderPrototypeSpecModels(
     }
     for (const language of options.languages ?? ["kotlin", "swift"]) {
       const context = {
+        kotlinImports,
         definitions: source.definitions,
         selection,
         refs,
@@ -84,6 +79,11 @@ export function renderPrototypeSpecModels(
       }
     }
   }
+  kotlin.splice(
+    kotlin.indexOf("import kotlinx.serialization.Serializable") + 1,
+    0,
+    ...[...kotlinImports].sort().map((name) => `import ${name}`),
+  );
   return { kotlin: kotlin.join("\n") + "\n", swift: swift.join("\n") + "\n" };
 }
 

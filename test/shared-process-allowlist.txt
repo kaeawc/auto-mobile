@@ -1314,6 +1314,7 @@ test/features/prototype/prototypeSelectionControls.test.ts
 test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeStack.test.ts
 test/features/prototype/prototypeStorage.test.ts
+test/features/prototype/prototypeStringConditions.test.ts
 test/features/prototype/prototypeSwipeActions.test.ts
 test/features/prototype/prototypeTextFieldActions.test.ts
 test/features/prototype/prototypeTextFieldOptions.test.ts
@@ -1610,7 +1611,6 @@ test/scripts/androidVideoBaselineGate.test.ts
 test/scripts/attestation/attestationCli.test.ts
 test/scripts/attestation/attestationCliArgs.test.ts
 test/scripts/attestation/attestationSchema.test.ts
-test/scripts/attestation/gate/adapters.test.ts
 test/scripts/attestation/gate/attestationGate.test.ts
 test/scripts/attestation/gate/attestationGateWorkflow.test.ts
 test/scripts/attestation/gitTreeProbe.test.ts

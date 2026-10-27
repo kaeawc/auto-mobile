@@ -1,0 +1,21 @@
+{
+  "capturedBy": "bun scripts via src/utils/audio/coreAudioHal.ts on macOS (CoreAudio HAL)",
+  "defaults": {
+    "input": 79,
+    "output": 72
+  },
+  "devices": {
+    "72": {
+      "name": "MacBook Pro Speakers",
+      "transportCode": "bltn",
+      "inputStreams": 0,
+      "outputStreams": 1
+    },
+    "79": {
+      "name": "MacBook Pro Microphone",
+      "transportCode": "bltn",
+      "inputStreams": 1,
+      "outputStreams": 0
+    }
+  }
+}

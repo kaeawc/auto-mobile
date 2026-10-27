@@ -1,3 +1,4 @@
+import { sessionDeviceInfo } from "./sessionDeviceBinding";
 import { releaseCleanupStatus } from "./releaseCleanupStatus";
 import { holderOf } from "./deviceBinding";
 import {
@@ -327,6 +328,7 @@ export async function handleSessionInfo(
     result: {
       sessionId: session.sessionId,
       assignedDevice: session.assignedDevice,
+      ...sessionDeviceInfo(session),
       platform: session.platform,
       // Wall-clock epoch ms, like the hold diagnostics beside them (#11243).
       createdAt: reportedWallClock(manager, session.createdAt),
@@ -382,6 +384,7 @@ export async function handleActiveSessions(
             sessions: sessions.map((session) => ({
               sessionId: session.sessionId,
               assignedDevice: session.assignedDevice,
+              ...sessionDeviceInfo(session),
               platform: session.platform,
               ...sessionHoldDiagnostics(
                 session,

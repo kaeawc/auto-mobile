@@ -56,6 +56,7 @@ function bindSocketTransport(
     broadcastListChanged: target.broadcastListChanged.bind(target),
     broadcastResourceUpdated: target.broadcastResourceUpdated.bind(target),
     handleResourceSubscription: target.handleResourceSubscription.bind(target),
+    broadcastSessionDeviceRebound: target.broadcastSessionDeviceRebound.bind(target),
     broadcastSessionReleased: target.broadcastSessionReleased.bind(target),
     pushProgressNotification: target.pushProgressNotification.bind(target),
     writeFrame: target.writeFrame.bind(target),
@@ -148,6 +149,7 @@ function bindMcpRouting(target: McpRouting): Pick<McpRouting, keyof McpRouting> 
 function bindMcpBindings(target: McpBindings): Pick<McpBindings, keyof McpBindings> {
   return {
     restoreSelectorSessions: target.restoreSelectorSessions.bind(target),
+    holdsSession: target.holdsSession.bind(target),
     failIfCallTargetsRefusedRestore: target.failIfCallTargetsRefusedRestore.bind(target),
     ownedSessionsOwnerToken: target.ownedSessionsOwnerToken.bind(target),
     selectorSessionIds: target.selectorSessionIds.bind(target),

@@ -4,6 +4,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -11,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
+import dev.jasonpearson.automobile.protocol.stackTransition
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
@@ -63,6 +66,35 @@ internal fun rememberStackScrollState(identity: String): ScrollState {
   return state
 }
 
+@Composable
+internal fun rememberStackListState(
+  identity: String,
+  keys: List<String>,
+  hasHeader: Boolean,
+): LazyListState {
+  val entry = LocalStackScrollEntry.current
+  val initial =
+    remember(entry, identity) {
+      entry?.store?.readList(entry.position, entry.screen, identity)?.restore(keys, hasHeader)
+        ?: PrototypeListAnchorTarget(0, 0)
+    }
+  val state = rememberLazyListState(initial.index, initial.offset)
+  val currentKeys = rememberUpdatedState(keys)
+  val currentHeader = rememberUpdatedState(hasHeader)
+  if (entry != null) {
+    fun save() {
+      val anchor = PrototypeListAnchor.capture(state, currentKeys.value, currentHeader.value)
+      entry.store.saveList(entry.position, entry.screen, identity, anchor)
+    }
+    LaunchedEffect(state, entry, identity) {
+      snapshotFlow { PrototypeListAnchor.capture(state, currentKeys.value, currentHeader.value) }
+        .collect { entry.store.saveList(entry.position, entry.screen, identity, it) }
+    }
+    DisposableEffect(state, entry, identity) { onDispose { save() } }
+  }
+  return state
+}
+
 private data class StackFrame(
   val position: Int,
   val screen: String,
@@ -95,7 +127,7 @@ internal fun PrototypeStackContent(
   val runtime = LocalPrototypeStackRuntime.current
   val preview = seek?.preview?.takeIf { it.stackChange?.id == source.id }
   val motion = LocalPrototypeMotion.current
-  val reducedMotion = LocalPrototypeReducedMotion.current
+  val reducedMotion = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
   val animation = resolveStackAnimation(source.stackTransition, change, motion, reducedMotion)
   val rtl = prototypeRtl()
   AnimatedStackContent(
@@ -168,54 +200,30 @@ private fun AnimatedStackContent(
     seek,
     if (runtime == null) frame else null,
   ) {
-    combine(
-        runtime?.snapshots ?: flowOf(null),
-        snapshotFlow {
-          val backPreview = seek?.preview?.takeIf { it.stackChange?.id == source.id }
-          Triple(
-            backPreview,
-            if (backPreview != null) seek.progress else 0f,
-            if (backPreview != null) seek.result else null,
+    stackGestureFlow(runtime, seek, source.id).collectLatest { (snapshot, gesture) ->
+      val (backPreview, progress, result) = gesture
+      val current = snapshot?.let { stackFrame(runtime, it, source.id) } ?: frame
+      val target = backPreview?.let { stackFrame(runtime, it, source.id) } ?: current
+      val kind =
+        resolveStackAnimation(
+            source.stackTransition,
+            (backPreview ?: snapshot)?.stackChange?.takeIf { it.id == source.id },
+            motion,
+            reducedMotion,
           )
-        },
-      ) { snapshot, gesture ->
-        snapshot to gesture
+          .kind
+      inFlight = true
+      try {
+        settleStack(
+          state,
+          kind,
+          StackSettle(current, target, backPreview != null, progress, result),
+          seek,
+        )
+      } finally {
+        inFlight = false
       }
-      .collectLatest { (snapshot, gesture) ->
-        val (backPreview, progress, result) = gesture
-        val current = snapshot?.let { stackFrame(runtime, it, source.id) } ?: frame
-        val target = backPreview?.let { stackFrame(runtime, it, source.id) } ?: current
-        val kind =
-          resolveStackAnimation(
-              source.stackTransition,
-              (backPreview ?: snapshot)?.stackChange?.takeIf { it.id == source.id },
-              motion,
-              reducedMotion,
-            )
-            .kind
-        inFlight = true
-        try {
-          if (backPreview == null) {
-            if (kind == StackTransitionKind.None) state.snapTo(current)
-            else state.animateTo(current)
-          } else
-            when (result) {
-              null -> if (kind != StackTransitionKind.None) state.seekTo(progress, target)
-              true -> {
-                if (kind == StackTransitionKind.None) state.snapTo(target)
-                else state.animateTo(target)
-                seek?.clear()
-              }
-              false -> {
-                if (kind == StackTransitionKind.None) state.snapTo(current)
-                else state.animateTo(current)
-                seek?.clear()
-              }
-            }
-        } finally {
-          inFlight = false
-        }
-      }
+    }
   }
   transition.AnimatedContent(
     modifier,
@@ -226,6 +234,57 @@ private fun AnimatedStackContent(
     contentAlignment = alignment,
   ) {
     draw(it)
+  }
+}
+
+private data class StackSettle(
+  val current: StackFrame,
+  val target: StackFrame,
+  val previewing: Boolean,
+  val progress: Float,
+  val result: Boolean?,
+)
+
+private fun stackGestureFlow(
+  runtime: PrototypeRuntime?,
+  seek: PrototypeBackSeek?,
+  stackId: String,
+) =
+  combine(
+    runtime?.snapshots ?: flowOf(null),
+    snapshotFlow {
+      val backPreview = seek?.preview?.takeIf { it.stackChange?.id == stackId }
+      Triple(
+        backPreview,
+        if (backPreview != null) seek.progress else 0f,
+        if (backPreview != null) seek.result else null,
+      )
+    },
+  ) { snapshot, gesture ->
+    snapshot to gesture
+  }
+
+private suspend fun settleStack(
+  state: SeekableTransitionState<StackFrame>,
+  kind: StackTransitionKind,
+  settle: StackSettle,
+  seek: PrototypeBackSeek?,
+) {
+  val animated = kind != StackTransitionKind.None
+  suspend fun go(frame: StackFrame) {
+    if (animated) state.animateTo(frame) else state.snapTo(frame)
+  }
+  if (!settle.previewing) return go(settle.current)
+  when (settle.result) {
+    null -> if (animated) state.seekTo(settle.progress, settle.target)
+    true -> {
+      go(settle.target)
+      seek?.clear()
+    }
+    false -> {
+      go(settle.current)
+      seek?.clear()
+    }
   }
 }
 

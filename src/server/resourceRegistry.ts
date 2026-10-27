@@ -24,6 +24,8 @@ export interface ResourceReadContext {
   /** A released session identity, available only to handlers that safely report inactivity. */
   releasedSessionUuid?: string;
   signal?: AbortSignal;
+  /** The reading client advertised MCP Apps support (`io.modelcontextprotocol/ui`) at initialize. */
+  clientSupportsApps?: boolean;
 }
 
 // Interface for resource content handlers.
@@ -51,6 +53,8 @@ export interface ResourceContent {
   mimeType?: string;
   text?: string;
   blob?: string; // base64 encoded
+  /** Content-level `_meta` (the MCP Apps `ui` hints ride here). */
+  _meta?: Record<string, unknown>;
 }
 
 // Interface for a registered resource

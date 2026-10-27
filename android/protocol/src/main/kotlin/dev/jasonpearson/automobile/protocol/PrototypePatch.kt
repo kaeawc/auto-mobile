@@ -86,7 +86,22 @@ object PrototypePatch {
     val state = spec["state"] as? JsonObject ?: JsonObject(emptyMap())
     if (name != "add" && key !in state) reject("$at.path", "Path does not exist")
     if (name == "test" && tests == StateTests.SKIP) return spec
-    val changed = member(state, key, op, at)
+    var changed = member(state, key, op, at)
+    if (name != "test") changed = clampPagerState(spec, changed, key)
     return if (name == "test") spec else JsonObject(spec + ("state" to changed))
+  }
+
+  /** An integer written to a pager's state key stays inside that pager's page range. */
+  private fun clampPagerState(spec: JsonObject, changed: JsonObject, key: String): JsonObject {
+    val value = (changed[key] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
+    if (value == null || !value.isFinite() || value % 1.0 != 0.0) return changed
+    val pager =
+      PrototypeBundleSpec.nodes(spec).firstOrNull {
+        text(it["type"]) == "pager" && text(it["stateKey"]) == key
+      }
+    val count = (pager?.get("children") as? JsonArray)?.size ?: 0
+    return if (count > 0)
+      JsonObject(changed + (key to JsonPrimitive(value.coerceIn(0.0, (count - 1).toDouble()))))
+    else changed
   }
 }

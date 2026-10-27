@@ -1,0 +1,29 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "tooltip",
+    "text": "Element hint",
+    "openWhen": {
+      "key": "open",
+      "equals": true
+    },
+    "anchor": {
+      "type": "element",
+      "selector": {
+        "testTag": "buy",
+        "text": "{route.x}"
+      },
+      "alignment": "cover"
+    },
+    "caret": "bottom",
+    "spotlight": {}
+  }
+}

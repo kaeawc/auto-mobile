@@ -4,6 +4,7 @@ import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { SKILLS_EXTENSION_ID } from "@modelcontextprotocol/server/ext/skills";
+import * as envReaders from "../../src/config/env";
 import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -123,6 +124,30 @@ describe("stdio proxy relays the Tasks extension to the daemon (#4668)", () => {
       ...options,
     });
   }
+
+  test("a 2026 envelope on the hand-built stdio server keeps today's response without reading the HTTP flag", async () => {
+    const envSpy = spyOn(envReaders, "readEnvBool");
+    try {
+      const wire = await connect(daemon());
+      const frame = await wire.request("server/discover", {
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "modern-probe", version: "1" },
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      });
+      expect(frame).toEqual({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32601, message: "Method not found" },
+      });
+      expect(envSpy.mock.calls.some(([spec]) => spec === envReaders.ENV.MCP_MODERN_ERA)).toBe(
+        false,
+      );
+    } finally {
+      envSpy.mockRestore();
+    }
+  });
 
   test("initialize advertises the extension only to a client that declared it", async () => {
     const wire = await connect(daemon());

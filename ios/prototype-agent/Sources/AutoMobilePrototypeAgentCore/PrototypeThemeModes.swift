@@ -17,39 +17,24 @@ struct PrototypeUnitPoint: Equatable {
 }
 
 /// `style.gradient`: linear along an angle, or radial from the node's centre.
-enum PrototypeGradient: Decodable, Equatable {
-    case linear(angle: Double, stops: [PrototypeGradientStop])
-    case radial(stops: [PrototypeGradientStop])
-
+extension PrototypeGradient {
     /// The contract's stop count.
     static let stopCount = 2 ... 4
 
-    private enum CodingKeys: String, CodingKey {
-        case type, angle, stops
-    }
-
-    /// The shared validator's rules, since iOS has no other check: a known type, an angle on a
-    /// linear gradient, two to four stops, and positions inside 0...1.
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let stops = try container.decode([PrototypeGradientStop].self, forKey: .stops)
-        guard Self.stopCount.contains(stops.count) else {
+    /// The shared validator's stop-count and position rules at the decoding boundary.
+    static func validateStops<Key: CodingKey>(
+        _ stops: [PrototypeGradientStop], forKey key: Key, in container: KeyedDecodingContainer<Key>
+    )
+        throws
+    {
+        guard stopCount.contains(stops.count) else {
             throw DecodingError.dataCorruptedError(
-                forKey: .stops, in: container, debugDescription: "A gradient needs 2 to 4 stops"
+                forKey: key, in: container, debugDescription: "A gradient needs 2 to 4 stops"
             )
         }
         guard stops.allSatisfy({ stop in stop.position.map { (0 ... 1).contains($0) } ?? true }) else {
             throw DecodingError.dataCorruptedError(
-                forKey: .stops, in: container, debugDescription: "A gradient stop position must be within 0 and 1"
-            )
-        }
-        let type = try container.decode(String.self, forKey: .type)
-        switch type {
-        case "linear": self = try .linear(angle: container.decode(Double.self, forKey: .angle), stops: stops)
-        case "radial": self = .radial(stops: stops)
-        default:
-            throw DecodingError.dataCorruptedError(
-                forKey: .type, in: container, debugDescription: "Unknown gradient type \(type)"
+                forKey: key, in: container, debugDescription: "A gradient stop position must be within 0 and 1"
             )
         }
     }
@@ -163,6 +148,7 @@ enum PrototypeThemeModes {
             try style(entry.style, "\(path).styleWhen[\(index)].style")
         }
         try color(node.scrim, "\(path).scrim", checksSingle: true)
+        try color(node.filter?.tint, "\(path).filter.tint", checksSingle: false)
         try asset(node.asset, "\(path).asset")
         for (index, item) in (node.items ?? []).enumerated() {
             try asset(item.image, "\(path).items[\(index)].image")
@@ -183,6 +169,12 @@ enum PrototypeThemeModes {
         try color(style.background, "\(path).background", checksSingle: false)
         try color(style.color, "\(path).color", checksSingle: false)
         try color(style.shadowColor, "\(path).shadowColor", checksSingle: false)
+        for (index, shadow) in (style.shadows ?? []).enumerated() {
+            try color(shadow.color, "\(path).shadows[\(index)].color", checksSingle: false)
+        }
+        for (index, stop) in (style.border?.gradient?.stops ?? []).enumerated() {
+            try color(stop.color, "\(path).border.gradient.stops[\(index)].color", checksSingle: true)
+        }
         try color(style.border?.color, "\(path).border.color", checksSingle: false)
         for (index, stop) in (style.gradient?.stops ?? []).enumerated() {
             try color(stop.color, "\(path).gradient.stops[\(index)].color", checksSingle: true)
@@ -199,6 +191,9 @@ enum PrototypeThemeModes {
         case let .modes(light, dark):
             if !isColor(light) { throw violation("\(path).light", message) }
             if !isColor(dark) { throw violation("\(path).dark", message) }
+        case .data:
+            // A media item binding is an image-slot form; the shared contract refuses it on a colour.
+            throw violation(path, message)
         }
     }
 

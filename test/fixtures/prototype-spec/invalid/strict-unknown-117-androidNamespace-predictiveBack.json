@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "namespaces",
+    "window": {
+      "ios": {
+        "sheet": {
+          "sizing": "form"
+        }
+      },
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "theme": {
+      "ios": {
+        "navigationTitle": "large"
+      },
+      "android": {
+        "indication": "none"
+      }
+    },
+    "root": {
+      "ios": {
+        "buttonStyle": "glass",
+        "tab": {
+          "role": "search"
+        },
+        "hover": "lift"
+      },
+      "android": {
+        "predictiveBack": {
+          "style": "default",
+          "zzzUnknown": true
+        },
+        "indication": "ripple"
+      },
+      "type": "button",
+      "label": "Save"
+    }
+  },
+  "expectedPath": "root.android.predictiveBack.zzzUnknown"
+}

@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "border": {
+          "width": 1
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.border.color",
+  "expectedMessage": "Exactly one of color, gradient is required"
+}

@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { userFlag } from "./setupUser";
 import { logger } from "../utils/logger";
 
 const LOCAL_NETWORK_PERMISSION = "android.permission.ACCESS_LOCAL_NETWORK";
@@ -14,13 +15,14 @@ export async function grantLocalNetworkPermission(
   adb: AdbExecutor,
   packageName: string,
   apiLevel: number | null,
+  userId?: number,
 ): Promise<void> {
   if (apiLevel === null || apiLevel < LOCAL_NETWORK_PERMISSION_MIN_API_LEVEL) {
     return;
   }
   try {
     const result = await adb.executeCommand(
-      `shell pm grant ${packageName} ${LOCAL_NETWORK_PERMISSION}`,
+      `shell pm grant${userFlag(userId)} ${packageName} ${LOCAL_NETWORK_PERMISSION}`,
       { noRetry: true },
     );
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;

@@ -129,9 +129,19 @@ Import needs identical accept/reject behaviour on all three platforms.
 
 ### 3.4 iOS app
 
+- Both `Info.plist` files (ProtoViewer and the Viewer template) declare `UIDeviceFamily` `[1, 2]` and all four
+  iPad orientations, so the app runs natively on iPad instead of in iPhone compatibility mode. Multiple
+  scenes stay off. The artifact policy gate and privacy manifest do not constrain the device family.
 - SwiftUI `ProtoViewer`: `LibraryView` (SF Symbols only) and `PrototypeScreen` hosting
   `ViewerRenderer` with `PrototypeModel(mode: .standalone, storage: .fileBacked())` in a
   per-library-id namespace.
+- ProtoViewer's own chrome keys on the native horizontal size class (compact or regular; no Material
+  breakpoints). `LibraryView` is one `NavigationSplitView` at every width: regular (full iPad window,
+  iPhone Duo inner panel) shows the library as a sidebar beside the open prototype, compact collapses to
+  the phone stack. The selection is plain state, so a size-class change (iPad window resize, Duo fold or
+  unfold) keeps the open prototype mounted; deleting the open entry clears the detail pane. Settings,
+  licenses and error text cap at a readable width at regular size. The prototype itself still sizes from
+  its own window, and the app-reserved chrome (toolbar, network indicator) stays outside it.
 - Data lives in Application Support (not Documents, no `UIFileSharingEnabled`) with
   `isExcludedFromBackup` set. Each prototype directory is `PrototypeSavedLayout` formatVersion 1,
   unchanged, plus the sibling `library.json` (section 4).
@@ -434,8 +444,29 @@ It runs in the pull-request Android build, in `prepare-release.yml` through
 `verify-protoviewer-artifact-policy.yml` (which `verify-prepared-release` waits on), and locally with
 `scripts/release/protoviewer-artifact-policy.sh`. Fixtures are real tool output captured by
 `scripts/release/capture-protoviewer-policy-fixtures.sh`; CtrlProxy's release APK is the
-deliberately failing Android case. The upgrade-in-place and minified-smoke tests from the issue
-remain open.
+deliberately failing Android case.
+
+### 8.1.1 Device checks for release artifacts (#15387)
+
+Two checks need a device and run from `scripts/release/protoviewer-release-smoke.sh` (logic in
+`scripts/release/protoviewer-release-smoke.ts`, fake-tested in `test/scripts/protoviewerReleaseSmoke.test.ts`):
+
+- **Upgrade in place** (`--mode upgrade`): install the previous release, import a prototype through
+  the MCP inbox, install the candidate over it (`adb install -r` / `simctl install`, never an
+  uninstall), then check the version moved, the app's data identity is unchanged (Android
+  `firstInstallTime`, iOS data container path) and the saved entry still opens under the same library id.
+- **Minified smoke** (`--mode smoke`): install the R8-minified APK (`--build` passes
+  `-Pautomobile.protoviewer.minifyRelease=true`) or the stripped iOS release, import and open two
+  validated asset-free specs (one standing in for the bundled sample, one for an import), and on
+  Android read the library screen's settings switch and open "Open-source licenses" through
+  `uiautomator dump`.
+
+Not automated: settings persistence (the network switch needs a runtime permission grant), and the
+iOS Settings and licenses screens (no UI driver in the script); both are reported as `SKIPPED`.
+The previous APK must be signed with the candidate's key. `protoviewer-release-smoke.yml` is a
+manual, advisory Android lane that downloads the previous release's APK; it is not called from any
+release workflow. All of this is unverified on devices until someone runs it (label
+`needs-device-verify` on #15387). The iOS forbidden-symbol rule stays advisory until #14150 lands.
 
 ### 8.2 Play-ready Android artifact (#14146)
 

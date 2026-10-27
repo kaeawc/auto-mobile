@@ -1,0 +1,108 @@
+{
+  "spec": {
+    "id": "linkify-repeat",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "data": {
+      "last": 0,
+      "posts": [
+        {
+          "id": "a",
+          "body": "@ana",
+          "count": 3
+        },
+        {
+          "id": "b",
+          "body": "@bob",
+          "count": 7
+        }
+      ]
+    },
+    "state": {
+      "liked_a": false,
+      "liked_b": false,
+      "handle_a": "",
+      "handle_b": "",
+      "number": 0
+    },
+    "root": {
+      "repeat": {
+        "items": {
+          "path": "/posts"
+        },
+        "as": "post"
+      },
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{post.body}",
+          "linkify": {
+            "kinds": ["mention"],
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "handle_{post.id}",
+                "value": {
+                  "match": "text",
+                  "zzzUnknown": true
+                }
+              },
+              {
+                "type": "toggle",
+                "key": "liked_{post.id}"
+              },
+              {
+                "type": "setState",
+                "key": "number",
+                "value": "{post.count}"
+              },
+              {
+                "type": "emit",
+                "name": "tap_{post.id}_{index}",
+                "payload": {
+                  "item": "id",
+                  "text": "{post.id}",
+                  "match": "text"
+                },
+                "context": {
+                  "id": {
+                    "item": "id"
+                  },
+                  "index": {
+                    "index": true
+                  },
+                  "match": {
+                    "match": "kind"
+                  },
+                  "liked": {
+                    "state": "liked_{post.id}"
+                  },
+                  "literal": {
+                    "value": {
+                      "item": "id",
+                      "text": "{post.id}",
+                      "match": "text"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "setData",
+                "path": "/data/last",
+                "value": {
+                  "item": "count"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].linkify.onTap[0].value.zzzUnknown"
+}

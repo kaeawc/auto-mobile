@@ -72,14 +72,16 @@ actor PrototypeMcpInbox {
     }
 
     /// A found open waits for the UI's load callback before reporting success.
-    func handle(_ command: PrototypeMcpRequest) -> PrototypeLibraryEntry? {
+    /// `screen` is the host's view of where the app is (native pixels, see [PrototypeMcpScreen]); it rides on an
+    /// import result so a multi-screen host can tell which panel the save landed on.
+    func handle(_ command: PrototypeMcpRequest, screen: String? = nil) -> PrototypeLibraryEntry? {
         sweepOrphans()
         guard PrototypeMcpRequest.validRequestId(command.request),
               !files.exists(resultURL(command.request)), pending[command.request] == nil
         else { return nil }
         switch command {
         case let .unsupported(request, reason): write(.rejected(request, path: "action", reason: reason))
-        case let .importBundle(request, label): write(importResult(request, label: label))
+        case let .importBundle(request, label): write(importResult(request, label: label, screen: screen))
         case let .open(request, libraryId):
             guard (try? PrototypeLibraryEntry.validateId(libraryId)) != nil else {
                 write(.init(status: "not_found", request: request)); return nil
@@ -97,10 +99,10 @@ actor PrototypeMcpInbox {
         return nil
     }
 
-    func reportOpened(_ command: PrototypeMcpRequest, entry: PrototypeLibraryEntry) {
+    func reportOpened(_ command: PrototypeMcpRequest, entry: PrototypeLibraryEntry, screen: String? = nil) {
         guard pending[command.request] == entry.libraryId else { return }
         pending.removeValue(forKey: command.request)
-        write(.entry("opened", request: command.request, entry: entry))
+        write(WireResult.entry("opened", request: command.request, entry: entry).on(screen: screen))
     }
 
     func reportOpenFailed(_ command: PrototypeMcpRequest) {
@@ -108,7 +110,7 @@ actor PrototypeMcpInbox {
         write(.rejected(command.request, path: "viewer", reason: "Unable to open the prototype"))
     }
 
-    private func importResult(_ request: String, label: String?) -> WireResult {
+    private func importResult(_ request: String, label: String?, screen: String?) -> WireResult {
         let inbox = root.appendingPathComponent("inbox", isDirectory: true)
         let url = inbox.appendingPathComponent("\(request).automobile-proto")
         defer {
@@ -122,8 +124,10 @@ actor PrototypeMcpInbox {
         guard files.exists(url) else {
             return .rejected(request, path: "inbox", reason: "No pushed prototype for this request")
         }
-        do { return try .entry("imported", request: request, entry: importBundle(url, label)) }
-        catch let failure as PrototypeLibraryImportFailure {
+        do {
+            let entry = try importBundle(url, label)
+            return WireResult.entry("imported", request: request, entry: entry).on(screen: screen)
+        } catch let failure as PrototypeLibraryImportFailure {
             switch failure {
             case .needsNewerViewer: return .rejected(request, path: "capability", reason: failure.message)
             case .invalid:
@@ -161,9 +165,16 @@ actor PrototypeMcpInbox {
         var label: String?
         var path: String?
         var reason: String?
+        var screen: String?
 
         static func entry(_ status: String, request: String, entry: PrototypeLibraryEntry) -> Self {
             Self(status: status, request: request, libraryId: entry.libraryId, label: entry.label)
+        }
+
+        func on(screen: String?) -> Self {
+            var copy = self
+            copy.screen = screen
+            return copy
         }
 
         static func rejected(_ request: String, path: String, reason: String) -> Self {

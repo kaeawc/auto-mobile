@@ -20,6 +20,8 @@ internal object PrototypeStateBindings {
       "dialog" to "Dialog",
       "snackbar" to "Snackbar",
       "menu" to "Menu",
+      "tooltip" to "Tooltip",
+      "drawer" to "Drawer",
     )
 
   fun openWhenErrors(
@@ -41,13 +43,13 @@ internal object PrototypeStateBindings {
     path: String,
     state: JsonObject,
   ): PrototypeSpecError? {
-    if (value.text("type") != "scroll") return null
+    if (value.text("type") !in setOf("scroll", "list")) return null
     val refresh = value["refresh"] as? JsonObject ?: return null
     if (value.text("axis") == "horizontal")
-      return fail("$path.refresh", "Pull-to-refresh needs a vertical scroll")
+      return fail("$path.refresh", "Pull-to-refresh needs a vertical ${value.text("type")}")
     val key = refresh.text("stateKey") ?: return null
     val stored = state[key] as? JsonPrimitive
-    return if (state.containsKey(key) && (!isBooleanState(stored)))
+    return if ((state.containsKey(key) || value.text("type") == "list") && !isBooleanState(stored))
       fail("$path.refresh.stateKey", "Refresh requires a boolean state key")
     else null
   }
@@ -100,7 +102,8 @@ internal object PrototypeStateBindings {
       (value["trailing"] as? JsonObject)?.text("stateKey"),
       if (value.text("type") in modalNames) (value["openWhen"] as? JsonObject)?.text("key")
       else null,
-      if (value.text("type") == "scroll") (value["refresh"] as? JsonObject)?.text("stateKey")
+      if (value.text("type") in setOf("scroll", "list"))
+        (value["refresh"] as? JsonObject)?.text("stateKey")
       else null,
       if (value.text("type") == "scroll") value.text("atEndKey") else null,
     )

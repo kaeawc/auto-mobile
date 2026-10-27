@@ -1,0 +1,60 @@
+{
+  "spec": {
+    "id": "routes-integration",
+    "data": {
+      "items": []
+    },
+    "state": {
+      "input": "",
+      "open": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "list",
+          "repeat": {
+            "items": {
+              "path": "/items"
+            },
+            "as": "row",
+            "key": "id"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "{row.id}"
+            }
+          ],
+          "onEndReached": [
+            {
+              "type": "request",
+              "url": "https://example.com",
+              "into": "/data/items{route.id}"
+            }
+          ]
+        }
+      },
+      "routes": {
+        "detail": {
+          "params": {
+            "id": "string"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"detail\"].onEndReached[0].into",
+  "expectedMessage": "Route placeholder must occupy a whole data pointer segment"
+}

@@ -1,0 +1,59 @@
+{
+  "id": "appear",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "opacity": 100
+  },
+  "state": {
+    "show": true
+  },
+  "root": {
+    "onAppear": [
+      {
+        "type": "startTimer",
+        "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "afterMs": 2000,
+        "actions": [
+          {
+            "type": "setState",
+            "key": "show",
+            "value": false
+          }
+        ]
+      }
+    ],
+    "type": "column",
+    "children": [
+      {
+        "onAppear": [
+          {
+            "type": "emit",
+            "name": "appeared"
+          }
+        ],
+        "visibleWhen": {
+          "key": "show",
+          "equals": true
+        },
+        "type": "text",
+        "text": "Splash"
+      },
+      {
+        "onAppear": [
+          {
+            "type": "emit",
+            "name": "appeared"
+          }
+        ],
+        "visibleWhen": {
+          "key": "show",
+          "equals": false
+        },
+        "type": "text",
+        "text": "Content"
+      }
+    ]
+  }
+}

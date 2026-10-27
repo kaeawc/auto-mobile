@@ -1,0 +1,156 @@
+{
+  "spec": {
+    "id": "routes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "id": "p1"
+              }
+            ],
+            "as": "row"
+          },
+          "children": [
+            {
+              "type": "button",
+              "label": "Open {row.id}",
+              "onTap": [
+                {
+                  "type": "push",
+                  "stack": "nav",
+                  "screen": "detail",
+                  "params": {
+                    "postId": {
+                      "item": "id"
+                    },
+                    "count": {
+                      "index": true
+                    },
+                    "flag": {
+                      "state": "flag"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "detail": {
+          "type": "column",
+          "children": [
+            {
+              "type": "text",
+              "text": "{route.postId}",
+              "visibleWhen": {
+                "data": "/posts/{route.postId}",
+                "equals": "{route.flag}"
+              }
+            },
+            {
+              "type": "textField",
+              "stateKey": "draft_{route.postId}"
+            },
+            {
+              "type": "button",
+              "label": "Save {route.postId}",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "count",
+                  "value": "{route.count}"
+                },
+                {
+                  "type": "appendData",
+                  "path": "/data/posts/{route.postId}/comments",
+                  "value": {
+                    "value": "Hello"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "dialog",
+              "openWhen": {
+                "key": "open",
+                "equals": true
+              },
+              "title": "Leave?",
+              "confirm": {
+                "label": "Leave",
+                "onTap": [
+                  {
+                    "type": "pop",
+                    "stack": "nav"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "routes": {
+        "home": {
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "home"
+            }
+          ]
+        },
+        "detail": {
+          "params": {
+            "postId": "string",
+            "count": "number",
+            "flag": "boolean"
+          },
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "entered_{route.postId}"
+            }
+          ],
+          "onBack": [
+            {
+              "type": "setState",
+              "key": "open",
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["stack:nav"]
+    },
+    "state": {
+      "count": 0,
+      "flag": true,
+      "open": false
+    },
+    "data": {
+      "posts": {}
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_stack_v1",
+      "prototype_storage_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_routes_v1"
+}

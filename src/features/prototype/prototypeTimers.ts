@@ -9,8 +9,19 @@ import {
   type Raw,
 } from "./prototypeTemplate";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-export const prototypeTimerFields = (spec: unknown): string[] =>
-  prototypeFieldsOfKind(spec, "timer");
+export const prototypeTimerFields = (spec: unknown): string[] => [
+  ...prototypeFieldsOfKind(spec, "timer"),
+  ...prototypeOnAppearFields(spec),
+];
+function prototypeOnAppearFields(spec: unknown): string[] {
+  const fields: string[] = [];
+  walkPrototypeNodes(spec, (node, path) => {
+    if (node.onAppear !== undefined) {
+      fields.push(`${path}.onAppear`);
+    }
+  });
+  return fields;
+}
 type Located = readonly { value: Raw; path: string }[];
 export function prototypeTimersError(
   actions: Located,

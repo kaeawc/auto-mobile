@@ -66,6 +66,22 @@ session nothing can expire, so that detection and replay
 assert there is none. Device-control transport recovery went with the loopback hop
 in slice L.
 
+## Opt-in modern daemon HTTP routing
+
+`AUTOMOBILE_MCP_MODERN_ERA` defaults off; `1`, `true`, `yes`, or `on` (case-insensitive,
+trimmed) enables MCP 2026-07-28 on the daemon HTTP endpoint. Disabled requests use the
+existing 2025 serving path without SDK classification or handler construction. When enabled,
+`StatelessMcpHttpEndpoint` classifies the already size-limited parsed body: modern requests
+use `createMcpHandler` with `legacy: 'reject'` and SSE responses; other outcomes retain the
+existing path. The parsed body is passed to the handler so the ingress body limit applies.
+
+The SDK factory reuses `createStatelessMcpServer`, carrying the era and request scope through
+an isolated async context. Modern discovery advertises the Tasks extension; legacy initialize
+advertisement remains conditional on the client's declaration. Both paths share cancellation
+indexing, request-scope execution cancellation, keyless binding cleanup, and shutdown tracking.
+The stdio proxy keeps its existing hand-built server and does not read this flag. No shared
+cache scope, TTL, or cache policy is configured here.
+
 ## Control-socket forwards in process (slice L, #11820)
 
 The socket server no longer reaches the tools over its own HTTP endpoint. Each forward gets
@@ -190,7 +206,8 @@ extension. They ship the 2025-11-25 core task vocabulary (`ttl`, `pollInterval`,
 know the `tasks/*` method names for `Mcp-Name` header routing, and lift the per-request
 `_meta` envelope (`io.modelcontextprotocol/clientCapabilities`) into `ctx.mcpReq.envelope` and
 a request's top-level `inputResponses` into `ctx.mcpReq.inputResponses`. `server/discover` is
-installed only on a server serving the 2026-07-28 era; ours serve the 2025 era. The separate
+installed only on a server serving the 2026-07-28 era, which the daemon HTTP endpoint can
+serve with `AUTOMOBILE_MCP_MODERN_ERA`. The separate
 `@modelcontextprotocol/ext-tasks` package is client-side and not a dependency. The wire is
 therefore implemented on our own handlers, per the extension specification (revision
 2026-07-28 of modelcontextprotocol/ext-tasks).
@@ -200,15 +217,12 @@ declarations are never remembered. A `tools/call` that did not declare it never 
 and `tasks/get`, `tasks/update` and `tasks/cancel` without it answer `-32021`. Because there is
 no `server/discover` on the 2025 era, the server advertises the extension in its `initialize`
 result, and only to a client whose `initialize` declared it; every other client sees the
-`initialize` result unchanged.
+`initialize` result unchanged. Modern HTTP servers advertise it in `server/discover`.
 
-This is a deliberate AutoMobile extension of the spec (owner decision, 2026-10-20, #13143).
-SEP-2663's backward-compatibility rules leave the extension undefined on `2025-11-25` and
-negotiate it only on a compatible protocol version. Gating on that version today would leave
-no client able to negotiate Tasks, because the server has no 2026-era `server/discover` path.
-So the advertisement is not gated on the client's `protocolVersion`. Two alternatives were
-rejected for now: gating on a 2026-era `protocolVersion` plus adding `server/discover` (new
-protocol work), and implementing the legacy 2025-11-25 core task flow.
+The legacy advertisement is a deliberate AutoMobile extension of the spec (#13143).
+SEP-2663 leaves the extension undefined on `2025-11-25`; retaining the conditional
+`initialize` advertisement lets existing clients negotiate Tasks while modern HTTP serving
+is opt-in. It is not gated on the legacy client's `protocolVersion`.
 
 **Pieces** (`src/server/tasks/`):
 

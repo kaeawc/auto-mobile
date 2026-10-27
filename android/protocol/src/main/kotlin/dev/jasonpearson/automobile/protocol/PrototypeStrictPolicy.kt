@@ -144,6 +144,7 @@ internal object PrototypeStrictPolicy {
     val scanner = CapabilityScanner()
     scanner.envelope(spec)
     spec["root"]?.let { scanner.scan(it) }
+    (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
     (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
     return scanner.result
@@ -168,6 +169,7 @@ internal object PrototypeStrictPolicy {
       "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
+      "upsertData" to "data_actions",
       "prependData" to "data_actions",
       "removeData" to "data_actions",
       "platform" to "platform",
@@ -255,6 +257,15 @@ internal object PrototypeStrictPolicy {
         if ("ios" in block || "android" in block) need("platform_namespace")
       }
       if (spec.text("motion") == "reduced") need("reduced_motion")
+      if (spec["channels"] != null) {
+        need("platform_realtime")
+        if (
+          (spec["channels"] as? JsonObject).orEmpty().values.any {
+            (it as? JsonObject)?.text("via") == "device"
+          }
+        )
+          need("platform_realtime_device")
+      }
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
       if ("derive" in spec) need("format")
@@ -305,14 +316,14 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" || (key == "value" && type !in listOf("setData", "appendData", "prependData"))
+      key == "payload" ||
+        (key == "value" && type !in listOf("setData", "appendData", "prependData", "upsertData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement) {
       when {
         key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
-          scan(child, key)
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") -> scan(child, key)
       }
     }
 
@@ -326,6 +337,8 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
+      if (type == "upsertData" || (type == "appendData" && "maxItems" in fields))
+        need("platform_realtime")
       val nodeTypes =
         PrototypeSpecContract.definitions
           .getValue("node")

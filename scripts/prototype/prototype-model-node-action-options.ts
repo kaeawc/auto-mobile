@@ -16,6 +16,7 @@ export const actionModelOptions = {
     "setData.value": {
       kotlin: "EmitContextBinding",
     },
+    "upsertData.value": { kotlin: "EmitContextBinding" },
     "appendData.value": {
       kotlin: "EmitContextBinding",
     },

@@ -19,6 +19,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // transition choreography (#15247). Style effects (#15128) have a validated contract and
         // no renderer yet, and neither does any platform-namespace field (#15257).
         let exclusions: Set<String> = [
+            // Realtime transport, routing and lifecycle remain owed by the runtime slices.
+            "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_platform_test_v1", "prototype_platform_namespace_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",

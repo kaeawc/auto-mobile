@@ -13,6 +13,7 @@ import { templateSegments, type Binding } from "./prototypeTemplate";
 export const PROTOTYPE_DATA_ACTION_TYPES = [
   "setData",
   "appendData",
+  "upsertData",
   "prependData",
   "removeData",
 ] as const;
@@ -109,7 +110,10 @@ export function prototypeDataActionError(
       message: "A data write value must be a string, boolean, finite number, array or object",
     };
   }
-  if (["appendData", "prependData"].includes(action.type) && !prototypeDataPathHasIndex(path)) {
+  if (
+    ["appendData", "prependData", "upsertData"].includes(action.type) &&
+    !prototypeDataPathHasIndex(path)
+  ) {
     const target = resolvePrototypeDataPointer(data, pointer);
     if (target !== undefined && !Array.isArray(target)) {
       return { path: `${at}.path`, message: `${action.type} target is not an array` };

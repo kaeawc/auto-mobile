@@ -20,7 +20,7 @@ import {
 export const prototypePlatformBindingSchema = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ platform: pointerSchema }).strict(),
-  z.object({ event: pointerSchema }).strict(),
+  z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
 ]);
 export type PrototypePlatformBinding = z.infer<typeof prototypePlatformBindingSchema>;
 
@@ -38,7 +38,10 @@ export const platformActionSchema = z
     type: z.enum(["platform"]),
     call: z.string().min(1).max(64),
     args: z
-      .record(z.string().min(1), prototypePlatformBindingSchema)
+      .record(
+        z.string().min(1),
+        z.union([prototypePlatformBindingSchema, z.string().min(1).max(64)]),
+      )
       .refine((args) => Object.keys(args).length <= contract.limits.MAX_PROTOTYPE_PLATFORM_ARGS)
       .optional(),
     into: z

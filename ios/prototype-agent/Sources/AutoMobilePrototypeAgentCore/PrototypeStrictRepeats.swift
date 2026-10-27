@@ -134,7 +134,7 @@ struct PrototypeStrictRepeats {
             if let text = child.stringValue {
                 let keyField = ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey", "statusKey", "state"]
                     .contains(key)
-                    || (key == "key" && object["repeat"] == nil)
+                    || (key == "key" && object["repeat"] == nil && object["type"] != .string("upsertData"))
                 let dataActionPath = key == "path"
                     && PrototypeDataWrite.actionTypes.contains(object["type"]?.stringValue ?? "")
                 let appendTarget = (key == "to" && object["from"] != nil) || dataActionPath
@@ -253,7 +253,9 @@ struct PrototypeStrictRepeats {
         entries.flatMap { entry -> [PrototypeLocatedValue] in
             guard let scope = scopes.first(where: { entry.path.hasPrefix("\($0.path).children[") })
             else { return [entry] }
-            let keys = PrototypeStrictBindings.boundKeys(entry.value) + [entry.value["key"]?.stringValue]
+            let keys = PrototypeStrictBindings
+                .boundKeys(entry.value) +
+                [entry.value["type"] == .string("upsertData") ? nil : entry.value["key"]?.stringValue]
                 .compactMap { $0 }
             if keys.contains(where: { key in
                 PrototypeRepeat.segments(key, alias: scope.alias).contains {

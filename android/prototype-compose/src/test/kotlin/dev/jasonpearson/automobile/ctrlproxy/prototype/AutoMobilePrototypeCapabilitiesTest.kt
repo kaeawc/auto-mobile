@@ -36,6 +36,9 @@ class AutoMobilePrototypeCapabilitiesTest {
    */
   private val exclusions =
     setOf(
+      // Realtime transport, routing and lifecycle remain owed by the runtime slices.
+      "prototype_platform_realtime_v1",
+      "prototype_platform_realtime_device_v1",
       "prototype_platform_test_v1",
       "prototype_backdrop_v1",
       "prototype_platform_namespace_v1",

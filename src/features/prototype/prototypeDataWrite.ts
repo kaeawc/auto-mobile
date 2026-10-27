@@ -1,3 +1,4 @@
+import { isPrototypeDataPointer } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { PrototypeData, PrototypeDataActionValue, PrototypeJson } from "./prototypeSpec";
 import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";
@@ -15,6 +16,7 @@ import { prototypeDataError } from "./prototypeValidation";
  */
 export type PrototypeDataWrite =
   | { op: "set"; path: string; value: unknown }
+  | { op: "upsert"; path: string; key: string; value: unknown; maxItems?: number }
   | { op: "append"; path: string; value: unknown; maxItems?: number }
   | { op: "prepend"; path: string; value: unknown[]; maxItems?: number }
   | { op: "extend"; path: string; value: unknown[]; maxItems?: number }
@@ -43,7 +45,7 @@ const refused = (code: PrototypeDataWriteErrorCode, message: string): PrototypeD
 
 /** The patch op that performs a write whose target has been checked. */
 function patchOp(
-  write: Exclude<PrototypeDataWrite, { op: "append" | "extend" | "prepend" }>,
+  write: Exclude<PrototypeDataWrite, { op: "append" | "extend" | "prepend" | "upsert" }>,
   exists: boolean,
 ): PrototypePatchOp {
   if (write.op === "remove") {
@@ -60,9 +62,20 @@ function targetRefusal(
   write: PrototypeDataWrite,
 ): PrototypeDataWriteResult | undefined {
   const existing = resolvePrototypeDataPointer(data, pointer);
-  if (write.op === "append" || write.op === "extend" || write.op === "prepend") {
+  if (
+    write.op === "append" ||
+    write.op === "extend" ||
+    write.op === "prepend" ||
+    write.op === "upsert"
+  ) {
     const name =
-      write.op === "append" ? "appendData" : write.op === "prepend" ? "prependData" : "extend";
+      write.op === "append"
+        ? "appendData"
+        : write.op === "prepend"
+          ? "prependData"
+          : write.op === "upsert"
+            ? "upsertData"
+            : "extend";
     if (existing === undefined) {
       return refused("not_found", `${name} target ${write.path} does not exist`);
     }
@@ -97,6 +110,12 @@ function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | und
   if (write.op === "remove") {
     return undefined;
   }
+  if (
+    write.op === "upsert" &&
+    (!isPrototypeDataPointer(write.key) ||
+      resolvePrototypeDataPointer(write.value, write.key) === undefined)
+  )
+    return refused("invalid_value", "upsert needs a valid key pointer present in value");
   const name = write.op === "prepend" ? "prependData" : write.op;
   if (write.value === undefined) {
     return refused("invalid_value", `${name} write needs a value`);
@@ -107,11 +126,31 @@ function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | und
   if (
     "maxItems" in write &&
     write.maxItems !== undefined &&
-    (!Number.isSafeInteger(write.maxItems) || write.maxItems < 1)
+    (!Number.isSafeInteger(write.maxItems) ||
+      write.maxItems < 1 ||
+      ((write.op === "upsert" || write.op === "append") &&
+        write.maxItems > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS))
   ) {
     return refused("invalid_value", `${name} maxItems must be a positive safe integer`);
   }
   return undefined;
+}
+
+/** JSON identity compares numbers by value and strings/object keys by exact spelling. */
+function sameKey(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right))
+    return (
+      left.length === right.length && left.every((value, index) => sameKey(value, right[index]))
+    );
+  const a = record(left),
+    b = record(right);
+  return (
+    a !== undefined &&
+    b !== undefined &&
+    Object.keys(a).length === Object.keys(b).length &&
+    Object.keys(a).every((key) => Object.hasOwn(b, key) && sameKey(a[key], b[key]))
+  );
 }
 
 /** Targets have already been checked; concatenate and trim before validating the final data. */
@@ -120,17 +159,32 @@ function windowedWrite(
   pointer: string,
   write: PrototypeDataWrite,
 ): {
-  effective: Exclude<PrototypeDataWrite, { op: "append" | "extend" | "prepend" }>;
+  effective: Exclude<PrototypeDataWrite, { op: "append" | "extend" | "prepend" | "upsert" }>;
   trimmed: number;
 } {
-  if (write.op !== "append" && write.op !== "extend" && write.op !== "prepend") {
+  if (
+    write.op !== "append" &&
+    write.op !== "extend" &&
+    write.op !== "prepend" &&
+    write.op !== "upsert"
+  ) {
     return { effective: write, trimmed: 0 };
   }
   const existing = resolvePrototypeDataPointer(current, pointer) as unknown[];
-  const combined =
+  let combined =
     write.op === "prepend"
       ? write.value.concat(existing)
       : existing.concat(write.op === "extend" ? write.value : [write.value]);
+  if (write.op === "upsert") {
+    const key = resolvePrototypeDataPointer(write.value, write.key);
+    const index = existing.findIndex((item) => {
+      const candidate = resolvePrototypeDataPointer(item, write.key);
+      return candidate !== undefined && sameKey(candidate, key);
+    });
+    combined = existing.slice();
+    if (index < 0) combined.push(write.value);
+    else combined[index] = write.value;
+  }
   const trimmed = write.maxItems === undefined ? 0 : Math.max(0, combined.length - write.maxItems);
   return {
     effective: {

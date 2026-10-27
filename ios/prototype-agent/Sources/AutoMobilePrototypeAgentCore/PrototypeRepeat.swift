@@ -178,7 +178,9 @@ enum PrototypeRepeat {
                 if case let .field(name) = $0 { return names.contains(name) }; return false
             }) {
                 let bound = row.interpolate(text)
-                if keyFields.contains(key), !isFieldName(bound) {
+                if keyFields.contains(key), !(key == "key" && fields["type"] == .string("upsertData")),
+                   !isFieldName(bound)
+                {
                     throw PrototypeContractValidator.invalid(
                         "\(repeatPath).repeat.items[\(row.index)]",
                         "Bound state key \(PrototypeContractValidator.quoted(bound)) is invalid"

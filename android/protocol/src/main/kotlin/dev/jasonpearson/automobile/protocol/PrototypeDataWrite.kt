@@ -11,6 +11,13 @@ sealed interface PrototypeDataWrite {
 
   data class Set(override val path: String, val value: JsonElement) : PrototypeDataWrite
 
+  data class Upsert(
+    override val path: String,
+    val key: String,
+    val value: JsonElement,
+    val maxItems: Number? = null,
+  ) : PrototypeDataWrite
+
   data class Append(
     override val path: String,
     val value: JsonElement,
@@ -37,6 +44,7 @@ sealed interface PrototypeDataWrite {
       when (this) {
         is Set -> "set"
         is Append -> "append"
+        is Upsert -> "upsert"
         is Extend -> "extend"
         is Prepend -> "prepend"
         is Remove -> "remove"
@@ -96,6 +104,7 @@ object PrototypeDataWriter {
     val next =
       when (write) {
         is PrototypeDataWrite.Set -> update(current, tokens) { _ -> write.value }
+        is PrototypeDataWrite.Upsert,
         is PrototypeDataWrite.Append,
         is PrototypeDataWrite.Prepend,
         is PrototypeDataWrite.Extend ->
@@ -117,14 +126,36 @@ object PrototypeDataWriter {
     return PrototypeDataWriteResult.Success(next, trimmed)
   }
 
+  /** JSON identity uses numeric value and exact strings, including nested identity objects. */
+  private fun sameKey(left: JsonElement, right: JsonElement): Boolean =
+    when {
+      left is JsonArray && right is JsonArray ->
+        left.size == right.size && left.indices.all { sameKey(left[it], right[it]) }
+      left is JsonObject && right is JsonObject ->
+        left.keys == right.keys && left.keys.all { sameKey(left.getValue(it), right.getValue(it)) }
+      else -> left == right || PrototypeDataValues.equal(left, right)
+    }
+
   private fun arrayWindow(write: PrototypeDataWrite, target: JsonArray): Pair<JsonArray, Int> {
     val incoming =
       when (write) {
         is PrototypeDataWrite.Extend -> write.value as JsonArray
         is PrototypeDataWrite.Prepend -> write.value as JsonArray
+        is PrototypeDataWrite.Upsert -> listOf(write.value)
         else -> listOf((write as PrototypeDataWrite.Append).value)
       }
-    val combined = if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
+    val combined =
+      if (write is PrototypeDataWrite.Upsert) {
+        val key = PrototypeDataPointer.resolve(write.value, write.key)
+        val index = target.indexOfFirst {
+          PrototypeDataPointer.resolve(it, write.key)?.let { candidate ->
+            key != null && sameKey(candidate, key)
+          } == true
+        }
+        target.toMutableList().also {
+          if (index < 0) it.add(write.value) else it[index] = write.value
+        }
+      } else if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
     val maximum = maximum(write)
     val trimmed =
       if (maximum == null) 0 else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
@@ -136,6 +167,7 @@ object PrototypeDataWriter {
 
   private fun maximum(write: PrototypeDataWrite): Double? =
     when (write) {
+      is PrototypeDataWrite.Upsert -> write.maxItems?.toDouble()
       is PrototypeDataWrite.Append -> write.maxItems?.toDouble()
       is PrototypeDataWrite.Extend -> write.maxItems?.toDouble()
       is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
@@ -143,6 +175,15 @@ object PrototypeDataWriter {
     }
 
   private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
+    if (
+      write is PrototypeDataWrite.Upsert &&
+        (!PrototypeDataPointer.isValid(write.key) ||
+          PrototypeDataPointer.resolve(write.value, write.key) == null)
+    )
+      return refused(
+        PrototypeDataWriteErrorCode.INVALID_VALUE,
+        "upsert needs a valid key pointer present in value",
+      )
     val invalidArray =
       when (write) {
         is PrototypeDataWrite.Extend -> write.value !is JsonArray
@@ -156,7 +197,11 @@ object PrototypeDataWriter {
         "$name needs an array value",
       )
     val maxItems = maximum(write) ?: return null
-    return if (!positiveSafeInteger(maxItems))
+    return if (
+      !positiveSafeInteger(maxItems) ||
+        ((write is PrototypeDataWrite.Upsert || write is PrototypeDataWrite.Append) &&
+          maxItems > PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
+    )
       refused(
         PrototypeDataWriteErrorCode.INVALID_VALUE,
         "$name maxItems must be a positive safe integer",
@@ -177,6 +222,7 @@ object PrototypeDataWriter {
   ): PrototypeDataWriteResult? {
     val existing = PrototypeDataPointer.resolve(data, pointer)
     return when (write) {
+      is PrototypeDataWrite.Upsert,
       is PrototypeDataWrite.Append,
       is PrototypeDataWrite.Prepend,
       is PrototypeDataWrite.Extend -> arrayRefusal(existing, write)
@@ -211,6 +257,7 @@ object PrototypeDataWriter {
       when (write) {
         is PrototypeDataWrite.Extend -> "extend"
         is PrototypeDataWrite.Prepend -> "prependData"
+        is PrototypeDataWrite.Upsert -> "upsertData"
         else -> "appendData"
       }
     return when {

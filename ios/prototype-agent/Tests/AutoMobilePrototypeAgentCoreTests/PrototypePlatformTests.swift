@@ -44,7 +44,14 @@ final class PrototypePlatformTests: XCTestCase {
                     switch argument.rule {
                     case let .json(maxBytes):
                         XCTAssertEqual(rule["kind"] as? String, "json", arg)
-                        XCTAssertEqual(rule["maxBytes"] as? Int, maxBytes, arg)
+                        XCTAssertEqual(
+                            rule["maxBytes"] as? Int ?? PrototypeContractValidator.limit("MAX_PROTOTYPE_SPEC_BYTES"),
+                            maxBytes,
+                            arg
+                        )
+                    case let .string(max):
+                        XCTAssertEqual(rule["kind"] as? String, "string", arg)
+                        XCTAssertEqual(rule["max"] as? Int, max, arg)
                     case let .integer(min, max):
                         XCTAssertEqual(rule["kind"] as? String, "number", arg)
                         XCTAssertEqual(rule["integer"] as? Bool, true, arg)

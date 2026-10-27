@@ -497,7 +497,13 @@ function setStateBindingErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const { key, value } = action.value;
-  if (typeof key !== "string" || action.operandTemplated || value === undefined) {
+  if (
+    typeof key !== "string" ||
+    action.operandTemplated ||
+    value === undefined ||
+    object(value)?.event !== undefined ||
+    object(value)?.platform !== undefined
+  ) {
     return undefined;
   }
   const controls = checked.nodes.filter((node) => boundKeys(node.value).includes(key));

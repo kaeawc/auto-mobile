@@ -41,12 +41,24 @@ internal object PrototypeBundleCapabilities {
       action.value,
       caps,
     )
+    if ("channels" in spec) {
+      caps.add("prototype_platform_realtime_v1")
+      if (
+        (spec["channels"] as? JsonObject).orEmpty().values.any {
+          text((it as? JsonObject)?.get("via")) == "device"
+        }
+      )
+        caps.add("prototype_platform_realtime_device_v1")
+    }
     platform(refs, caps)
     return caps.sorted()
   }
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
-    when (text(action["type"])) {
+    val type = text(action["type"])
+    if (type == "upsertData" || (type == "appendData" && "maxItems" in action))
+      caps.add("prototype_platform_realtime_v1")
+    when (type) {
       "request" -> {
         if ("append" in action) {
           caps.add("prototype_lazy_list_v1")
@@ -61,6 +73,7 @@ internal object PrototypeBundleCapabilities {
       }
       "setData",
       "appendData",
+      "upsertData",
       "removeData" -> caps.add("prototype_data_actions_v1")
       "startTimer",
       "cancelTimer" -> caps.add("prototype_timers_v1")

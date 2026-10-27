@@ -1177,6 +1177,7 @@ class PrototypeRuntime(
     }
     val value =
       when (write) {
+        is PrototypeDataWrite.Upsert -> error("Realtime data writes require a supporting runtime")
         is PrototypeDataWrite.Set -> write.value
         is PrototypeDataWrite.Append -> write.value
         is PrototypeDataWrite.Prepend -> write.value

@@ -291,6 +291,30 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
   // `requires` is a root-level block a patch cannot introduce, and every module use must be
   // declared there (#14294), so only the show half applies. A permission-only block needs just the
   // vocabulary capability; a declared module also needs its own, with the vocabulary advertised.
+  prototype_platform_realtime_v1: {
+    ...fixture({
+      ...label,
+      onTap: [
+        {
+          type: "upsertData",
+          path: "/data/rows",
+          key: "/id",
+          value: { value: { id: 1 } },
+          maxItems: 20,
+        },
+      ],
+    }),
+    with: ["prototype_data_actions_v1"],
+  },
+  prototype_platform_realtime_device_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["realtime"] },
+      channels: { feed: { kind: "sse", url: "https://example.com/events", via: "device" } },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_realtime_v1"],
+  },
   prototype_platform_v1: {
     minimalSpec: {
       ...base,

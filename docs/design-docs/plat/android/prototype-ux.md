@@ -2024,6 +2024,49 @@ ignored.
   loopback destinations for `via: "device"`; see the iOS
   [destination policy](../ios/prototype-agent.md#destination-policy-13815).
 
+## Realtime channels
+
+The strict root `channels` map declares up to four channel IDs (state-key grammar), requires
+`realtime` in `requires.platform`, and gates the entire vocabulary on
+`prototype_platform_realtime_v1`. `via: "device"` additionally requires
+`prototype_platform_realtime_device_v1`. Neither runtime advertises these capabilities.
+
+A channel requires `kind: "websocket" | "sse"` and `url`. WebSocket URLs use ws/wss; SSE URLs
+use http/https, sharing request URL placeholder and length rules. Optional `protocols` has up to
+four WebSocket subprotocols. `headers` has up to 16 entries and shares the request rules, also
+refusing case-insensitive `Sec-WebSocket-*` and `Last-Event-ID`. Optional `via` defaults to host,
+`connect` to onShow (or manual), `decode` to json (or text); `statusKey` names declared string
+state. `reconnect` requires integer maxAttempts 0..20 and initialDelayMs/maxDelayMs with
+100 <= initial <= max <= 60000.
+
+Up to 16 ordered routes match `{pointer, equals}`, `{pointer, exists: boolean}`, an SSE event
+name `{event}`, or every frame when `when` is absent. Routes allow state and data actions only;
+requests, navigation and other effects are refused. Routes and onOpen/onClose/onError callbacks
+have handler event scope: `{event: ""}` reads the whole event and a nonempty RFC 6901 pointer
+reads a member. Root `platform.on` supports realtime.status and realtime.frame as well.
+`realtime.connect/disconnect` take a declared channel selector; `realtime.send` also takes a body
+value binding and requires a WebSocket channel. A selector is a literal string or `{value: id}`;
+dynamic channel selection is refused so validation can prove the declaration and kind.
+
+The read-only `/platform/realtime/<channel>` state contains status, attempt, framesIn,
+framesDropped, closeCode, closeReason and error, read through `/realtime/<channel>/<field>`
+platform pointers. The contract budgets are 65536 bytes per received frame, 16384 per send,
+eight open channels per device, and 50 ms per flush window. Limits are read from the shared
+contract by the TS, Kotlin and Swift mirrors.
+
+The realtime capability also gates `appendData.maxItems` and `upsertData {path, key, value,
+maxItems?}` everywhere actions can occur. Upsert replaces the first matching identity in place
+or appends; the incoming value must contain its valid, nonempty key pointer. JSON identity uses
+numeric value, exact strings and member names, and structural array/object equality. maxItems
+is an integer 1..2000; oldest rows are dropped after replacement/append and before final data
+limits. Missing/non-array targets and invalid writes leave input unchanged.
+
+Runtime work remains owed: WebSocket/SSE transport, host/device dispatch, routing and atomic
+frame writes, reconnect/backoff, send queues, counters/events, inspection, simulation and
+foreground/background/patch/reset/dismiss lifecycle. Coalescing within the flush window remains
+an open decision; latest-wins sets and never-coalesced appends are a proposal, without an
+implemented rule or fixtures that claim runtime behavior.
+
 ## Data, storage and network (#12531)
 
 The three features compose: a `request` writes its response into `/data`, data actions edit `/data`
@@ -2032,12 +2075,14 @@ The detailed contracts are [Data actions](#data-actions-12519), [Storage](#stora
 [Request action](#request-action-12523); this section is the one-page overview and the capability
 map.
 
-| Capability                    | Gates                                                     | Android CtrlProxy | iOS agent  |
-| ----------------------------- | --------------------------------------------------------- | ----------------- | ---------- |
-| `prototype_data_actions_v1`   | `setData`, `appendData`, `prependData`, `removeData`      | Advertised        | Advertised |
-| `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clearStorage` | Advertised        | Advertised |
-| `prototype_network_v1`        | the `request` action with `via: "host"`                   | Advertised        | Advertised |
-| `prototype_network_device_v1` | `request` with `via: "device"`                            | Advertised        | Advertised |
+| Capability                              | Gates                                                     | Android CtrlProxy | iOS agent     |
+| --------------------------------------- | --------------------------------------------------------- | ----------------- | ------------- |
+| `prototype_data_actions_v1`             | `setData`, `appendData`, `prependData`, `removeData`      | Advertised        | Advertised    |
+| `prototype_storage_v1`                  | root `storage` block, `inspect` `storage`, `clearStorage` | Advertised        | Advertised    |
+| `prototype_network_v1`                  | the `request` action with `via: "host"`                   | Advertised        | Advertised    |
+| `prototype_platform_realtime_v1`        | channels, realtime calls, upsertData, appendData.maxItems | Contract only     | Contract only |
+| `prototype_platform_realtime_device_v1` | channels with `via: "device"`                             | Contract only     | Contract only |
+| `prototype_network_device_v1`           | `request` with `via: "device"`                            | Advertised        | Advertised    |
 
 A device without a capability is refused before uploads or show, with a message naming the
 capability. Device-side verification is the manual run in `skills/manual-test/prototype-acceptance.md`

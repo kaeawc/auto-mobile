@@ -566,7 +566,7 @@ devices are refused before upload, display or patch dispatch. The \`prototype_ev
 
 export const GUIDE_DATA_ACTIONS = `### Data actions
 
-A tap can change \`/data\` on the device without the agent answering it. Three actions write a
+A tap can change \`/data\` on the device without the agent answering it. Data actions write a
 member of \`data\`; each \`path\` is \`/data\` plus a non-empty data pointer (the same syntax and
 \`MAX_PROTOTYPE_DATA_POINTER_LENGTH\` as \`{data: pointer}\`), so the whole document cannot be
 written:
@@ -604,6 +604,33 @@ own \`data\` authoritative again and clears the history.
 Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
 refused on a device without it, before anything is shown or sent.
 
+
+### Realtime channels
+
+The validated contract requires \`prototype_platform_realtime_v1\`; current Android and iOS
+runtimes do not advertise it. A root \`channels\` map holds at most four named channels and
+requires \`requires.platform:["realtime"]\`. Each channel declares \`kind:"websocket"|"sse"\`
+and \`url\` (ws/wss or http/https respectively), using request URL placeholders and length rules.
+Optional fields: \`protocols\` (WebSocket only, up to four), \`headers\` (up to 16, request rules
+plus refusing Sec-WebSocket-* and Last-Event-ID), \`via:"host"|"device"\` (host default),
+\`connect:"onShow"|"manual"\` (onShow default), declared string \`statusKey\`,
+\`decode:"json"|"text"\` (json default), \`reconnect\`, \`routes\`, \`onOpen/onClose/onError\`.
+Device routing additionally requires \`prototype_platform_realtime_device_v1\`.
+Reconnect fields are integer \`maxAttempts:0..20\`, \`initialDelayMs>=100\`,
+\`maxDelayMs<=60000\`, with initial <= max. Up to 16 routes use \`when:{pointer,equals}\`,
+\`{pointer,exists:boolean}\`, \`{event:SSE-name}\`, or omit when. Their actions are state/data
+writes; request and navigation are refused. In channel callbacks and platform handlers,
+\`{event:"/message"}\` reads decoded event data and \`{event:""}\` reads the whole event.
+Calls use \`{type:"platform",call:"realtime.connect"|"realtime.disconnect",args:{channel:"chat"}}\`
+and \`realtime.send\` with \`args:{channel:"chat",body:{value:json}}\` (WebSocket only).
+Read live counters with \`{platform:"/realtime/chat/framesIn"}\`; state keys are status, attempt,
+framesIn, framesDropped, closeCode, closeReason and error. Events are realtime.status and realtime.frame.
+The same capability gates \`appendData.maxItems\` and \`upsertData {path,key,value,maxItems?}\`.
+Upsert replaces the first row whose key pointer matches the incoming value, otherwise appends;
+missing incoming identity is an error. maxItems is 1..2000 and drops oldest rows before limits apply.
+Frame/send budgets are 65536/16384 bytes, with eight open channels per device and a 50 ms flush budget.
+Transport, lifecycle and routing execution remain unavailable. Flush-window coalescing is an open
+decision; no coalescing behavior is implemented.
 `;
 
 export const GUIDE_STORAGE = `### Storage

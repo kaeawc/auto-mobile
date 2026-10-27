@@ -18,6 +18,11 @@ enum PrototypeStrictCapabilities {
         }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
+        if spec["channels"] != nil {
+            need("platform_realtime")
+            if (spec["channels"]?.objectFields ?? [:]).values
+                .contains(where: { $0.objectFields?["via"] == .string("device") }) { need("platform_realtime_device") }
+        }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }
@@ -105,13 +110,19 @@ enum PrototypeStrictCapabilities {
                     }
                 }
             }
-            if ["setData", "appendData", "prependData", "removeData"].contains(type) { need("data_actions") }
+            if ["setData", "appendData", "prependData", "upsertData", "removeData"]
+                .contains(type) { need("data_actions") }
+            if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
             for (key, child) in fields {
                 if key == "strings" { continue }
-                if key == "payload" || (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
+                if key == "payload" ||
+                    (key == "value" && !["setData", "appendData", "prependData", "upsertData"].contains(type))
+                {
+                    continue
+                }
                 if key == "repeat" {
                     if child.objectFields?["derive"] != nil { need("format") }
                     if let repeatSpec = child.objectFields,
@@ -146,11 +157,13 @@ enum PrototypeStrictCapabilities {
                 // An effect's own `animate`, colours and params are not spec features of their own.
                 if key == "linkify" {
                     if let actions = child.objectFields?["onTap"] { scan(actions, field: "onTap") }
-                } else if !["series", "effects", "scrollLinked", "scrollTransition"].contains(key) { scan(child, field: key) }
+                } else if !["series", "effects", "scrollLinked", "scrollTransition"]
+                    .contains(key) { scan(child, field: key) }
             }
         }
         if let root = spec["root"] { scan(root) }
         if let handlers = spec["platform"] { scan(handlers) }
+        for channel in (spec["channels"]?.objectFields ?? [:]).values { scan(channel) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }
         if let requires = spec["requires"]?.objectFields {

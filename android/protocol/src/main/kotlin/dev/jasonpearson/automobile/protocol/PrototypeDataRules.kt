@@ -37,7 +37,7 @@ internal object PrototypeDataRules {
         fail("data", "Data byte limit exceeded")
       else null
 
-  val dataActionTypes = setOf("setData", "appendData", "prependData", "removeData")
+  val dataActionTypes = setOf("setData", "appendData", "prependData", "upsertData", "removeData")
 
   /**
    * Static checks for `setData`, `appendData`, `prependData` and `removeData` (#12519) that the
@@ -65,7 +65,7 @@ internal object PrototypeDataRules {
         )
       }
       if (
-        type in setOf("appendData", "prependData") &&
+        type in setOf("appendData", "prependData", "upsertData") &&
           !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)
       ) {
         val target = PrototypeDataPointer.resolve(data, pointer)

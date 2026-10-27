@@ -27,11 +27,12 @@ public enum PrototypeSpecStrictValidator {
             try repeats.expanded(root.objectFields ?? [:], path: "root")
             try PrototypeStrictSemantics.storage(fields)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
-            try PrototypeRequestValidator.validate(root, state: state)
+            try PrototypeRequestValidator.validateActions(context.actions, state: state)
             try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
                 handlers: fields["platform"],
+                channels: fields["channels"],
                 root: root,
                 state: state
             )
@@ -141,7 +142,7 @@ public enum PrototypeSpecStrictValidator {
                     }
                 }
                 append(action.value["body"], path: "\(action.path).body", request: true)
-            case "setData", "appendData", "prependData":
+            case "setData", "appendData", "prependData", "upsertData":
                 append(action.value["value"], path: "\(action.path).value")
             case "emit", "platform":
                 let name = action.value["type"] == .string("emit") ? "context" : "args"

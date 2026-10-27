@@ -27,6 +27,14 @@ enum PrototypeBundleCapabilities {
             }
         }
         if let handlers = spec["platform"] { scanSlots(handlers, names: &names) }
+        if let channels = spec["channels"] {
+            need("platform_realtime")
+            if (channels.objectFields ?? [:]).values
+                .contains(where: { $0.objectFields?["via"] == .string("device") }) { need("platform_realtime_device") }
+            for channel in (channels.objectFields ?? [:]).values {
+                scanSlots(channel, names: &names)
+            }
+        }
         var pending = [spec["root"]].compactMap { $0 }
         for component in spec["components"]?.objectFields?.values ?? [:].values {
             if let root = component.objectFields?["root"] { pending.append(root) }
@@ -122,8 +130,10 @@ enum PrototypeBundleCapabilities {
             names.insert("prototype_network_v1")
             if fields["via"]?.stringValue == "device" { names.insert("prototype_network_device_v1") }
         }
-        if ["setData", "appendData", "prependData", "removeData"]
+        if ["setData", "appendData", "prependData", "upsertData", "removeData"]
             .contains(type ?? "") { names.insert("prototype_data_actions_v1") }
+        if type == "upsertData" ||
+            (type == "appendData" && fields["maxItems"] != nil) { names.insert("prototype_platform_realtime_v1") }
         if type == "prependData" { names.insert("prototype_lazy_list_v1") }
         if type == "emit", fields["context"] != nil { names.insert("prototype_emit_context_v1") }
         if type == "requireValid" { names.insert("prototype_checks_v1") }

@@ -313,6 +313,8 @@ data class PrototypeSpec(
   val requires: PrototypeRequires? = null,
   /** `platform.on`: action lists run when a platform event is delivered (#14294). */
   val platform: PrototypePlatformHandlers? = null,
+  /** Validated channel declarations; no transport is installed by the contract slice. */
+  val channels: Map<String, PrototypeChannel>? = null,
   val strings: JsonObject? = null,
 )
 

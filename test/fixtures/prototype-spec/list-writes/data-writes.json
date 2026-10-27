@@ -1285,5 +1285,454 @@
       },
       "trimmed": 3
     }
+  },
+  {
+    "name": "upsert replaces first matching identity in place",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "old"
+        },
+        {
+          "id": 2
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 1,
+        "text": "edit"
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "text": "edit"
+          },
+          {
+            "id": 2
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "upsert appends unknown identity and drops oldest",
+    "before": {
+      "items": [
+        {
+          "id": 1
+        },
+        {
+          "id": 2
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 3
+      },
+      "maxItems": 2
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 2
+          },
+          {
+            "id": 3
+          }
+        ]
+      },
+      "trimmed": 1
+    }
+  },
+  {
+    "name": "upsert replacement also applies window",
+    "before": {
+      "items": [
+        {
+          "id": 1
+        },
+        {
+          "id": 2
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 2,
+        "text": "edit"
+      },
+      "maxItems": 1
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 2,
+            "text": "edit"
+          }
+        ]
+      },
+      "trimmed": 1
+    }
+  },
+  {
+    "name": "upsert first duplicate wins",
+    "before": {
+      "items": [
+        {
+          "id": 1
+        },
+        {
+          "id": 1
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 1,
+        "text": "first"
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "text": "first"
+          },
+          {
+            "id": 1
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "upsert nested escaped key",
+    "before": {
+      "items": [
+        {
+          "a/b": {
+            "~id": 1
+          }
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/a~1b/~0id",
+      "value": {
+        "a/b": {
+          "~id": 1
+        },
+        "text": "edit"
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "a/b": {
+              "~id": 1
+            },
+            "text": "edit"
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "upsert ignores rows without key",
+    "before": {
+      "items": [
+        {
+          "text": "missing"
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 1
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "text": "missing"
+          },
+          {
+            "id": 1
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "upsert refuses incoming missing key",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "text": "missing"
+      }
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "upsert refuses invalid pointer",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/bad~2",
+      "value": {
+        "id": 1
+      }
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "upsert refuses empty pointer",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "",
+      "value": {
+        "id": 1
+      }
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "upsert refuses window zero",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 1
+      },
+      "maxItems": 0
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "upsert refuses oversized window",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 1
+      },
+      "maxItems": 2001
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "upsert numeric identities compare by value",
+    "before": {
+      "items": [
+        {
+          "id": 1.0
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 1,
+        "text": "same"
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "text": "same"
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "upsert string identities differ from numbers",
+    "before": {
+      "items": [
+        {
+          "id": "1"
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": 1
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": "1"
+          },
+          {
+            "id": 1
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "upsert JSON identities ignore object member order",
+    "before": {
+      "items": [
+        {
+          "id": {
+            "b": 2,
+            "a": 1
+          }
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": {
+          "a": 1,
+          "b": 2
+        },
+        "text": "same"
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": {
+              "a": 1,
+              "b": 2
+            },
+            "text": "same"
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "upsert refuses null data values",
+    "before": {
+      "items": [
+        {
+          "id": null
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": null,
+        "text": "same"
+      }
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "upsert exact Unicode identity",
+    "before": {
+      "items": [
+        {
+          "id": "é"
+        }
+      ]
+    },
+    "write": {
+      "op": "upsert",
+      "path": "/data/items",
+      "key": "/id",
+      "value": {
+        "id": "é"
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": "é"
+          },
+          {
+            "id": "é"
+          }
+        ]
+      },
+      "trimmed": 0
+    }
   }
 ]

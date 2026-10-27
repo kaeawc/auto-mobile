@@ -10,6 +10,7 @@ enum PrototypePlatformValidator {
     enum Rule: Equatable {
         case json(maxBytes: Int)
         case integer(min: Double, max: Double)
+        case string(max: Int)
     }
 
     struct Argument: Equatable {
@@ -43,8 +44,9 @@ enum PrototypePlatformValidator {
                     return Argument(
                         optional: arg["optional"] == .bool(true),
                         rule: rule["kind"] == .string("json")
-                            ? .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
-                            : .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+                            ? .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 1_048_576))
+                            : rule["kind"] == .string("string") ? .string(max: Int(rule["max"]?.numberValue ?? 64)) :
+                            .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
                     )
                 }
                 func strings(_ key: String) -> [String] {
@@ -91,16 +93,29 @@ enum PrototypePlatformValidator {
         var modules: Set<String> = []
         var permissions: Set<String> = []
         var background: Set<String> = []
+        var channels: [String: JSONValue] = [:]
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
-        requires: JSONValue?, handlers: JSONValue?, root: JSONValue, state: [String: JSONValue]
+        requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, root: JSONValue,
+        state: [String: JSONValue]
     )
         throws
     {
-        let declared = try validateRequires(requires)
+        try PrototypeChannels.validate(channels?.objectFields, requires: requires, state: state)
+        var declared = try validateRequires(requires)
+        declared.channels = channels?.objectFields ?? [:]
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
+        for (handler, path) in PrototypeChannels.handlers(declared.channels) {
+            if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
+                actions,
+                path: path,
+                depth: 1,
+                state: state
+            ) }
+            try scan(handler, path: path, inHandler: true, declared: declared, state: state)
+        }
         try scan(root, path: "root", inHandler: false, declared: declared, state: state)
     }
 
@@ -292,7 +307,9 @@ enum PrototypePlatformValidator {
         guard declared.modules.contains(name) else { throw notDeclared(path, name) }
         if let state = modules[name]?.state {
             let tokens = PrototypeDataPointer.tokens(pointer)
-            guard tokens.count == 2, state.contains(tokens[1]) else {
+            let valid = name == "realtime" ? tokens.count == 3 && declared.channels[tokens[1]] != nil && state
+                .contains(tokens[2]) : tokens.count == 2 && state.contains(tokens[1])
+            guard valid else {
                 throw fail(path, "Unknown platform state \(pointer)")
             }
         }
@@ -341,7 +358,7 @@ enum PrototypePlatformValidator {
                 throw fail("\(path).\(list)", "Array length out of range")
             }
         }
-        let args = try arguments(action["args"], path: "\(path).args")
+        let args = try arguments(action["args"], path: "\(path).args", realtime: call.hasPrefix("realtime."))
         guard let parts = qualified(call), let definition = modules[parts.module]?.calls[parts.member] else {
             throw fail("\(path).call", "Unknown platform call")
         }
@@ -364,16 +381,21 @@ enum PrototypePlatformValidator {
                 try check(literal, argument.rule, path: "\(at).value")
             }
         }
+        try PrototypeChannels.call(action, path: path, channels: declared.channels)
         if let into = action["into"] { try self.into(into, path: "\(path).into") }
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
     }
 
-    private static func arguments(_ raw: JSONValue?, path: String) throws -> [String: JSONValue] {
+    private static func arguments(_ raw: JSONValue?, path: String, realtime: Bool) throws -> [String: JSONValue] {
         guard let raw else { return [:] }
         guard case let .object(fields) = raw else { throw fail(path, "Expected object") }
         guard fields.count <= maxArgs else { throw fail(path, "Record entry limit exceeded") }
         for name in sorted(Set(fields.keys)) {
             let at = PrototypeLimits.dataMemberPath(path, key: name)
+            if fields[name]?.stringValue != nil {
+                if realtime, name == "channel" { continue }
+                throw fail(at, "Invalid union value")
+            }
             guard case let .object(form)? = fields[name], form.count == 1, let key = form.keys.first,
                   bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
             else { throw fail(at, "Invalid union value") }
@@ -389,6 +411,11 @@ enum PrototypePlatformValidator {
             guard let bytes = try? encoder.encode(literal), bytes.count <= maxBytes else {
                 throw fail(path, "Invalid json value")
             }
+        case let .string(max):
+            guard let value = literal.stringValue, !value.isEmpty, value.utf16.count <= max else { throw fail(
+                path,
+                "Invalid string value"
+            ) }
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")

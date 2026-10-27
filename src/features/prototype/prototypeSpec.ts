@@ -1,3 +1,4 @@
+import { prototypeChannelsSchema } from "./prototypeChannelSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
@@ -89,7 +90,12 @@ const dataActionPathSchema = z
   .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
 const dataActionFields = {
   path: dataActionPathSchema,
-  value: z.union([...prototypeDataActionValueSchema.options, prototypeMatchBindingSchema]),
+  value: z.union([
+    ...prototypeDataActionValueSchema.options,
+    prototypeMatchBindingSchema,
+    z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
+    z.object({ platform: pointerSchema }).strict(),
+  ]),
 };
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
@@ -117,7 +123,14 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["setState"]),
       key: stateKeySchema,
-      value: z.union([z.string(), z.number().finite(), z.boolean(), prototypeMatchBindingSchema]),
+      value: z.union([
+        z.string(),
+        z.number().finite(),
+        z.boolean(),
+        prototypeMatchBindingSchema,
+        z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
+        z.object({ platform: pointerSchema }).strict(),
+      ]),
     })
     .strict(),
   z
@@ -142,7 +155,21 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
-  z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
+  z
+    .object({
+      type: z.enum(["appendData"]),
+      ...dataActionFields,
+      maxItems: z.number().int().min(1).max(MAX_PROTOTYPE_DATA_ARRAY_ITEMS).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum(["upsertData"]),
+      ...dataActionFields,
+      key: pointerSchema,
+      maxItems: z.number().int().min(1).max(MAX_PROTOTYPE_DATA_ARRAY_ITEMS).optional(),
+    })
+    .strict(),
   z.object({ type: z.enum(["prependData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
   timers.startTimerActionSchema,
@@ -884,6 +911,7 @@ const specSchema = z
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
+    channels: prototypeChannelsSchema(() => actionSchema).optional(),
     derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
@@ -949,6 +977,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "dismiss",
   "setData",
   "appendData",
+  "upsertData",
   "prependData",
   "removeData",
   "request",

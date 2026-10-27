@@ -53,7 +53,10 @@ describe("platform module table", () => {
       expect(definition.capability).toMatch(new RegExp(`^prototype_platform_${name}_v[0-9]+$`));
     }
     expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability)).toEqual(
-      Object.values(contract.platformModules).map((definition) => definition.capability),
+      Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
+        definition.capability,
+        ...(definition.deviceCapability ? [definition.deviceCapability] : []),
+      ]),
     );
   });
 });

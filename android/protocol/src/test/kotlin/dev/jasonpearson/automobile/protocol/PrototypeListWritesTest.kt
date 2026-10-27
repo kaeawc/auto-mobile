@@ -22,6 +22,13 @@ class PrototypeListWritesTest {
         val maxItems = write["maxItems"]?.jsonPrimitive?.double
         val input =
           when (write.getValue("op").jsonPrimitive.content) {
+            "upsert" ->
+              PrototypeDataWrite.Upsert(
+                path,
+                write.getValue("key").jsonPrimitive.content,
+                value,
+                maxItems,
+              )
             "append" -> PrototypeDataWrite.Append(path, value, maxItems)
             "prepend" -> PrototypeDataWrite.Prepend(path, value, maxItems)
             "extend" -> PrototypeDataWrite.Extend(path, value, maxItems)

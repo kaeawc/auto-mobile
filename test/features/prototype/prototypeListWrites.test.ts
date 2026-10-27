@@ -166,3 +166,27 @@ test("prepend trims discarded oversized rows before final byte limits", () => {
     error: { code: "not_array", message: "prependData target /data/items is not an array" },
   });
 });
+
+test("upsert trims before the hard array budget and leaves inputs unchanged", () => {
+  const items = Array.from({ length: contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS }, (_, id) => ({
+    id,
+  }));
+  const before = { items };
+  const write = {
+    op: "upsert" as const,
+    path: "/data/items",
+    key: "/id",
+    value: { id: items.length },
+  };
+  expect(applyPrototypeDataWrite(before, write)).toMatchObject({
+    success: false,
+    error: { code: "limit_exceeded" },
+  });
+  expect(applyPrototypeDataWrite(before, { ...write, maxItems: 1 })).toEqual({
+    success: true,
+    data: { items: [write.value] },
+    trimmed: items.length,
+  });
+  expect(before.items).toBe(items);
+  expect(items).toHaveLength(contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS);
+});

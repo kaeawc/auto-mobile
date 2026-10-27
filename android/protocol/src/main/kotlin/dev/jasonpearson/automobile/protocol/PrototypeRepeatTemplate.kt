@@ -305,6 +305,7 @@ internal object PrototypeBindableFields {
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
         "setData",
         "appendData",
+        "upsertData",
         "prependData" ->
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")

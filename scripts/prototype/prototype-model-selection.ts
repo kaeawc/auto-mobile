@@ -40,6 +40,7 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},

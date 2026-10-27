@@ -1154,3 +1154,5 @@ namespace objects on nodes, window and theme for native semantics. Each field ha
 `why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
 Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
 ignore both blocks and do not advertise it.
+
+Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.

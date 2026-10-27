@@ -20,6 +20,7 @@ import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
+import { prototypeMotionV3Error } from "./prototypeMotionV3";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
@@ -825,7 +826,11 @@ function hostVocabularyError(
 
 /** Motion and choreography share one set of located nodes. */
 function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
-  return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
+  return (
+    prototypeMotionV3Error(nodes) ??
+    prototypeMotionV2Error(nodes) ??
+    prototypeChoreographyError(nodes)
+  );
 }
 
 /** Cross-node references share the component-expanded tree and repeat cardinalities. */

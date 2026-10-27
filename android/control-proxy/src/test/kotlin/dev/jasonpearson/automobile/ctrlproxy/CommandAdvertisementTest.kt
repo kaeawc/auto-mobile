@@ -76,6 +76,7 @@ class CommandAdvertisementTest {
       "prototype_semantics_v1",
       "prototype_string_conditions_v1",
       "prototype_motion_v2",
+      "prototype_motion_v3",
       "prototype_window_motion_v1",
       "prototype_effects_v1",
       "prototype_choreography_v1",

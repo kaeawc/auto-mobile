@@ -177,6 +177,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     style: { shimmer: true },
     children: [{ type: "spacer" }],
   }),
+  prototype_motion_v3: {
+    ...fixture({ ...label, animate: {}, style: { cornerRadius: 8 } }),
+    with: ["prototype_motion_v2"],
+  },
   prototype_window_motion_v1: fixture({
     type: "column",
     id: "label",

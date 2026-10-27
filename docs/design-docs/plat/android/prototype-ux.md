@@ -62,8 +62,7 @@ blanket focusability proposal).
 | `window`  | Required window configuration below.                                                                                   |
 | `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
 | `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
-| `motion`  | Optional `none`, `standard` (default), or `reduced` for alpha-only scroll motion. See Motion below.                    |
-| `motion`  | Optional `none`, `reduced` or `standard` (default). See Motion below.                                                  |
+| `motion`  | Optional `none`, `standard` (default), `reduced` for alpha-only scroll motion, or `expressive`. See Motion below.      |
 | `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
 | `root`    | Required single node.                                                                                                  |
 
@@ -1095,6 +1094,32 @@ without `visibleWhen`, or when motion is off; a show reports the advisory
 A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
+
+### Expressive and layout motion (`prototype_motion_v3`)
+
+`motion: "expressive"` selects Material 3 expressive springs. Standard remains the default.
+
+| Change                                                      | Expressive spring |
+| ----------------------------------------------------------- | ----------------- |
+| Visibility size, offset, scale; container size; press scale | Default spatial   |
+| Visibility alpha; press alpha; animated color and alpha     | Default effects   |
+
+Node `animate` also tweens `border.color`, `border.width`, `cornerRadius`, `elevation`,
+`shadowColor`, `padding`, and dp `width`/`height`. Its duration and easing apply as before;
+`easing: "spring"` uses the expressive spring when expressive motion is selected. Text, font,
+gradient and fill/wrap/token swaps remain instant.
+
+Node `press: {scale?, alpha?}` requires at least one field: scale 0.85–1, alpha 0.5–1.
+It requires tap/long-press/double-tap actions or an inherently pressable control (button,
+iconButton, fab, chip, listItem, switch, checkbox, radioGroup, segmentedButton, select or menu).
+`press.scale` overrides `style.pressScale`. Feedback changes drawing only, keeping the 48dp
+minimum touch target and reported bounds. Component gestures remain owned by their controls.
+
+With `motion: "none"` or animator scale 0, style changes and control state visuals are instant,
+and clickable nodes and Material controls draw no ripple. Material boolean controls are keyed
+by their final state while off to avoid starting their internal animations; slider position is
+immediate and its thumb uses a resting interaction source. Reduced motion still snaps spatial
+changes and preserves fades and colors.
 
 ### Window and modal motion
 

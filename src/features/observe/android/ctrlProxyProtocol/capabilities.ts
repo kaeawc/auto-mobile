@@ -120,6 +120,7 @@ export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
  */
 export const PROTOTYPE_MEDIA_ITEMS_CAPABILITY = "prototype_platform_media_items_v1";
 /** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
+export const PROTOTYPE_MOTION_V3_CAPABILITY = "prototype_motion_v3";
 export const PROTOTYPE_WINDOW_MOTION_CAPABILITY = "prototype_window_motion_v1";
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 /** Transition `delayMs`, container `stagger` and the `blurReplace` transition (#15247). */

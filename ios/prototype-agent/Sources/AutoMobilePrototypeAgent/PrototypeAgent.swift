@@ -150,7 +150,7 @@ final class PrototypeAgent: NSObject {
     private static var instance: PrototypeAgent?
     static var shared: PrototypeAgent {
         if let instance { return instance }
-        let agent = PrototypeAgent(mode: .session)
+        let agent = PrototypeAgent(mode: .session, registry: .feedbackModules())
         instance = agent
         return agent
     }
@@ -164,7 +164,7 @@ final class PrototypeAgent: NSObject {
             return
         }
 
-        let agent = PrototypeAgent(mode: .standalone)
+        let agent = PrototypeAgent(mode: .standalone, registry: .feedbackModules())
         instance = agent
         agent.boot()
     }

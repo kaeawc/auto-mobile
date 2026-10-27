@@ -52,12 +52,18 @@ class PrototypeCapabilityAdvertisementTest {
       AutoMobilePrototype.capabilities(platform),
     )
     assertFalse(commands(PrototypePlatform.None).contains("prototype_platform_test_v1"))
+    // The gateways reach for the context lazily, so a bare wrapper is enough to register them.
+    val overlay = prototypeRuntimePlatform(android.content.ContextWrapper(null))
     assertEquals(
-      setOf("prototype_platform_test_v1"),
-      prototypeRuntimePlatform().registry.capabilities,
+      setOf(
+        "prototype_platform_haptics_v1",
+        "prototype_platform_sound_v1",
+        "prototype_platform_test_v1",
+      ),
+      overlay.registry.capabilities,
     )
     assertTrue(
-      prototypeRuntimePlatform().registry.modules.all {
+      overlay.registry.modules.all {
         it.availability() == PlatformAvailability.Ready
       },
     )

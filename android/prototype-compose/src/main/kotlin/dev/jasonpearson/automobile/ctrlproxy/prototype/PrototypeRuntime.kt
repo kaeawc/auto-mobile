@@ -337,6 +337,9 @@ class PrototypeRuntime(
 
   private val deviceModule =
     PrototypeDeviceModule(initialPlatformState["device"] as? JsonObject ?: JsonObject(emptyMap()))
+  /** The last haptic and sound calls this prototype made, for `inspect` (#14329). */
+  val feedbackLog = PrototypeFeedbackLog()
+
   val platformRegistry =
     PrototypePlatformRegistry(
       listOf(deviceModule) + platform.registry.modules,
@@ -1216,6 +1219,7 @@ class PrototypeRuntime(
       if (invalid == null) JsonObject(args) else null,
       invalid,
       eventData,
+      owningNodeId(current.spec, action),
     )
   }
 
@@ -1306,6 +1310,10 @@ class PrototypeRuntime(
           )
         }
         return
+      }
+      call.args?.let { args ->
+        feedbackLogEntry(call.action.call, args, result, call.nodeId, clock())
+          ?.let(feedbackLog::record)
       }
       val error = writePlatformResult(call, result, initial, duration)
       call.action.statusKey?.let {

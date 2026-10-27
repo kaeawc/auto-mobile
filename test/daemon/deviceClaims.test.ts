@@ -1,11 +1,22 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import type { Kysely } from "kysely";
 import {
+  DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS,
   lazyDeviceClaims,
   StoreDeviceClaimMirror,
   type DeviceClaim,
   type DeviceClaims,
 } from "../../src/daemon/deviceClaims";
+import { DeviceClaimMirrorHub } from "../../src/daemon/deviceClaimMirrorHub";
 import { BINDING_REGISTRY_MIGRATIONS } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import * as migration from "../../src/daemon/sessionBroker/registry/migrations/2026_10_26_014_device_claims";
 import {
@@ -199,5 +210,235 @@ describe("lazyDeviceClaims", () => {
     expect(claims()).toBeUndefined();
     await opening.catch(() => undefined);
     expect(claims()).toBeUndefined();
+  });
+});
+
+describe("the claims mirror: backfill, retries and shutdown (#11811 c)", () => {
+  const RETRIES = DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS;
+  let timer: FakeTimer;
+  let store: FakeDeviceClaims;
+  let available: DeviceClaims | undefined;
+  let mirror: StoreDeviceClaimMirror;
+  let warn: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    timer = new FakeTimer();
+    timer.setCurrentTime(10);
+    store = new FakeDeviceClaims();
+    available = store;
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    mirror = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: () => available,
+      timer,
+      daemonSessionId: "daemon-1",
+      generationOf: () => "boot-1:start-9",
+    });
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  const settle = async (): Promise<void> => {
+    await mirror.idle();
+    await Promise.resolve();
+    await mirror.idle();
+  };
+
+  test("claims taken before a registry opens reach the table when it opens", async () => {
+    available = undefined;
+    mirror.claimed("emulator-5554", OWNER);
+    mirror.claimed("emulator-5556", { pid: 100, ownerToken: "token-b" });
+    await settle();
+    expect(store.rows.size).toBe(0);
+
+    timer.setCurrentTime(500);
+    const hub = new DeviceClaimMirrorHub();
+    hub.register(mirror);
+    available = store;
+    hub.registryOpened(store);
+    await settle();
+
+    expect([...store.rows.keys()].sort()).toEqual([
+      "android:emulator-5554",
+      "android:emulator-5556",
+    ]);
+    // The claim keeps the time it was taken, not the time it was backfilled.
+    expect((await store.get("android", "emulator-5554"))?.claimedAtMs).toBe(10);
+  });
+
+  test("a registry that reopens empty gets the held claims again, and not the released ones", async () => {
+    mirror.claimed("emulator-5554", OWNER);
+    mirror.claimed("emulator-5556", { pid: 100, ownerToken: "token-b" });
+    await settle();
+    mirror.released("emulator-5556", { pid: 100, ownerToken: "token-b" });
+    await settle();
+    store.rows.clear();
+
+    mirror.reconcile(store);
+    await settle();
+
+    expect([...store.rows.keys()]).toEqual(["android:emulator-5554"]);
+  });
+
+  test("a write that finds no registry is retried on the backoff until one opens", async () => {
+    available = undefined;
+    mirror.claimed("emulator-5554", OWNER);
+    await settle();
+    available = store;
+    await timer.advanceTimeAsync(RETRIES[0]!);
+    await settle();
+    expect(store.rows.size).toBe(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a failed release write is retried until it lands, then nothing is left armed", async () => {
+    mirror.claimed("emulator-5554", OWNER);
+    await settle();
+    store.failWrites = 2;
+    mirror.released("emulator-5554", OWNER);
+    await settle();
+    expect(store.rows.size).toBe(1);
+
+    await timer.advanceTimeAsync(RETRIES[0]!);
+    await settle();
+    expect(store.rows.size).toBe(1);
+    await timer.advanceTimeAsync(RETRIES[1]!);
+    await settle();
+
+    expect(store.rows.size).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  test("retries are bounded, and the registry opening starts them over", async () => {
+    store.failWrites = Number.POSITIVE_INFINITY;
+    mirror.claimed("emulator-5554", OWNER);
+    await settle();
+    for (const delay of RETRIES) {
+      await timer.advanceTimeAsync(delay);
+      await settle();
+    }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(RETRIES.length + 1);
+
+    store.failWrites = 0;
+    mirror.reconcile(store);
+    await settle();
+    expect(store.rows.size).toBe(1);
+  });
+
+  test("a newer intent made while a write is in flight is written after it", async () => {
+    const gate = Promise.withResolvers<void>();
+    const upsert = store.upsert.bind(store);
+    let first = true;
+    store.upsert = async (claim) => {
+      if (first) {
+        first = false;
+        await gate.promise;
+      }
+      await upsert(claim);
+    };
+    mirror.claimed("emulator-5554", OWNER);
+    await Promise.resolve();
+    mirror.released("emulator-5554", OWNER);
+    gate.resolve();
+    await settle();
+    expect(store.rows.size).toBe(0);
+  });
+
+  test("re-claiming by the same owner keeps when it first claimed", async () => {
+    mirror.claimed("emulator-5554", OWNER);
+    await settle();
+    timer.setCurrentTime(900);
+    mirror.claimed("emulator-5554", OWNER);
+    await settle();
+    expect((await store.get("android", "emulator-5554"))?.claimedAtMs).toBe(10);
+    expect((await store.get("android", "emulator-5554"))?.updatedAtMs).toBe(900);
+  });
+
+  test("a claim the file no longer names is dropped, not written over its new owner's row", async () => {
+    let held = true;
+    available = undefined;
+    mirror.claimed("emulator-5554", OWNER, () => held);
+    await settle();
+    held = false;
+    await store.upsert({ ...CLAIM, pid: 200, ownerToken: "token-b", updatedAtMs: 5 });
+    available = store;
+    await timer.advanceTimeAsync(RETRIES[0]!);
+    await settle();
+    mirror.reconcile(store);
+    await settle();
+    expect((await store.get("android", "emulator-5554"))?.pid).toBe(200);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a claim file that cannot be re-read keeps the claim and writes it", async () => {
+    mirror.claimed("emulator-5554", OWNER, () => {
+      throw new Error("EACCES");
+    });
+    await settle();
+    expect(store.rows.size).toBe(1);
+  });
+
+  test("a reconcile while a write is in flight writes again to the registry it names", async () => {
+    const gate = Promise.withResolvers<void>();
+    const stale = new FakeDeviceClaims();
+    const upsert = stale.upsert.bind(stale);
+    stale.upsert = async (claim) => {
+      await gate.promise;
+      await upsert(claim);
+    };
+    available = stale;
+    mirror.claimed("emulator-5554", OWNER);
+    await Promise.resolve();
+    available = store;
+    mirror.reconcile(store);
+    gate.resolve();
+    await settle();
+    expect(store.rows.size).toBe(1);
+  });
+
+  test("after dispose nothing is written or retried", async () => {
+    store.failWrites = 1;
+    mirror.claimed("emulator-5554", OWNER);
+    await settle();
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    mirror.dispose();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    mirror.claimed("emulator-5556", OWNER);
+    mirror.reconcile(store);
+    await settle();
+    expect(store.rows.size).toBe(0);
+  });
+});
+
+describe("DeviceClaimMirrorHub", () => {
+  test("tells every registered mirror when a registry opens and when to stop", async () => {
+    const timer = new FakeTimer();
+    const store = new FakeDeviceClaims();
+    const hub = new DeviceClaimMirrorHub();
+    const mirrors = (["android", "ios"] as const).map((platform) =>
+      hub.register(
+        new StoreDeviceClaimMirror({
+          platform,
+          store: () => undefined,
+          timer,
+          generationOf: () => undefined,
+        }),
+      ),
+    );
+    mirrors[0]!.claimed("emulator-5554", OWNER);
+    mirrors[1]!.claimed("UDID-1", OWNER);
+
+    hub.registryOpened(store);
+    await Promise.all(mirrors.map((mirror) => mirror.idle()));
+    expect([...store.rows.keys()].sort()).toEqual(["android:emulator-5554", "ios:UDID-1"]);
+
+    hub.dispose();
+    mirrors[0]!.released("emulator-5554", OWNER);
+    await mirrors[0]!.idle();
+    expect(store.rows.size).toBe(2);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

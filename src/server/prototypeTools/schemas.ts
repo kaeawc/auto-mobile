@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
@@ -607,6 +608,11 @@ const lastResultSchema = z.object({
     .describe(
       "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
     ),
+  degradedEffects: z.array(prototypeDegradedEffectSchema).optional(),
+  warning: z
+    .string()
+    .optional()
+    .describe("Effects omitted or frozen by the device, with their paths and reasons"),
   storage: prototypeStorageOutputField,
   timers: z
     .array(
@@ -881,6 +887,7 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "show or save with assets: assets the device confirmed, also present on failure. They stay on the device until the prototype session ends.",
     ),
+  degradedEffects: z.array(prototypeDegradedEffectSchema).optional(),
   missingAssets: z
     .array(z.string())
     .optional()
@@ -903,7 +910,7 @@ export const prototypeOutputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
+      "show or patch succeeded or awaitEvent timed out, and it needs attention: reports degraded effects with paths and api/budget reasons, names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
     ),
   anchors: z
     .array(

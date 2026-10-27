@@ -75,10 +75,6 @@ export interface SessionReleaseCommitHost {
     operation?: SessionReleaseOperation,
   ): void;
   readonly forcedStuckRelease: ForcedStuckRelease;
-  restoreNonTerminalRowOverSupersededReleaseLater(
-    session: Session,
-    supersededReasons: readonly string[],
-  ): void;
   notifySessionRelease(snapshot: SessionReleaseSnapshot, options?: SessionReleaseOptions): void;
   completeReleasePersistence(
     snapshot: SessionReleaseSnapshot,
@@ -119,10 +115,6 @@ export interface SessionReleaseCommitHost {
     retainFence?: boolean,
     afterDelete?: () => void,
   ): void;
-  reassertSupersededLiveRow(
-    session: Session,
-    supersededReasons: readonly string[],
-  ): Promise<boolean>;
   upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void;
   readonly releaseRowGenerations: WeakMap<SessionReleaseSnapshot, number>;
   persistSessionRelease(
@@ -236,14 +228,13 @@ export class SessionReleaseCommit {
           !terminalFenceHeldBefore,
         );
       }
-      const owedReasons = this.host.superseded.reasonsOwedTo(session);
       if (!this.host.commitReleaseRemoval(sessionId, session, deviceId, pendingCleanup)) {
         // Ownership changed: lift only the fence this release raised, never a newer session's.
         this.undoUncommittedFence(releaseSnapshot, priorFence, terminalIntent, true);
         return null;
       }
       this.host.commitReplacedDeviceTeardown(sessionId, session, options, operation);
-      this.settleNonTerminalCommit(releaseSnapshot, session, owedReasons);
+      this.settleNonTerminalCommit(releaseSnapshot);
 
       // A durable terminal intent frees the device without waiting for the row, which is written
       // now, after the commit, and awaited below.
@@ -325,20 +316,13 @@ export class SessionReleaseCommit {
     return written ?? { snapshot: fenced.snapshot, persisted: fenced.persisted };
   }
 
-  /** A non-terminal commit lifts any terminal fence and replaces the rows owed over superseded releases. */
-  private settleNonTerminalCommit(
-    snapshot: SessionReleaseSnapshot,
-    session: Session,
-    owedReasons: readonly string[],
-  ): void {
+  /** A non-terminal commit lifts any terminal fence this release's removal left behind. */
+  private settleNonTerminalCommit(snapshot: SessionReleaseSnapshot): void {
     if (snapshot.terminal) {
       return;
     }
     this.host.forcedStuckRelease.liftTerminalFenceIfPresent(snapshot.sessionId);
     this.host.sessionSlots.deleteTerminalReasonState(snapshot.sessionId);
-    // The removal dropped the rewrite owed over a superseded release's terminal row, and
-    // this release's own write does not replace a terminal row.
-    this.host.restoreNonTerminalRowOverSupersededReleaseLater(session, owedReasons);
   }
 
   /** Removal committed before persistence: keep its identity and reason for the retry owner. */

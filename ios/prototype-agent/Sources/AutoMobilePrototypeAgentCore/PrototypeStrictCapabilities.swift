@@ -93,6 +93,8 @@ enum PrototypeStrictCapabilities {
             if includeAgentGates, type == "icon",
                ["rounded", "sharp", "twoTone"].contains(fields["variant"]?.stringValue ?? "") { need("icon_variant") }
             if type == "text", fields["spans"] != nil { need("rich_text") }
+            if type == "text", let mode = fields["contentTransition"]?.stringValue,
+               mode != "none" { need("content_transition") }
             if type == "textField" {
                 if [
                     "label",

@@ -13997,6 +13997,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "contentTransition",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "textField": [

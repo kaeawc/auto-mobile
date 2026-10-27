@@ -681,6 +681,11 @@
                 .multilineTextAlignment(alignment)
                 .lineLimit(style?.maxLines)
                 .truncationMode(.tail)
+                .modifier(PrototypeContentTransitionModifier(
+                    text: node.plainText(state: model.state, pager: pagerPosition),
+                    mode: node.contentTransition, rich: node.spans != nil,
+                    motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                ))
                 .modifier(SpanLinksModifier(runs: runs, model: model))
         }
 

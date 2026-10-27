@@ -3,6 +3,10 @@ import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer, ServerCapabilities } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
 import { MODERN_CACHE_HINTS } from "./modernCacheHints";
+import {
+  daemonDeviceChoiceRequestState,
+  type DeviceChoiceRequestStateCodec,
+} from "./deviceChoiceRequestState";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
@@ -104,6 +108,7 @@ import {
 
 export interface McpServerOptions {
   era?: "legacy" | "modern";
+  deviceChoiceRequestState?: DeviceChoiceRequestStateCodec;
   deviceReadiness?: DeviceReadiness;
   iosDependencies?: IosDoctorDependencies;
   debug?: boolean;
@@ -339,12 +344,12 @@ function installDeviceReadiness(options: McpServerOptions): void {
 }
 
 /**
- * The capabilities one request's server advertises. A modern request has no notification stream
- * until subscriptions/listen is wired (#13947), so it claims no resource subscriptions.
+ * The capabilities one request's server advertises. Modern listen streams receive resource
+ * subscriptions and list changes through the endpoint's shared event bus.
  */
 function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities {
   return {
-    resources: era === "modern" ? { listChanged: true } : { subscribe: true, listChanged: true },
+    resources: { subscribe: true, listChanged: true },
     tools: era === "modern" ? { listChanged: true } : {},
     prompts: {},
     ...(era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),
@@ -355,11 +360,21 @@ function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities
 function deviceElicitationDispatch(
   daemonMode: boolean,
   options: McpServerOptions,
-): { era?: "modern"; ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions } {
+): {
+  era?: "modern";
+  ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
+  deviceChoiceRequestState?: DeviceChoiceRequestStateCodec;
+} {
   if (options.era === "modern") {
-    return { era: "modern" };
+    return { era: "modern", deviceChoiceRequestState: options.deviceChoiceRequestState };
   }
   return daemonMode ? {} : { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} };
+}
+
+function modernRequestState(options: McpServerOptions) {
+  return options.era === "modern"
+    ? { verify: (options.deviceChoiceRequestState ?? daemonDeviceChoiceRequestState).verify }
+    : undefined;
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
@@ -416,6 +431,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     },
     sdkServerCapabilities(options.era),
     options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
+    modernRequestState(options),
   );
   startupBenchmark.endPhase("sdkInitialization");
 

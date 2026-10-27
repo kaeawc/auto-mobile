@@ -29,10 +29,24 @@ measurement below says otherwise.
 - Legacy requests ask over a stateful client connection: the stdio proxy and direct stdio server.
   A legacy daemon HTTP request has no push channel; its proxy asks the client instead.
 - Modern (2026-07-28) requests declare capabilities in their request envelope and ask through MRTR:
-  `input_required` embeds the device question as `inputRequests.deviceChoice`. A retry carries the
-  answer in `inputResponses.deviceChoice`. No `requestState` is needed: the backend runs again and
-  the accepted device must be in its current candidate list. A declined, cancelled, invalid or empty
-  response map returns that refusal unchanged and never asks again.
+  `input_required` embeds the device question as `inputRequests.deviceChoice` and an SDK
+  HMAC-SHA256 `requestState`. A retry echoes that state alongside `inputResponses.deviceChoice`.
+  The versioned state binds the tool name, SHA-256 of arguments serialized with canonical key
+  order (excluding only the top-level `deviceId`), and the offered device IDs. It expires after
+  ten minutes, checked with the injected clock as well as the SDK's wall-clock expiry.
+- The SDK verifies modern state before dispatch and exposes only the verified payload to the
+  wrapper. The selected device must belong to both the signed offered list and the backend's
+  freshly computed candidates, and the tool and argument hash must match. Missing or mismatched
+  state, or a declined, cancelled, invalid or empty response map returns the original refusal
+  unchanged and never asks again. Tampered, malformed, expired or session-mismatched wire state
+  is rejected by the SDK with `-32602`, `Invalid or expired requestState`, and
+  `data.reason: "invalid_request_state"`, before the tool executes.
+- A lazy per-process 256-bit secret survives the daemon's per-request server construction;
+  a daemon restart invalidates outstanding state. The SDK's `bind` tag uses the request header's
+  MCP session key through the shared session-key reader. State from a keyed caller cannot be
+  used under a different or absent key. Requests without a session-key header share an unkeyed
+  binding; callers must supply a stable key for caller isolation. The state is signed, not
+  encrypted, and contains no secret or raw session key. Legacy elicitation is unchanged.
 
 ## Why it cannot stall an unattended call
 
@@ -49,9 +63,15 @@ Extending to confirmations needs data on which clients declare elicitation and h
 
 ### MRTR limits (modern era)
 
-- A tool call that runs as a task (the client declared the Tasks extension and the tool is
-  task-eligible) returns its task handle immediately, so the device question is not asked on that
-  call; the ambiguity refusal appears in the task's result.
-- The answer is not bound to the call that asked (there is no `requestState`). An answer attached
-  to a different ambiguous call is accepted only when it names a device that call's own refusal
-  offers, so it cannot select a device the caller could not already see.
+- A modern tool call that runs as a task returns its task handle immediately. Inside the task's
+  work, an ambiguity refusal pauses it in `input_required`; `tasks/get` inlines the question as
+  `inputRequests.deviceChoice`, and only the creating session's owner key may answer through
+  `tasks/update`. The original request envelope must declare form elicitation, and the call
+  must omit `deviceId`. The same accepted-content schema validates the choice against the
+  backend's candidates before one retry. A declined, cancelled, invalid or empty answer for
+  `deviceChoice` completes with the original refusal and never asks again. An update omitting
+  the key leaves the task waiting. Cancelling the task while it waits settles it as cancelled.
+- Task questions use the task's input waiter rather than MRTR `requestState` or the legacy
+  20-second elicitation timeout. An unattended client leaves the task in `input_required`
+  until answered, cancelled or expired by its task TTL. Running tasks currently advertise
+  `ttlMs: null`, so there is no automatic input deadline. Legacy task calls are unchanged.

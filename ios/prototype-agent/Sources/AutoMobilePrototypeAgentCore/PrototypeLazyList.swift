@@ -12,7 +12,7 @@ struct PrototypeListRepeat: Decodable {
 
 /// Resolved independently so a renderer can compose rows without expanding the authored tree.
 enum PrototypeLazyList {
-    static let capability = "prototype_lazy_list_v1"
+    static let capability = PrototypeAgentProtocol.lazyListCapability
 
     struct Row {
         let key: String

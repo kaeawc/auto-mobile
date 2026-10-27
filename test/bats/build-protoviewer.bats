@@ -132,6 +132,33 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "ProtoViewer and Viewer plists run natively on iPad with every orientation (#15431)" {
+  run python3 - "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
+    "${REPO_ROOT}/ios/prototype-agent/Viewer/Info.plist" <<'PY'
+import plistlib
+import re
+import sys
+orientations = {
+    'UIInterfaceOrientationPortrait',
+    'UIInterfaceOrientationPortraitUpsideDown',
+    'UIInterfaceOrientationLandscapeLeft',
+    'UIInterfaceOrientationLandscapeRight',
+}
+for path in sys.argv[1:]:
+    with open(path, 'rb') as source:
+        # The Viewer template's stamping comment contains `--` flags, which expat rejects.
+        value = plistlib.loads(re.sub(rb'<!--.*?-->', b'', source.read(), flags=re.S))
+    assert value['UIDeviceFamily'] == [1, 2], path
+    assert set(value['UISupportedInterfaceOrientations~ipad']) == orientations, path
+    assert len(value['UISupportedInterfaceOrientations~ipad']) == 4, path
+    # iPhone orientations stay unchanged: no upside-down on the phone.
+    assert 'UIInterfaceOrientationPortraitUpsideDown' not in value['UISupportedInterfaceOrientations'], path
+    assert value['UIApplicationSceneManifest']['UIApplicationSupportsMultipleScenes'] is False, path
+    assert 'UIRequiresFullScreen' not in value, path
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "rejects unsupported architectures before compilation" {
   PROTOVIEWER_ARCHS=mips run bash "$SCRIPT" "$OUT"
   [ "$status" -ne 0 ]

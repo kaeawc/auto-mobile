@@ -17,7 +17,6 @@ describe("canonical paths", () => {
   test.each([
     ["src/a.ts", "src/a.ts"],
     ["./src//a.ts", "src/a.ts"],
-    ["src\\win\\a.ts", "src/win/a.ts"],
     ["src/./b/c", "src/b/c"],
   ])("%s is %s", (input, expected) => {
     expect(canonicalInputPath(input)).toBe(expected);
@@ -41,7 +40,12 @@ describe("canonical entries", () => {
   });
 
   test("a duplicate path is refused, including one that only normalizes to a duplicate", () => {
-    expect(() => canonicalInputEntries([entry("a/b"), entry("a\\b")])).toThrow("duplicate");
+    expect(() => canonicalInputEntries([entry("a/b"), entry("a//b")])).toThrow("duplicate");
+  });
+
+  test("a backslash is part of a file name, never a separator", () => {
+    expect(canonicalInputPath("src\\a.ts")).toBe("src\\a.ts");
+    expect(canonicalInputEntries([entry("src/a.ts"), entry("src\\a.ts")])).toHaveLength(2);
   });
 });
 
@@ -100,11 +104,12 @@ describeHashBoundary<InputEntry[]>("tree-entries input hash", {
     "a file mode": (e) => e.map((x) => (x.path === "src/b.ts" ? { ...x, mode: "100755" } : x)),
     "a file added": (e) => [...e, { path: "src/c.ts", id: "ccc", mode: "100644" }],
     "a file removed": (e) => e.filter((x) => x.path !== "src/b.ts"),
+    "a file with a backslash in place of a separator": (e) =>
+      e.map((x) => (x.path === "src/a.ts" ? { ...x, path: "src\\a.ts" } : x)),
     "a file renamed": (e) => e.map((x) => (x.path === "src/a.ts" ? { ...x, path: "src/z.ts" } : x)),
   },
   perturbations: {
     "entries in another order": (e) => [...e].reverse(),
-    "backslash separators": (e) => e.map((x) => ({ ...x, path: x.path.replaceAll("/", "\\") })),
     "a leading ./ on every path": (e) => e.map((x) => ({ ...x, path: `./${x.path}` })),
   },
 });

@@ -1058,6 +1058,79 @@ resolve to "viewer unavailable". The host template provider resolves: explicit p
 `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`, configured local builds, then a checksum-pinned release cache/download
 (unless `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`).
 
+## Native SwiftUI presentations and containers in the overlay window (#15254 spike)
+
+**Status: desk analysis, not device-verified.** The agent draws into a `PassthroughWindow`
+(`windowLevel = .alert + 1`) whose root is `PrototypeLayersViewController` hosting two
+`UIHostingController`s. `PassthroughWindow.hitTest` returns `nil` unless the point is in
+`model.hitRects`, so everything outside the registered prototype rectangles falls through to the
+app. No simulator was booted for this spike (no-device rule), so every row below is a prediction
+from that code and UIKit's presentation model, with the check that would confirm it. The 18/26/27
+simulator pass is the first follow-up.
+
+### Mechanisms that decide the matrix
+
+1. **Presentations attach to the nearest view controller in the window.** SwiftUI `.sheet`,
+   `.alert`, `.confirmationDialog` and `.popover` call UIKit `present(_:)` from the hosting
+   controller's responder chain, so they present from the overlay window's root, not the app's key
+   window. The presented view and its dimming/container view live in the overlay window.
+2. **Hit testing does not know about them.** The presented container is not in `model.hitRects`,
+   so a sheet's own touches would be dropped to the app unless the rect is registered. This is the
+   main engineering cost, not a blocker: the container frame is observable.
+3. **Menu, `Picker(.menu)` and context menus use a system-owned window.** They are drawn above all
+   app windows by UIKit's context-menu machinery and are not part of the overlay hierarchy.
+4. **Containers (`NavigationStack`, `TabView`, `.searchable`) render inside the hosting
+   controller** and own no scene, so they render, but their bars sit in the hosted view's safe area
+   (`safeAreaRegions` is set to none for the keyboard fix, #11042) and need hit rects.
+5. **Dismissal reports through bindings.** `isPresented`/`item` bindings, `onDismiss` and the
+   alert/dialog actions fire on swipe-down and outside tap, so mapping to prototype state works the
+   way the custom `bottomSheet` does.
+
+### Matrix (predicted; confirm per the check column)
+
+| Component                                    | Verdict                       | Reason                                                                             | Fallback                                                 | Confirm                                                                                               |
+| -------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `NavigationStack` + `.toolbar` + large title | Usable                        | Renders in the host; identifiers survive; needs hit rect for the bar               | Custom top bar                                           | Large-title collapse with no scene-owned `UINavigationController`; safe-area insets with regions none |
+| `TabView` (`Tab`, iOS 18)                    | Usable only by label          | Tab items expose a label, not `testTag` ids                                        | Custom tab bar by default; label selectors only per node | Item identifiers in the XCUITest snapshot on 18 and 26                                                |
+| `.tabBarMinimizeBehavior` (26)               | Usable on 26 only             | Needs the iOS 26 SDK; no-op on 18                                                  | Fixed bar                                                | Does the minimize scroll signal reach a hosted scroll view                                            |
+| `.sheet` + `presentationDetents`             | Usable with new hit-rect work | Presents from the overlay root; container not in `hitRects`                        | Custom `bottomSheet`                                     | Presenter is overlay window or app key window; grabber identifier; swipe-down fires the binding       |
+| `presentationBackgroundInteraction`          | Likely usable                 | Background interaction passes through the overlay window naturally                 | Custom sheet without dim                                 | Touches outside the sheet reach the app                                                               |
+| `.alert` / `.confirmationDialog`             | Usable                        | UIKit alert from the overlay root; buttons are standard accessibility elements     | Custom dialog                                            | Window level versus app alerts (overlay is `.alert + 1`)                                              |
+| `Menu`, `Picker(.menu)`                      | Usable only by label          | Drawn in a system window; items have labels, no ids; outside the overlay hierarchy | Custom menu (existing Menu and select contract)          | Does `observe` list the items; does `tapOn` reach them                                                |
+| `Picker(.segmented)`                         | Usable only by label          | No per-segment identifiers                                                         | Custom segmented control                                 | Segment identifiers on 26                                                                             |
+| `.searchable`                                | Usable with caveats           | Needs a navigation container; the search field owns the keyboard                   | Existing search bar contract (#12069)                    | Keyboard lift interaction                                                                             |
+| `.popover` + `presentationCompactAdaptation` | Usable                        | Adapts to a sheet or popover; same presenter and hit-rect issue as `.sheet`        | Custom anchored surface                                  | Anchor frame across the overlay window origin                                                         |
+
+Liquid Glass on iOS 26 is applied by the SDK when the view is built with it; whether the glass
+samples the app content beneath a transparent overlay window (rather than only its own window) is
+unknown and must be measured.
+
+### Cross-cutting risks
+
+- **Hidden from app screenshots (#10943).** Presentations living in the overlay window stay in the
+  prototype layer, but menus (system window) may not; verify with `layer: "app"` captures.
+- **Keyboard lift (#10262, #11042).** A native sheet does its own keyboard avoidance. The agent's
+  lift would stack on it; a native sheet must opt out of `PrototypeKeyboardLift`.
+- **Motion off.** UIKit presentations animate unless wrapped in a transaction with animations
+  disabled; one-frame settling is not guaranteed for presented controllers.
+- **Testability.** Host-side logic (hit-rect registration, dismissal mapping) should stay in the
+  UIKit-free core with fakes; only the window plumbing needs a simulator.
+
+### iOS 27 dependencies
+
+- Xcode 27 in CI is an open decision (#15244, question 7). Until it is decided, only
+  iOS 18 and 26 behaviour can be gated; iOS 27.0 and 27.1 simulator runtimes exist locally, but the
+  27.1 runtime is Duo-only.
+- Every row's confirm step must be repeated on 27.0, because presentation, glass and tab-bar
+  behaviour are SDK-versioned. This document claims nothing about iOS 27 API changes.
+
+### Recommendation for decision 4 (#15244)
+
+Fall back to the existing custom drawing for `TabView`, `Picker(.segmented)`, `Menu` and
+`Picker(.menu)` (identifier loss, system-owned window). Pursue native `.sheet`/`.popover`
+/`.alert` only after the hit-rect and device-verification work; keep `NavigationStack` as a
+candidate for iOS 26 where the large title and glass are the point.
+
 ## Platform namespaces (#15257)
 
 Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`

@@ -155,7 +155,7 @@ YAML
   block="$(awk '
     /name: junit-runner-heap-dumps/ { print prev4 "\n" prev3 "\n" prev2 "\n" prev1 "\n" $0 }
     { prev4 = prev3; prev3 = prev2; prev2 = prev1; prev1 = $0 }
-  ' ".github/workflows/pull_request.yml")"
+  ' ".github/workflows/pull_request.yml" ".github/actions/ci-junit-runner-unit-tests/action.yml")"
   [ -n "$block" ]
   [ "$(echo "$block" | grep -c 'if: failure()')" -eq 2 ]
   [ "$(echo "$block" | grep -c 'continue-on-error: true')" -eq 2 ]

@@ -505,16 +505,6 @@ internal object PrototypeBindableFields {
             }
         // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
         "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
-        "menu" ->
-          objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
-            visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
-              ?: part(entry, entryPath)
-          }
-        "select" ->
-          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
-            ?: objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
-              visitor.field(option, "label", optionPath, PrototypeBindableKind.TEXT)
-            }
         "segmentedButton" ->
           objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
             visitor.field(option, "label", optionPath, PrototypeBindableKind.TEXT)
@@ -525,10 +515,27 @@ internal object PrototypeBindableFields {
             ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
               part(entry, entryPath)
             }
+        "menu",
+        "select" -> menuComponent(node, path)
         "textField",
         "searchBar",
         "dialog",
         "snackbar" -> formComponent(node, path)
+        else -> null
+      }
+
+    private fun menuComponent(node: JsonObject, path: String): T? =
+      when ((node["type"] as? JsonPrimitive)?.content) {
+        "menu" ->
+          objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
+            visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+              ?: part(entry, entryPath)
+          }
+        "select" ->
+          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
+              visitor.field(option, "label", optionPath, PrototypeBindableKind.TEXT)
+            }
         else -> null
       }
 

@@ -53,12 +53,22 @@ enum PrototypeStrictSemantics {
         }.max() ?? 0
     }
 
-    static func storage(_ fields: [String: JSONValue]) throws {
+    static func storage(_ fields: [String: JSONValue], context: PrototypeContractValidator) throws {
         guard let storage = fields["storage"]?.objectFields else { return }
         var pointers: [String] = []
         var bytes = 0
         for (index, key) in PrototypeContractValidator.strings(storage["keys"]).enumerated() {
             let path = "storage.keys[\(index)]"
+            if key.hasPrefix("stack:") {
+                if !context.locatedNodes
+                    .contains(where: {
+                        $0.value["type"] == .string("stack") && $0.value["id"] == .string(String(key.dropFirst(6)))
+                    })
+                {
+                    throw PrototypeContractValidator.invalid(path, "Unknown storage stack")
+                }
+                continue
+            }
             guard let parsed = PrototypeStorageKey.parse(key) else { throw PrototypeContractValidator.invalid(
                 path,
                 "Invalid storage key"
@@ -192,7 +202,7 @@ enum PrototypeStrictSemantics {
                 if stacks[id] != nil { throw PrototypeContractValidator.invalid("\(path).id", "Duplicate stack") }
                 let screens = fields["screens"]?.objectFields ?? [:]
                 if screens[fields["start"]?.stringValue ?? ""] ==
-                    nil { throw PrototypeContractValidator.invalid("\(path).start", "Unknown start") }
+                    nil { throw PrototypeContractValidator.invalid("\(path).start", "Unknown start screen") }
                 stacks[id] = screens
             }
         }
@@ -216,11 +226,11 @@ enum PrototypeStrictSemantics {
             if let stack = action.value["stack"]?.stringValue {
                 guard let screens = stacks[stack] else { throw PrototypeContractValidator.invalid(
                     "\(action.path).stack",
-                    "Unknown stack"
+                    "Unknown stack id"
                 ) }
                 if let screen = action.value["screen"]?.stringValue,
                    screens[screen] ==
-                   nil { throw PrototypeContractValidator.invalid("\(action.path).screen", "Unknown screen") }
+                   nil { throw PrototypeContractValidator.invalid("\(action.path).screen", "Unknown stack screen") }
             }
         }
     }

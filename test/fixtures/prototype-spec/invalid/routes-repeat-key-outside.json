@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "switch",
+          "stateKey": "flag_{route.x}_{row.id}"
+        }
+      },
+      "routes": {
+        "detail": {
+          "params": {
+            "x": "string"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"detail\"].stateKey",
+  "expectedMessage": "State key placeholder outside a repeat template"
+}

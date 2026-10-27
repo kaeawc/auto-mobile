@@ -131,6 +131,7 @@ export const PROTOTYPE_LAZY_LIST_CAPABILITY = "prototype_lazy_list_v1";
 /** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
 export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
+export const PROTOTYPE_ROUTES_CAPABILITY = "prototype_routes_v1";
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */

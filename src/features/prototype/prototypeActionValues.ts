@@ -31,3 +31,10 @@ export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSc
  * `linkify.onTap`, where the runtime replaces it with the match before the actions run.
  */
 export const prototypeMatchBindingSchema = z.object({ match: z.enum(["text", "kind"]) }).strict();
+
+/** Bound action lists expose parsed actions without propagating the union's Zod internals. */
+export function buildPrototypeActionListSchema<Action extends z.ZodTypeAny>(
+  actionSchema: Action,
+): z.ZodType<z.output<Action>[], z.ZodTypeDef, unknown> {
+  return z.array(actionSchema).min(1).max(32);
+}

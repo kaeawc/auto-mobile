@@ -43,6 +43,7 @@ const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "a
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_routes_v1: { ...label, onTap: [{ type: "pop", stack: "nav", force: true }] },
   prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
   prototype_tooltip_v1: {
     type: "tooltip",

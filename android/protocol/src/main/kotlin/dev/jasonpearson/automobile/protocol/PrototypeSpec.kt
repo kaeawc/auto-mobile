@@ -127,6 +127,7 @@ data class PrototypeRepeat(
   val `as`: String,
   val itemsPath: String? = null,
   val key: String? = null,
+  val stagger: Int? = null,
 )
 
 @Serializable
@@ -134,6 +135,7 @@ private data class PrototypeRepeatWire(
   val items: JsonElement,
   val `as`: String,
   val key: String? = null,
+  val stagger: Int? = null,
 )
 
 /** Keeps the source pointer in `items.path`, never as a wire-level `itemsPath` member. */
@@ -150,7 +152,7 @@ object PrototypeRepeatSerializer :
     val items =
       if (source == null) json.decodeFromJsonElement<List<Map<String, PrototypeScalar>>>(wire.items)
       else emptyList()
-    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key)
+    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key, wire.stagger)
   }
 
   override fun toJson(value: PrototypeRepeat): JsonElement {
@@ -158,7 +160,9 @@ object PrototypeRepeatSerializer :
     val items =
       value.itemsPath?.let { buildJsonObject { put("path", it) } }
         ?: json.encodeToJsonElement(value.items)
-    return json.encodeToJsonElement(PrototypeRepeatWire(items, value.`as`, value.key))
+    return json.encodeToJsonElement(
+      PrototypeRepeatWire(items, value.`as`, value.key, value.stagger),
+    )
   }
 }
 
@@ -1498,6 +1502,7 @@ data class PrototypeWindow(
   val persistence: String? = null,
   /** Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`. */
   val chrome: String? = null,
+  val transition: String? = null,
 )
 
 /**

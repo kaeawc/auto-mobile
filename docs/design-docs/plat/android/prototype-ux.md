@@ -799,6 +799,38 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Window and modal motion
+
+Android `prototype_window_motion_v1` gates authored `window.transition` and
+`repeat.stagger`. Window transitions are `auto` (default), `none`, `fade`, `slide`,
+or `scale`. Auto slides a sheet from its placement edge, fades and scales a
+floating surface from 0.92 to 1, and fades fullscreen content. Exit mirrors enter.
+Root Compose content animates for 300 ms; removal is scheduled through the host
+settle timer at 400 ms, independent of animation frames. Exiting windows become
+non-touchable immediately. Outgoing windows retain their hierarchy motion metadata
+and shared image/font assets until detach; service teardown drains these exits
+immediately. Dismissal events and sequence allocation retain their
+existing timing at exit start. Agent shows animate; device-persistence boot
+restoration does not. Idle TTL, last-client disconnect and service teardown remove
+windows immediately to keep teardown bounded.
+
+Bottom sheets slide from the bottom, dialogs and menus fade and scale, and
+snackbars fade and slide. Scrims fade with their surfaces. Panels remain composed
+through exit, including when removed from the authored tree; a patch reopening a
+panel cancels its exit and re-enters. `SheetDismiss` and modal button actions commit
+at exit start, so runtime state and emitted action events change immediately;
+retained visual content finishes exiting afterward. A dragged sheet follows the
+pointer directly and springs to the selected detent on release. Reduced motion
+uses fades without translation, scaling or detent springs. Off motion snaps and
+keeps the settled rendering unchanged. Window and modal transitions and detent
+settles participate in the motion-active signal.
+
+`repeat.stagger` is an integer 0–100 ms per instance, in item order. Only template
+children with `visibleWhen` receive it. It adds to container stagger and transition
+delay through the existing enter-delay machinery, with each total capped at
+600 ms; exits are not delayed. iOS accepts the structural contract but does not
+advertise this capability, so host preflight refuses either authored field.
+
 ### Motion profiles (#15115, `prototype_reduced_motion_v1`)
 
 Motion runs in one of three profiles, decided identically on both platforms from the spec's

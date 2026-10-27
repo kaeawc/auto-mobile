@@ -109,7 +109,6 @@ internal fun RenderPrototypeMenu(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeMenuNode ?: return
-  if (!node.sheetOpen) return
   val layers = LocalPrototypeMenuLayers.current
   Box(Modifier.fillMaxSize()) {
     Box(
@@ -117,7 +116,11 @@ internal fun RenderPrototypeMenu(
         .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) }
         .semantics { node.testTag?.let { testTag = "$it:outside" } },
     )
-    PrototypeMenuSurface(anchor, layers, modifier.pointerInput(Unit) { detectTapGestures {} }) {
+    PrototypeMenuSurface(
+      anchor,
+      layers,
+      modifier.prototypeModalSurface("scale").pointerInput(Unit) { detectTapGestures {} },
+    ) {
       source.items.forEachIndexed { index, item ->
         when (item) {
           PrototypeMenuDivider -> HorizontalDivider()

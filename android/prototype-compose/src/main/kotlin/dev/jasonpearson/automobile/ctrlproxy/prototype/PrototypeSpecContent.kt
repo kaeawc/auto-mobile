@@ -158,7 +158,7 @@ fun PrototypeRuntimeContent(
   val transitionScale by rememberTransitionAnimationScale(resolver)
   val profile = prototypeMotionProfile(snapshot.spec.motion, durationScale, transitionScale)
   val motion = profile != PrototypeMotionProfile.OFF
-  if (snapshot.active) {
+  if (snapshot.active || LocalPrototypeWindowRetainsContent.current) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
       // the order they happened, whatever the dispatcher does with separately launched jobs.
@@ -234,19 +234,21 @@ fun PrototypeSpecContent(
           }
           modals.forEach { node ->
             key(node.identity) {
-              if (node.role == "menu") {
-                val parent = menuParents[node.identity]
-                RenderPrototypeMenu(
-                  node,
-                  prototypeNodeModifier(node, interact),
-                  parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+              PrototypeModalMotion(node) {
+                if (node.role == "menu") {
+                  val parent = menuParents[node.identity]
+                  RenderPrototypeMenu(
+                    node,
+                    prototypeNodeModifier(node, interact),
+                    parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                    interact,
+                  )
+                } else RenderPrototypeModal(node, interact)
+                PrototypeAnchorLayer(
+                  remember(node) { layeredPrototypeAnchorsIn(node.children) },
                   interact,
                 )
-              } else RenderPrototypeModal(node, interact)
-              PrototypeAnchorLayer(
-                remember(node) { layeredPrototypeAnchorsIn(node.children) },
-                interact,
-              )
+              }
             }
           }
           val expanded = menuLayers.expandedSelect
@@ -1281,12 +1283,12 @@ private fun RenderPrototypeSheet(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeBottomSheetNode ?: return
-  if (!node.sheetOpen) return
   BoxWithConstraints(Modifier.fillMaxSize()) {
     val heights = prototypeSheetHeights(source.detents, maxHeight.value.toDouble())
     var height by remember(node.identity, heights) { mutableDoubleStateOf(heights.first()) }
     var drag by remember(node.identity) { mutableDoubleStateOf(0.0) }
     val density = LocalDensity.current.density
+    val sheetHeight = prototypeSettledSheetHeight((height - drag).toFloat(), drag != 0.0)
     Box(
       Modifier.fillMaxSize()
         .background(
@@ -1297,9 +1299,10 @@ private fun RenderPrototypeSheet(
     )
     Column(
       modifier
+        .prototypeModalSurface("slide")
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
-        .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
+        .height(sheetHeight.coerceIn(0f, maxHeight.value).dp)
         .then(
           // The authored background and gradient are already painted by `modifier`; a later opaque
           // fill would cover them, so the surface is only the fallback when neither is authored.

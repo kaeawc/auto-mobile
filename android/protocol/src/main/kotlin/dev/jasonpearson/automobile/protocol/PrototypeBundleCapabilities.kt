@@ -8,6 +8,8 @@ internal object PrototypeBundleCapabilities {
   fun required(refs: PrototypeBundleReferences): List<String> {
     val spec = refs.spec
     val caps = linkedSetOf<String>()
+    if ((spec["window"] as? JsonObject)?.get("transition") != null)
+      caps.add("prototype_window_motion_v1")
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")

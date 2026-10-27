@@ -231,6 +231,7 @@ internal object PrototypeStrictPolicy {
     }
 
     fun envelope(spec: JsonObject) {
+      if ((spec["window"] as? JsonObject)?.get("transition") != null) need("window_motion")
       if (spec.text("motion") == "reduced") need("reduced_motion")
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
@@ -307,6 +308,7 @@ internal object PrototypeStrictPolicy {
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
+      if (repeatSpec?.get("stagger") != null) need("window_motion")
       if (repeatSpec?.get("items") is JsonObject || repeatSpec?.get("key") != null)
         need("data_model")
     }

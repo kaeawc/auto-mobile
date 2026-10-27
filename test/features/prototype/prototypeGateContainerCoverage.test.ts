@@ -166,12 +166,26 @@ const containers: {
 
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
-const ROOT_LEVEL_GATES = ["prototype_storage_v1", "prototype_reduced_motion_v1"];
+const ROOT_LEVEL_GATES = [
+  "prototype_storage_v1",
+  "prototype_reduced_motion_v1",
+  "prototype_window_motion_v1",
+];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability).sort(),
   );
+});
+
+test("the window motion gate reports window.transition and a repeat stagger", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_window_motion_v1",
+  )!;
+  expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([
+    "window.transition",
+  ]);
+  expect(gate.fields({ root: label })).toEqual([]);
 });
 
 test("the storage gate reports the root-level storage block", () => {

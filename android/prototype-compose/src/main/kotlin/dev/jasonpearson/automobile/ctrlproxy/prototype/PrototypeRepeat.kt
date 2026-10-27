@@ -81,7 +81,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
-internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)
+internal data class PrototypeChildEntry(
+  val node: PrototypeNode,
+  val path: String,
+  val enterDelayMs: Int = 0,
+)
 
 private data class RepeatInstance(
   val alias: String,
@@ -140,6 +144,7 @@ internal fun prototypeChildEntries(
       PrototypeChildEntry(
         if (bind) child.bound(instance) else child,
         "$path.repeat[$identity].children[$index]",
+        if (child.visibleWhen != null) (itemIndex * (repeat.stagger ?: 0)).coerceAtMost(600) else 0,
       )
     }
   }

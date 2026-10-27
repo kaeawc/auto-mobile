@@ -199,6 +199,7 @@ const repeatSchema = z
     ]),
     as: keySchema,
     key: keySchema.optional(),
+    stagger: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
@@ -809,6 +810,7 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
 const windowSchema = z
   .object({
     placement: placementSchema,
+    transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()

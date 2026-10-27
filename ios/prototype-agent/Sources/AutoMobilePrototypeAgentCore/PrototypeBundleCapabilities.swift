@@ -9,6 +9,7 @@ enum PrototypeBundleCapabilities {
         var names = Set<String>()
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
+        if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         if spec["data"] != nil { need("data_model") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
@@ -30,6 +31,7 @@ enum PrototypeBundleCapabilities {
         while let node = pending.popLast()?.objectFields {
             if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
+            if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["sharedKey"] != nil { need("shared_element") }
             let type = node["type"]?.stringValue ?? ""
             let featureTypes = [

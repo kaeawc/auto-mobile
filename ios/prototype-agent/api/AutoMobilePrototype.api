@@ -36,6 +36,45 @@ AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: [PrototypeLoadError] c
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public enum PrototypeLoadError: Error, Equatable, Sendable, LocalizedError
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public static func validate(spec: Data) throws
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public var errorDescription: String?
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeFeedbackOutcome] case played
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeFeedbackOutcome] case suppressed
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeFeedbackOutcome] case unavailable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticEffect] case click, tick, heavyClick, doubleClick, selection, success, warning, error
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticEffect] case impactLight, impactMedium, impactHeavy, longPress
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case double(Impact, gapMs: Int)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case impact(Impact)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case notification(Notification)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case selection
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticsPlayer] func perform(_ effect: PrototypeHapticEffect) -> PrototypeFeedbackOutcome
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeSoundCue] case click, send, receive, shutter
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeSoundPlayer] func play(_ cue: PrototypeSoundCue, volume: Int?) -> PrototypeFeedbackOutcome
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum Impact: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum Notification: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeFeedbackOutcome: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeHapticEffect: String, CaseIterable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeHapticPlan: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeSoundCue: String, CaseIterable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeSystemSound
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public final class PrototypeHapticsModule: PrototypePlatformModule
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public final class PrototypeSoundModule: PrototypePlatformModule
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public init(player: any PrototypeHapticsPlayer)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public init(player: any PrototypeSoundPlayer)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let capability = "prototype_platform_haptics_v1"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let capability = "prototype_platform_sound_v1"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let events = AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let events = AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let name = "haptics"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let name = "sound"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let state: [String: JSONValue] = [:]
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let state: [String: JSONValue] = [:]
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public protocol PrototypeHapticsPlayer
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public protocol PrototypeSoundPlayer
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public static func id(for cue: PrototypeSoundCue) -> UInt32
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public static func plan(for effect: PrototypeHapticEffect) -> PrototypeHapticPlan
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public enum PrototypeLibraryNetwork
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public static func configuration(gate: PrototypeLibraryNetworkGate, allowsCleartext: Bool, onLocalNetworkDenied: @escaping @MainActor @Sendable (PrototypeConsentEpoch) -> Void = { _ in }, pinned: @escaping @MainActor @Sendable (Bool, PrototypeConsentEpoch) -> PrototypeNetworkConfiguration) -> PrototypeNetworkConfiguration
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public static func configuration(networkSwitch: PrototypeLibraryNetworkSwitch, allowsCleartext: Bool) -> PrototypeNetworkConfiguration

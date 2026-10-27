@@ -38,6 +38,7 @@ internal object PrototypeBundleNodeCapabilities {
     fun mark(name: String, used: Boolean) {
       if (used) caps.add("prototype_$name")
     }
+    mark("motion_tokens_v1", (n["animate"] as? JsonObject)?.containsKey("tempo") == true)
     mark("keyframes_v1", "keyframes" in n)
     mark("semantics_v1", "semantics" in n)
     mark("platform_namespace_v1", PrototypeGlassRules.needsNamespace(n))

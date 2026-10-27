@@ -40,6 +40,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_media_items_v1",
         ]
         // Core tests also run on macOS 15/16, where the injected OS-version gate excludes iOS 17 keyframes.
+        if !PrototypeAgentProtocol.advertisedCapabilities().contains("prototype_motion_tokens_v1") {
+            exclusions.insert("prototype_motion_tokens_v1")
+        }
         if !PrototypeAgentProtocol.advertisedCapabilities().contains("prototype_keyframes_v1") {
             exclusions.insert("prototype_keyframes_v1")
         }

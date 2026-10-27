@@ -1,3 +1,5 @@
+import { prototypeGlassObjectError } from "./prototypeGlass";
+import { prototypeMotionObjectError } from "./prototypeMotionTokens";
 import { prototypeRoutesError } from "./prototypeRoutes";
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
 import { prototypeDerivedError } from "./prototypeDerivedValidation";
@@ -30,11 +32,7 @@ import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
-import {
-  chargeKeyframeNode,
-  prototypeKeyframesError,
-  prototypeKeyframeTracksError,
-} from "./prototypeKeyframes";
+import { chargeKeyframeNode, prototypeKeyframesError } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { jsonCost } from "./prototypeJsonCost";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -301,10 +299,9 @@ function objectSemanticConstraint(
 ): PrototypeValidationError | undefined {
   const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
   return (
+    prototypeGlassObjectError(data, kind ?? "", path) ??
     prototypeStylePolishV2ObjectError(data, kind ?? "", path) ??
-    (rule === definitions.keyframes
-      ? prototypeKeyframeTracksError(data.tracks, `${path}.tracks`)
-      : undefined) ??
+    prototypeMotionObjectError(rule, data, path) ??
     objectConstraint(data, rule, path)
   );
 }

@@ -200,6 +200,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     repeat: { items: [{ label: "A" }], as: "item", stagger: 50 },
     children: [{ type: "text", text: "A" }],
   }),
+  prototype_motion_tokens_v1: {
+    ...fixture({ ...label, animate: { tempo: "fast" } }),
+    with: ["prototype_motion_v2"],
+  },
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_keyframes_v1: fixture({
     ...label,

@@ -142,6 +142,13 @@ struct SafeAreaPadding: Codable, Equatable, Sendable {
     let types: [String]
 }
 
+/// A node's style animation: mutually exclusive `tempo` or `durationMs`/`easing`.
+struct Animate: Codable, Equatable, Sendable {
+    let durationMs: Int?
+    let easing: String?
+    let tempo: String?
+}
+
 /// A fixed y axis for a chart; `max` is above `min`.
 struct PrototypeChartRange: Codable, Equatable, Sendable {
     let min: Double

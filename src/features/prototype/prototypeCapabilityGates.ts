@@ -214,6 +214,12 @@ import {
   prototypeMediaItemsUnsupportedMessage,
 } from "./prototypeMediaItems";
 
+import { PROTOTYPE_MOTION_TOKENS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeMotionTokenFields,
+  prototypeMotionTokensUnsupportedMessage,
+} from "./prototypeMotionTokens";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
@@ -233,6 +239,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypeScrollEdgeEffectFields,
     unsupportedMessage: (fields) =>
       `The device does not advertise prototype_scroll_edge_effect_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_MOTION_TOKENS_CAPABILITY,
+    fields: prototypeMotionTokenFields,
+    unsupportedMessage: prototypeMotionTokensUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,

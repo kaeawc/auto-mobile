@@ -88,8 +88,7 @@ export const prototypeModelSelection = {
   sheetCondition: { languages: ["kotlin"] },
   safeAreaPadding: {},
   animate: {
-    languages: ["kotlin"],
-    doc: "A node's style animation (#14208): `durationMs` 0..2000 (default 300) and `easing`.",
+    doc: "A node's style animation: mutually exclusive `tempo` or `durationMs`/`easing`.",
   },
   stagger: {
     languages: ["kotlin"],

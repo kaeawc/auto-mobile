@@ -180,7 +180,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   // Delegate Getters (lazy initialization)
   // ===========================================================================
 
-  private get gestures(): CtrlProxyGestures {
+  protected get gestures(): CtrlProxyGestures {
     return (this._gestures ??= new CtrlProxyGestures(
       this.createDelegateContext(),
       undefined,
@@ -194,7 +194,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     ));
   }
 
-  private get text(): CtrlProxyText {
+  protected get text(): CtrlProxyText {
     return (this._text ??= new CtrlProxyText(this.createDelegateContext()));
   }
 
@@ -204,23 +204,23 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     ));
   }
 
-  private get screenshot(): CtrlProxyScreenshot {
+  protected get screenshot(): CtrlProxyScreenshot {
     return (this._screenshot ??= new CtrlProxyScreenshot(this.createDelegateContext()));
   }
 
-  private get navigation(): CtrlProxyNavigation {
+  protected get navigation(): CtrlProxyNavigation {
     return (this._navigation ??= new CtrlProxyNavigation(this.createDelegateContext()));
   }
 
-  private get clipboard(): CtrlProxyClipboard {
+  protected get clipboard(): CtrlProxyClipboard {
     return (this._clipboard ??= new CtrlProxyClipboard(this.createDelegateContext()));
   }
 
-  private get voiceOver(): CtrlProxyVoiceOver {
+  protected get voiceOver(): CtrlProxyVoiceOver {
     return (this._voiceOver ??= new CtrlProxyVoiceOver(this.createDelegateContext()));
   }
 
-  private get storage(): CtrlProxyStorage {
+  protected get storage(): CtrlProxyStorage {
     return (this._storage ??= new CtrlProxyStorage(
       this.createDelegateContext(),
       () => this.boundSessionId,
@@ -228,19 +228,19 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     ));
   }
 
-  private get keyboard(): CtrlProxyKeyboard {
+  protected get keyboard(): CtrlProxyKeyboard {
     return (this._keyboard ??= new CtrlProxyKeyboard(this.createDelegateContext()));
   }
 
-  private get highlights(): CtrlProxyHighlights {
+  protected get highlights(): CtrlProxyHighlights {
     return (this._highlights ??= new CtrlProxyHighlights(this.createDelegateContext()));
   }
 
-  private get database(): CtrlProxyDatabase {
+  protected get database(): CtrlProxyDatabase {
     return (this._database ??= new CtrlProxyDatabase(this.createDelegateContext()));
   }
 
-  private get permissions(): CtrlProxyPermissions {
+  protected get permissions(): CtrlProxyPermissions {
     return (this._permissions ??= new CtrlProxyPermissions(this.createDelegateContext()));
   }
 

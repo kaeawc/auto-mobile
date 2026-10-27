@@ -10,12 +10,18 @@ struct PrototypeViewerApp: App {
     private let content: PrototypeViewerContent
     private static let terminationObserver = ViewerTerminationObserver()
 
-    init() {
+    init() { self.init(registry: .empty) }
+
+    init(registry: PrototypePlatformRegistry) {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         let layoutDirectory = (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"))
             .appendingPathComponent(PrototypeViewerLayoutLoader.documentsDirectoryName)
         let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
-        let model = PrototypeModel(mode: .standalone, storage: PrototypeStorageCoordinator.fileBacked())
+        let model = PrototypeModel(
+            mode: .standalone,
+            storage: PrototypeStorageCoordinator.fileBacked(),
+            registry: registry
+        )
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
         let fallback = PrototypeViewerSpecLoader(reader: PrototypeViewerFileReader(), locations: locations)
         let launch: PrototypeViewerLaunch
@@ -51,11 +57,12 @@ struct PrototypeViewerApp: App {
             switch content {
             case .absent:
                 Text("No prototype saved")
+                    .accessibilityAddTraits(.isHeader)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .invalid(path, message):
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Invalid prototype").font(.headline)
+                        Text("Invalid prototype").font(.headline).accessibilityAddTraits(.isHeader)
                         Text(path).font(.system(.body, design: .monospaced))
                         Text(message)
                     }
@@ -66,7 +73,7 @@ struct PrototypeViewerApp: App {
             case let .unsupportedFormat(version):
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Unsupported prototype format").font(.headline)
+                        Text("Unsupported prototype format").font(.headline).accessibilityAddTraits(.isHeader)
                         Text("Version \(version); expected \(PrototypeSavedLayout.formatVersion)")
                     }
                     .textSelection(.enabled)
@@ -76,7 +83,7 @@ struct PrototypeViewerApp: App {
             case let .corrupt(message):
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Prototype data is corrupt").font(.headline)
+                        Text("Prototype data is corrupt").font(.headline).accessibilityAddTraits(.isHeader)
                         Text(message)
                     }
                     .textSelection(.enabled)

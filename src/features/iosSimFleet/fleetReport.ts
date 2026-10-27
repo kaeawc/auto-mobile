@@ -7,11 +7,18 @@ export function formatBytes(bytes: number): string {
   return bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GiB` : `${Math.round(bytes / MIB)} MiB`;
 }
 
+/** Footprint text, or an explicit "unmeasured": a missing read is never shown as zero. */
+export function describeFootprint(footprintBytes: number | undefined): string {
+  return footprintBytes === undefined
+    ? "memory unmeasured"
+    : `${formatBytes(footprintBytes)} footprint`;
+}
+
 function describeSimulator(sim: SimulatorCost): string {
   const parts = [`${sim.name} (${sim.udid}) ${sim.state}`];
   if (sim.quality === "measured" && sim.process) {
     parts.push(
-      `${formatBytes(sim.process.rssBytes)} RSS, ${sim.process.cpuPercent.toFixed(1)}% CPU, ${sim.process.processCount} processes`,
+      `${describeFootprint(sim.process.footprintBytes)}, ${sim.process.cpuPercent.toFixed(1)}% CPU, ${sim.process.processCount} processes`,
     );
   } else if (sim.quality === "no-processes" || sim.quality === "unavailable") {
     parts.push(`cost unavailable (${sim.quality}${sim.error ? `: ${sim.error}` : ""})`);

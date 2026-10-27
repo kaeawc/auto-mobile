@@ -20,6 +20,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PrototypeRenderModelTest {
+  // These tests probe unknown icon names on a plain JVM, where android.util.Log is not mocked.
+  @org.junit.Before
+  fun silenceIconWarnings() {
+    prototypeIconWarning = {}
+  }
+
   companion object {
     @JvmStatic
     @org.junit.BeforeClass
@@ -539,7 +545,8 @@ class PrototypeRenderModelTest {
   @Test
   fun `placement opacity and alpha first colors map without a display`() {
     assertEquals(100, mapPrototypeSpec(spec(PrototypeSpacerNode())).opacityPercent)
-    val window = PrototypeWindow(PrototypeFullscreenPlacement("#80123456"), 37)
+    val window =
+      PrototypeWindow(PrototypeFullscreenPlacement(PrototypeModeValue.Single("#80123456")), 37)
     val model = mapPrototypeSpec(spec(PrototypeSpacerNode()).copy(window = window))
     assertEquals(37, model.request().opacityPercent)
     assertEquals(
@@ -675,7 +682,37 @@ class PrototypeRenderModelTest {
         decoded,
         (roundTrip as PrototypeSpecValidation.Success).spec,
       )
-      mapPrototypeSpec(decoded)
+      // Derived values format through android.icu, which a plain JVM test cannot run; the
+      // prototype-compose Robolectric tests map them.
+      if (!file.readText().contains("\"derive\"")) mapPrototypeSpec(decoded)
     }
+  }
+
+  @Test
+  fun `forced text errors map independently of validation and preserve caption precedence`() {
+    val field =
+      PrototypeTextFieldNode(
+        stateKey = "value",
+        errorWhen = PrototypeCondition(key = "value", contains = PrototypeScalar.Text("h")),
+      )
+    val state = mapOf("value" to PrototypeScalar.Text("hello"))
+    fun mapped(node: PrototypeTextFieldNode, shown: Set<String> = emptySet()) =
+      mapPrototypeSpec(spec(node).copy(state = state), shownErrors = shown).root
+    assertTrue(mapped(field).isError)
+    assertNull(mapped(field).errorMessage)
+    assertEquals("Help", mapped(field.copy(supportingText = "Help")).errorMessage)
+    val checked =
+      field.copy(
+        checks = listOf(PrototypeCheck.MinLength(10.0, "Check")),
+        supportingText = "Help",
+      )
+    assertEquals("Check", mapped(checked, setOf("value")).errorMessage)
+    assertEquals("Server", mapped(checked.copy(errorText = "Server"), setOf("value")).errorMessage)
+    val normal =
+      field.copy(
+        errorWhen = PrototypeCondition(key = "value", startsWith = PrototypeScalar.Text("z")),
+      )
+    assertFalse(mapped(normal).isError)
+    assertNull(mapped(normal).errorMessage)
   }
 }

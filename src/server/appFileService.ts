@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "../utils/ios-cmdline-tools/simulatorOwnContainer";
 import {
   DefaultDeviceServicePreflight,
   type DeviceServicePreflight,
@@ -53,6 +54,10 @@ import { AndroidAppFileProvider } from "./AndroidAppFileProvider";
 import { AndroidUserFilesProvider } from "./AndroidUserFilesProvider";
 import { AndroidMediaLibraryProvider } from "./AndroidMediaLibraryProvider";
 import { IosSimulatorAppFileProvider } from "./IosSimulatorAppFileProvider";
+import {
+  HostBuiltIosFilesFixtureInstaller,
+  type IosFilesFixtureInstaller,
+} from "./IosFilesFixtureInstaller";
 import { SimctlIosFilesFixtureContainer } from "./SimctlIosFilesFixtureContainer";
 import { IosSimulatorMediaLibraryProvider } from "./IosSimulatorMediaLibraryProvider";
 import { prepareFileSource } from "./fileSourcePreparation";
@@ -174,6 +179,7 @@ export interface ForegroundAppLookup {
 export type AppFileSimCtl = Pick<SimCtlClient, "executeCommand" | "executeCommandArgs">;
 
 export interface AppFileServiceDependencies {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   servicePreflight?: DeviceServicePreflight;
   timer?: Timer;
   foregroundAppLookup?: ForegroundAppLookup;
@@ -186,6 +192,8 @@ export interface AppFileServiceDependencies {
   sharedStorageService?: SharedStorageService;
   iosSimulatorMediaClient?: IosSimulatorMediaClient;
   iosFilesFixtureContainer?: IosFilesFixtureContainer;
+  /** Production only: tests leave it unset so no simulator is ever built for or installed to. */
+  iosFilesFixtureInstaller?: IosFilesFixtureInstaller;
   documentPickerVisibilityVerifier?: DocumentPickerVisibilityVerifier;
 }
 
@@ -203,7 +211,11 @@ let appFileService: AppFileService | null = null;
 export function getAppFileService(): AppFileService {
   if (!appFileService) {
     appFileService = new DefaultAppFileService(
-      createDefaultProviders(defaultDependencies),
+      createDefaultProviders(defaultDependencies, {
+        iosFilesFixtureInstaller: new HostBuiltIosFilesFixtureInstaller({
+          simctlFactory: defaultDependencies.simctlFactory,
+        }),
+      }),
       defaultDependencies.deviceResolver,
       defaultDependencies.fileSystem,
     );
@@ -239,12 +251,14 @@ function createDefaultProviders(
     Pick<AppFileServiceDependencies, "timer">,
   options: Pick<
     AppFileServiceDependencies,
+    | "containerOwnership"
     | "servicePreflight"
     | "idGenerator"
     | "sharedStorageService"
     | "iosSimulatorMediaClient"
     | "foregroundAppLookup"
     | "iosFilesFixtureContainer"
+    | "iosFilesFixtureInstaller"
     | "documentPickerVisibilityVerifier"
   > = {},
 ): AppFileProvider[] {
@@ -256,10 +270,19 @@ function createDefaultProviders(
     }),
     new AndroidUserFilesProvider(options.sharedStorageService),
     new AndroidMediaLibraryProvider(options.sharedStorageService),
-    new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
+    new IosSimulatorAppFileProvider(
+      deps.simctlFactory,
+      deps.fileSystem,
+      options.containerOwnership,
+    ),
     new IosSimulatorUserFilesProvider(
       options.iosFilesFixtureContainer ??
-        new SimctlIosFilesFixtureContainer(deps.simctlFactory, deps.fileSystem),
+        new SimctlIosFilesFixtureContainer(
+          deps.simctlFactory,
+          deps.fileSystem,
+          options.containerOwnership,
+          options.iosFilesFixtureInstaller,
+        ),
       options.documentPickerVisibilityVerifier,
     ),
     new IosSimulatorMediaLibraryProvider(

@@ -165,6 +165,8 @@ export interface ScreenIdentity {
  * Represents the result of observing the device state
  */
 export type ObserveResult = {
+  /** Applies to all UI content in this payload, including raw trees and projected labels. */
+  importedPrototypeContent?: import("./ImportedPrototypeContent").ImportedPrototypeContent;
   /** Physical panel represented by this capture; always present on emitted observations. */
   display: DisplayRef;
   /** Opt-in Android display:"all" aggregate; the proposed additive shape (#8256). */
@@ -624,6 +626,7 @@ export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &
   Pick<
     ObserveResult,
     | "viewHierarchy"
+    | "importedPrototypeContent"
     | "skeleton"
     | "context"
     | "keyboard"

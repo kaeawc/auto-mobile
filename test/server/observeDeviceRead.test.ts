@@ -52,7 +52,7 @@ import {
 } from "../../src/utils/directSessionDeviceRegistry";
 import { SnapshotReferenceStore } from "../../src/features/observe/SnapshotReferenceStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/wire/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { DeviceReadOptions } from "../../src/features/observe/interfaces/ObserveScreen";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";

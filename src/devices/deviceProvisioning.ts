@@ -1,3 +1,6 @@
+import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
+import { isIosDuoDeviceType } from "../utils/ios-cmdline-tools/iosDeviceType";
+import type { SimulatorCreator } from "./SimulatorCreator";
 /**
  * Device provisioning — creating a simulator/emulator when none matches.
  *
@@ -33,6 +36,7 @@ import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
+  prebootDisabledResources?: readonly ConfigurableDeviceResource[];
   platform: "android" | "ios";
   /** Device name (iOS simulator name / AVD name). */
   name: string;
@@ -148,6 +152,11 @@ function deviceTypeMatchesIosFormFactor(
   deviceType: AppleDeviceType,
   formFactor: "phone" | "tablet" = "phone",
 ): boolean {
+  // The Duo is foldable, so a phone request must not select it: inventory would report it as
+  // foldable and the next phone request would provision again.
+  if (formFactor === "phone" && isIosDuoDeviceType(deviceType.identifier)) {
+    return false;
+  }
   const family = IOS_FAMILY_BY_FORM_FACTOR[formFactor];
   return deviceType.productFamily === family || deviceType.name.startsWith(family);
 }
@@ -521,6 +530,7 @@ export function pickAndroidSystemImage(
 // ---------------------------------------------------------------------------
 
 export interface DefaultDeviceProvisionerDependencies {
+  simulatorCreation?: SimulatorCreator;
   prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   iosCreator: () => IosSimulatorCreator | undefined;
   androidCreator: () => AndroidAvdCreator;
@@ -599,7 +609,16 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
 
     let deviceId: string;
     try {
-      deviceId = await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
+      deviceId = this.dependencies.simulatorCreation
+        ? (
+            await this.dependencies.simulatorCreation.create({
+              name,
+              deviceType: deviceType.identifier,
+              runtime,
+              signal: creationSignal,
+            })
+          ).udid
+        : await simctl.createSimulator(name, deviceType.identifier, runtime, creationSignal);
     } catch (error) {
       throw toActionableError(
         error,
@@ -623,9 +642,21 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
         "' when no longer needed.",
     );
     await identityHooks?.bindAfterCreate(provisioned);
-    await this.dependencies.prebootProfile?.apply(deviceId, {}, creationSignal);
+    return this.applyPrebootProfile(deviceId, provisioned, creationSignal);
+  }
 
-    return provisioned;
+  private async applyPrebootProfile(
+    deviceId: string,
+    provisioned: ProvisionedDevice,
+    signal?: AbortSignal,
+  ): Promise<ProvisionedDevice> {
+    const preboot = await this.dependencies.prebootProfile?.apply(deviceId, {}, signal);
+    return {
+      ...provisioned,
+      ...(preboot?.applied && preboot.resources.length
+        ? { prebootDisabledResources: preboot.resources }
+        : {}),
+    };
   }
 
   private async provisionAndroid(
@@ -712,9 +743,11 @@ export function createDefaultAndroidAvdCreator(): AndroidAvdCreator {
 export function createDefaultDeviceProvisioner(
   iosCreator: () => IosSimulatorCreator | undefined = () => new SimCtlClient(null),
   identityHooks?: DeviceProvisioningIdentityHooks,
+  simulatorCreation?: SimulatorCreator,
 ): DeviceProvisioner {
   return new DefaultDeviceProvisioner({
     iosCreator,
+    simulatorCreation,
     prebootProfile: new SimulatorPrebootProfile(),
     androidCreator: createDefaultAndroidAvdCreator,
     identityHooks,

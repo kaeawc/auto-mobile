@@ -8,15 +8,17 @@ import type {
 import { sweepStaleAppearanceConfigs } from "../appearanceConfigStartupSweep";
 import { createServer as createHttpServer } from "node:http";
 import { logger } from "../../utils/logger";
+import { setLogContextProvider } from "../../utils/logContext";
+import { currentMcpTrace } from "../mcpTraceContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { UnixSocketServer } from "../socketServer";
 import { type DaemonSocketServer } from "../daemonSocketServer";
 import { bindingRegistryFileExists } from "../sessionBroker/registry/sqliteBindingRegistry";
-import { SOCKET_PATH, MCP_STREAMABLE_PATH } from "../constants";
+import { SOCKET_PATH, MCP_STREAMABLE_PATH } from "../wire/constants";
 import { DaemonOptions } from "../types";
 import { writeDaemonExitRecord, type DaemonExitRecordFileSystem } from "../daemonExitRecord";
 import { setCtrlProxyForwardLeaseOwnerSocketPath } from "../../features/observe/shared/ctrlProxyForwardLeaseOwnership";
-import { PID_FILE_PATH } from "../constants";
+import { PID_FILE_PATH } from "../wire/constants";
 import { type LiveDaemonSessionIdProvider } from "../daemonFiles";
 import { recordDeviceSettingDefaultsBeforeChange } from "../../features/utility/DeviceSettingDefaults";
 import { HybridVideoCaptureBackend } from "../../features/video/HybridVideoCaptureBackend";
@@ -387,6 +389,7 @@ export class DaemonStartup {
   }
 
   enterDaemonProcess(): void {
+    setLogContextProvider(currentMcpTrace);
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary stable log is `<configured log dir>/daemon.log` (defaulting to
     // `<auto-mobile data dir>/logs/daemon.log`); the daemon manager also

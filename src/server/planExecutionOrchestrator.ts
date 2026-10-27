@@ -1,4 +1,4 @@
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/wire/constants";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import type { DevicePool } from "../daemon/devicePool";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";

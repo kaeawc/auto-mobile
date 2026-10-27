@@ -1,3 +1,9 @@
+import {
+  resolveOwnAppDataContainer,
+  SimulatorContainerOwnershipError,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+} from "../../../utils/ios-cmdline-tools/simulatorOwnContainer";
 import { posix } from "node:path";
 import type { BootedDevice } from "../../../models";
 import { ActionableError } from "../../../models/ActionableError";
@@ -113,6 +119,7 @@ export class PrototypeViewerAttacher implements PrototypeViewerLaunchAttacher {
 }
 
 export interface PrototypeViewerProductionDependencies {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   simctl?: Pick<SimCtlClient, "executeCommandArgs">;
   files?: Pick<FileSystem, "readFile" | "existsSync">;
   connector?: PrototypeAgentConnector;
@@ -131,10 +138,21 @@ export function createPrototypeViewerAttacher(
     containers: {
       dataContainer: async (deviceId, bundleId) => {
         try {
-          return (
-            await simctl.executeCommandArgs(["get_app_container", deviceId, bundleId, "data"])
-          ).stdout.trim();
+          return await resolveOwnAppDataContainer({
+            ...deps.containerOwnership,
+            deviceId,
+            bundleId,
+            run: (args) => simctl.executeCommandArgs(args),
+          });
         } catch (error) {
+          if (error instanceof SimulatorContainerUnresolvedError) {
+            // The attacher owns the existing missing-container guidance.
+            logger.debug("Simulator returned an empty prototype viewer data container path");
+            return "";
+          }
+          if (error instanceof SimulatorContainerOwnershipError) {
+            throw error;
+          }
           throw new ActionableError(
             "Could not resolve the prototype viewer data container; check that it is installed on this simulator.",
             { cause: error },

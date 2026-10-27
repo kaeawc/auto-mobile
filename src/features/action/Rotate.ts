@@ -11,7 +11,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { observedIosOrientation, verifyIosRotation } from "./iosRotateVerification";
@@ -352,7 +352,7 @@ export class Rotate extends BaseVisualChange {
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     let previousObservation: ObserveResult | undefined;
-    let runner: IOSCtrlProxyClient | undefined;
+    let runner: Pick<IosCtrlProxy, "requestRotate"> | undefined;
     const result: RotateResult = await this.observedInteraction(
       async (observation) => {
         previousObservation = observation;
@@ -422,7 +422,7 @@ export class Rotate extends BaseVisualChange {
    */
   private async restoreIosOrientationAfterFailure(
     failed: RotateResult,
-    client: Pick<IOSCtrlProxyClient, "requestRotate"> | undefined,
+    client: Pick<IosCtrlProxy, "requestRotate"> | undefined,
     previousObservation: ObserveResult | undefined,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     signal?: AbortSignal,
@@ -733,8 +733,7 @@ export class Rotate extends BaseVisualChange {
     // pre-existing value so it can be restored once the forced rotation
     // completes, instead of leaving auto-rotate permanently disabled
     // (#6129). An explicit persistent request takes ownership of this state,
-    // while explicit false restores automatic rotation even after a previous
-    // persistent request.
+    // while omission and false preserve the known prior auto-rotate state.
 
     try {
       this.outcomes.logAutoRotatePlan(autoRotateState, preserveLock, restoreAutomaticRotation);
@@ -751,7 +750,7 @@ export class Rotate extends BaseVisualChange {
           throwIfAborted(signal);
           cleanup.needed = shouldRestoreAutoRotate && autoRotateState !== "locked";
           await this.planDeviceStateLock(cleanup, {
-            shouldRestoreAutoRotate,
+            shouldRestoreAutoRotate: shouldRestoreAutoRotate || plan.restoreAfterConfirmation,
             autoRotateState,
             signal,
           });
@@ -780,7 +779,7 @@ export class Rotate extends BaseVisualChange {
       let warning: string | undefined;
       let restoreConfirmed = true;
 
-      if (shouldRestoreAutoRotate) {
+      if (shouldRestoreAutoRotate || plan.restoreAfterConfirmation) {
         ({ achievedOrientation, warning, restoreConfirmed } =
           await this.outcomes.restoreAutoRotateAndConfirmOrientation(orientation, signal, cleanup));
       }
@@ -961,9 +960,19 @@ export class Rotate extends BaseVisualChange {
       slot,
       signal,
     });
-    const { achievedOrientation } = confirmation;
-    let { warning } = confirmation;
+    let { achievedOrientation, warning } = confirmation;
     if (achievedOrientation === orientation) {
+      let restoreConfirmed = !restoreFailure;
+      if (plan.restoreAfterConfirmation) {
+        const restored = await this.outcomes.restoreAutoRotateAndConfirmOrientation(
+          orientation,
+          signal,
+          cleanup,
+        );
+        achievedOrientation = restored.achievedOrientation;
+        warning = [warning, restored.warning].filter(Boolean).join(" ") || undefined;
+        restoreConfirmed = restored.restoreConfirmed;
+      }
       const result = await this.outcomes.finalizeAndroidRotation({
         orientation,
         value,
@@ -971,11 +980,12 @@ export class Rotate extends BaseVisualChange {
         achievedOrientation,
         warning: [
           restoreFailure?.message,
+          warning,
           `Rotation was confirmed after an earlier error: ${error}`,
         ]
           .filter(Boolean)
           .join(" "),
-        restoreConfirmed: !restoreFailure,
+        restoreConfirmed,
         preserveLock,
         restoreAutomaticRotation,
         wasAutoRotateEnabled,

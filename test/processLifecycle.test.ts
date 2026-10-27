@@ -5,7 +5,7 @@ import {
   type StdioWriteErrorSource,
 } from "../src/processLifecycle";
 import { FakeTimer } from "./fakes/FakeTimer";
-import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../src/daemon/constants";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../src/daemon/wire/constants";
 import { FakeProcess } from "./fakes/FakeProcess";
 
 type StdinEventMap = {
@@ -406,6 +406,24 @@ describe("process lifecycle handlers", () => {
     await flushMicrotasks();
 
     expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("a handler-set exit code is used once an orderly shutdown completes (#15312)", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    let cleaned = false;
+    lifecycle.install();
+    lifecycle.setShutdownHandler(async () => {
+      lifecycle.setShutdownExitCode(130);
+      await Promise.resolve();
+      cleaned = true;
+    });
+
+    fakeProcess.emit("SIGINT");
+    await flushUntilExit(fakeProcess);
+
+    expect(cleaned).toBe(true);
+    expect(fakeProcess.exitCodes).toEqual([130]);
   });
 
   test("awaits the bound shutdown handler before exiting", async () => {

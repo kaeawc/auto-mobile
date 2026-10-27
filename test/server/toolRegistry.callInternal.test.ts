@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
-import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constants";
 import { ActionableError } from "../../src/models/ActionableError";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 

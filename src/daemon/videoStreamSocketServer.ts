@@ -28,7 +28,7 @@ import {
   type StreamSubscriptionEndReason,
   type StreamSubscriptionIdentity,
   type StreamSubscriptionKind,
-} from "./streamSubscriptionPolicy";
+} from "./wire/streamSubscriptionPolicy";
 import {
   HEARTBEAT_INTERVAL_MS,
   OUTBOUND_STALL_TIMEOUT_MS,
@@ -49,7 +49,10 @@ import {
   validateCaptureHints,
   type VideoStreamSocketServerDependencies,
 } from "./videoStreamSocketSupport";
-import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
+import type {
+  VideoStreamSocketRequest,
+  VideoStreamSocketResponse,
+} from "./wire/videoStreamSocketTypes";
 
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.

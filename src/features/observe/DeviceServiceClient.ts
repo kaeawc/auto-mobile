@@ -89,6 +89,7 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
       },
       requestManager: this.requestManager,
       deliverMessage: (data) => this.handleMessage(data),
+      waitForHandshake: (timeoutMs, signal) => this.waitForHandshake(timeoutMs, signal),
       readState: () => ({
         autoReconnectEnabled: this.autoReconnectEnabled,
         supportedCommands: this.supportedCommands,
@@ -110,7 +111,7 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
     });
   }
   /** Socket owning the current handshake/open lifecycle, used to reject delayed stale events. */
-  private lifecycleSocket: CtrlSocket | null = null;
+  protected lifecycleSocket: CtrlSocket | null = null;
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;
@@ -428,7 +429,7 @@ export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
    * Finish a lost connection exactly once, even when replacement beats its close event.
    * Socket identity is the connection token; late events cannot clean up a replacement.
    */
-  private finishEstablishedConnection(socket: CtrlSocket): void {
+  protected finishEstablishedConnection(socket: CtrlSocket): void {
     if (this.ws !== socket) {
       return;
     }

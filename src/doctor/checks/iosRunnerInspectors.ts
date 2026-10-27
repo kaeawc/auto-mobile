@@ -48,6 +48,11 @@ export interface IosObserveRoundTripInspection {
   screenSize: { width: number; height: number };
   hierarchyError: string | null;
   elementCount: number;
+  /**
+   * False when the runner was found not installed or not running, so no request was sent to the
+   * simulator at all. Absent means a request was made (#15310).
+   */
+  probed?: boolean;
 }
 
 /** Source of booted-simulator iOS observe round trips (injectable for tests). */
@@ -332,6 +337,7 @@ export function createIosObserveRoundTripInspector(
         let screenSize = { width: 0, height: 0 };
         let hierarchyError: string | null = null;
         let elementCount = 0;
+        let probed = true;
 
         const readHierarchy = (
           response: { hierarchy: CtrlProxyHierarchy } | null,
@@ -367,10 +373,12 @@ export function createIosObserveRoundTripInspector(
           screenSize,
           hierarchyError,
           elementCount,
+          ...(probed ? {} : { probed }),
         });
         try {
           const installed = await manager.isInstalled();
           hierarchyError = iosObserveUnavailableReason(installed, discoveredRunnerPort, existing);
+          probed = hierarchyError === null;
         } catch (error) {
           hierarchyError = errorMessage(error);
           log.warn(

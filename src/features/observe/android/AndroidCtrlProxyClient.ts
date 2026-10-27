@@ -1,6 +1,5 @@
 import { assertAndroidCtrlProxyDevice } from "./androidCtrlProxyDeviceGuard";
 import { AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
-import { AndroidCtrlProxyObservationClient } from "./AndroidCtrlProxyObservationClient";
 import { defaultAndroidServiceManagerFactory } from "./AndroidCtrlProxyServices";
 export { type AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
 export type {
@@ -108,7 +107,7 @@ import { pushNetworkMockRules } from "./networkMockRulesPush";
 // Import delegates
 // Import types
 import type { AndroidCtrlProxy } from "./AndroidCtrlProxy";
-import type { AndroidCtrlProxyClientTestHooks } from "./AndroidCtrlProxyClientTestHooks";
+import { AndroidCtrlProxyTestHooksFacade } from "./AndroidCtrlProxyTestHooksFacade";
 import type {
   AccessibilityHierarchy,
   AndroidPerfTiming,
@@ -128,7 +127,7 @@ export type {
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
 export class AndroidCtrlProxyClient
-  extends AndroidCtrlProxyObservationClient
+  extends AndroidCtrlProxyTestHooksFacade
   implements AndroidCtrlProxy
 {
   protected getLiveLocalPorts(): ReadonlySet<number> {
@@ -516,91 +515,6 @@ export class AndroidCtrlProxyClient
       client.screenshotBackoffScheduler = deps.screenshotBackoffScheduler;
     }
     return client;
-  }
-
-  /** @internal Typed view of internals for unit tests; production code must not use it. */
-  get testHooks(): AndroidCtrlProxyClientTestHooks {
-    const client = this;
-    return {
-      requestManager: client.requestManager,
-      forcedRestartBudget: client.forcedRestartBudget,
-      text: () => client.text,
-      gestures: () => client.gestures,
-      storage: () => client.storage,
-      certificates: () => client.certificates,
-      focus: () => client.focus,
-      packages: () => client.packages,
-      prototypes: () => client.prototypes,
-      highlights: () => client.highlights,
-      webSocketMessageHandlers: () => client.webSocketMessageHandlers,
-      createDelegateContext: () => client.createDelegateContext(),
-      isCommandSupported: (messageType) => client.isCommandSupported(messageType),
-      get installedGestures() {
-        return client._gestures;
-      },
-      set installedGestures(value) {
-        client._gestures = value;
-      },
-      injected: () => ({
-        ctrlProxyForwardLease: client.ctrlProxyForwardLease,
-        forwardClientProbe: client.forwardClientProbe,
-        loggerInstance: client.loggerInstance,
-        transientObserver: client.transientObserver,
-        timer: client.timer,
-        webSocketFactory: client.webSocketFactory,
-        certificateFileSystem: client.certificateFileSystem,
-        serviceManagerFactory: client.serviceManagerFactory,
-        idGenerator: client.idGenerator,
-        screenshotBackoffScheduler: client.screenshotBackoffScheduler,
-        portAllocationId: client.portAllocationId,
-      }),
-      cachedHierarchy: () => client.cachedHierarchy,
-      handleWebSocketMessage: (data) => client.handleWebSocketMessage(data),
-      getWebSocketUrl: () => client.getWebSocketUrl(),
-      removeCtrlProxyPortForward: (port) => client.removeCtrlProxyPortForward(port),
-      get recoveryPromise() {
-        return client.recoveryPromise;
-      },
-      set recoveryPromise(value) {
-        client.recoveryPromise = value;
-      },
-      get isRecoveringService() {
-        return client.isRecoveringService;
-      },
-      set isRecoveringService(value) {
-        client.isRecoveringService = value;
-      },
-      get connectionAttempts() {
-        return client.connectionAttempts;
-      },
-      set connectionAttempts(value) {
-        client.connectionAttempts = value;
-      },
-      get lastConnectionAttempt() {
-        return client.lastConnectionAttempt;
-      },
-      set lastConnectionAttempt(value) {
-        client.lastConnectionAttempt = value;
-      },
-      get connectionResetMs() {
-        return client.config.connectionResetMs;
-      },
-      set connectionResetMs(value) {
-        client.config.connectionResetMs = value;
-      },
-      get portForwardingSetup() {
-        return client.portForwardingSetup;
-      },
-      set portForwardingSetup(value) {
-        client.portForwardingSetup = value;
-      },
-      get localPort() {
-        return client.localPort;
-      },
-      set localPort(value) {
-        client.localPort = value;
-      },
-    };
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */

@@ -2,7 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
-import { SOCKET_PATH, PID_FILE_PATH } from "./constants";
+import { SOCKET_PATH, PID_FILE_PATH } from "./wire/constants";
 import { DaemonClient } from "./client";
 import { readFile } from "node:fs/promises";
 import { PidFileData } from "./types";

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
+import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
@@ -86,6 +87,12 @@ internal class PrototypeResultBroadcaster(
       )
     }
 
+  private val shownBackdrops = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+  override fun noteShownBackdrop(requestId: String?, backdrop: String) {
+    shownBackdrops[requestId.orEmpty()] = backdrop
+  }
+
   override suspend fun sendShownNavigation(
     requestId: String?,
     missingAssets: List<String>,
@@ -104,8 +111,39 @@ internal class PrototypeResultBroadcaster(
         pages = pages,
         stacks = stacks,
         hiddenReason = hiddenReason,
+        backdrop = shownBackdrops.remove(requestId.orEmpty()),
       )
     }
+
+  override suspend fun sendShownDegraded(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot>,
+    hiddenReason: PrototypeHiddenReason?,
+    degradedEffects: List<PrototypeDegradedEffect>,
+  ) =
+    emit(requestId) {
+      prototypeResultFrame(
+        requestId,
+        true,
+        null,
+        missingAssets,
+        appearance,
+        pages = pages,
+        stacks = stacks,
+        hiddenReason = hiddenReason,
+        backdrop = shownBackdrops.remove(requestId.orEmpty()),
+        degradedEffects = degradedEffects,
+      )
+    }
+
+  override suspend fun sendAdvanced(requestId: String?, fired: Int) =
+    emit(requestId) { prototypeResultFrame(requestId, true, null, fired = fired) }
+
+  override suspend fun sendAdvanceFailed(requestId: String?, fired: Int, error: String) =
+    emit(requestId) { prototypeResultFrame(requestId, false, error, fired = fired) }
 
   override suspend fun sendCleared(requestId: String?, cleared: Int) =
     emit(requestId) { prototypeClearedFrame(requestId, cleared) }

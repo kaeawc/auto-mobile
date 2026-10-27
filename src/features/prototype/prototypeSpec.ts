@@ -1,7 +1,21 @@
+import { prototypePressSchema } from "./prototypePressSchema";
+export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
+import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
+import { themeSchema } from "./prototypeThemeSchema";
+import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
+import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
+import { prototypeScrollMotionShape } from "./prototypeScrollMotionSchema";
+import { prototypePlatformNamespaceShape } from "./prototypePlatformNamespaceSchema";
+import * as timers from "./prototypeTimerSchema";
+import { prototypeStringsSchema } from "./prototypeStrings";
+import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
+import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
+import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
+  buildPrototypeActionListSchema,
   keySchema,
   pointerSchema,
   prototypeDataActionValueSchema,
@@ -14,21 +28,23 @@ import {
   prototypeJsonSchema,
   type PrototypeJson,
 } from "./prototypeJson";
+import * as lazyList from "./prototypeLazyListSchema";
+import { prototypeBackdropSchema } from "./prototypeBackdropSchema";
 import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
+  fadeEdgesSchema,
+  imageFilterSchema,
   anchorSchema,
-  colorTokenSchema,
   colorValueSchema,
   conditionSchema,
   detentSchema,
-  hexColorSchema,
   iconNameSchema,
   iconVariantSchema,
   itemSchema,
   placementSchema,
-  PROTOTYPE_COLOR_ROLES,
   type PrototypeData,
   safeAreaPaddingSchema,
   sheetConditionSchema,
@@ -44,11 +60,7 @@ import {
 import { bindPrototypeRequestFollowUps, requestActionSchema } from "./prototypeRequestSchema";
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
 import { record } from "./prototypeTemplate";
-export {
-  PROTOTYPE_COLOR_ROLES,
-  type PrototypeAnchor,
-  type PrototypeData,
-} from "./prototypePresentationSchemas";
+export { type PrototypeAnchor, type PrototypeData } from "./prototypePresentationSchemas";
 export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
@@ -59,6 +71,7 @@ export const {
   MAX_PROTOTYPE_DATA_WRITE_BYTES,
   MAX_PROTOTYPE_DATA_DEPTH,
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
+  MAX_PROTOTYPE_LIST_ITEMS,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH,
   MAX_PROTOTYPE_REPEAT_PATH_CELLS,
   MAX_PROTOTYPE_PAGER_DP,
@@ -133,13 +146,17 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["dismiss"]) }).strict(),
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["prependData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
+  timers.startTimerActionSchema,
+  timers.cancelTimerActionSchema,
   requestActionSchema,
   platformActionSchema,
+  stackScreenActionSchema("push"),
   z
-    .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
+    .object({ type: z.enum(["pop"]), stack: z.string().min(1), force: z.boolean().optional() })
     .strict(),
-  z.object({ type: z.enum(["pop"]), stack: z.string().min(1) }).strict(),
+  setStackActionSchema,
   z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
   z
     .object({
@@ -152,15 +169,15 @@ export const actionSchema = z.discriminatedUnion("type", [
       animated: z.boolean().optional(),
     })
     .strict(),
-  z
-    .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
-    .strict(),
+  stackScreenActionSchema("replace"),
 ]);
+timers.bindPrototypeTimerActions(() => actionSchema);
 bindPrototypeRequestFollowUps(() => actionSchema);
 bindPrototypePlatformFollowUps(() => actionSchema);
+const actionListSchema = buildPrototypeActionListSchema(actionSchema);
 const gestureNodeShape = {
-  onLongPress: z.array(actionSchema).min(1).max(32).optional(),
-  onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
+  onLongPress: actionListSchema.optional(),
+  onDoubleTap: actionListSchema.optional(),
 };
 export { prototypeCheckSchema, type PrototypeCheck } from "./prototypeCheckSchema";
 import { prototypeCheckSchema } from "./prototypeCheckSchema";
@@ -170,16 +187,26 @@ const checksShape = {
   checks: z.array(prototypeCheckSchema).min(1).max(8).optional(),
   validateOn: z.enum(["change", "blur", "submit"]).optional(),
 };
-const commonNodeShape = {
+export const commonNodeShape = {
+  semantics: prototypeSemanticsSchema.optional(),
+  onAppear: actionListSchema.optional(),
+  ...prototypeScrollMotionShape,
+  ...prototypePlatformNamespaceShape,
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
   // The node's accessible label, read by observe and screen readers in place of its text (#10446).
   contentDescription: z.string().min(1).optional(),
-  onTap: z.array(actionSchema).min(1).max(32).optional(),
+  onTap: actionListSchema.optional(),
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
+  sharedKey: keySchema.optional(),
+  press: prototypePressSchema.optional(),
+  shared: z
+    .object({ key: z.string().min(1).max(256), as: z.enum(["element", "bounds"]) })
+    .strict()
+    .optional(),
   ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -196,42 +223,29 @@ const repeatSchema = z
       z.object({ path: pointerSchema }).strict(),
     ]),
     as: keySchema,
+    derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),
+    stagger: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
+// `box`, `row` and `column` also stagger their `visibleWhen` children (#15247).
+const containerShape = { ...repeatShape, ...prototypeStaggerShape };
 const boxBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["box"]) })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...containerShape, type: z.enum(["box"]) })
   .strict();
-const swipeActionSchema = z
-  .object({
-    label: z.string().min(1),
-    icon: iconNameSchema.optional(),
-    role: z.enum(["default", "destructive"]).optional(),
-    color: colorTokenSchema.optional(),
-    onTap: z.array(actionSchema).min(1).max(32),
-  })
-  .strict();
-const swipeActionListSchema = z.array(swipeActionSchema).min(1).max(3);
-const swipeActionsSchema = z
-  .object({
-    start: swipeActionListSchema.optional(),
-    end: swipeActionListSchema.optional(),
-    fullSwipe: z.boolean().optional(),
-  })
-  .strict();
-const swipeActionsShape = { swipeActions: swipeActionsSchema.optional() };
+const swipeActionsShape = createSwipeActionsShape(actionSchema);
 const rowBaseSchema = z
   .object({
     ...commonNodeShape,
     ...gestureNodeShape,
     ...swipeActionsShape,
-    ...repeatShape,
+    ...containerShape,
     type: z.enum(["row"]),
   })
   .strict();
 const columnBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["column"]) })
+  .object({ ...commonNodeShape, ...gestureNodeShape, ...containerShape, type: z.enum(["column"]) })
   .strict();
 const flowBaseSchema = z
   .object({
@@ -256,6 +270,7 @@ const textSpanSchema = z
   .object({
     text: z.string().min(1),
     style: styleSchema
+      .innerType()
       .pick({
         color: true,
         fontWeight: true,
@@ -278,7 +293,7 @@ const linkifySchema = z
       .min(1)
       .max(3),
     style: textSpanSchema.shape.style,
-    onTap: z.array(actionSchema).min(1).max(32),
+    onTap: actionListSchema,
   })
   .strict();
 const textBaseSchema = z
@@ -292,7 +307,12 @@ const textBaseSchema = z
   })
   .strict();
 const imageBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...prototypeImageShape })
+  .object({
+    ...commonNodeShape,
+    ...gestureNodeShape,
+    ...prototypeImageShape,
+    filter: imageFilterSchema.optional(),
+  })
   .strict();
 const iconBaseSchema = z
   .object({
@@ -304,7 +324,6 @@ const iconBaseSchema = z
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();
-const actionListSchema = z.array(actionSchema).min(1).max(32);
 // An icon-only control in a top app bar: the icon, its accessible label and its tap.
 const appBarActionSchema = z
   .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
@@ -319,6 +338,8 @@ const textFieldBaseSchema = z
     label: z.string().min(1).optional(),
     variant: z.enum(["filled", "outlined"]).optional(),
     supportingText: z.string().min(1).optional(),
+    errorWhen: conditionSchema.optional(),
+    errorText: z.string().min(1).max(256).optional(),
     keyboardType: z
       .enum(["text", "number", "decimal", "email", "phone", "url", "password"])
       .optional(),
@@ -494,6 +515,8 @@ const topAppBarBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["topAppBar"]),
+    onScroll: z.enum(["pinned", "enterAlways", "exitUntilCollapsed"]).optional(),
+    scroll: z.string().min(1).optional(),
     title: z.string().min(1),
     variant: z.enum(["small", "centerAligned", "medium", "large"]).optional(),
     navigationIcon: appBarActionSchema.optional(),
@@ -578,20 +601,20 @@ const datePickerBaseSchema = z
     stateKey: stateKeyFieldSchema,
   })
   .strict();
-const scrollRefreshSchema = z
-  .object({ stateKey: stateKeySchema, onRefresh: z.array(actionSchema).min(1).max(32) })
-  .strict();
+const scrollRefreshSchema = lazyList.refresh(actionSchema);
+const listBaseSchema = lazyList.base(commonNodeShape, actionSchema, scrollRefreshSchema);
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
     refresh: scrollRefreshSchema.optional(),
+    fadeEdges: fadeEdgesSchema.optional(),
     // Chat lists (#14232): anchored at the end, following new rows, reporting the end position.
     reverse: z.boolean().optional(),
     stickToEnd: z.boolean().optional(),
     atEndKey: stateKeySchema.optional(),
-    onStartReached: z.array(actionSchema).min(1).max(32).optional(),
+    onStartReached: actionListSchema.optional(),
   })
   .strict();
 // Pager distances share the contract's 10000 dp dimension ceiling.
@@ -600,6 +623,7 @@ const pagerBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["pager"]),
+    stateKey: stateKeySchema.optional(),
     id: z.string().min(1),
     axis: z.enum(["horizontal", "vertical"]).optional(),
     pageSpacing: pagerDpSchema.optional(),
@@ -630,6 +654,8 @@ const tabBarBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["tabBar"]),
+    onScroll: z.enum(["none", "hide", "minimize"]).optional(),
+    scroll: z.string().min(1).optional(),
     items: z.array(itemSchema).min(1).max(32),
     pager: z.string().min(1).optional(),
     stateKey: stateKeySchema.optional(),
@@ -640,11 +666,19 @@ const bottomNavBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["bottomNav"]),
+    onScroll: z.enum(["none", "hide", "minimize"]).optional(),
+    scroll: z.string().min(1).optional(),
     items: z.array(itemSchema).min(2).max(5),
     pager: z.string().min(1).optional(),
     stateKey: stateKeySchema.optional(),
   })
   .strict();
+const { tooltipBaseSchema, drawerBaseSchema } = buildTooltipDrawerSchemas({
+  commonNodeShape,
+  sheetConditionSchema,
+  actionSchema,
+  colorValueSchema,
+});
 const bottomSheetBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -656,12 +690,15 @@ const bottomSheetBaseSchema = z
     dismissOnSwipe: z.boolean().optional(),
   })
   .strict();
+const routeSchema = buildRouteSchema(actionSchema);
 const stackBaseSchema = z
   .object({
     ...commonNodeShape,
+    transition: stackTransitionSchema,
     type: z.enum(["stack"]),
     id: z.string().min(1),
     start: z.string().min(1),
+    routes: z.record(routeSchema).and(z.unknown()).optional(),
   })
   .strict();
 export type PrototypeNode =
@@ -696,10 +733,13 @@ export type PrototypeNode =
   | z.infer<typeof progressBaseSchema>
   | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
+  | z.infer<typeof tooltipBaseSchema>
+  | (z.infer<typeof drawerBaseSchema> & { child: PrototypeNode })
   | z.infer<typeof menuBaseSchema>
   | z.infer<typeof snackbarBaseSchema>
   | z.infer<typeof timePickerBaseSchema>
   | z.infer<typeof datePickerBaseSchema>
+  | (z.infer<typeof listBaseSchema> & lazyList.Slots<PrototypeNode>)
   | (z.infer<typeof scrollBaseSchema> & { child: PrototypeNode })
   | (z.infer<typeof pagerBaseSchema> & { children: PrototypeNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -773,10 +813,13 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       progressBaseSchema,
       chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
+      tooltipBaseSchema,
+      drawerBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
       menuBaseSchema,
       snackbarBaseSchema,
       timePickerBaseSchema,
       datePickerBaseSchema,
+      listBaseSchema.extend(lazyList.children(z.lazy(() => prototypeNodeSchema))),
       scrollBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
       pagerBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(1) }),
       stackBaseSchema.extend({
@@ -789,6 +832,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
 );
 export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
   prototypeNodeBaseSchema.superRefine((node, context) => {
+    tooltipAnchorIssue(node, context);
     if (node.type === "text" && (node.text !== undefined) === (node.spans !== undefined)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -802,13 +846,17 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
   });
 const windowSchema = z
   .object({
+    ...prototypePlatformNamespaceShape,
     placement: placementSchema,
+    backdrop: prototypeBackdropSchema.optional(),
+    transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()
       .describe(
         "Fullscreen only: none (default on a device advertising prototype_window_chrome_v1) removes the host dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill for 5 s. Device persistence defaults to bar. An older device keeps the bar and refuses explicit none; lastResult.chrome reports what it draws",
       ),
+    deadTaps: z.boolean().optional(),
     opacity: z.number().finite().int().min(0).max(100).default(100),
     layer: z
       .enum(["app", "system"])
@@ -824,55 +872,12 @@ const windowSchema = z
       ),
   })
   .strict();
-/**
- * Explicit hex overrides for individual scheme roles, applied over the seed, device or baseline
- * scheme in both light and dark.
- */
-const themeColorRoleSchemas = Object.fromEntries(
-  PROTOTYPE_COLOR_ROLES.map((role) => [role, hexColorSchema.optional()]),
-) as Record<(typeof PROTOTYPE_COLOR_ROLES)[number], z.ZodOptional<typeof hexColorSchema>>;
-/** Role overrides for one resolved mode, applied after the flat overrides (#11218). */
-const themeModeColorsSchema = z
-  .object(themeColorRoleSchemas)
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeColorsSchema = z
-  .object({
-    seed: hexColorSchema.optional(),
-    source: z.enum(["device"]).optional(),
-    light: themeModeColorsSchema.optional(),
-    dark: themeModeColorsSchema.optional(),
-    ...themeColorRoleSchemas,
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeTypographySchema = z
-  .object({
-    scale: z.number().finite().min(0.75).max(1.5).optional(),
-    fontFamily: z.enum(["sans", "serif", "mono"]).optional(),
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeShapesSchema = z
-  .object({
-    corner: z.enum(["none", "small", "medium", "large", "full"]).optional(),
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
-const themeSchema = z
-  .object({
-    mode: z.enum(["light", "dark", "system"]).optional(),
-    colors: themeColorsSchema.optional(),
-    typography: themeTypographySchema.optional(),
-    shapes: themeShapesSchema.optional(),
-  })
-  .strict()
-  .refine((value) => Object.keys(value).length > 0);
 const specSchema = z
   .object({
     id: z.string().min(1),
     window: windowSchema,
     theme: themeSchema.optional(),
+    strings: prototypeStringsSchema.optional(),
     data: z
       .custom<PrototypeData>((value) => {
         if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -890,10 +895,11 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
-    motion: z.enum(["none", "standard"]).optional(),
+    motion: z.enum(["none", "standard", "reduced", "expressive"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
+    derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();
@@ -934,16 +940,20 @@ export const PROTOTYPE_NODE_TYPES = [
   "snackbar",
   "timePicker",
   "datePicker",
+  "list",
   "scroll",
   "pager",
   "stack",
   "tabBar",
   "bottomNav",
   "bottomSheet",
+  "tooltip",
+  "drawer",
 ] as const;
 export const PROTOTYPE_ACTION_TYPES = [
   "emit",
   "setPage",
+  "setStack",
   "push",
   "pop",
   "popToRoot",
@@ -955,10 +965,13 @@ export const PROTOTYPE_ACTION_TYPES = [
   "dismiss",
   "setData",
   "appendData",
+  "prependData",
   "removeData",
   "request",
   "platform",
   "scrollTo",
+  "startTimer",
+  "cancelTimer",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

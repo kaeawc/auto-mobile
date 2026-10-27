@@ -4,6 +4,7 @@ import * as core from "../../../src/features/deviceLifecycle/deviceLifecycleCore
 test("preserves the device lifecycle core runtime exports", () => {
   expect(Object.keys(core).sort()).toEqual([
     "DEVICE_ALREADY_STOPPED_ERROR_CODE",
+    "DEVICE_INTACT_REFUSAL_CODES",
     "DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF",
     "DEVICE_SHUTDOWN_POLL_INTERVAL_MS",
     "DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS",
@@ -105,6 +106,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "initializedDeviceSessionUuid",
     "inventoryContainsTarget",
     "isConfirmedDeviceReplacement",
+    "isDeviceIntactRefusal",
     "isMismatchedBootedDeviceId",
     "isProvisionDeviceCallerAbort",
     "isShutdownTimeoutError",
@@ -147,6 +149,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "rebootAndroidAfterSystemUiAnr",
     "rebuildSameIdReplacement",
     "refreshResourcesAfterCommittedBoot",
+    "refuseLiveStoppedAndroidTarget",
     "releaseRecoveryReservations",
     "releaseShutdownSessionOwnership",
     "reserveInitialDeviceForReadiness",

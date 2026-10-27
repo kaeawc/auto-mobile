@@ -1,3 +1,13 @@
+import { parsePrototypeBackdrop } from "../prototypeBackdrop";
+import {
+  prototypeShaderPatchSpec,
+  prototypeShaderFields,
+  prototypeShadersUnsupportedMessage,
+} from "../prototypeShaders";
+import { PROTOTYPE_SHADER_MIME_TYPE } from "../prototypeShaderSource";
+import { prototypeDegradedEffectsField } from "../prototypeDegradedEffects";
+import { PROTOTYPE_TIMERS_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import { prototypeTimersUnsupportedMessage } from "../prototypeTimers";
 import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
 import { PROTOTYPE_STACK_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import { prototypeStacksSchema } from "../../observe/android/CtrlProxyPrototypes";
@@ -13,8 +23,9 @@ import {
  * The agent speaks the CtrlProxy prototype message names, so requests and `prototype_event` pushes
  * map one to one. It has no `update_prototype` (#10550): a same-id `show` replaces the prototype.
  * It has no display targeting. `reset` is forwarded to start a same-id show fresh, and `appearance`
- * to pin the system setting (an agent advertising `prototype_appearance_v1` only). Transport per-call `timeoutMs` is not forwarded. Status uses a short client deadline to detect
- * a suspended app; other requests use the agent client's default request timeout.
+ * to pin the system setting (an agent advertising `prototype_appearance_v1` only). A per-call
+ * `timeoutMs` is forwarded on show, patch, dismiss and clearStorage; without one they use the agent
+ * client's default request timeout. Status uses a short client deadline to detect a suspended app.
  */
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -124,22 +135,31 @@ export function prototypeAgentNotConnectedMessage(deviceId: string): string {
   );
 }
 
+/** Both device counters are optional, nonnegative integral result fields. */
+function resultCount(
+  key: "fired" | "cleared",
+  value: unknown,
+): Partial<Pick<PrototypeResult, "fired" | "cleared">> {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? { [key]: value }
+    : {};
+}
+
 function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const { missingAssets, totalTimeMs } = result;
   // Only a show answered by an agent advertising prototype_appearance_v1 carries it.
   const appearance = parsePrototypeAppearance(result.appearance);
   return {
     ...(appearance ? { appearance } : {}),
+    ...parsePrototypeBackdrop(result.backdrop),
     ...(prototypeStacksSchema.parse(result.stacks)
       ? { stacks: prototypeStacksSchema.parse(result.stacks) }
       : {}),
+    ...prototypeDegradedEffectsField(result.degradedEffects),
     success: result.success,
     requestId: result.requestId,
-    ...(typeof result.cleared === "number" &&
-    Number.isSafeInteger(result.cleared) &&
-    result.cleared >= 0
-      ? { cleared: result.cleared }
-      : {}),
+    ...resultCount("fired", result.fired),
+    ...resultCount("cleared", result.cleared),
     ...(typeof result.error === "string" ? { error: result.error } : {}),
     ...(typeof totalTimeMs === "number" ? { totalTimeMs } : {}),
     ...(Array.isArray(missingAssets) &&
@@ -234,6 +254,9 @@ export class IosPrototypeTransport implements PrototypeTransport {
    * `prototype_show_in_place_v1`.
    */
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
+    if (prototypeShaderFields(spec).length) {
+      throw new ActionableError(prototypeShadersUnsupportedMessage([], "ios"));
+    }
     if (prototypeHasStack(spec) && !this.supportsCapability(PROTOTYPE_STACK_CAPABILITY)) {
       throw new ActionableError(prototypeStackUnsupportedMessage("ios"));
     }
@@ -252,24 +275,42 @@ export class IosPrototypeTransport implements PrototypeTransport {
       throw new ActionableError(prototypeAppearanceUnsupportedMessage(appearance, "ios"));
     }
     return toPrototypeResult(
-      await this.agent.request("show_prototype", {
-        spec,
-        ...(options.reset === true ? { reset: true } : {}),
-        ...(appearance === undefined ? {} : { appearance }),
-      }),
+      await this.request("show_prototype", showMessage(spec, options), options.timeoutMs),
     );
   }
 
-  async patch(patch: PrototypePatchRequest): Promise<PrototypePatchReply> {
+  /** The per-call deadline when the caller gave one; otherwise the agent client's default. */
+  private request(
+    type: PrototypeAgentRequestType,
+    body: PrototypeAgentMessage,
+    timeoutMs?: number,
+  ): Promise<PrototypeAgentResult> {
+    return timeoutMs === undefined
+      ? this.agent.request(type, body)
+      : this.agent.request(type, body, { timeoutMs });
+  }
+
+  async patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
+    if (prototypeShaderFields(prototypeShaderPatchSpec(patch.ops)).length) {
+      return {
+        success: false,
+        delivery: "unsent",
+        error: prototypeShadersUnsupportedMessage([], "ios"),
+      };
+    }
     if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
       return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
     }
     try {
-      const reply = await this.agent.request("patch_prototype", {
-        id: patch.id,
-        ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
-        ops: patch.ops,
-      });
+      const reply = await this.request(
+        "patch_prototype",
+        {
+          id: patch.id,
+          ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
+          ops: patch.ops,
+        },
+        timeoutMs,
+      );
       return {
         ...toPrototypeResult(reply),
         ...prototypePatchReplyFields(reply),
@@ -281,23 +322,44 @@ export class IosPrototypeTransport implements PrototypeTransport {
     }
   }
 
-  async dismiss(target: PrototypeDismiss): Promise<PrototypeResult> {
+  async dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     const body: PrototypeAgentMessage = target.all ? { all: true } : { id: target.id };
-    return toPrototypeResult(await this.agent.request("dismiss_prototype", body));
+    return toPrototypeResult(await this.request("dismiss_prototype", body, timeoutMs));
+  }
+
+  async advanceClock(
+    id: string,
+    advanceTimeMs: number,
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (!this.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY)) {
+      throw new ActionableError(prototypeTimersUnsupportedMessage([], "ios"));
+    }
+    if (!id || !Number.isInteger(advanceTimeMs) || advanceTimeMs < 1 || advanceTimeMs > 3600000) {
+      throw new ActionableError("simulate requires id and advanceTimeMs (integer 1..3600000)");
+    }
+    return toPrototypeResult(
+      await this.request("advance_prototype_clock", { id, advanceTimeMs }, timeoutMs),
+    );
   }
 
   /** Wipes the values the agent stored for `id` (#12522); refused unless it advertises prototype_storage_v1. */
-  async clearStorage(id: string): Promise<PrototypeResult> {
+  async clearStorage(id: string, timeoutMs?: number): Promise<PrototypeResult> {
     if (!this.supportsCapability(PROTOTYPE_STORAGE_CAPABILITY)) {
       throw new ActionableError(prototypeClearStorageUnsupportedMessage("ios"));
     }
-    return toPrototypeResult(await this.agent.request("clear_prototype_storage", { id }));
+    return toPrototypeResult(await this.request("clear_prototype_storage", { id }, timeoutMs));
   }
 
   async putAsset(
     asset: PrototypeAssetUpload,
     options: PrototypeAssetRequestOptions = {},
   ): Promise<PrototypeAssetResult> {
+    if (asset.mimeType === PROTOTYPE_SHADER_MIME_TYPE) {
+      throw new ActionableError(
+        "iOS prototype agents refuse application/vnd.automobile.agsl assets: custom shaders are Android-only.",
+      );
+    }
     const problem = prototypeAssetUploadProblem(asset);
     if (problem !== null) {
       throw new ActionableError(`Invalid prototype asset: ${problem}`);
@@ -343,6 +405,7 @@ export class IosPrototypeTransport implements PrototypeTransport {
       throw error;
     }
     return {
+      ...prototypeDegradedEffectsField(result.degradedEffects),
       success: result.success,
       ...(typeof result.error === "string" ? { error: result.error } : {}),
       ...(isRecord(result.status) ? { status: result.status } : {}),
@@ -402,4 +465,14 @@ export class IosPrototypeTransport implements PrototypeTransport {
       };
     }
   }
+}
+
+/** Show overrides share the message envelope, never the spec. */
+function showMessage(spec: PrototypeSpec, options: PrototypeShowOptions) {
+  return {
+    spec,
+    ...(options.reset === true ? { reset: true } : {}),
+    ...(options.appearance === undefined ? {} : { appearance: options.appearance }),
+    ...(spec.strings && options.locale !== undefined ? { locale: options.locale } : {}),
+  };
 }

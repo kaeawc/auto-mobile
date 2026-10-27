@@ -11,6 +11,30 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
  */
 internal object PrototypeMotionRules {
   fun motionErrors(context: Context): PrototypeSpecError? {
+    val pressable =
+      setOf(
+        "button",
+        "iconButton",
+        "fab",
+        "chip",
+        "listItem",
+        "switch",
+        "checkbox",
+        "radioGroup",
+        "segmentedButton",
+        "select",
+        "menu",
+      )
+    val invalidPress =
+      context.nodes.firstOrNull { (node) ->
+        "press" in node &&
+          node.text("type") !in pressable &&
+          listOf("onTap", "onLongPress", "onDoubleTap").none {
+            (node[it] as? kotlinx.serialization.json.JsonArray)?.isNotEmpty() == true
+          }
+      }
+    if (invalidPress != null)
+      return fail("${invalidPress.path}.press", "press requires a pressable node")
     val (_, path) =
       context.nodes.firstOrNull { (node) ->
         node.text("type") == "image" && "zoomable" in node && "onDoubleTap" in node

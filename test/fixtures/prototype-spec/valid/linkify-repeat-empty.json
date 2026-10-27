@@ -1,0 +1,92 @@
+{
+  "id": "linkify-repeat",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "liked_a": false,
+    "liked_b": false,
+    "handle_a": "",
+    "handle_b": "",
+    "number": 0
+  },
+  "data": {
+    "last": 0,
+    "posts": []
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "as": "post",
+      "items": {
+        "path": "/posts"
+      }
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{post.body}",
+        "linkify": {
+          "kinds": ["mention"],
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "handle_{post.id}",
+              "value": {
+                "match": "text"
+              }
+            },
+            {
+              "type": "toggle",
+              "key": "liked_{post.id}"
+            },
+            {
+              "type": "setState",
+              "key": "number",
+              "value": "{post.count}"
+            },
+            {
+              "type": "emit",
+              "name": "tap_{post.id}_{index}",
+              "context": {
+                "id": {
+                  "item": "id"
+                },
+                "index": {
+                  "index": true
+                },
+                "match": {
+                  "match": "kind"
+                },
+                "liked": {
+                  "state": "liked_{post.id}"
+                },
+                "literal": {
+                  "value": {
+                    "item": "id",
+                    "text": "{post.id}",
+                    "match": "text"
+                  }
+                }
+              },
+              "payload": {
+                "item": "id",
+                "text": "{post.id}",
+                "match": "text"
+              }
+            },
+            {
+              "type": "setData",
+              "path": "/data/last",
+              "value": {
+                "item": "count"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

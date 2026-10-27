@@ -1,0 +1,16 @@
+{
+  "id": "shared",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "column",
+    "children": []
+  },
+  "motion": "reduced"
+}

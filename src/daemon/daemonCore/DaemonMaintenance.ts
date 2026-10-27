@@ -13,7 +13,7 @@ import {
 } from "../daemonHealthCheck";
 import { SessionHeartbeatMonitor } from "../SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "../SingleFlightInterval";
-import { DEFAULT_SOCKET_PATH, SOCKET_PATH } from "../constants";
+import { DEFAULT_SOCKET_PATH, SOCKET_PATH } from "../wire/constants";
 import { DeviceForwardLeaseIdleReleaser } from "../deviceForwardLeaseIdleReleaser";
 import {
   getAcceptedAuxSocketConnectionCount,
@@ -29,7 +29,7 @@ import {
 } from "../privateDaemonOrphanWatchdog";
 import { PROCESS_ENTRY_PARENT_PID } from "../processEntry";
 import { resolveCtrlProxyForwardLeaseIdleMs } from "../../features/observe/shared/ctrlProxyForwardLeaseOwnership";
-import { PID_FILE_PATH } from "../constants";
+import { PID_FILE_PATH } from "../wire/constants";
 import { isProcessRunning } from "../daemonFiles";
 import { getDatabase, getDatabasePath } from "../../db";
 import { NavigationRetention } from "../../db/navigationRetention";
@@ -88,6 +88,7 @@ export interface DaemonMaintenanceHost {
   lastDatabaseHealthFailure: () => string | undefined;
   setLastDatabaseHealthFailure: (value: string | undefined) => void;
   recoverFromDatabaseHealthFailure: () => DatabaseHealthFailureRecovery;
+  hostIoStalled?: () => (() => boolean) | undefined;
   attemptRecovery: DaemonMaintenance["attemptRecovery"];
   sessionExecutionProbe: DaemonSessions["sessionExecutionProbe"];
   cancelAndReleaseSession: DaemonSessions["cancelAndReleaseSession"];
@@ -118,7 +119,8 @@ export class DaemonMaintenance {
           this.host.setLastDatabaseHealthFailure(message);
         },
         recover: (kind) => this.host.attemptRecovery(kind),
-        hostIoStalled: () => logSinkStalledWithin(HOST_IO_STALL_MEMORY_MS),
+        hostIoStalled:
+          this.host.hostIoStalled?.() ?? (() => logSinkStalledWithin(HOST_IO_STALL_MEMORY_MS)),
       }),
     );
     this.host.healthCheck()!.start();

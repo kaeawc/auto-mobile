@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DaemonBoundSessionExpiredError,
   DaemonMcpProxy,

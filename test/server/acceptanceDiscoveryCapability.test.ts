@@ -18,7 +18,7 @@ import {
   DAEMON_VERSION,
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { DaemonClient } from "../../src/daemon/client";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";

@@ -1640,6 +1640,43 @@ describe("checkIosObserveRoundTrip", () => {
     expect(result.message).toContain("elementCount=0");
   });
 
+  describe("a booted simulator with no running runner (#15310)", () => {
+    const notRunning = inspection({
+      deviceId: "CI-SIM",
+      connected: false,
+      screenSize: { width: 0, height: 0 },
+      hierarchyError: "iOS CtrlProxy runner is not running",
+      elementCount: 0,
+      probed: false,
+    });
+
+    test("warns instead of failing when no simulator was requested, since none was probed", async () => {
+      const result = await checkIosObserveRoundTrip(withRoundTrips([notRunning]));
+
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("notProbed=true");
+      expect(result.recommendation).toContain("--device");
+    });
+
+    test("still fails for the simulator the caller asked about", async () => {
+      const result = await checkIosObserveRoundTrip(
+        withRoundTrips([notRunning]),
+        undefined,
+        "CI-SIM",
+      );
+
+      expect(result.status).toBe("fail");
+    });
+
+    test("a probed simulator that fails still fails the check alongside an unprobed one", async () => {
+      const result = await checkIosObserveRoundTrip(
+        withRoundTrips([notRunning, inspection({ elementCount: 0 })]),
+      );
+
+      expect(result.status).toBe("fail");
+    });
+  });
+
   test("skips when no simulators are booted", async () => {
     const result = await checkIosObserveRoundTrip(withRoundTrips([]));
 
@@ -2633,6 +2670,8 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     expect(created).toBe(false);
     expect(inspections[0].connected).toBe(false);
     expect(inspections[0].hierarchyError).toBe("iOS CtrlProxy runner is not running");
+    // Nothing was sent to the simulator (#15310).
+    expect(inspections[0].probed).toBe(false);
   });
 
   test("connects to the discovered host port despite stale manager allocation", async () => {

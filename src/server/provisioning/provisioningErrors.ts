@@ -22,8 +22,8 @@ import {
   type ProvisionDeviceRecoveryEvidence,
   type ProvisionDeviceRecoveryInput,
 } from "../provisionDeviceRecoveryEvidence";
-import { getCurrentBuildIdentity } from "../../daemon/buildIdentity";
-import { DAEMON_VERSION } from "../../daemon/constants";
+import { getCurrentBuildIdentity } from "../../daemon/wire/buildIdentity";
+import { DAEMON_VERSION } from "../../daemon/wire/constants";
 import { DaemonHandoffInterruptionError } from "../../daemon/daemonHandoffInterruption";
 import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { DeviceBootTimeoutError } from "../../devices/deviceBootService";
@@ -143,6 +143,9 @@ export function failureBoundaryRecovery(
     // A rollback error's own lifecycle is newer than the last one recorded.
     lifecycle: lifecycle ?? request.lifecycleEvidence.lifecycle,
     ...(ownership ? { ownership } : {}),
+    deviceIntact:
+      error instanceof ProvisionDeviceRollbackError &&
+      error.diagnostics.retainedDevice !== undefined,
     originalError: { code, message: errorMessage(failure) },
     ...(retryable !== undefined ? { retryable } : {}),
   });
@@ -366,6 +369,9 @@ function provisionDeviceDiagnosticFields(error: ProvisionDeviceError) {
     ...(diagnostics.deviceId ? { deviceId: diagnostics.deviceId } : {}),
     ...(diagnostics.ownerPid !== undefined ? { ownerPid: diagnostics.ownerPid } : {}),
     ...(diagnostics.retryAfterMs !== undefined ? { retryAfterMs: diagnostics.retryAfterMs } : {}),
+    ...(diagnostics.hazards
+      ? { hazards: diagnostics.hazards, howToProceed: diagnostics.howToProceed }
+      : {}),
     ...(diagnostics.resourceDrift ? { resourceDrift: diagnostics.resourceDrift } : {}),
     ...(diagnostics.runtimeCompatibility
       ? { runtimeCompatibility: diagnostics.runtimeCompatibility }

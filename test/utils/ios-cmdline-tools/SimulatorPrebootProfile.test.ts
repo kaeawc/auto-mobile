@@ -1,7 +1,9 @@
+import { fakeIosDeviceResourceHazards as hazards } from "../../helpers/fakeIosDeviceResourceHazards";
 import { NodeSimulatorHostState } from "../../../src/utils/ios-cmdline-tools/NodeSimulatorHostState";
 import { expect, test, spyOn } from "bun:test";
 import {
   SimulatorPrebootProfile,
+  PREBOOT_LEAN_PROFILES,
   resolvePrebootLabels,
   resolveDefaultPrebootProfile,
   simulatorHostStateDir,
@@ -57,7 +59,7 @@ test.each(["../x", "A/B", "sim", `${UDID}/x`, `${UDID}\n`])(
 );
 test("none touches nothing", async () => {
   const { host, service } = harness();
-  expect(await service.apply(UDID, {})).toEqual({ applied: false, labels: [] });
+  expect(await service.apply(UDID, {})).toEqual({ applied: false, labels: [], resources: [] });
   expect(host.calls).toEqual([]);
 });
 test("creates a private directory and merges foreign keys into the binary database", async () => {
@@ -66,6 +68,7 @@ test("creates a private directory and merges foreign keys into the binary databa
   const result = await service.apply(UDID, {});
   expect(result).toEqual({
     applied: true,
+    resources: ["wallpaperRendering", "widgets", "liveActivities"],
     labels: resolvePrebootLabels({ profile: "minimal" }),
     path: simulatorDisabledDbPath(UDID),
   });
@@ -85,7 +88,11 @@ test("write failures warn and return typed failure", async () => {
   host.writeError = new Error("denied");
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    expect(await service.apply(UDID, {})).toMatchObject({ applied: false, reason: "denied" });
+    expect(await service.apply(UDID, {})).toMatchObject({
+      applied: false,
+      resources: [],
+      reason: "denied",
+    });
     expect(warn).toHaveBeenCalled();
   } finally {
     warn.mockRestore();
@@ -115,8 +122,8 @@ test("unexpected remove failures warn without throwing", async () => {
     warn.mockRestore();
   }
 });
-test("environment defaults to none and accepts only named profiles", () => {
-  expect(resolveDefaultPrebootProfile({})).toBe("none");
+test("environment defaults to minimal and accepts only named profiles", () => {
+  expect(resolveDefaultPrebootProfile({})).toBe("minimal");
   for (const profile of ["none", "minimal", "catalog-cpu"] as const) {
     expect(resolveDefaultPrebootProfile({ AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE: profile })).toBe(
       profile,
@@ -126,7 +133,7 @@ test("environment defaults to none and accepts only named profiles", () => {
   try {
     expect(
       resolveDefaultPrebootProfile({ AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE: "everything" }),
-    ).toBe("none");
+    ).toBe("minimal");
     expect(warn).toHaveBeenCalled();
   } finally {
     warn.mockRestore();
@@ -185,7 +192,7 @@ test("evaluates the default lazily on each apply without reading ambient env in 
   expect((await service.apply(UDID, {})).labels).toHaveLength(3);
   host.calls.length = 0;
   env.AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE = "none";
-  expect(await service.apply(UDID, {})).toEqual({ applied: false, labels: [] });
+  expect(await service.apply(UDID, {})).toEqual({ applied: false, labels: [], resources: [] });
   expect(host.calls).toEqual([]);
 });
 
@@ -305,3 +312,68 @@ test.each(["symlink", "foreign owner", "file", "ok"])(
     }
   },
 );
+
+test("unsafe preboot overrides warn without host access", async () => {
+  const host = new FakeSimulatorHostState();
+  const service = new SimulatorPrebootProfile(host, () => "minimal", hazards);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(
+      await service.apply(UDID, {
+        resources: { calendarServices: "disabled", reminderServices: "disabled" },
+      }),
+    ).toMatchObject({ applied: false, labels: [], resources: [], unsafe: hazards });
+    expect(host.calls).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+  } finally {
+    warn.mockRestore();
+  }
+});
+test("preboot hazards include profile keys and honor enabled overrides", async () => {
+  const host = new FakeSimulatorHostState();
+  const profileHazards = [{ ...hazards[0]!, resources: ["widgets", "calendarServices"] as const }];
+  const service = new SimulatorPrebootProfile(host, () => "minimal", profileHazards);
+  expect(
+    (await service.apply(UDID, { resources: { calendarServices: "disabled" } })).unsafe,
+  ).toEqual(profileHazards);
+  expect(host.calls).toEqual([]);
+  expect(
+    (await service.apply(UDID, { resources: { calendarServices: "disabled", widgets: "enabled" } }))
+      .applied,
+  ).toBe(true);
+});
+
+test("real post-boot calendar hazard allows preboot disable", async () => {
+  const host = new FakeSimulatorHostState();
+  const service = new SimulatorPrebootProfile(host, () => "minimal");
+  const result = await service.apply(UDID, { resources: { calendarServices: "disabled" } });
+  expect(result.applied).toBe(true);
+  expect(result.labels).toContain("com.apple.calaccessd");
+  expect(result.unsafe).toBeUndefined();
+});
+
+test("default and all profiles exclude calendar; default is safe in both phases", async () => {
+  const { findUnsafeResourceCombinations, iosDeviceResourceHazards } =
+    await import("../../../src/utils/iosDeviceResourceHazards");
+  const profile = resolveDefaultPrebootProfile({});
+  for (const profileName of Object.keys(
+    PREBOOT_LEAN_PROFILES,
+  ) as (keyof typeof PREBOOT_LEAN_PROFILES)[]) {
+    const { service } = harness(profileName);
+    expect((await service.apply(UDID, {})).resources).not.toContain("calendarServices");
+  }
+  for (const phase of ["preboot", "post_boot"] as const) {
+    expect(
+      findUnsafeResourceCombinations(
+        [...PREBOOT_LEAN_PROFILES[profile]],
+        iosDeviceResourceHazards,
+        phase,
+      ),
+    ).toEqual([]);
+  }
+  const { service } = harness("minimal");
+  const result = await service.apply(UDID, {
+    resources: { widgets: "enabled", healthServices: "disabled" },
+  });
+  expect(result.resources).toEqual(["wallpaperRendering", "liveActivities", "healthServices"]);
+});

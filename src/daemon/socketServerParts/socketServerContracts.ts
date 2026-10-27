@@ -281,6 +281,7 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
         deviceId: string,
       ): string | undefined;
       isSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
+      isSessionOwnedByConnection?(sessionId: string, mcpSessionId?: string): boolean;
       assertNotClaimedByForeignDaemon?(
         deviceId: string,
         platform: "android" | "ios",

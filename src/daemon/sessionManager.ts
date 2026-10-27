@@ -1,3 +1,4 @@
+import type { SessionDeviceReboundEmitter } from "./sessionDeviceReboundBroadcast";
 import type { Session } from "./sessionManager/sessionTypes";
 
 import type * as Types from "./sessionManager/publicExports";
@@ -24,7 +25,7 @@ import type { ReleaseSessionRequest } from "./releaseSessionRequest";
 import { onSessionClock } from "./sessionClockPersistence";
 import { SessionDeviceStateRestore } from "./sessionDeviceStateRestore";
 import { SessionLivenessController } from "./sessionLivenessLease";
-import * as livenessWindows from "./sessionLivenessWindows";
+import * as livenessWindows from "./wire/sessionLivenessWindows";
 import { SessionManagerCleanup } from "./sessionManager/cleanup";
 import { SessionManagerConfiguration } from "./sessionManager/configuration";
 import { SessionManagerConstruction } from "./sessionManager/construction";
@@ -314,6 +315,7 @@ export class SessionManager extends SessionManagerForwarders {
       sessionSetupPromises: () => this.sessionSetupPromises,
       deviceCleanupQuarantine: () => this.deviceCleanupQuarantine,
       releaseCallbacks: () => this.releaseCallbacks,
+      sessionDeviceReboundEmitter: () => this.sessionDeviceReboundEmitter,
       deviceOwnershipCallbacks: () => this.deviceOwnershipCallbacks,
       createdCallbacks: () => this.createdCallbacks,
       deviceUnboundCallbacks: () => this.deviceUnboundCallbacks,
@@ -416,6 +418,7 @@ export class SessionManager extends SessionManagerForwarders {
   private timer: Timer;
   /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
   private readonly sessionClock: SteadyWallClock;
+  private sessionDeviceReboundEmitter: SessionDeviceReboundEmitter | undefined;
   private releaseCallbacks: Types.SessionReleaseCallback[] = [];
   private readonly restartReleasePersistence = new WeakMap<
     Types.SessionReleaseSnapshot,
@@ -576,7 +579,7 @@ export class SessionManager extends SessionManagerForwarders {
   private readonly deferredAcquisitionCancellations = new Map<string, string | undefined>();
 
   // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
-  // tool call, env-overridable (see `./sessionLivenessWindows`).
+  // tool call, env-overridable (see `./wire/sessionLivenessWindows`).
   private readonly SESSION_TIMEOUT_MS = livenessWindows.getSessionIdleTimeoutMs();
 
   // Cleanup interval: every 5 minutes
@@ -609,6 +612,7 @@ export class SessionManager extends SessionManagerForwarders {
     });
 
     this.timer = timer;
+    this.sessionDeviceReboundEmitter = options.sessionDeviceReboundEmitter;
     this.sessionClock = new SteadyWallClock(timer);
     this.deviceCleanupQuarantine = construction.createDeviceCleanupQuarantine(timer);
     // Rows are read by other processes on their own session clocks: stamps cross as wall ms (#11162).

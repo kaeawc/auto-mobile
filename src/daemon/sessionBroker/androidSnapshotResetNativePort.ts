@@ -251,6 +251,8 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
       throw new ActionableError("Android reset cannot prove the owned emulator process exists");
     }
     await this.dependencies.emulator.killDevice(device, {
+      // This broker owns the identified process; offline adb is not proof of exit.
+      force: true,
       beforeDispatch: () => this.assertTarget(device, step),
       signal: step.signal,
       timeoutMs: step.timeoutMs,

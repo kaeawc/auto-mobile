@@ -13,7 +13,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 

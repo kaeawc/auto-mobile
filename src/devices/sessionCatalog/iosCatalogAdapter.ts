@@ -17,6 +17,7 @@ import {
   hasRuntimeRangeMetadata,
 } from "../../utils/ios-cmdline-tools/runtimeCompatibility";
 import { logger as defaultLogger } from "../../utils/logger";
+import { isIosDuoDeviceType } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { nativeCatalogRevision } from "./revision";
 
 const IOS_CATALOG_SOURCE = "simctl-installed-catalog";
@@ -142,7 +143,12 @@ function classifyIpadName(name: string): IosModelType | undefined {
 }
 
 function builtInClassification(deviceType: AppleDeviceType): IosClassification {
-  if (deviceType.productFamily === "Duo" || deviceType.name === "iPhone Duo") {
+  // Xcode reports the Duo as productFamily "iPhone"; its device-type identifier is authoritative.
+  if (
+    isIosDuoDeviceType(deviceType.identifier) ||
+    deviceType.productFamily === "Duo" ||
+    deviceType.name === "iPhone Duo"
+  ) {
     return {
       archetype: "duo",
       modelType: { family: "duo", variant: "duo" },

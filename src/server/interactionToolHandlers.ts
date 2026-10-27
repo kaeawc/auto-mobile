@@ -44,7 +44,9 @@ import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { SendKeys } from "../features/action/SendKeys";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { fixedBackoff } from "../utils/Backoff";
+import { IosOpenAlertError, selectIosOpenAlertAcceptButton } from "./iosOpenAlert";
 import { ProgressCallback } from "./toolRegistry";
 import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -64,7 +66,7 @@ import { SystemTray } from "../features/systemTray/SystemTray";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import { dismissKeyboardAfterSendKeys } from "../features/action/dismissKeyboardAfterSendKeys";
 import { serverConfig } from "../utils/ServerConfig";
-import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/wire/constants";
 import { assertActiveWindowWaitForSupportedOnPlatform, waitForObservation } from "./observeTools";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { displayWaitInventory } from "../utils/deviceMatcher";
@@ -333,11 +335,13 @@ const IOS_SYSTEM_DIALOG_CLASSES = new Set([
   "XCUIElementTypeSheet",
 ]);
 
-const IOS_OPEN_ALERT_ACCEPT_ATTEMPTS = 8;
+/** How long to wait for the "Open in ...?" alert after openurl; a loaded host animates it slowly. */
+const IOS_OPEN_ALERT_WAIT_TIMEOUT_MS = 5_000;
 
-const IOS_OPEN_ALERT_RETRY_INTERVAL_MS = 250;
+/** How long to wait for the alert to finish dismissing after the accept tap. */
+const IOS_OPEN_ALERT_VERIFY_TIMEOUT_MS = 3_000;
 
-const IOS_OPEN_ALERT_VERIFY_ATTEMPTS = 4;
+const IOS_OPEN_ALERT_POLL_BACKOFF = fixedBackoff(250);
 
 const IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS = 2_000;
 
@@ -435,28 +439,60 @@ async function tapLiveSystemAlert(tapSystemAlert: SystemAlertTap | undefined): P
   return tapSystemAlert ? (await tapSystemAlert()).success : false;
 }
 
+interface OpenAlertTiming {
+  timer: Timer;
+  waitTimeoutMs: number;
+  verifyTimeoutMs: number;
+}
+
+/** Probe until it yields a value or the budget is spent; the delay between probes is bounded by the backoff. */
+async function pollWithin<T>(
+  timing: { timer: Timer; timeoutMs: number; signal: AbortSignal | undefined },
+  probe: () => Promise<T | undefined>,
+): Promise<T | undefined> {
+  const startedAt = timing.timer.now();
+  for (let attempt = 1; ; attempt += 1) {
+    throwIfOpenAlertAcceptanceAborted(timing.signal);
+    const value = await probe();
+    if (value !== undefined) {
+      return value;
+    }
+    const delay = IOS_OPEN_ALERT_POLL_BACKOFF.delayForAttempt(attempt);
+    if (timing.timer.now() - startedAt + delay > timing.timeoutMs) {
+      return undefined;
+    }
+    await timing.timer.sleep(delay);
+  }
+}
+
 async function verifyIosOpenAlertDismissed(
   refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
   tapSystemAlert: SystemAlertTap | undefined,
   signal: AbortSignal | undefined,
+  timing: OpenAlertTiming,
 ): Promise<boolean> {
   if (!refreshHierarchy) {
     return true;
   }
-  for (let attempt = 0; attempt < IOS_OPEN_ALERT_VERIFY_ATTEMPTS; attempt += 1) {
-    throwIfOpenAlertAcceptanceAborted(signal);
-    const hierarchy = await refreshHierarchy();
-    if (!hierarchy) {
-      continue;
-    }
-    if (!isIosAppOpenAlertHierarchy(hierarchy)) {
-      return true;
-    }
-    if (!(await tapLiveSystemAlert(tapSystemAlert))) {
-      return false;
-    }
-  }
-  return false;
+  // The dismissal animation outlives the tap: let it run before the first check.
+  await timing.timer.sleep(IOS_OPEN_ALERT_POLL_BACKOFF.delayForAttempt(1));
+  const dismissed = await pollWithin(
+    { timer: timing.timer, timeoutMs: timing.verifyTimeoutMs, signal },
+    async () => {
+      const hierarchy = await refreshHierarchy();
+      if (!hierarchy) {
+        return undefined;
+      }
+      if (!isIosAppOpenAlertHierarchy(hierarchy)) {
+        return true;
+      }
+      // Re-tap only while the same alert is still on screen. A failed live tap just means the
+      // dialog is already leaving, so the next poll decides.
+      await tapLiveSystemAlert(tapSystemAlert);
+      return undefined;
+    },
+  );
+  return dismissed === true;
 }
 
 async function resolveIosOpenAlert(
@@ -464,6 +500,7 @@ async function resolveIosOpenAlert(
   refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
   tapSystemAlert: SystemAlertTap | undefined,
   signal: AbortSignal | undefined,
+  timing: OpenAlertTiming,
 ): Promise<OpenAlertResolution> {
   if (isIosAppOpenAlertHierarchy(initialHierarchy) && !tapSystemAlert) {
     return initialHierarchy ? { hierarchy: initialHierarchy } : null;
@@ -473,25 +510,35 @@ async function resolveIosOpenAlert(
   }
 
   let hierarchy = initialHierarchy;
-  for (let attempt = 0; attempt < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS; attempt += 1) {
-    throwIfOpenAlertAcceptanceAborted(signal);
-    hierarchy = await refreshOpenAlertHierarchy(hierarchy, refreshHierarchy);
-    if (await tapLiveSystemAlert(tapSystemAlert)) {
-      return { systemTapped: true };
-    }
-    if (isIosAppOpenAlertHierarchy(hierarchy)) {
-      return hierarchy ? { hierarchy } : null;
-    }
-    if (attempt + 1 < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS) {
-      await defaultTimer.sleep(IOS_OPEN_ALERT_RETRY_INTERVAL_MS);
-    }
-  }
-  return null;
+  const resolved = await pollWithin(
+    { timer: timing.timer, timeoutMs: timing.waitTimeoutMs, signal },
+    async (): Promise<OpenAlertResolution | undefined> => {
+      hierarchy = await refreshOpenAlertHierarchy(hierarchy, refreshHierarchy);
+      if (await tapLiveSystemAlert(tapSystemAlert)) {
+        return { systemTapped: true };
+      }
+      if (isIosAppOpenAlertHierarchy(hierarchy)) {
+        return hierarchy ? { hierarchy } : null;
+      }
+      return undefined;
+    },
+  );
+  return resolved ?? null;
+}
+
+function systemAlertTapResult(text: string): TapOnElementResult {
+  return {
+    success: true,
+    action: "tap",
+    element: { text, bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+  } as TapOnElementResult;
 }
 
 /**
- * Tap the system-owned Open button only when the merged SpringBoard hierarchy
- * proves the custom-URL confirmation is present.
+ * Tap the system-owned accept button only when the merged SpringBoard hierarchy
+ * proves the custom-URL confirmation is present. Waits (bounded) for the alert to
+ * appear and to dismiss; returns null when none appeared in the window, and throws an
+ * {@link IosOpenAlertError} naming the failed phase otherwise.
  */
 export async function acceptIosAppOpenAlert(
   device: BootedDevice,
@@ -504,41 +551,67 @@ export async function acceptIosAppOpenAlert(
   if (device.platform !== "ios") {
     return null;
   }
+  const timing: OpenAlertTiming = {
+    timer: options.timer ?? defaultTimer,
+    waitTimeoutMs: options.waitTimeoutMs ?? IOS_OPEN_ALERT_WAIT_TIMEOUT_MS,
+    verifyTimeoutMs: options.verifyTimeoutMs ?? IOS_OPEN_ALERT_VERIFY_TIMEOUT_MS,
+  };
 
   const resolution = await resolveIosOpenAlert(
     observation?.viewHierarchy,
     refreshHierarchy,
     tapSystemAlert,
     signal,
+    timing,
   );
   if (!resolution) {
     return null;
   }
-  if ("systemTapped" in resolution) {
-    const result = {
-      success: true,
-      action: "tap",
-      element: { text: "Open", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
-    } as TapOnElementResult;
-    if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
-      throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
+  const verify = async (candidates: readonly string[]) => {
+    if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal, timing))) {
+      throw new IosOpenAlertError("verify", "dialog remained visible", candidates);
     }
-    return result;
+  };
+  if ("systemTapped" in resolution) {
+    await verify([]);
+    return systemAlertTapResult("Open");
   }
 
-  const result = await (tapOnElementFactory ?? defaultTapOnElementFactory)(device).execute(
-    { text: "Open", action: "tap" },
+  const tapped = await tapAlertAcceptButton(
+    device,
+    resolution.hierarchy,
+    { tapOnElementFactory, tapSystemAlert },
     { progress, signal },
   );
-  if (!result.success) {
-    throw new ActionableError(
-      `Failed to accept iOS app-open alert: ${result.error || "unknown error"}`,
-    );
+  await verify(tapped.candidates);
+  return tapped.result;
+}
+
+/** Tap the accept button chosen by role; the live system tap covers a tap that misses. */
+async function tapAlertAcceptButton(
+  device: BootedDevice,
+  hierarchy: ObserveResult["viewHierarchy"],
+  taps: Pick<AcceptIosAppOpenAlertOptions, "tapOnElementFactory" | "tapSystemAlert">,
+  context: { progress: ProgressCallback | undefined; signal: AbortSignal | undefined },
+): Promise<{ result: TapOnElementResult; candidates: string[] }> {
+  // Role and position pick the button; the English "Open" label is only the last resort.
+  const accept = selectIosOpenAlertAcceptButton(hierarchy);
+  const candidates = accept?.candidates ?? [];
+  const result = await (taps.tapOnElementFactory ?? defaultTapOnElementFactory)(device).execute(
+    { ...(accept?.selector ?? { text: "Open" }), action: "tap" },
+    context,
+  );
+  if (result.success) {
+    return { result, candidates };
   }
-  if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
-    throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
+  if (await tapLiveSystemAlert(taps.tapSystemAlert)) {
+    return { result: systemAlertTapResult(candidates.at(-1) ?? "Open"), candidates };
   }
-  return result;
+  throw new IosOpenAlertError(
+    accept ? "tap" : "detect",
+    accept ? result.error || "unknown error" : "the alert offers no accept button",
+    candidates,
+  );
 }
 
 // ============================================================================

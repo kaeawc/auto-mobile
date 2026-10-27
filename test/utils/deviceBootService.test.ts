@@ -2100,6 +2100,7 @@ describe("DeviceBootService", () => {
           provisionCriteria = criteria;
           return {
             platform: "ios",
+            prebootDisabledResources: ["widgets"],
             name: "AutoMobile CI iPhone",
             deviceId: "CI-UDID",
             deviceType: "iPhone",
@@ -2110,7 +2111,7 @@ describe("DeviceBootService", () => {
       matchingStrategy: "LATEST",
     });
 
-    await bootService.boot({
+    const result = await bootService.boot({
       platform: "ios",
       name: "AutoMobile CI iPhone (26.3)",
       minOsVersion: "26.3",
@@ -2119,6 +2120,7 @@ describe("DeviceBootService", () => {
       createIfMissing: true,
     });
 
+    expect(result.prebootDisabledResources).toEqual(["widgets"]);
     expect(provisionCriteria).toMatchObject({ minOsVersion: "26.3", maxOsVersion: "26.3" });
   });
 

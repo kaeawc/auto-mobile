@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { markImportedPrototypeContent } from "../../importedPrototypeContent";
 import { parseObserveResultJson } from "../observeResultWire";
 import type { Element } from "../../../../models/Element";
 import type { ObserveResult, SkeletonElement } from "../../../../models/ObserveResult";
@@ -158,6 +159,7 @@ export function sanitizeObserveResult(
   // (ViewHierarchy.ts) and the wire's own JSON semantics (undefined/functions
   // dropped), so it can never throw on a value structuredClone would reject.
   const out = clone(obs);
+  markImportedPrototypeContent(out, obs);
   sanitizeHierarchyMetadata(out);
 
   stripPerformanceAudit(out);

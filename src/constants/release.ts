@@ -86,6 +86,18 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.88",
+    apkSha256: "de6b78a022dcb62ff862b137076ac7202866a9896bda6d04be20dd7ab1ae377d",
+    ipaSha256: "4fddc878276c9ea0a86008ea45422a41c31885cec70d5060b1ad573d45e8b893",
+    runnerSha256: "5e6cf51eabcd6e7a7cd49e5205208845d11a54ae126fa235bee261120e7b0dc2",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
+    screenCaptureHelperSha256: "bb0696c32e2ef61ebfede73a844817660e6a5aebbc8258dcc03e487afa294fb4",
+    prototypeAgentSha256: "cc644a6dc81fd4aab561e2b7e8c1ba80a320a5b68da1729b650e750fd1b726e2",
+    prototypeViewerSha256: "3fdabb1600c84db71ec8dbd089d8e741c1260bbf7631c48b5505b017713c7d22",
+    networkFilterSha256: "ab1455dc7d737d4fc003ffaf11b5d2033c8b70f8648e059d7beef6164ce76336",
+  },
+  {
     version: "0.0.87",
     apkSha256: "65e6c420b48b9af28377df9b68073b6151567a90059cefb33e677a5310cb6544",
     ipaSha256: "0d5bc367976e67475400fd85a84b85c2e51bd4efa31060bfb43fbba47c4fab7c",
@@ -640,11 +652,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "bb7770cbbc9a4aa10276d21277c547730f7db1e8fe1424c1a57fe1626eaf5ea8",
-  ipaSha256: "1fa282c76edf59e229c1784fe11f90a9d2bb8dd52702761cef5fdfac0e6d9a58",
+  apkSha256: "8660046756d7957041308e96fa98b47948630642fae0c23b9978218d206d9d17",
+  ipaSha256: "e22e313f3a0bfd76e2c2fd1711f604e29bb7aae10e569c29c05f9c5da8b558f2",
   runnerSha256Target: "xctest",
   videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
-  runnerSha256: "005ef4ec3ab34c664efb2216b89dda01060c0e521c88b5946afae5a58dea222b",
+  runnerSha256: "eff4087c8e348c0cbc8f50479d30bb755806ab28d6afc07aeb1557cb4d69e4ea",
 };
 
 /**

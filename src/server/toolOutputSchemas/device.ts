@@ -1,3 +1,4 @@
+import { disabledResourcesSchema } from "../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import { deviceDescriptionSchema } from "../../daemon/deviceDescription";
 import { platformSchema } from "../../utils/schemaHelpers";
@@ -43,6 +44,7 @@ export const startDeviceOutputSchema = z
     isReady: z.literal(true).optional(),
     acquisition: z.enum(["already-booted", "cold-boot"]).optional(),
     readiness: startDeviceReadinessSchema.optional(),
+    disabledResources: disabledResourcesSchema.optional(),
     // PerformanceTracker emits nested arrays/records rather than a flat numeric map.
     timing: z.unknown().optional(),
   })

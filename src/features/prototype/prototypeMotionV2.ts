@@ -1,4 +1,5 @@
 import { PROTOTYPE_MOTION_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeTransitionType } from "./prototypeChoreography";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record, type Raw } from "./prototypeTemplate";
 
@@ -39,7 +40,10 @@ function nodeFields(node: Raw, path: string): string[] {
   const styleWhen = Array.isArray(node.styleWhen) ? node.styleWhen : [];
   return [
     ...(node.animate !== undefined ? [`${path}.animate`] : []),
-    ...((PROTOTYPE_MOTION_V2_TRANSITIONS as readonly unknown[]).includes(node.transition)
+    ...(node.type !== "stack" &&
+    (PROTOTYPE_MOTION_V2_TRANSITIONS as readonly unknown[]).includes(
+      prototypeTransitionType(node.transition),
+    )
       ? [`${path}.transition`]
       : []),
     ...styleFields(node.style, `${path}.style`),

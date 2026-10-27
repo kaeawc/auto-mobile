@@ -16,7 +16,7 @@ describe("daemon state path constants", () => {
 
   async function importFreshConstants() {
     return import(
-      `../../src/daemon/constants.ts?daemon-state-path-test=${Date.now()}-${Math.random()}`
+      `../../src/daemon/wire/constants.ts?daemon-state-path-test=${Date.now()}-${Math.random()}`
     );
   }
 

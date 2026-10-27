@@ -1,3 +1,10 @@
+import { resolveOwnAppDataContainer } from "../../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+  cloneContainerFixture,
+} from "../../helpers/simulatorContainerFixture";
+import { FakeDeviceSnapshotStore } from "../../fakes/FakeDeviceSnapshotStore";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
@@ -920,7 +927,7 @@ describe("RestoreSnapshot (iOS)", () => {
 
   beforeEach(async () => {
     device = {
-      deviceId: "ios-device-1",
+      deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       name: "iPhone 15",
       platform: "ios",
     };
@@ -940,6 +947,7 @@ describe("RestoreSnapshot (iOS)", () => {
       store,
       simctl,
       iosRestoreOperations: operations,
+      containerOwnership: simulatorOwnership,
     });
   }
 
@@ -1129,9 +1137,11 @@ describe("RestoreSnapshot (iOS)", () => {
     await fs.mkdir(path.join(appDataPath, bundleId, "Documents"), { recursive: true });
     await fs.writeFile(path.join(appDataPath, bundleId, "Documents", "data.txt"), "new-data");
 
-    const containerRoot = path.join(testBasePath, "containers", bundleId);
-    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
-    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "old-data");
+    const containerRoot = simulatorDataContainer(device.deviceId);
+    const containerFiles = new Map([
+      [path.join(containerRoot, "Documents", "data.txt"), "old-data"],
+    ]);
+    const removed: string[] = [];
 
     simctl.setContainerPath(bundleId, containerRoot);
     simctl.setInstalledApps([{ bundleId }]);
@@ -1151,7 +1161,35 @@ describe("RestoreSnapshot (iOS)", () => {
       },
     };
 
-    const result = await makeRestore().execute({
+    const result = await makeRestore({
+      pathExists: async (target) =>
+        fs.access(target).then(
+          () => true,
+          () => false,
+        ),
+      terminateAppIfRunning: (deviceId, appId) => simctl.terminateApp(appId, deviceId),
+      getAppDataContainerPath: (deviceId, appId) =>
+        resolveOwnAppDataContainer({
+          ...simulatorOwnership,
+          deviceId,
+          bundleId: appId,
+          run: (args) => simctl.executeCommandArgs(args),
+        }),
+      rm: async (target) => {
+        removed.push(target);
+        for (const file of containerFiles.keys()) {
+          if (file.startsWith(`${target}${path.sep}`)) {
+            containerFiles.delete(file);
+          }
+        }
+      },
+      cp: async (source, destination) => {
+        containerFiles.set(
+          path.join(destination, "data.txt"),
+          await fs.readFile(path.join(source, "data.txt"), "utf8"),
+        );
+      },
+    }).execute({
       snapshotName,
       manifest,
       useVmSnapshot: false,
@@ -1159,7 +1197,8 @@ describe("RestoreSnapshot (iOS)", () => {
 
     expect(result.success).toBe(true);
     expect(result.failures).toEqual([]);
-    const restored = await fs.readFile(path.join(containerRoot, "Documents", "data.txt"), "utf-8");
+    expect(removed).toEqual([path.join(containerRoot, "Documents")]);
+    const restored = containerFiles.get(path.join(containerRoot, "Documents", "data.txt"));
     expect(restored).toBe("new-data");
     expect(simctl.getMethodCalls("terminateApp")).toHaveLength(1);
   });
@@ -1361,5 +1400,68 @@ describe("RestoreSnapshot (iOS)", () => {
     const argvCommands = simctl.getMethodCalls("executeCommandArgs").map((c) => c.args);
     // UI restore still runs after the failed defaults write.
     expect(argvCommands).toContainEqual(["ui", device.deviceId, "appearance", "light"]);
+  });
+});
+
+describe("RestoreSnapshot default iOS ownership wiring", () => {
+  const snapshotScratch = useScratchRoot("restore-clone-ownership-");
+  const UDID = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
+  const manifest: DeviceSnapshotManifest = {
+    snapshotName: "clone",
+    timestamp: "2026-10-03T00:00:00Z",
+    platform: "ios",
+    deviceId: UDID,
+    deviceName: "clone",
+    includeAppData: true,
+    includeSettings: false,
+    snapshotType: "app_data",
+  };
+  it("default restore operations pass ownership through and record refusal before rm/cp", async () => {
+    const bundleId = "com.apple.mobilesafari";
+    const clone = cloneContainerFixture(UDID, null);
+    const simctl = new FakeSimctl();
+    simctl.setContainerPath(bundleId, clone.reported);
+    simctl.setInstalledApps([{ bundleId }]);
+    const store = new FakeDeviceSnapshotStore(snapshotScratch.next());
+    await fs.mkdir(store.getAppDataPath("clone", { platform: "ios", deviceId: UDID }), {
+      recursive: true,
+    });
+    const rm = spyOn(fs, "rm").mockResolvedValue();
+    const cp = spyOn(fs, "cp").mockResolvedValue();
+    try {
+      const restore = new RestoreSnapshot(
+        { platform: "ios", deviceId: UDID, name: "clone" },
+        {
+          store,
+          simctl,
+          containerOwnership: clone.ownership,
+        },
+      );
+      expect(
+        await restore.execute({
+          snapshotName: "clone",
+          manifest: {
+            ...manifest,
+            includeSettings: false,
+            appDataBackup: { backupMethod: "simctl_copy", backedUpPackages: [bundleId] },
+          },
+        }),
+      ).toMatchObject({
+        success: false,
+        failures: [
+          {
+            kind: "ios_bundle",
+            bundleId,
+            reason: expect.stringContaining("foreign-device-unproven"),
+          },
+        ],
+      });
+      expect(clone.inspected).toEqual([clone.own]);
+      expect(rm).not.toHaveBeenCalled();
+      expect(cp).not.toHaveBeenCalled();
+    } finally {
+      rm.mockRestore();
+      cp.mockRestore();
+    }
   });
 });

@@ -7,7 +7,7 @@ import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/se
 import { DaemonClient } from "../../src/daemon/client";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DAEMON_VERSION, MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
+import { DAEMON_VERSION, MCP_STREAMABLE_PATH } from "../../src/daemon/wire/constants";
 import { registerMcpTools } from "../../src/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -254,12 +254,9 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
       },
     );
     // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
-    const call = async (method: string): Promise<void> => {
-      await Reflect.get(daemon, method).call(daemon);
-    };
     daemon.testHooks.publishHttpToken();
     await Reflect.get(daemon, "httpIngress").start();
-    await call("resolveStartupCompletion");
+    daemon.testHooks.resolveStartupCompletion();
     await Promise.resolve();
 
     const exchanges: FixtureExchange[] = [];

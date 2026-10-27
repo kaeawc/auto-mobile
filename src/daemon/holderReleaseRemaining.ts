@@ -4,7 +4,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,
-} from "./sessionLivenessWindows";
+} from "./wire/sessionLivenessWindows";
 
 /** Combine existing release evidence without changing ownership, timers or session clocks. */
 export function holderReleaseRemainingMs(input: {

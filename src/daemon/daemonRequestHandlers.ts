@@ -1,8 +1,10 @@
+import { sessionDeviceInfo } from "./sessionDeviceBinding";
 import { releaseCleanupStatus } from "./releaseCleanupStatus";
 import { holderOf } from "./deviceBinding";
 import {
   SESSION_BROKER_CAPABILITY,
   SESSION_BROKER_EXPORT_CAPABILITY,
+  SESSION_BROKER_IOS_DUO_CAPABILITY,
 } from "./sessionBroker/hostConfig";
 import { BROKER_DAEMON_METHOD_HANDLERS } from "./sessionBroker/handlers";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
@@ -34,7 +36,7 @@ import {
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
   DAEMON_DEVICE_LEASE_STATUS_METHOD,
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
-} from "./constants";
+} from "./wire/constants";
 import { executionTracker } from "./executionTracker";
 import { sessionHoldDiagnostics } from "./sessionHoldDiagnostics";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
@@ -125,6 +127,10 @@ export async function handleDaemonRequest(
           DAEMON_REGISTER_SESSION_METHOD,
           ...(state.isSessionBrokerMode?.()
             ? [SESSION_BROKER_CAPABILITY, SESSION_BROKER_EXPORT_CAPABILITY]
+            : []),
+          ...(state.isSessionBrokerMode?.() &&
+          state.getSessionBrokerService?.()?.broker.supportsIosDuo()
+            ? [SESSION_BROKER_IOS_DUO_CAPABILITY]
             : []),
         ],
       },
@@ -322,6 +328,7 @@ export async function handleSessionInfo(
     result: {
       sessionId: session.sessionId,
       assignedDevice: session.assignedDevice,
+      ...sessionDeviceInfo(session),
       platform: session.platform,
       // Wall-clock epoch ms, like the hold diagnostics beside them (#11243).
       createdAt: reportedWallClock(manager, session.createdAt),
@@ -377,6 +384,7 @@ export async function handleActiveSessions(
             sessions: sessions.map((session) => ({
               sessionId: session.sessionId,
               assignedDevice: session.assignedDevice,
+              ...sessionDeviceInfo(session),
               platform: session.platform,
               ...sessionHoldDiagnostics(
                 session,

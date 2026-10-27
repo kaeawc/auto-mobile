@@ -1,7 +1,6 @@
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { shutdownDevice } from "../../src/server/deviceToolsShutdown";
 import { getDeviceToolsDependencies } from "../../src/features/deviceLifecycle/deviceLifecycleCore";
-import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { makePool } from "../helpers/makePool";
 import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
 import { readFileSync } from "node:fs";
@@ -28,7 +27,6 @@ import { EventEmitter } from "node:events";
 import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
 import { Daemon } from "../../src/daemon/daemon";
-import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
@@ -75,7 +73,6 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android/Andro
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type {
   PlatformDeviceManager,
-  MultiPlatformDeviceManager,
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
   DeviceShutdownOptions,
@@ -2464,6 +2461,8 @@ describe("killDevice handler", () => {
         clearInstalledAppsForDevice: async () => {},
         timer,
       });
+      // Built first: the Daemon constructor initializes the shared DaemonState, which the pool below then replaces.
+      const monitor = new Daemon({}, { timer }).testHooks;
       sessionManager = new SessionManager(timer, deviceSessionRepository);
       placeholderManager.setDeviceImages("android", [image]);
       const pool = makePool(sessionManager, "daemon-session", {
@@ -2504,25 +2503,8 @@ describe("killDevice handler", () => {
         }
       };
       // Exercise the real daemon monitor tick without its socket/DB services.
-      const monitor = Object.assign(Object.create(Daemon.prototype), {
-        timer,
-        devicePool: pool,
-        sessionManager,
-        deviceDisconnectMonitor: null,
-        deviceLoss: new DeviceLossState(),
-        deferredSessionRecoverySweeps: new Set(),
-      }) as {
-        deviceDisconnectMonitor: SingleFlightInterval;
-        startDeviceDisconnectMonitor(
-          manager: Pick<
-            MultiPlatformDeviceManager,
-            | "getBootedDevicesDetailed"
-            | "getAndroidOfflineDeviceIds"
-            | "recoverAndroidOfflineDevices"
-          >,
-          listRecordings: () => Promise<[]>,
-        ): void;
-      };
+      monitor.replaceDevicePool(pool);
+      monitor.replaceSessionManager(sessionManager);
       const reserve = pool.reserveDeviceForShutdown.bind(pool);
       if (source !== "kill-discovery") {
         runtimeAvdNames.set(image.deviceId!, image.name);
@@ -2530,6 +2512,7 @@ describe("killDevice handler", () => {
           {
             getBootedDevicesDetailed: (platform, options) =>
               placeholderManager.getBootedDevicesDetailed(platform, options),
+            getAndroidListedDeviceStates: async () => new Map(),
             getAndroidOfflineDeviceIds: async () => new Set(),
             recoverAndroidOfflineDevices: async () => {},
           },
@@ -2544,7 +2527,7 @@ describe("killDevice handler", () => {
               deviceId: image.deviceId!,
             },
           ]);
-          await monitor.deviceDisconnectMonitor.run();
+          await monitor.runtime.deviceDisconnectMonitor!.run();
           expect(pool.getDevice(image.deviceId!)?.identityUnresolved).toBe(true);
           expect(cancelledSessions).toEqual([]);
           expect(initiatingKill.abortController.signal.aborted).toBe(false);
@@ -2632,7 +2615,7 @@ describe("killDevice handler", () => {
         executionTracker.endExecution(competingExecution.id);
         executionTracker.endExecution(sessionlessExecution.id);
         if (source !== "kill-discovery") {
-          await monitor.deviceDisconnectMonitor.stop();
+          await monitor.runtime.deviceDisconnectMonitor!.stop();
         }
       }
     },

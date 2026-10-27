@@ -72,6 +72,12 @@ export interface DaemonDependencies {
   bindingExclusionFactory?: (timer: Timer) => BindingExclusion;
   /** Host forward evidence is supplied by the production entry point only (#12220). */
   foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
+  /**
+   * Whether host disk I/O is stalled, which excuses database health-probe timeouts (#11990).
+   * Defaults to the process-wide log sink's stall evidence; tests inject a fixed answer so a
+   * stall reported by an unrelated file cannot decide their strike count.
+   */
+  hostIoStalled?: () => boolean;
   /** Where the daemon registers its sessions and pool; defaults to the process-wide state. */
   daemonState?: DaemonStateWrites;
 }
@@ -83,6 +89,7 @@ export type ResolvedDaemonDependencies = Required<
     | "installedAppsRepository"
     | "recoverFromDatabaseHealthFailure"
     | "foreignCtrlProxyForwardEvidence"
+    | "hostIoStalled"
   >
 > &
   Pick<
@@ -90,6 +97,7 @@ export type ResolvedDaemonDependencies = Required<
     | "installedAppsRepository"
     | "recoverFromDatabaseHealthFailure"
     | "foreignCtrlProxyForwardEvidence"
+    | "hostIoStalled"
   >;
 
 /**

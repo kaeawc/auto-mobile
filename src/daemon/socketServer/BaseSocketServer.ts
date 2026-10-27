@@ -21,7 +21,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { ensureSecureDir, secureFile } from "../../utils/filesystem/securePermissions";
-import { AUX_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./LineFramer";
+import { AUX_SOCKET_MAX_FRAME_BYTES, LineFramer } from "../wire/LineFramer";
 import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
 
 /** Open connections across every auxiliary socket server in this process. */

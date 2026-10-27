@@ -71,6 +71,7 @@ async function harness() {
     "request_list_keyboard_profiles",
     "prototype_saved_v1",
     "prototype_storage_v1",
+    "prototype_timers_v1",
     "prototype_patch_v1",
     "prototype_persistence_replay_v1",
     "show_prototype",
@@ -82,12 +83,13 @@ async function harness() {
     "inspect_prototypes",
     "delete_saved_prototype",
     "clear_prototype_storage",
+    "advance_prototype_clock",
     "put_prototype_asset",
     "remove_prototype_asset",
   ]);
   client.ensureConnected = async () => true;
-  client["connectWebSocket"] = async () => true;
-  client["cancelScreenshotBackoff"] = () => {};
+  client.testHooks.overrideConnectWebSocket(async () => true);
+  client.testHooks.overrideCancelScreenshotBackoff(() => {});
   // A lost connection otherwise arms a reconnect timer, which is not a request leak.
   client.connectionTestHooks.autoReconnectEnabled = false;
   adb.setCommandResponse("pidof", createExecResult("1234", ""));
@@ -403,6 +405,11 @@ const methods: RequestMethod[] = [
     invoke: (h) => h.client.requestClearPrototypeStorage("p", LONG_TIMEOUT_MS, perf),
   },
   {
+    name: "requestAdvancePrototypeClock",
+    abortable: false,
+    invoke: (h) => h.client.requestAdvancePrototypeClock("p", 1000, LONG_TIMEOUT_MS, perf),
+  },
+  {
     name: "requestPutPrototypeAsset",
     invoke: (h, s) =>
       h.client.requestPutPrototypeAsset(
@@ -571,7 +578,7 @@ async function settle(
   if (trigger === "abort") {
     controller.abort(new Error("caller cancelled"));
   } else {
-    h.client["finishEstablishedConnection"](h.socket);
+    h.client.testHooks.finishEstablishedConnection(h.socket);
   }
   await flush();
   if (!settled) {

@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+    import Accessibility
     import SwiftUI
     import UIKit
 
@@ -84,29 +85,31 @@
         let gradient: PrototypeGradient
         let palette: PrototypePalette
 
+        func paint(in size: CGSize) -> AnyShapeStyle {
+            let width = Double(size.width)
+            let height = Double(size.height)
+            let stops = gradient.colorStops(palette: palette).map {
+                Gradient.Stop(color: Color($0.color), location: CGFloat($0.location))
+            }
+            switch gradient {
+            case let .linear(angle, _):
+                let line = PrototypeGradient.linearLine(angle: angle, width: width, height: height)
+                return AnyShapeStyle(LinearGradient(
+                    stops: stops,
+                    startPoint: UnitPoint(x: line.start.x, y: line.start.y),
+                    endPoint: UnitPoint(x: line.end.x, y: line.end.y)
+                ))
+            case .radial:
+                return AnyShapeStyle(RadialGradient(
+                    stops: stops, center: .center, startRadius: 0,
+                    endRadius: CGFloat(PrototypeGradient.radialRadius(width: width, height: height))
+                ))
+            }
+        }
+
         var body: some View {
             GeometryReader { proxy in
-                let width = Double(proxy.size.width)
-                let height = Double(proxy.size.height)
-                let stops = gradient.colorStops(palette: palette).map {
-                    Gradient.Stop(color: Color($0.color), location: CGFloat($0.location))
-                }
-                switch gradient {
-                case let .linear(angle, _):
-                    let line = PrototypeGradient.linearLine(angle: angle, width: width, height: height)
-                    Rectangle().fill(LinearGradient(
-                        stops: stops,
-                        startPoint: UnitPoint(x: line.start.x, y: line.start.y),
-                        endPoint: UnitPoint(x: line.end.x, y: line.end.y)
-                    ))
-                case .radial:
-                    Rectangle().fill(RadialGradient(
-                        stops: stops,
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: CGFloat(PrototypeGradient.radialRadius(width: width, height: height))
-                    ))
-                }
+                Rectangle().fill(paint(in: proxy.size))
             }
             .accessibilityHidden(true)
         }
@@ -147,6 +150,17 @@
         }
     }
 
+    private struct PrototypeSharedNamespaceKey: EnvironmentKey {
+        static let defaultValue: Namespace.ID? = nil
+    }
+
+    extension EnvironmentValues {
+        var prototypeSharedNamespace: Namespace.ID? {
+            get { self[PrototypeSharedNamespaceKey.self] }
+            set { self[PrototypeSharedNamespaceKey.self] = newValue }
+        }
+    }
+
     @MainActor
     struct NodeView: View {
         let node: PrototypeNode
@@ -161,18 +175,28 @@
         var inStackSlot = false
         /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
         var stackAxis: PrototypeAxis?
+        @Environment(\.prototypeSharedNamespace) private var sharedNamespace
         @FocusState private var controlFocused: Bool
         @Environment(\.pagerContext) private var pager
+        @Environment(\.locale) private var deviceLocale
         @Environment(\.prototypePalette) private var palette
         @Environment(\.prototypeTypography) private var typography
         @Environment(\.prototypeShapes) private var shapes
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
+            if let key = node.repeatKey {
+                contentBody.id(PrototypeScrollTarget.key(key))
+            } else {
+                contentBody
+            }
+        }
+
+        @ViewBuilder private var contentBody: some View {
             // A node that draws nothing here (hidden, anchored elsewhere, a modal not yet in its layer)
             // returns no view at all: a stack puts its spacing around an empty ZStack too, which left
             // a gap Android does not (#10912). Container parents also leave such children out.
-            if !drawsNow {
+            if !drawsNow || barHidden {
                 EmptyView()
             } else if inStackSlot || node.visibleWhen == nil {
                 // A parent that lays children out through `drawnChildren` inserts and removes this node
@@ -180,7 +204,8 @@
                 // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
                 // its child at the size it measured, and a row re-laid out at exactly its ideal width
                 // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
-                validatedContent.transition(transition.swiftUITransition)
+                sharedContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
+                    .transition(visibilityTransition)
             } else {
                 // Parents without that filter (a root, a scroll child, a pager page): the conditional
                 // lives in a stable container so the insertion/removal has one whose animation is
@@ -189,15 +214,76 @@
                 // The container passes its parent's proposal through, unlike a ZStack (see above).
                 PrototypeLayeredLayout(alignment: .topLeading) {
                     if isVisible {
-                        validatedContent.transition(transition.swiftUITransition)
+                        sharedContent.modifier(PrototypeScrollMotionModifier(node: node, model: model))
+                            .transition(visibilityTransition)
                     }
                 }
                 .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
             }
         }
 
+        @ViewBuilder private var barContent: some View {
+            if ["bottomNav", "tabBar"].contains(node.type), node.onScroll == "hide" {
+                validatedContent.modifier(PrototypeBarSlide(fraction: barFraction))
+            } else {
+                validatedContent
+            }
+        }
+
+        private var barFraction: Double {
+            model.barScroll(node).collapse(
+                node.onScroll,
+                extent: PrototypeBarScrollState.extent(variant: node.variant, behavior: node.onScroll),
+                reduced: !PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
+            )
+        }
+
+        private var barHidden: Bool {
+            (
+                (["bottomNav", "tabBar"].contains(node.type) && node.onScroll == "hide") ||
+                    (node.type == "topAppBar" && node.onScroll == "enterAlways")
+            ) && barFraction >= 1
+        }
+
+        @ViewBuilder private var sharedContent: some View {
+            let plan = sharedPlan
+            if plan.apply, let key = plan.key, let sharedNamespace {
+                barContent.matchedGeometryEffect(
+                    id: key,
+                    in: sharedNamespace,
+                    properties: .frame,
+                    isSource: isVisible
+                )
+            } else {
+                barContent
+            }
+        }
+
+        private var sharedPlan: PrototypeSharedElementPlan {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            return PrototypeSharedElementPlan(
+                node: node, profile: motion.profile,
+                conflictingKeys: node.resolvedSharedKey == nil || !motion.spatial ? [] : sharedConflicts
+            )
+        }
+
+        private var sharedConflicts: Set<String> {
+            guard let root = model.spec?.root else { return [] }
+            return PrototypeSharedElementPlan.conflictingKeys(in: root, holds: model.holds)
+        }
+
+        private var visibilityTransition: AnyTransition {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            // Explicit transition animation fades filtered children even when parent layout snaps.
+            let plan = sharedPlan
+            if node.shared != nil, plan.apply { return plan.crossfade ? .opacity : .identity }
+            return motion.fadeOnly && transition != .instant
+                ? transition.swiftUITransition.animation(.easeInOut(duration: 0.25))
+                : transition.swiftUITransition
+        }
+
         @ViewBuilder private var validatedContent: some View {
-            if node.checks?.isEmpty == false {
+            if node.checks?.isEmpty == false || node.errorWhen != nil {
                 VStack(alignment: .leading, spacing: 4) {
                     checkedControl
                     if let message = model.shownError(node) {
@@ -230,11 +316,15 @@
             }
         }
 
-        /// `visibleWhen` appears and disappears with the node's `transition`; instant when motion is
-        /// off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
+        /// `visibleWhen` uses the node's `transition` (the default for stacks); instant when motion is
+        /// off for spec `motion: "none"`; reduced motion preserves fades (#10442).
         private var transition: PrototypeVisibilityTransition {
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
-            return node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
+            return node.visibleWhen == nil ? .instant : motion.visibility(
+                transition: node.transition,
+                nodeType: node.type,
+                shared: node.resolvedSharedKey != nil
+            )
         }
 
         /// Whether anything is drawn for the node in the slot this view occupies. Unfiltered parents
@@ -270,7 +360,7 @@
             [
                 "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
                 "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar",
-                "menu",
+                "menu", "tooltip",
                 "select",
             ].contains(node.type)
         }
@@ -325,7 +415,9 @@
             case "text":
                 textView
             case "image":
-                imageView
+                imageView.modifier(PrototypeImageFilterModifier(
+                    parameters: PrototypeImageFilter(node.filter, palette: palette)
+                ))
             case "icon":
                 // Decorative unless it has an authored description or is tappable; the decorative
                 // case is a text glyph (see `PrototypeGlyph`) so no image element is exposed.
@@ -342,27 +434,22 @@
                 checkboxView
             case "button":
                 buttonView
+            case "list":
+                // A replacing show resets list state; stack pushes/pops keep this identity.
+                PrototypeLazyListView(node: node, model: model).id(model.showRevision)
             case "scroll":
                 if node.axis != "horizontal", let refresh = node.refresh {
                     PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
                 } else {
-                    ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
-                        if let child = node.child { NodeView(node: child, model: model) }
-                    }
+                    PrototypeChatScrollView(node: node, model: model)
                 }
             case "stack":
-                if let screen = node.currentScreen(stacks: model.stacks), let top = node.screens?[screen] {
-                    // Only the top view exists: inactive screens are absent from the native
-                    // accessibility tree as well as from rendering. Navigation is instant.
-                    NodeView(node: top, model: model)
-                        .id(screen)
-                        .transition(.identity)
-                        .animation(nil, value: screen)
-                }
+                PrototypeStackView(node: node, model: model)
             case "pager":
                 PagerView(node: node, model: model)
             case "tabBar", "bottomNav":
                 navBar
+                    .modifier(PrototypeBarClip(fraction: node.onScroll == "hide" ? barFraction : 0))
             case "bottomSheet":
                 sheet
             case "slider":
@@ -370,7 +457,7 @@
             case "chip":
                 PrototypeChipView(node: node, model: model, style: style)
             case "card":
-                PrototypeCardView(node: node, model: model, style: style)
+                PrototypeCardView(node: node, model: model, style: style, cornerRadius: cardCornerRadius)
             case "radioGroup":
                 PrototypeRadioGroupView(node: node, model: model, style: style)
             case "listItem":
@@ -378,7 +465,12 @@
             case "iconButton":
                 PrototypeIconButtonView(node: node, model: model, style: style)
             case "fab":
-                PrototypeFabView(node: node, model: model, style: style)
+                PrototypeFabView(
+                    node: node,
+                    model: model,
+                    style: style,
+                    label: node.plainText(state: model.state, pager: pagerPosition, derived: derivedContext)
+                )
             case "segmentedButton":
                 PrototypeSegmentedButtonView(node: node, model: model)
             case "topAppBar":
@@ -402,6 +494,11 @@
                     title: interpolated(node.title),
                     text: node.text.map(interpolated)
                 )
+            // These bodies are reached only from the hoisted modal layer.
+            case "tooltip":
+                PrototypeTooltipBubble(node: node, model: model)
+            case "drawer":
+                if let child = node.child { NodeView(node: child, model: model) }
             case "menu":
                 PrototypeMenuView(node: node, model: model)
             case "select":
@@ -463,8 +560,14 @@
             interpolated(node.text)
         }
 
+        private var derivedContext: PrototypeDerivedContext {
+            // Reading SwiftUI's locale invalidates this view on a device language change.
+            _ = deviceLocale
+            return PrototypeDerivedContext(entries: model.spec?.derive ?? [:], data: model.spec?.data)
+        }
+
         private func interpolated(_ text: String?) -> String {
-            interpolatePrototypeText(text ?? "", state: model.state, pager: pagerPosition)
+            interpolatePrototypeText(text ?? "", state: model.state, pager: pagerPosition, derived: derivedContext)
         }
 
         @ViewBuilder private var iconView: some View {
@@ -487,7 +590,7 @@
                     )
                     .frame(idealWidth: 24, idealHeight: 24)
                     .fixedSize(horizontal: style?.width == nil, vertical: style?.height == nil)
-                    .accessibilityHidden(accessibilityLabelOverride == nil)
+                    .accessibilityHidden(accessibilityLabelOverride == nil && node.semantics == nil)
                     .accessibilityAddTraits(accessibilityLabelOverride == nil ? [] : .isImage)
             }
         }
@@ -496,13 +599,16 @@
         /// name needs to be applied explicitly.
         private var accessibilityLabelOverride: String? {
             // A chart reads its summary, unless an authored description wins (#14679).
-            if node.type == "chart" { return node.chartLabel(data: model.spec?.data, state: model.state) }
-            guard node.contentDescription != nil || ["icon", "iconButton", "fab"].contains(node.type)
+            if node.type == "chart",
+               node.semantics?.label == nil { return node.chartLabel(data: model.spec?.data, state: model.state) }
+            guard node.semantics?.label != nil || node.contentDescription != nil || ["icon", "iconButton", "fab"]
+                .contains(node.type)
             else { return nil }
             return node.accessibilityLabel(
                 state: model.state,
                 pager: pagerPosition,
-                tappable: node.isInteractive
+                tappable: node.isInteractive,
+                derived: derivedContext
             )
         }
 
@@ -538,7 +644,8 @@
                 font = .system(size: scaled, weight: weight, design: design)
             }
             let runs = PrototypeRichText.runs(
-                node: node, state: model.state, pager: pagerPosition, nodeKey: node.id ?? "text"
+                node: node, state: model.state, pager: pagerPosition, nodeKey: node.id ?? "text",
+                derived: derivedContext
             )
             var text = (runs.map { Text(attributedText($0)) } ?? Text(interpolatedText)).font(font)
             if runs == nil, style?.fontStyle == "italic" { text = text.italic() }
@@ -688,22 +795,26 @@
                     buttonLabel
                 }
             }
-            .accessibilityLabel(node.label ?? "")
+            .accessibilityLabel(node.plainText(state: model.state, pager: pagerPosition, derived: derivedContext))
             // A button claims its label's width before its siblings shrink, so a tight row never cuts
             // "Save" to "Sa..." (#10899); a label wider than the row wraps rather than overflowing,
             // as on Android (#10912).
             .layoutPriority(1)
             switch node.variant {
-            case "outlined", "tonal": button.buttonStyle(.bordered)
-            case "elevated": button.buttonStyle(.bordered).shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-            case "text": button.buttonStyle(.borderless)
-            default: button.buttonStyle(.borderedProminent)
+            case "outlined", "tonal": button.buttonStyle(.bordered).tint(themePrimary)
+            case "elevated": button.buttonStyle(.bordered).tint(themePrimary)
+                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+            case "text": button.buttonStyle(.borderless).tint(themePrimary)
+            default: button.buttonStyle(.borderedProminent).tint(themePrimary)
             }
         }
 
+        /// The theme's `primary`, so buttons follow the spec theme rather than the system accent (#15445).
+        private var themePrimary: Color { ComponentColors(palette: palette).primary }
+
         /// Wraps onto more lines when the row is narrower than the label, never truncating.
         private var buttonLabel: some View {
-            Text(node.label ?? "")
+            Text(node.plainText(state: model.state, pager: pagerPosition, derived: derivedContext))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -723,9 +834,12 @@
                     } label: {
                         VStack(spacing: 2) {
                             navVisual(item)
-                            Text(item.label).font(.caption)
+                            if node.onScroll != "minimize" || barFraction == 0 { Text(item.label).font(.caption) }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: node.onScroll == "minimize" && barFraction == 0 ? 64 : 44
+                        )
                         .foregroundColor(navForeground(selected: index == navSelection))
                         .background(
                             Capsule().fill(
@@ -733,6 +847,7 @@
                             )
                         )
                     }
+                    .accessibilityLabel(item.label)
                     .accessibilityAddTraits(index == navSelection ? .isSelected : [])
                 }
             }
@@ -777,21 +892,18 @@
 
         // MARK: Style
 
-        private var cornerShape: UnevenRoundedRectangle {
-            switch style?.cornerRadius.map(shapes.resolve) {
-            case let .uniform(radius)?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
-                    topLeading: radius, bottomLeading: radius, bottomTrailing: radius, topTrailing: radius
-                ))
-            case .token?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
-            case let .corners(topStart, topEnd, bottomEnd, bottomStart)?:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
-                    topLeading: topStart, bottomLeading: bottomStart, bottomTrailing: bottomEnd, topTrailing: topEnd
-                ))
-            case nil:
-                UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
-            }
+        /// A card draws the authored uniform radius (a theme token resolves to one); without it,
+        /// Material's 12 pt (#15445).
+        private var cardCornerRadius: Double {
+            if case let .uniform(radius)? = style?.cornerRadius.map(shapes.resolve) { return radius }
+            return 12
+        }
+
+        private var cornerShape: PrototypeStyleShape {
+            PrototypeStyleShape(
+                radius: node.type == "card" ? .uniform(cardCornerRadius) : style?.cornerRadius.map(shapes.resolve),
+                continuous: style?.cornerStyle == "continuous"
+            )
         }
 
         private func styled(_ view: some View) -> some View {
@@ -814,30 +926,20 @@
                     ),
                     alignment: contentAlignment
                 ))
-                // The gradient is painted over the background colour, as on Android.
-                .background {
-                    if let gradient = style?.gradient {
-                        PrototypeGradientFill(gradient: gradient, palette: palette)
-                    }
-                }
-                .background(palette.color(style?.background) ?? .clear)
-                .modifier(PrototypeShimmerModifier(
-                    enabled: style?.shimmer == true,
-                    animated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled,
-                    shape: shape
+                .modifier(PrototypeStylePaintModifier(
+                    style: style, shape: shape, palette: palette,
+                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                        .spatial,
+                    effects: PrototypeEffects.plan(
+                        style?.effects, platformBackedSubtree: PrototypeEffects.hasPlatformBackedSubtree(node)
+                    ),
+                    motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion),
+                    authorsEffects: PrototypeEffects.authorsEffects(node)
                 ))
-                .clipShape(shape)
-                .overlay(
-                    shape.stroke(palette.color(style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
-                )
-                .shadow(
-                    color: (style?.elevation ?? 0) > 0 ? palette.color(style?.shadowColor) ?? .black
-                        .opacity(0.25) : .clear,
-                    radius: style?.elevation ?? 0
-                )
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
+                .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(TapModifier(
                     actions: handlesOwnTap ? nil : node.onTap,
                     longPress: handlesOwnTap ? nil : node.onLongPress,
@@ -850,7 +952,15 @@
                     // The search bar's editable field owns the node identifier.
                     identifier: node.type == "searchBar" ? nil : node.testTag,
                     label: accessibilityLabelOverride,
-                    grouping: grouping
+                    grouping: grouping,
+                    semantics: node.semantics,
+                    accessibleText: node.semantics?.liveRegion == nil
+                        ? "" : node.announcementText(state: model.state, pager: pagerPosition),
+                    hint: node.semantics?.hint.map { interpolatePrototypeText(
+                        $0,
+                        state: model.state,
+                        pager: pagerPosition
+                    ) }
                 ))
         }
 
@@ -861,22 +971,12 @@
         }
 
         private var contentAlignment: Alignment {
-            switch node.type {
-            case "row":
-                switch style?.arrangement {
-                case "center": return .center
-                case "end": return .trailing
-                default: return .leading
-                }
-            case "column", "flow", "grid":
-                switch style?.arrangement {
-                case "center": return .leading
-                case "end": return .bottomLeading
-                default: return .topLeading
-                }
-            case "box": return swiftUIAlignment(style?.alignment)
-            default: return .center
-            }
+            prototypeContentAlignment(
+                nodeType: node.type,
+                arrangement: style?.arrangement,
+                boxAlignment: swiftUIAlignment(style?.alignment),
+                textAlign: style?.textAlign
+            )
         }
 
         private var safeAreaEdges: UIEdgeInsets {
@@ -1031,6 +1131,32 @@
         }
     }
 
+    /// Controls consume taps even when their value stays unchanged. Plain content gets no gesture.
+    @MainActor
+    private struct PrototypeHandledTapModifier: ViewModifier {
+        let node: PrototypeNode
+        let model: PrototypeModel
+
+        private var handlesTap: Bool {
+            node.onTap != nil || node.onDoubleTap != nil || [
+                "textField", "searchBar", "switch", "checkbox", "button", "slider", "chip",
+                "radioGroup", "listItem", "iconButton", "fab", "segmentedButton", "timePicker",
+                "datePicker", "tabBar", "bottomNav", "select",
+            ].contains(node.type)
+        }
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if handlesTap {
+                content.simultaneousGesture(TapGesture().onEnded {
+                    if model.isEnabled(node) { model.consumeDeadTap() }
+                })
+            } else {
+                content
+            }
+        }
+    }
+
     @MainActor
     private struct TapModifier: ViewModifier {
         let actions: [PrototypeAction]?
@@ -1078,7 +1204,7 @@
         private func tapped(_ content: some View) -> some View {
             // SwiftUI resolves inner-first. A long press that fails to complete lets the ancestor's
             // tap through. Gesture-only nodes must never install a single-tap handler.
-            plan.layers.reduce(AnyView(content)) { view, layer in
+            let gestures = plan.layers.reduce(AnyView(content)) { view, layer in
                 switch layer {
                 case .longPress:
                     AnyView(view.onLongPressGesture {
@@ -1096,10 +1222,18 @@
                     AnyView(view.onTapGesture { resolveTap() })
                 }
             }
+            // `onLongPressGesture` and `onTapGesture(count: 2)` add no VoiceOver action, so name them.
+            return plan.accessibilityActions.reduce(gestures) { view, action in
+                AnyView(view.accessibilityAction(named: Text(action.name)) {
+                    guard model.isEnabled(node) else { return }
+                    model.run((action == .longPress ? longPress : doubleTap) ?? [])
+                })
+            }
         }
 
         private func resolveTap() {
             guard model.isEnabled(node) else { return }
+            model.consumeDeadTap()
             let now = ProcessInfo.processInfo.systemUptime
             // A busy main actor can deliver the next tap before the expiry task resumes.
             if tapResolver.disambiguator.expire(at: now) {
@@ -1134,16 +1268,30 @@
         let identifier: String?
         let label: String?
         let grouping: AccessibilityGrouping
+        let semantics: PrototypeSemantics?
+        let accessibleText: String
+        let hint: String?
 
         func body(content: Content) -> some View {
             labelled(identified(content))
+                .accessibilityAddTraits(traits)
+                .onChange(of: accessibleText) { old, new in
+                    guard let announcement = PrototypeAnnouncement.change(
+                        previous: old,
+                        current: new,
+                        liveRegion: semantics?.liveRegion
+                    ) else { return }
+                    var text = AttributedString(announcement.text)
+                    if announcement.assertive { text.accessibilitySpeechAnnouncementPriority = .high }
+                    AccessibilityNotification.Announcement(text).post()
+                }
         }
 
         /// A label needs its own accessibility element: on a bare container SwiftUI would spread it
         /// over the children.
         @ViewBuilder
         private func identified(_ content: Content) -> some View {
-            if identifier == nil, label == nil || grouping == .leaf {
+            if identifier == nil, semantics == nil, label == nil || grouping == .leaf {
                 content
             } else if let identifier {
                 grouped(content).accessibilityIdentifier(identifier)
@@ -1154,20 +1302,35 @@
 
         @ViewBuilder
         private func grouped(_ content: Content) -> some View {
-            switch grouping {
+            switch semantics?.group == true ? .contain : grouping {
             case .leaf: content
             case .contain: content.accessibilityElement(children: .contain)
             case .combine: content.accessibilityElement(children: .combine)
             }
         }
 
+        private var traits: AccessibilityTraits {
+            var result: AccessibilityTraits = []
+            if semantics?.heading == true { _ = result.insert(.isHeader) }
+            for trait in semantics?.traits ?? [] {
+                switch trait {
+                case "button": _ = result.insert(.isButton)
+                case "image": _ = result.insert(.isImage)
+                case "selected": _ = result.insert(.isSelected)
+                default: break
+                }
+            }
+            return result
+        }
+
         @ViewBuilder
         private func labelled(_ content: some View) -> some View {
-            if let label {
-                content.accessibilityLabel(label)
-            } else {
-                content
-            }
+            if let hint { named(content).accessibilityHint(hint) } else { named(content) }
+        }
+
+        @ViewBuilder
+        private func named(_ content: some View) -> some View {
+            if let label { content.accessibilityLabel(label) } else { content }
         }
     }
 
@@ -1194,7 +1357,7 @@
 
         /// Page changes animate unless spec `motion: "none"` or Reduce Motion is on (#10442).
         private var pageAnimation: Animation? {
-            PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
+            PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
                 ? .easeInOut(duration: 0.25) : nil
         }
 
@@ -1350,8 +1513,9 @@
                 let heights = prototypeSheetHeights(detents: node.detents ?? [], containerHeight: containerHeight)
                 let current = settledHeight ?? heights.first
                 ZStack(alignment: .bottom) {
-                    if let scrim = palette.scrim(node.scrim).map({ Color($0) }) {
+                    if let scrim = palette.sheetScrim(node.scrim).map({ Color($0) }) {
                         scrim
+                            .ignoresSafeArea()
                             .contentShape(Rectangle())
                             .onTapGesture { model.closeModal(node) }
                             .accessibilityHidden(true)
@@ -1413,6 +1577,118 @@
         }
     }
 
+    /// Row identity belongs to the data key; lazy stacks alone decide which row views exist.
+    private struct PrototypeLazyListCell: View {
+        let node: PrototypeNode
+        let model: PrototypeModel
+        let index: Int
+        let key: String
+        let visibility: (String, Bool) -> Void
+        @State private var decoder = PrototypeLazyList.RowDecoder()
+
+        var body: some View {
+            if let row = decoder.decode(node: node, data: model.spec?.data, index: index) {
+                NodeView(node: row.node, model: model)
+                    .onAppear { visibility(key, true) }
+                    .onDisappear { visibility(key, false) }
+            }
+        }
+    }
+
+    private struct PrototypeLazyListView: View {
+        let node: PrototypeNode
+        let model: PrototypeModel
+        @Environment(\.prototypeStackEntryID) private var entryID
+        @Environment(\.prototypeStackActive) private var active
+        @State private var pulling = false
+        @State private var anchorKey: String?
+        @State private var visibleKeys: Set<String> = []
+        @State private var restoreTop = false
+
+        private func visibility(_ key: String, appeared: Bool) {
+            if appeared { visibleKeys.insert(key) } else { visibleKeys.remove(key) }
+            if anchorKey == nil, active {
+                let keys = PrototypeLazyList.keys(node: node, data: model.spec?.data)
+                anchorKey = keys.first { visibleKeys.contains($0) }
+            }
+            model.listVisible(node, appearedKey: appeared ? key : nil, disappearedKey: appeared ? nil : key)
+        }
+
+        private func restore(keys: [String]) {
+            if restoreTop {
+                anchorKey = keys.first
+                restoreTop = false
+            } else if let saved = model.savedListAnchor(entryID: entryID, node: node, keys: keys) {
+                anchorKey = saved
+            } else if anchorKey != nil, PrototypeListAnchor.resolve(anchorKey: anchorKey, newKeys: keys) == nil {
+                anchorKey = keys.first
+            }
+        }
+
+        @ViewBuilder
+        private func content(keys: [String]) -> some View {
+            if let header = node.header { NodeView(node: header, model: model) }
+            ForEach(Array(keys.enumerated()), id: \.element) { index, key in
+                PrototypeLazyListCell(node: node, model: model, index: index, key: key, visibility: visibility)
+            }
+            .scrollTargetLayout()
+            if let footer = node.footer { NodeView(node: footer, model: model) }
+        }
+
+        private func scroll(keys: [String]) -> some View {
+            ScrollView(node.axis == "horizontal" ? .horizontal : .vertical, showsIndicators: true) {
+                Group {
+                    if node.axis == "horizontal" {
+                        LazyHStack(spacing: node.spacing.map { CGFloat($0) }) { content(keys: keys) }
+                    } else {
+                        LazyVStack(spacing: node.spacing.map { CGFloat($0) }) { content(keys: keys) }
+                    }
+                }
+                .padding(CGFloat(node.contentPadding ?? 0))
+            }
+            // A nil anchor lets SwiftUI preserve a partially visible row's relative position,
+            // rather than aligning its leading edge on every data update. Both axes share it.
+            .scrollPosition(id: $anchorKey, anchor: nil)
+            .onAppear { restore(keys: keys) }
+            .onChange(of: active) { _, active in
+                if active { restore(keys: keys) }
+            }
+            .onChange(of: anchorKey) { _, key in
+                if active { model.saveListAnchor(entryID: entryID, node: node, key: key) }
+            }
+            .onChange(of: keys) { _, next in
+                let previous = anchorKey ?? model.savedListAnchor(entryID: entryID, node: node, keys: next)
+                let pinned = PrototypeListAnchor.resolve(anchorKey: previous, newKeys: next)
+                if !active, previous != nil, pinned == nil { restoreTop = true }
+                anchorKey = pinned
+                model.saveListAnchor(entryID: entryID, node: node, key: pinned)
+                model.listVisible(node)
+            }
+        }
+
+        var body: some View {
+            let keys = PrototypeLazyList.keys(node: node, data: model.spec?.data)
+            if node.axis != "horizontal", let refresh = node.refresh {
+                scroll(keys: keys).refreshable {
+                    guard model.state[refresh.stateKey]?.boolValue != true else { return }
+                    pulling = true
+                    model.run(PrototypeRefresh.actions(for: refresh))
+                    await PrototypeRefresh.awaitCompletion(
+                        isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                        isCancelled: { Task.isCancelled },
+                        sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+                    )
+                    pulling = false
+                }
+                .overlay(alignment: .top) {
+                    if model.state[refresh.stateKey]?.boolValue == true, !pulling {
+                        ProgressView().padding(.top, 8)
+                    }
+                }
+            } else { scroll(keys: keys) }
+        }
+    }
+
     /// A vertical scroll with `refresh`: the system refresh control runs the pull actions and stays up
     /// until the prototype writes false to the bound key. A key written true without a pull (an agent
     /// patch) shows a plain spinner instead, since SwiftUI cannot start `refreshable` programmatically.
@@ -1425,25 +1701,23 @@
         private var refreshing: Bool { model.state[refresh.stateKey]?.boolValue == true }
 
         var body: some View {
-            ScrollView(.vertical) {
-                if let child = node.child { NodeView(node: child, model: model) }
-            }
-            .refreshable {
-                guard !refreshing else { return }
-                pulling = true
-                model.run(PrototypeRefresh.actions(for: refresh))
-                await PrototypeRefresh.awaitCompletion(
-                    isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
-                    isCancelled: { Task.isCancelled },
-                    sleep: { try? await Task.sleep(for: .milliseconds(100)) }
-                )
-                pulling = false
-            }
-            .overlay(alignment: .top) {
-                if refreshing, !pulling {
-                    ProgressView().padding(.top, 8)
+            PrototypeChatScrollView(node: node, model: model)
+                .refreshable {
+                    guard !refreshing else { return }
+                    pulling = true
+                    model.run(PrototypeRefresh.actions(for: refresh))
+                    await PrototypeRefresh.awaitCompletion(
+                        isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                        isCancelled: { Task.isCancelled },
+                        sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+                    )
+                    pulling = false
                 }
-            }
+                .overlay(alignment: .top) {
+                    if refreshing, !pulling {
+                        ProgressView().padding(.top, 8)
+                    }
+                }
         }
     }
 #endif

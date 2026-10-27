@@ -88,6 +88,13 @@ describe("pickIosDeviceType", () => {
     expect(pickIosDeviceType(types, {}).name).toBe("iPhone 17");
   });
 
+  it("never picks the foldable iPhone Duo for a phone request, even when it is the newest", () => {
+    const withDuo = [deviceType("iPhone 17"), deviceType("iPhone Duo")];
+    expect(pickIosDeviceType(withDuo, {}).name).toBe("iPhone 17");
+    expect(() => pickIosDeviceType([deviceType("iPhone Duo")], {})).toThrow(ActionableError);
+    expect(pickIosDeviceType(withDuo, { name: "iPhone Duo" }).name).toBe("iPhone Duo");
+  });
+
   it("honours an explicit name (case-insensitive)", () => {
     expect(pickIosDeviceType(types, { name: "iphone 16" }).name).toBe("iPhone 16");
   });
@@ -945,7 +952,7 @@ describe("DefaultDeviceProvisioner", () => {
   );
 });
 
-it.each(["none", "minimal"] as const)(
+it.each(["none", "minimal", "failed"] as const)(
   "applies only the default %s preboot profile after iOS creation",
   async (selectedProfile) => {
     const { SimulatorPrebootProfile, resolvePrebootLabels } =
@@ -954,8 +961,14 @@ it.each(["none", "minimal"] as const)(
     const udid = "12345678-1234-ABCD-9876-123456789ABC";
     const host = new FakeSimulatorHostState();
     const simctl = new FakeIosSimulatorCreator([deviceType("iPhone 17")], "iOS-26", udid);
-    const profile = new SimulatorPrebootProfile(host, () => selectedProfile);
+    const profile = new SimulatorPrebootProfile(host, () =>
+      selectedProfile === "failed" ? "minimal" : selectedProfile,
+    );
+    if (selectedProfile === "failed") {
+      host.writeError = new Error("denied");
+    }
     const calls: string[] = [];
+    let bound: import("../../src/devices/deviceProvisioning").ProvisionedDevice | undefined;
     const provisioner = new DefaultDeviceProvisioner({
       iosCreator: () => simctl,
       androidCreator: () => new FakeAndroidAvdCreator(),
@@ -970,15 +983,23 @@ it.each(["none", "minimal"] as const)(
         },
       },
     });
-    await provisioner.provision({ platform: "ios" }, undefined, {
+    const result = await provisioner.provision({ platform: "ios" }, undefined, {
       reserveBeforeCreate: async () => undefined,
-      bindAfterCreate: async () => {
+      bindAfterCreate: async (device) => {
+        bound = device;
         calls.push("bind");
       },
     });
+    expect(result.prebootDisabledResources).toEqual(
+      selectedProfile !== "minimal"
+        ? undefined
+        : ["wallpaperRendering", "widgets", "liveActivities"],
+    );
+    expect(bound?.prebootDisabledResources).toBeUndefined();
+    expect(result).not.toBe(bound);
     expect(calls).toEqual(["bind", "apply"]);
     expect(Object.keys(host.written ?? {}).sort()).toEqual(
-      resolvePrebootLabels({ profile: selectedProfile }),
+      selectedProfile === "failed" ? [] : resolvePrebootLabels({ profile: selectedProfile }),
     );
     if (selectedProfile === "none") {
       expect(host.calls).toEqual([]);

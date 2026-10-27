@@ -1,3 +1,5 @@
+import { prototypeSpecSchema } from "../../src/features/prototype/prototypeSpec";
+import { createPrototypeSavedPlatformDispatch } from "../../src/server/prototypeSavedActions";
 import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
@@ -102,7 +104,17 @@ describe("iOS saved prototype tool actions", () => {
     androidLookups = 0;
     observationReads = [];
     dispose = registerPrototypeTools({
+      env: {},
       iosSavedPrototypeInstaller: backend ?? installer,
+      protoViewerFactory: () => ({
+        installed: async () => false,
+        importBundle: async () => {
+          throw new Error("Absent ProtoViewer must not import");
+        },
+        open: async () => {
+          throw new Error("Absent ProtoViewer must not open");
+        },
+      }),
       assetFileReader: reader,
       observationScreenshotReader: async (uri) => {
         observationReads.push(uri);
@@ -226,6 +238,14 @@ describe("iOS saved prototype tool actions", () => {
       root: { type: "text", text: "Hello Ada" },
     });
   });
+  test("iOS save refuses AGSL file assets before installer or asset work", async () => {
+    const refused = await save({ assets: [{ id: "effect", path: "/effect.agsl" }] });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("Android only");
+    expect(installer.calls).toEqual([]);
+    expect(reader.reads).toEqual([]);
+  });
+
   test("invalid spec reports the validator path before any installer or file call", async () => {
     const output = await save({ spec: { ...spec, root: { type: "unknown" } }, assets });
     expect(output.success).toBe(false);
@@ -456,3 +476,40 @@ describe("iOS saved prototype tool actions", () => {
     }
   });
 });
+
+test.each([{}, { AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1" }])(
+  "iOS save refuses shader specs and AGSL assets before reads or installs, env=%j",
+  async (env) => {
+    const installer = new FakeSavedInstaller();
+    const reader = new FakePrototypeAssetFileReader();
+    const dispatch = createPrototypeSavedPlatformDispatch({
+      env,
+      installer,
+      assetFileReader: reader,
+      observationScreenshotReader: async () => {
+        throw new Error("Unexpected screenshot read");
+      },
+    });
+    const shaderSpec = {
+      ...spec,
+      root: { type: "text", text: "Effect", style: { shader: { asset: "effect" } } },
+    };
+    for (const input of [
+      { spec: shaderSpec },
+      { spec, assets: [{ id: "effect", path: "/effect.AGSL" }] },
+    ]) {
+      const output = await dispatch(
+        ios,
+        { action: "save", ...input, spec: prototypeSpecSchema.parse(input.spec) },
+        undefined,
+        () => undefined,
+      );
+      expect(output).toMatchObject({
+        success: false,
+        error: expect.stringContaining("Android only"),
+      });
+    }
+    expect(reader.reads).toEqual([]);
+    expect(installer.calls).toEqual([]);
+  },
+);

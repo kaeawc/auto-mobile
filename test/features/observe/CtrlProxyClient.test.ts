@@ -1055,7 +1055,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(client.a11yScreenshotSupported).toBe(false);
 
       // Exercise the same successful-connection hook used after a replacement/reconnect.
-      client["onConnectionEstablished"]();
+      client.testHooks.onConnectionEstablished();
       expect(client.a11yScreenshotSupported).toBe(null);
 
       const requestsBefore = countScreenshotRequests(socket);

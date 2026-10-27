@@ -1,0 +1,553 @@
+[
+  {
+    "name": "paging keeps cursor",
+    "before": {
+      "items": [1],
+      "page": {}
+    },
+    "into": "/data/page",
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "items": [2, 3],
+        "next": "p3"
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items",
+      "maxItems": 2
+    },
+    "expected": {
+      "status": "success",
+      "data": {
+        "items": [2, 3],
+        "page": {
+          "next": "p3"
+        },
+        "page__meta": {
+          "status": 200,
+          "headers": {},
+          "durationMs": 1
+        }
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1
+      },
+      "wroteInto": true,
+      "appended": 2
+    }
+  },
+  {
+    "name": "append without into",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "items": [2]
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "success",
+      "data": {
+        "items": [1, 2]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1
+      },
+      "wroteInto": false,
+      "appended": 1
+    }
+  },
+  {
+    "name": "empty page",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "items": []
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "success",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "missing source",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {},
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "append.from does not resolve to an array in the response"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "non-array source",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "items": 1
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "append.from does not resolve to an array in the response"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "array element source",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": [[2]],
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/0",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "append.from does not resolve to an array in the response"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "whole body source",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": [2],
+      "durationMs": 1
+    },
+    "append": {
+      "from": "",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "append.from does not resolve to an array in the response"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "scalar body",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": "text",
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "append.from does not resolve to an array in the response"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "missing target",
+    "before": {},
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "items": [2]
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {},
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "append.to extend target /data/items does not exist"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "non-array target",
+    "before": {
+      "items": 1
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "items": [2]
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": 1
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "append.to extend target /data/items is not an array"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "into failure rolls back append",
+    "before": {
+      "items": [1]
+    },
+    "into": "/data/missing/page",
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "items": [2]
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "invalid_response",
+          "message": "setData target /data/missing/page has no existing parent or element"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "HTTP error does not append",
+    "before": {
+      "items": [1]
+    },
+    "into": null,
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 404,
+      "headers": {},
+      "body": {
+        "items": [2]
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "error",
+      "data": {
+        "items": [1]
+      },
+      "meta": {
+        "status": 404,
+        "headers": {},
+        "durationMs": 1,
+        "error": {
+          "code": "http_error",
+          "message": "HTTP 404"
+        }
+      },
+      "wroteInto": false,
+      "appended": 0
+    }
+  },
+  {
+    "name": "escaped nested object member",
+    "before": {
+      "items": [1]
+    },
+    "into": "/data/page",
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": {
+        "a/b": {
+          "~items": [2],
+          "next": "p3"
+        }
+      },
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/a~1b/~0items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "success",
+      "data": {
+        "items": [1, 2],
+        "page": {
+          "a/b": {
+            "next": "p3"
+          }
+        },
+        "page__meta": {
+          "status": 200,
+          "headers": {},
+          "durationMs": 1
+        }
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1
+      },
+      "wroteInto": true,
+      "appended": 1
+    }
+  },
+  {
+    "name": "object member inside response array",
+    "before": {
+      "items": [1]
+    },
+    "into": "/data/page",
+    "response": {
+      "type": "prototype_response",
+      "requestId": "r",
+      "ok": true,
+      "status": 200,
+      "headers": {},
+      "body": [
+        {
+          "items": [2],
+          "next": "p3"
+        }
+      ],
+      "durationMs": 1
+    },
+    "append": {
+      "from": "/0/items",
+      "to": "/data/items"
+    },
+    "expected": {
+      "status": "success",
+      "data": {
+        "items": [1, 2],
+        "page": [
+          {
+            "next": "p3"
+          }
+        ],
+        "page__meta": {
+          "status": 200,
+          "headers": {},
+          "durationMs": 1
+        }
+      },
+      "meta": {
+        "status": 200,
+        "headers": {},
+        "durationMs": 1
+      },
+      "wroteInto": true,
+      "appended": 1
+    }
+  }
+]

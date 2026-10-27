@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { McpOverloadError, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError, McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { MCP_FORWARD_START_HEADROOM_MS } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";

@@ -9,7 +9,7 @@ import {
   DAEMON_VERSION,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";

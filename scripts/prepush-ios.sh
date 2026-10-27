@@ -102,10 +102,10 @@ fi
 protoviewer_changed=false
 while IFS= read -r -d '' relative_path; do
   case "${relative_path}" in
-    ios/prototype-agent/*|scripts/ios/protoviewer-build.sh) protoviewer_changed=true ;;
+    ios/prototype-agent/*|scripts/ios/protoviewer-build.sh|scripts/ios/prototype-effects-metallib.sh) protoviewer_changed=true ;;
   esac
 done < <(
-  git -C "${repo_root}" diff --name-only -z "${base_ref}...HEAD" -- ios/prototype-agent/ scripts/ios/protoviewer-build.sh \
+  git -C "${repo_root}" diff --name-only -z "${base_ref}...HEAD" -- ios/prototype-agent/ scripts/ios/protoviewer-build.sh scripts/ios/prototype-effects-metallib.sh \
     || printf '%s' "$?" > "${git_diff_status_file}"
 )
 if [[ -s "${git_diff_status_file}" ]]; then
@@ -211,6 +211,8 @@ if [[ "${protoviewer_changed}" == true && "${PREPUSH_IOS_SKIP_PROTOVIEWER:-0}" !
     echo "prepush-ios.sh: prototype-agent executed 0 tests" >&2
     exit 1
   fi
+  bun "${project_root}/scripts/ios/protoviewer-notices.ts" --check
+  bun "${project_root}/scripts/ios/check-privacy-manifests.ts"
   "${project_root}/scripts/ios/protoviewer-build.sh" "${project_root}/scratch/protoviewer-prepush"
   attestation_protoviewer=pass
 fi

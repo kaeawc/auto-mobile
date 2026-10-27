@@ -365,31 +365,42 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
     expect(deletedSessions).toEqual(["base"]);
   });
 
-  test("notifies the release handler for every derived label session it releases", async () => {
-    await sessionManager.createSession("base", androidDevice.deviceId, "android");
-    await asPlanAllocation(sessionManager, "base", ["base:B"], () =>
-      sessionManager.createSession("base:B", androidDevice.deviceId, "android"),
-    );
-    sessionManager.setDeviceLabels("base", buildDeviceLabelMap(["A", "B"], "base"));
+  test.each([false, true])(
+    "tears down only released bindings (callerHeldSession: %s)",
+    async (callerHeldSession) => {
+      await sessionManager.createSession("base", androidDevice.deviceId, "android");
+      await asPlanAllocation(sessionManager, "base", ["base:B"], () =>
+        sessionManager.createSession("base:B", androidDevice.deviceId, "android"),
+      );
+      sessionManager.setDeviceLabels("base", buildDeviceLabelMap(["A", "B"], "base"));
 
-    const cleanupService = new FakeAppCleanupService();
-    const releaseHandler = new FakeSessionBindingReleaseHandler();
-    const manager = new DefaultPlanLifecycleManager();
+      const cleanupService = new FakeAppCleanupService();
+      const releaseHandler = new FakeSessionBindingReleaseHandler();
+      const manager = new DefaultPlanLifecycleManager();
+      const deletedSessions: string[] = [];
 
-    await manager.afterExecution({
-      name: "executePlan",
-      args: {},
-      baseSessionUuid: "base",
-      cleanupService,
-      device: androidDevice,
-      sessionUuid: "base",
-      shouldResolveDevice: true,
-      sessionBindingReleaseHandler: releaseHandler,
-    });
+      await manager.afterExecution({
+        name: "executePlan",
+        args: {},
+        baseSessionUuid: "base",
+        cleanupService,
+        device: androidDevice,
+        sessionUuid: "base",
+        shouldResolveDevice: true,
+        callerHeldSession,
+        sessionBindingReleaseHandler: releaseHandler,
+        sessionToolSelectionService: {
+          deleteSession: async (uuid) => {
+            deletedSessions.push(uuid);
+          },
+        },
+      });
 
-    expect(releaseHandler.released).toContain("base");
-    expect(releaseHandler.released).toContain("base:B");
-    expect(sessionManager.getSession("base")).toBeNull();
-    expect(sessionManager.getSession("base:B")).toBeNull();
-  });
+      expect(releaseHandler.released).toEqual(callerHeldSession ? ["base:B"] : ["base:B", "base"]);
+      expect(deletedSessions).toEqual(releaseHandler.released);
+      expect(sessionManager.hasSession("base")).toBe(callerHeldSession);
+      expect(sessionManager.getSession("base:B")).toBeNull();
+      expect(sessionManager.getDeviceLabels("base")).toBeUndefined();
+    },
+  );
 });

@@ -1,3 +1,8 @@
+import { SimulatorIosClearDataBackend } from "../../../src/utils/ios-cmdline-tools/SimulatorIosClearDataBackend";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
 import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { buildObserveResult } from "../../helpers/observeFixture";
@@ -7,7 +12,6 @@ import {
   afterEach as afterOutputSchema,
   spyOn as spyOnOutputSchema,
 } from "bun:test";
-import { useScratchRoot } from "../../helpers/scratchRoot";
 import { launchAppResultSchema } from "../../../src/server/toolOutputSchemas";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
@@ -4543,7 +4547,6 @@ describe("LaunchApp", () => {
   describe("iOS clearAppData", () => {
     const userBundleId = "com.example.myapp";
     const systemBundleId = "com.apple.Preferences";
-    const scratch = useScratchRoot("automobile-launch-clear-");
 
     function createClearDataHarness(bundleId: string, opts: { containerPath?: string } = {}) {
       const iosDevice: BootedDevice = {
@@ -4601,6 +4604,14 @@ describe("LaunchApp", () => {
 
       const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb, fakeSimctl, fakeTimer, {
         installedAppsProvider: installedApps,
+        clearAppDataFactory: (device) => ({
+          execute: (id) =>
+            new SimulatorIosClearDataBackend(device.deviceId, {
+              simctl: fakeSimctl,
+              containerOwnership: simulatorOwnership,
+              rm: async () => {},
+            }).clearAppData(id),
+        }),
       });
       iosLaunchApp.awaitIdle = new FakeAwaitIdle();
       iosLaunchApp.observeScreen = iosObserveScreen;
@@ -4621,7 +4632,7 @@ describe("LaunchApp", () => {
 
     test("wipes the data container and re-wires CtrlProxy when clearAppData is true", async () => {
       fakeTimer.enableAutoAdvance();
-      const containerPath = scratch.next();
+      const containerPath = simulatorDataContainer("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE");
       const { iosLaunchApp, fakeCtrlProxy, installedApps, calls, cleanup } = createClearDataHarness(
         userBundleId,
         {

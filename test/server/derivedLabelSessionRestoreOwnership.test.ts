@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";

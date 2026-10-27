@@ -192,6 +192,21 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.deleteResult;
   }
 
+  readonly advanceClockRequests: { id: string; advanceTimeMs: number }[] = [];
+  private advanceClockResult: PrototypeResult = { success: true, fired: 0 };
+  setAdvanceClockResult(result: PrototypeResult): void {
+    this.advanceClockResult = result;
+  }
+  async requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.advanceClockRequests.push({ id, advanceTimeMs });
+    this.checkFailure("requestAdvancePrototypeClock");
+    return this.advanceClockResult;
+  }
   readonly clearStorageRequests: string[] = [];
   private clearStorageResult: PrototypeResult = { success: true, cleared: 0 };
   setClearStorageResult(result: PrototypeResult): void {
@@ -245,6 +260,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         reset?: boolean;
         replaceOthers?: boolean;
         appearance?: PrototypeAppearanceOverride;
+        locale?: string;
       }
     | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
@@ -286,6 +302,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
+      ...(overrides?.locale === undefined ? {} : { locale: overrides.locale }),
       ...(overrides?.appearance === undefined ? {} : { appearance: overrides.appearance }),
       ...(overrides?.replaceOthers === false ? { replaceOthers: false } : {}),
     });

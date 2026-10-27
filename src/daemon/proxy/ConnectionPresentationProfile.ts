@@ -3,7 +3,7 @@ import { DaemonUnavailableError } from "../client";
 import {
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-} from "../constants";
+} from "../wire/constants";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";
 import { runPreflightTransport } from "./DaemonLifecycleReconciler";
 

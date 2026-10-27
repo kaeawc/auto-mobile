@@ -4,7 +4,7 @@ import type { BackoffInput } from "../../utils/Backoff";
 import { type IdGenerator } from "../../utils/IdGenerator";
 import { type Timer } from "../../utils/SystemTimer";
 import { carryToolFailureMark } from "../../utils/toolFailureSignal";
-import { type BuildIdentity } from "../buildIdentity";
+import { type BuildIdentity } from "../wire/buildIdentity";
 import { DaemonClient, type DaemonClientFactory } from "../client";
 import { DaemonBoundSessionLostError } from "../DaemonBoundSessionLostError";
 import {

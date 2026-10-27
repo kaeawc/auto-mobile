@@ -2,7 +2,10 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -33,14 +36,28 @@ internal val PrototypeAnchorFadeKey = SemanticsPropertyKey<Float>("PrototypeAnch
 @Composable
 internal fun AnimatedVisibilityScope.ProvideAnchorFade(
   none: Boolean,
+  enterDelayMs: Int = 0,
   content: @Composable () -> Unit,
 ) {
   val outer = LocalPrototypeAnchorFade.current
   // Not animated for `none`: a child animation of the transition would hold the node on screen.
+  val expressive =
+    if (LocalPrototypeExpressive.current) prototypeExpressiveSpec<Float>(effects = true) else null
   val own =
     if (none) null
     else
-      transition.animateFloat(label = "prototypeAnchorFade") {
+      transition.animateFloat(
+        transitionSpec = {
+          expressive?.prototypeEnterDelay(
+            if (targetState == EnterExitState.Visible) enterDelayMs else 0,
+          )
+            ?: prototypeAnchorFadeSpec(
+              entering = targetState == EnterExitState.Visible,
+              enterDelayMs,
+            )
+        },
+        label = "prototypeAnchorFade",
+      ) {
         if (it == EnterExitState.Visible) 1f else 0f
       }
   // The layer drops the anchored node a recomposition after this leaves the composition; until
@@ -53,6 +70,18 @@ internal fun AnimatedVisibilityScope.ProvideAnchorFade(
     }
   CompositionLocalProvider(LocalPrototypeAnchorFade provides fade, content = content)
 }
+
+/**
+ * How the anchored fade runs: an enter with a delay waits [enterDelayMs] and then tweens, like the
+ * node's own enter (#15247), so a hoisted descendant does not appear before its parent; every other
+ * change keeps the default spring.
+ */
+internal fun prototypeAnchorFadeSpec(
+  entering: Boolean,
+  enterDelayMs: Int,
+): FiniteAnimationSpec<Float> =
+  if (entering && enterDelayMs > 0) tween(DELAYED_ENTER_MS, delayMillis = enterDelayMs)
+  else spring()
 
 /**
  * Applies [fade] to the anchored node's draw without an offscreen layer. The default compositing of

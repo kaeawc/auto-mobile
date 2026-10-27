@@ -1,3 +1,4 @@
+import { AdbAndroidFoldPostureRestore } from "./androidFoldPostureRestore";
 import {
   InMemoryMutationRecordingGaps,
   type MutationRecordingGaps,
@@ -236,6 +237,7 @@ export async function openSessionBrokerService(
         health: nativeIosResetHealth(options.timer),
         erase: iosReset,
         maxUses: reuse.maxUses,
+        fallback: reuse.fallback,
         budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
         budgetCeilingMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MAX_MS),
       });
@@ -310,6 +312,7 @@ export async function openSessionBrokerService(
         }
         return defaults;
       },
+      capabilities: options.config.capabilities,
       sessionDisposition: options.sessionDisposition,
       reuseCleanDevices: reuse.mode !== "off",
       reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
@@ -590,6 +593,7 @@ function nativeAndroidBaselineReset(
     port: (device) => new AndroidDeviceMutationResetPort(defaultAdbClientFactory.create(device)),
   });
   return new AndroidBaselineReset({
+    postureReset: new AdbAndroidFoldPostureRestore(defaultAdbClientFactory),
     timer,
     resetTimeoutMs: config.androidResetTimeoutMs,
     inventory: async (options) => {

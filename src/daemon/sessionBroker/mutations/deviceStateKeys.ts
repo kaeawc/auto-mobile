@@ -22,6 +22,12 @@ export type PowerIntent =
   | { field: PowerFieldKey; appId?: undefined }
   | { field: PowerAppFieldKey; appId: string };
 
+/**
+ * The opaque `setPosture` intent rows (Android): the base row is covered by a foldable's release
+ * posture restore; the display-preset row (a resized display) is not.
+ */
+export const POSTURE_OPAQUE_PARTS = ["setDeviceState", "posture"] as const;
+
 const POWER_PREFIX = "power:";
 
 export function powerIntentKey(intent: PowerIntent): string {

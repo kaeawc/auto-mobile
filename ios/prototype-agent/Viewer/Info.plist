@@ -25,7 +25,7 @@
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>MinimumOSVersion</key><string>17.0</string>
     <key>LSRequiresIPhoneOS</key><true/>
-    <key>UIDeviceFamily</key><array><integer>1</integer></array>
+    <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
     <!-- A prototype's `request` with via "device" may call any http:// URL (#12529). The viewer is
          a dev tool for simulators, so it opts out of App Transport Security entirely. -->
     <key>NSAppTransportSecurity</key>
@@ -34,6 +34,13 @@
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>

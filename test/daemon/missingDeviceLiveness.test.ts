@@ -15,7 +15,7 @@ import type {
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
 import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline-tools/AdbClient";
-import type { ExecResult } from "../../src/models";
+import type { ExecResult, SomePlatform } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
@@ -191,6 +191,29 @@ describe("MissingDeviceLiveness", () => {
     } finally {
       restore();
     }
+  });
+  test("fresh presence bypasses the simulator-list cache only for iOS, and the adb cache only for Android (#15295)", async () => {
+    const h = harness();
+    const optionsSeen: [string, BootedDeviceDiscoveryOptions | undefined][] = [];
+    class OptionsRecordingManager extends FakeDeviceManager {
+      override async getBootedDevicesDetailed(
+        platform: SomePlatform,
+        options?: BootedDeviceDiscoveryOptions,
+      ): Promise<BootedDeviceDiscovery> {
+        optionsSeen.push([platform, options]);
+        return super.getBootedDevicesDetailed(platform);
+      }
+    }
+    const manager = new OptionsRecordingManager();
+    h.port.getDeviceManager = () => manager;
+
+    await h.liveness.takeFreshPresenceDiscovery("ios");
+    await h.liveness.takeFreshPresenceDiscovery("android");
+
+    expect(optionsSeen).toEqual([
+      ["ios", { bypassIosDeviceListCache: true }],
+      ["android", { bypassAndroidDeviceListCache: true }],
+    ]);
   });
   test("fresh presence bypasses only its own adb read while a concurrent caller keeps the cached list", async () => {
     resetAdbClientCaches();

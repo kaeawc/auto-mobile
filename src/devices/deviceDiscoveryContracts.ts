@@ -200,6 +200,11 @@ export interface DeviceDestroyOptions {
 /** Options applied only when starting a new virtual-device process. */
 export interface DeviceStartOptions {
   cameraPosterPath?: string;
+  /**
+   * Android emulators only: launch with `-no-snapshot-save`, so a normal exit writes no quick-boot
+   * snapshot (2-4 GiB). For an AVD its owner destroys or does not reuse warm (#15477).
+   */
+  discardSnapshotOnExit?: boolean;
   /** iOS only: the resource profile this boot is for, so boot durations compare per profile. */
   resourceProfile?: SimulatorWorkloadProfile;
 }
@@ -451,3 +456,14 @@ export type DeviceManagerSimCtl = Pick<
   | "killSimulator"
   | "waitForSimulatorReady"
 >;
+
+/** The Android launcher options a start request maps to: poster and the exit-snapshot policy (#15477). */
+export function androidLaunchOptions(options: DeviceStartOptions): {
+  cameraPosterPath: string | undefined;
+  extraArgs?: readonly string[];
+} {
+  return {
+    cameraPosterPath: options.cameraPosterPath,
+    ...(options.discardSnapshotOnExit ? { extraArgs: ["-no-snapshot-save"] } : {}),
+  };
+}

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DAEMON_OWNED_SESSIONS_PARAM } from "../../src/daemon/constants";
+import { DAEMON_OWNED_SESSIONS_PARAM } from "../../src/daemon/wire/constants";
 import {
   DESKTOP_CLIENT_NAME,
   DesktopWireHarness,

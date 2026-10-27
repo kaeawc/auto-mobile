@@ -1,4 +1,3 @@
-import { DeviceLossState } from "../../src/daemon/deviceLossState";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -8,15 +7,19 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
 import type { BootedDevice } from "../../src/models";
-import { Daemon } from "../../src/daemon/daemon";
-import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { describe, expect, spyOn, test } from "bun:test";
+import {
+  createMonitorDaemon,
+  heldAndroidDevice,
+  heldSession,
+} from "../helpers/disconnectMonitorDaemon";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import {
   pruneStaleOfflineRecoveryAttempts,
   selectOfflineRecoveryCandidates,
@@ -177,37 +180,20 @@ function monitorHarness(
   },
 ) {
   const timer = new FakeTimer();
-  const device = {
-    id: "emulator-5554",
-    platform: "android",
-    incarnation: 1,
-    status: "busy" as const,
-    sessionId: "owner",
-  };
-  const daemon = Object.assign(Object.create(Daemon.prototype), {
+  const device = heldAndroidDevice("emulator-5554");
+  const { daemon, spies } = createMonitorDaemon({
     timer,
-    deviceDisconnectMonitor: null,
-    deviceLoss: new DeviceLossState({ missIncarnations: new Map([[device.id, 1]]) }),
-    deferredSessionRecoverySweeps: new Set(),
-    devicePool: {
-      retryDueDeferredSessionRecoveries: async () => {},
-      reconcileDiscoveryObservation: async () => {},
-      mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
-      getAndroidTransportAliases: (): string[] => [],
-      ...({
-        getAllDevices: () => [device],
-        getDevice: (id) => (id === device.id ? device : null),
-        isDeviceLeasedForAndroidStartup: () => false,
-      } satisfies DisconnectMonitorPool),
-      releaseAdbServerResetCohortReservations: async () => {},
-    },
-    sessionManager: {
-      getAssignedDevices: () => [device.id],
-      getAllSessions: () => [{ assignedDevice: device.id, platform: "android" }],
-    },
+    device,
+    missIncarnations: new Map([[device.id, 1]]),
   });
-  daemon.startDeviceDisconnectMonitor(manager, async () => []);
-  return { daemon, device, monitor: daemon.deviceDisconnectMonitor as SingleFlightInterval };
+  daemon.testHooks.startDeviceDisconnectMonitor(manager, async () => []);
+  return {
+    daemon,
+    device,
+    timer,
+    spies,
+    monitor: daemon.testHooks.runtime.deviceDisconnectMonitor as SingleFlightInterval,
+  };
 }
 
 test("monitor dispatches only in-session offline targets", async () => {
@@ -220,15 +206,13 @@ test("monitor dispatches only in-session offline targets", async () => {
       received.push([...ids]);
     }
   }
-  const { daemon, device, monitor } = monitorHarness(new OfflineManager());
+  const { device, monitor, spies } = monitorHarness(new OfflineManager());
   const second = { ...device, id: "emulator-5558" };
-  daemon.devicePool.getAllDevices = () => [device, second];
-  daemon.sessionManager.getAssignedDevices = () => [device.id, second.id];
-  daemon.sessionManager.getAllSessions = () =>
-    [device, second].map((target) => ({
-      assignedDevice: target.id,
-      platform: "android",
-    }));
+  spies.getAllDevices.mockImplementation(() => [device, second]);
+  spies.getAssignedDevices.mockImplementation(() => new Set([device.id, second.id]));
+  spies.getAllSessions.mockImplementation(() =>
+    [device, second].map((target) => heldSession(target.id)),
+  );
   await monitor.run();
   await monitor.stop();
   expect(received).toEqual([["emulator-5554", "emulator-5558"]]);
@@ -277,7 +261,7 @@ test.each(["emulator-5554", "localhost:5555"])(
         this.bootedDevices = [{ deviceId: recoveredId, platform: "android", name: "Pixel" }];
       }
     }
-    const { daemon, monitor } = monitorHarness(new RecoveringManager());
+    const { daemon, monitor, spies } = monitorHarness(new RecoveringManager());
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("ro.serialno", createExecResult("EMULATOR-SERIAL", ""));
     adb.setCommandResponse("ro.kernel.qemu", createExecResult("1", ""));
@@ -288,15 +272,17 @@ test.each(["emulator-5554", "localhost:5555"])(
       { deviceId: "localhost:5555", name: "Pixel", platform: "android" },
     ];
     aliases.fold(initial, await aliases.prepare(initial), new Set(["emulator-5554"]));
-    daemon.devicePool.mapAndroidDiscovery = (rows: BootedDevice[]) => aliases.mapDiscovery(rows);
-    daemon.deviceLoss.misses.set("emulator-5554", 2);
+    spies.mapAndroidDiscovery.mockImplementation((rows: BootedDevice[]) =>
+      aliases.mapDiscovery(rows),
+    );
+    daemon.testHooks.deviceLoss.misses.set("emulator-5554", 2);
     const sweep = monitor.run();
     await entered.promise;
-    expect(daemon.deviceLoss.misses.get("emulator-5554")).toBe(2);
+    expect(daemon.testHooks.deviceLoss.misses.get("emulator-5554")).toBe(2);
     complete.resolve();
     await sweep;
-    expect(daemon.deviceLoss.misses.has("emulator-5554")).toBe(false);
-    expect(daemon.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
+    expect(daemon.testHooks.deviceLoss.misses.has("emulator-5554")).toBe(false);
+    expect(daemon.testHooks.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
     await monitor.stop();
   },
 );
@@ -334,12 +320,12 @@ test("alternating successful and failed offline probes do not repeat global reco
   fail = true;
   const failedSweep = monitor.run();
   await probeEntered.promise;
-  expect(daemon.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
+  expect(daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
   failProbe.resolve();
   await failedSweep;
-  expect(daemon.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
+  expect(daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
   fail = false;
-  daemon.deviceLoss.misses.clear();
+  daemon.testHooks.deviceLoss.misses.clear();
   await monitor.run();
   expect(reconnects).toBe(1);
   device.incarnation++;
@@ -358,14 +344,16 @@ test("B1 defers the global reconnect when another offline candidate owns startup
       reconnects++;
     }
   }
-  const { daemon, device, monitor } = monitorHarness(new OfflineManager());
+  const { daemon, device, monitor, spies } = monitorHarness(new OfflineManager());
   const protectedDevice = { ...device, id: "emulator-5556" };
-  daemon.devicePool.getAllDevices = () => [device, protectedDevice];
-  daemon.devicePool.isDeviceLeasedForAndroidStartup = (id: string) => id === protectedDevice.id;
+  spies.getAllDevices.mockImplementation(() => [device, protectedDevice]);
+  spies.isDeviceLeasedForAndroidStartup.mockImplementation(
+    (id: string) => id === protectedDevice.id,
+  );
   await monitor.run();
-  const attempts = daemon.deviceLoss.offlineRecoveryAttemptedIds.size;
+  const attempts = daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds.size;
   const protectedReconnects = reconnects;
-  daemon.devicePool.isDeviceLeasedForAndroidStartup = () => false;
+  spies.isDeviceLeasedForAndroidStartup.mockImplementation(() => false);
   await monitor.run();
   await monitor.stop();
   expect(protectedReconnects).toBe(0);
@@ -391,7 +379,7 @@ test.each([
       }
     }
     const manager = new AliasManager();
-    const { daemon, monitor, device } = monitorHarness(manager);
+    const { daemon, monitor, device, spies, timer } = monitorHarness(manager);
     device.id = canonical;
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("ro.serialno", createExecResult(canonical, ""));
@@ -405,26 +393,28 @@ test.each([
       { deviceId: device.id, name: "Pixel", platform: "android" },
       { deviceId: alias, name: "Pixel", platform: "android" },
     ]);
-    daemon.devicePool.mapAndroidDiscovery = (rows: BootedDevice[]) => aliases.mapDiscovery(rows);
+    spies.mapAndroidDiscovery.mockImplementation((rows: BootedDevice[]) =>
+      aliases.mapDiscovery(rows),
+    );
     const identityCalls = adb.getExecutedCommands().length;
     adb.setCommandError("boot_id", new Error("timeout"));
     manager.bootedDevices = [{ deviceId: alias, name: "Pixel", platform: "android" }];
     let cleanups = 0;
-    daemon.cleanupDisconnectedDevice = async () => {
+    daemon.testHooks.overrideCleanupDisconnectedDevice(async () => {
       cleanups++;
-    };
+    });
     try {
       for (let tick = 0; tick < 4; tick++) {
         await monitor.run();
       }
-      expect(daemon.deviceLoss.misses.size).toBe(0);
-      expect(daemon.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
+      expect(daemon.testHooks.deviceLoss.misses.size).toBe(0);
+      expect(daemon.testHooks.deviceLoss.confirmedDisconnectedIds.size).toBe(0);
       expect(offlineProbes).toBe(0);
       expect(recoveries).toBe(0);
       expect(cleanups).toBe(0);
       expect(aliases.resolveTransport(device.id)).toBe(device.id);
       expect(adb.getExecutedCommands()).toHaveLength(identityCalls);
-      expect(daemon.timer.getSleepHistory()).toEqual([]);
+      expect(timer.getSleepHistory()).toEqual([]);
     } finally {
       await monitor.stop();
     }
@@ -439,8 +429,7 @@ test("concurrent refresh and disconnect monitor do not probe twice or fail disco
     async recoverAndroidOfflineDevices() {}
   }
   const manager = new AliasManager();
-  const { daemon, monitor, device } = monitorHarness(manager);
-  const timer = daemon.timer as FakeTimer;
+  const { daemon, monitor, device, timer } = monitorHarness(manager);
   const row = (deviceId: string): BootedDevice => ({
     deviceId,
     name: deviceId,
@@ -465,7 +454,7 @@ test("concurrent refresh and disconnect monitor do not probe twice or fail disco
       },
     ),
   );
-  daemon.devicePool = pool;
+  daemon.testHooks.replaceDevicePool(pool);
   device.id = usb;
   await pool.refreshDevices();
   await pool.assignDeviceToSession("owner-a", "android");
@@ -488,7 +477,7 @@ test("concurrent refresh and disconnect monitor do not probe twice or fail disco
     await drainMicrotasks(100);
     expect(normalization).toHaveBeenCalledTimes(1);
     expect(adb.getExecutedCommands()).toHaveLength(calls);
-    expect(daemon.deviceLoss.misses.size).toBe(0);
+    expect(daemon.testHooks.deviceLoss.misses.size).toBe(0);
     release.resolve(createExecResult(usb, ""));
     await expect(sweep).resolves.toBeUndefined();
     expect((await refresh).failure).toBeUndefined();
@@ -504,4 +493,8 @@ test("concurrent refresh and disconnect monitor do not probe twice or fail disco
     await monitor.stop();
     timer.reset();
   }
+});
+
+afterEach(() => {
+  DaemonState.getInstance().reset();
 });

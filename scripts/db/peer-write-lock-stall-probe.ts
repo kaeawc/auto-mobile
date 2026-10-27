@@ -53,7 +53,7 @@ try {
     const { DeviceSessionRepository } = await import("../../src/db/deviceSessionRepository");
     const { openSqliteBindingRegistry } =
       await import("../../src/daemon/sessionBroker/registry/sqliteBindingRegistry");
-    const windows = await import("../../src/daemon/sessionLivenessWindows");
+    const windows = await import("../../src/daemon/wire/sessionLivenessWindows");
     const { raceWithDeadline } = await import("../../src/utils/raceWithDeadline");
     const { defaultTimer } = await import("../../src/utils/SystemTimer");
     const { sql } = await import("kysely");

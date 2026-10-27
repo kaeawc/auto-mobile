@@ -31,6 +31,8 @@ extension PrototypeContractValidator {
             if let child = data[key] { try walk(child, rule: childRule, path: childPath, depth: depth) }
             else if field["optional"] != .bool(true) { throw Self.invalid(childPath, "Required property") }
         }
+        let kind = ["style", "fadeEdges", "imageFilter"].first { rule == definitions[$0]?.objectFields } ?? ""
+        try PrototypeStylePolishV2.validateObject(data, kind: kind, path: path)
         try Self.constraints(data, rule: rule, path: path)
     }
 
@@ -54,7 +56,7 @@ extension PrototypeContractValidator {
                 if let first = present.first {
                     throw invalid(keyPath(path, first), "Requires \(triggers.joined(separator: " or "))")
                 }
-            } else if present.count != 1, let first = names.first {
+            } else if trigger.contains("|"), present.count != 1, let first = names.first {
                 throw invalid(
                     keyPath(path, present.dropFirst().first ?? first),
                     "Exactly one of \(names.joined(separator: ", ")) is required"
@@ -62,7 +64,12 @@ extension PrototypeContractValidator {
             }
         }
         if rule["atLeastOne"] == .bool(true), data.isEmpty {
-            throw invalid(path, "At least one selector field is required")
+            throw invalid(
+                path,
+                path
+                    .hasSuffix(".semantics") ? "Expected at least one semantics field" :
+                    "At least one selector field is required"
+            )
         }
     }
 

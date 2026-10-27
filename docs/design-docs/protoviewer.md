@@ -129,9 +129,19 @@ Import needs identical accept/reject behaviour on all three platforms.
 
 ### 3.4 iOS app
 
+- Both `Info.plist` files (ProtoViewer and the Viewer template) declare `UIDeviceFamily` `[1, 2]` and all four
+  iPad orientations, so the app runs natively on iPad instead of in iPhone compatibility mode. Multiple
+  scenes stay off. The artifact policy gate and privacy manifest do not constrain the device family.
 - SwiftUI `ProtoViewer`: `LibraryView` (SF Symbols only) and `PrototypeScreen` hosting
   `ViewerRenderer` with `PrototypeModel(mode: .standalone, storage: .fileBacked())` in a
   per-library-id namespace.
+- ProtoViewer's own chrome keys on the native horizontal size class (compact or regular; no Material
+  breakpoints). `LibraryView` is one `NavigationSplitView` at every width: regular (full iPad window,
+  iPhone Duo inner panel) shows the library as a sidebar beside the open prototype, compact collapses to
+  the phone stack. The selection is plain state, so a size-class change (iPad window resize, Duo fold or
+  unfold) keeps the open prototype mounted; deleting the open entry clears the detail pane. Settings,
+  licenses and error text cap at a readable width at regular size. The prototype itself still sizes from
+  its own window, and the app-reserved chrome (toolbar, network indicator) stays outside it.
 - Data lives in Application Support (not Documents, no `UIFileSharingEnabled`) with
   `isExcludedFromBackup` set. Each prototype directory is `PrototypeSavedLayout` formatVersion 1,
   unchanged, plus the sibling `library.json` (section 4).
@@ -140,6 +150,37 @@ Import needs identical accept/reject behaviour on all three platforms.
   Fonts are unregistered when switching prototypes.
 - Network: requests go through a pin-capable transport, not `URLSession`; App Transport Security is
   relaxed only in the simulator and dev build; see section 6.
+
+### 3.5 Open-source notices (#14158)
+
+Both apps list the licenses of everything they ship under Settings, "Open-source licenses", and
+link `SECURITY.md` beside it. The lists are generated, never hand-maintained.
+
+- **Android**: the AboutLibraries Gradle plugin (`com.mikepenz.aboutlibraries.plugin.android`,
+  version in `libs.versions.toml`) collects the release runtime classpath at build time into
+  `res/raw/aboutlibraries.json`. Only the plugin is applied: `LicensesActivity` parses the JSON with
+  the existing kotlinx.serialization dependency, so the app links no extra runtime library. The
+  plugin runs offline, so the full Apache-2.0 text comes from
+  `android/protoviewer/license-config/licenses/Apache-2.0.json` (a test pins it to the repository
+  `LICENSE`). Strict mode fails the build for any license outside the allow-list, and a unit test
+  fails when a bundled dependency has no license entry or no license text. Alternatives checked:
+  Google's `oss-licenses-plugin` (its UI is the Play services `play-services-oss-licenses` runtime
+  library, which an unprivileged offline app should not link), and licensee (validates licenses but
+  is not a notice generator). No such plugin existed in the build before.
+- **iOS**: `scripts/ios/protoviewer-notices.ts` reads the SwiftPM graph of `ios/prototype-agent`
+  (`swift package show-dependencies --format json`, so transitive packages and resolved versions are
+  covered), adds each package's license text from
+  `ios/prototype-agent/ProtoViewer/third-party-licenses/<identity>.txt`, and writes
+  `ProtoViewer/Acknowledgements.generated.swift`, which the viewer build compiles in. Today the graph
+  is first party only, so the list holds the AutoMobile Apache-2.0 notice. When a package is added:
+  commit its license text, run `bun scripts/ios/protoviewer-notices.ts`, and add the package
+  directory to `.github/dependabot.yml`. A missing text, or a text for a package no longer linked,
+  fails the script.
+- **Drift check**: `scripts/prepush-ios.sh` and the `protoviewer-notices` Fast Validation check run
+  the script with `--check`. On macOS it rebuilds the output from SwiftPM and fails when the
+  committed Swift file differs. Elsewhere, where the pinned Swift toolchain may be absent, the
+  generated header records a digest of `Package.swift`, `LICENSE` and the license texts, and the
+  check fails when the digest no longer matches, so any manifest edit needs a regeneration on macOS.
 
 ## 4. Data model and formats
 
@@ -189,9 +230,9 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
 - Importing a prototype whose `spec.id` already exists creates a new entry with its own library id
   and empty storage. Replace and keep-both are later work.
 - Not in the first release: user-facing URL import, universal links, compact `?spec=` links, QR. The
-  one custom URL scheme in the first release is the internal launch scheme `automobile-proto://open`
-  (section 7): the iOS app registers it, and it only opens an entry that is already in the library.
-  It never fetches, imports or carries spec bytes.
+  one custom URL scheme in the first release is the internal launch scheme `automobile-proto://`
+  (section 7): it imports a host-staged inbox bundle or opens an existing library entry.
+  The scheme never fetches or carries spec bytes.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 
@@ -310,7 +351,9 @@ Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When 
   when an entry is imported; host attach is off by default for imported prototypes.
 - Limits: 200 prototypes and 100 MiB per library, enforced at commit and on load, plus a render
   watchdog. Android allows 10 seconds for loading and the first successful content composition;
-  timeout or composition failure shows the corrupt state with Back. Android sets `allowBackup=false` and allows no cleartext outside the dev flavor. iOS
+  timeout or composition failure shows the corrupt state with Back. iOS allows the same 10 seconds
+  from mount to the first laid-out content (`PrototypeRenderWatchdog`, cancelled by the renderer's
+  first layout in a window) and then shows the error state; a blocked main thread is not caught. Android sets `allowBackup=false` and allows no cleartext outside the dev flavor. iOS
   distributed (non-simulator) builds carry no App Transport Security exception.
 
 The shared request-policy and storage work is tracked in #13622.
@@ -340,18 +383,31 @@ The shared request-policy and storage work is tracked in #13622.
   folders cannot be prepared, the push is refused, or the app answers `rejected` at `inbox` (it
   cannot see the pushed file), nothing was imported and the host keeps the CtrlProxy save path
   with a logged warning instead of failing the call.
-  iOS (simulator and dev-signed devices) uses `simctl` or `devicectl` file copy into the app's
-  inbox plus the internal launch scheme `automobile-proto://open`, which the iOS app registers in
-  the first release (section 4). Opening the scheme with an unknown id or an inbox name that does
-  not pass the same import checks shows an error and changes nothing. The iOS route is a separate
-  slice of #13621; until it lands, iOS `save` keeps the template path and `open` is refused.
-- `prototype save`: on Android, when ProtoViewer is installed for the current user, build a
+- iOS simulators use the host filesystem and `simctl openurl`, without a new socket or broadcast.
+  The host resolves the app's own data container and creates
+  `Library/Application Support/ProtoViewer/mcp/inbox/` and `results/` (same host uid as the app);
+  the app also creates them idempotently on start and never purges this inbox at launch.
+  Import writes `inbox/<request>.automobile-proto.tmp` then renames it, and delivers
+  `automobile-proto://import?request=<request>&label=<percent-encoded-label>` (label optional).
+  Open delivers `automobile-proto://open?request=<request>&id=<libraryId>`.
+  Request ids match `[A-Za-z0-9_-]{1,64}`. The scheme carries no spec bytes. The app validates the
+  full import, sets `source: mcp` itself, removes the inbox file after every attempt, and atomically
+  publishes `results/<request>.json` using the same result shapes as Android. Rejections are
+  reported in that file rather than an alert. Open reports `opened` only after the viewer loads.
+  Host polling treats a missing result as pending until the timer deadline; finally it removes
+  results and leftover inbox files even after cancellation, with an independent cleanup timeout.
+  An absent app, unresolved container, unusable inbox, or nonzero `openurl` exit keeps the template
+  save path with a logged warning. Command timeout or result deadline after delivery is a hard
+  failure: the save may still have landed, so check ProtoViewer before retrying.
+  Physical devices keep the template path's existing behavior; `open` needs an iOS simulator.
+  `devicectl` delivery to dev-signed physical devices remains later work.
+- `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is installed, build a
   canonical bundle (#13616) and route it as above; otherwise the CtrlProxy or template path is
   unchanged. `pin` and `icon` describe CtrlProxy launcher shortcuts, which ProtoViewer has not, so
-  a save with either keeps the CtrlProxy path. The output gains `viewer` `{app, libraryId, label}`
+  a save with either keeps the platform save path. The output gains `viewer` `{app, libraryId, label}`
   and a warning that the entry is imported.
 - `prototype open` (new action) launches a library id (`viewer.libraryId`) through the same
-  activity with action `….mcp.OPEN`, and returns the same warning.
+  activity with action `….mcp.OPEN` on Android or the iOS simulator URL route, and returns the same warning.
 - Not in the first release: MCP `export` and `import` actions, a `listSaved` merge, live attach.
 
 ## 8. Distribution
@@ -362,6 +418,101 @@ listing):
 - Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum.
 - iOS: dev-signed builds installed on the owner's iPhones (an Apple Developer team is configured).
   The simulator template remains available.
+
+### 8.1 Release-artifact policy gate (#14154)
+
+The hardening promises above are checked on the **built artifact**, not the source manifests, by
+`scripts/release/check-protoviewer-artifact-policy.ts` against the checked-in allowlists in
+`scripts/release/protoviewer-artifact-policy.json`:
+
+- **Android** (`aapt2 dump xmltree` of the APK's merged manifest): permissions equal the allowlist
+  (`INTERNET`, `ACCESS_LOCAL_NETWORK`) with no declared permissions; no `debuggable`;
+  `allowBackup=false` and `dataExtractionRules`; no cleartext (`usesCleartextTraffic` or a network
+  security config that permits it); the exported components equal the allowlist (the launcher,
+  `ImportActivity`, and the two `DUMP`-protected entries); `targetSdk` at the Play floor; no
+  `-SNAPSHOT` `versionName` (local and PR builds pass `--allow-snapshot`).
+- **iOS** (`plutil`, `codesign -d --entitlements`, `nm`): no ATS relaxation, no
+  `UIFileSharingEnabled`, `CFBundleSupportedPlatforms` matches `--platform`, entitlements within the
+  allowlist and never a `get-task-allow` that is not `false` (simulator builds keep entitlements in the
+  executable, so `codesign` reports none and these rules bite on the device `.ipa`), no `.dSYM` in the bundle and no debug map left in the
+  executable. The `PrivacyInfo.xcprivacy` check is enforced (#14151, #15387). The
+  forbidden-symbol check (`PrototypeServer`, `bootViewerHost`) is **advisory** (reported as a warning,
+  table `advisory` in the policy file) until the App Store archive (#14150) lands; delete the table
+  entry then to enforce it.
+
+It runs in the pull-request Android build, in `prepare-release.yml` through
+`verify-protoviewer-artifact-policy.yml` (which `verify-prepared-release` waits on), and locally with
+`scripts/release/protoviewer-artifact-policy.sh`. Fixtures are real tool output captured by
+`scripts/release/capture-protoviewer-policy-fixtures.sh`; CtrlProxy's release APK is the
+deliberately failing Android case.
+
+### 8.1.1 Device checks for release artifacts (#15387)
+
+Two checks need a device and run from `scripts/release/protoviewer-release-smoke.sh` (logic in
+`scripts/release/protoviewer-release-smoke.ts`, fake-tested in `test/scripts/protoviewerReleaseSmoke.test.ts`):
+
+- **Upgrade in place** (`--mode upgrade`): install the previous release, import a prototype through
+  the MCP inbox, install the candidate over it (`adb install -r` / `simctl install`, never an
+  uninstall), then check the version moved, the app's data identity is unchanged (Android
+  `firstInstallTime`, iOS data container path) and the saved entry still opens under the same library id.
+- **Minified smoke** (`--mode smoke`): install the R8-minified APK (`--build` passes
+  `-Pautomobile.protoviewer.minifyRelease=true`) or the stripped iOS release, import and open two
+  validated asset-free specs (one standing in for the bundled sample, one for an import), and on
+  Android read the library screen's settings switch and open "Open-source licenses" through
+  `uiautomator dump`.
+
+Not automated: settings persistence (the network switch needs a runtime permission grant), and the
+iOS Settings and licenses screens (no UI driver in the script); both are reported as `SKIPPED`.
+The previous APK must be signed with the candidate's key. `protoviewer-release-smoke.yml` is a
+manual, advisory Android lane that downloads the previous release's APK; it is not called from any
+release workflow. All of this is unverified on devices until someone runs it (label
+`needs-device-verify` on #15387). The iOS forbidden-symbol rule stays advisory until #14150 lands.
+
+### 8.2 Play-ready Android artifact (#14146)
+
+The Android module builds a Play-uploadable AAB next to the APK. The Gradle side is the
+`automobile.protoviewer-play-release` convention in `android/build-logic`; it replaces the shared
+`automobile.android-app-signing` for ProtoViewer, which falls back open to the debug key.
+
+**Dedicated keystore.** ProtoViewer has its own signing key, never CtrlProxy's `RELEASE_KEYSTORE_*`.
+Inputs are read from the environment (CI) or `gradle.properties` (local):
+
+| Input                                 | Purpose                                                   | CI secret                       |
+| ------------------------------------- | --------------------------------------------------------- | ------------------------------- |
+| `PROTOVIEWER_KEYSTORE_PATH`           | keystore file (relative paths resolve against `android/`) | `PROTOVIEWER_KEYSTORE_BASE64`   |
+| `PROTOVIEWER_KEYSTORE_PASSWORD`       | store password                                            | `PROTOVIEWER_KEYSTORE_PASSWORD` |
+| `PROTOVIEWER_KEY_ALIAS`               | key alias                                                 | `PROTOVIEWER_KEY_ALIAS`         |
+| `PROTOVIEWER_KEY_PASSWORD`            | key password                                              | `PROTOVIEWER_KEY_PASSWORD`      |
+| `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | (workflow input)                |
+| `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | (workflow env)                  |
+
+The workflow decodes `PROTOVIEWER_KEYSTORE_BASE64` to a file and exports its path as
+`PROTOVIEWER_KEYSTORE_PATH`. Whether this key is the Play upload key or the app-signing key is
+decided at Play App Signing enrolment; record it next to the key.
+
+**Fail closed.** With `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, `verifyProtoViewerReleaseInputs`
+(a `preReleaseBuild` dependency, so it fails before compilation) rejects a missing signing input, a
+missing keystore file, a missing `PROTOVIEWER_RELEASE_VERSION`, or a `-SNAPSHOT`/suffixed version.
+Without it (local and pull-request builds) an incomplete keystore falls back to the debug key and
+the version code stays `1`. Debug builds always use the debug key, never the release key.
+
+**versionCode.** `major * 1_000_000 + minor * 1_000 + patch` of `PROTOVIEWER_RELEASE_VERSION`
+(`ProtoViewerVersioning`). It is strictly monotonic in version order, bounded under Play's
+2,100,000,000 cap (major <= 2099, minor and patch <= 999), and `0.0.89` gives `89`. The release
+`versionName` is the same plain version, so a published build never carries `-SNAPSHOT`.
+
+**AAB, R8 and mapping.** `:protoviewer:bundleRelease` writes
+`build/outputs/bundle/release/protoviewer-release.aab` and is finalized by
+`verifyProtoViewerReleaseAab` (required entries, jar signature present and not the Android debug
+certificate when signing is required, R8 mapping present) and, when R8 is on,
+`archiveProtoViewerReleaseMapping` (`build/outputs/release-archive/mapping-<versionCode>.txt`, to
+be kept as a release asset for as long as that version is supported). R8 is on for release (disable
+locally with `-Pautomobile.protoviewer.minifyRelease=false`); `verifyReleaseR8KeptClasses` asserts
+the manifest components, the saved-prototype `@Serializable` contract and the reflectively resolved
+icon set survive. Unused `:protocol` wire models are shrunk away.
+
+Not yet wired: the release workflow step that exports these inputs and uploads the AAB and mapping,
+`lintRelease` in CI, and the `bundletool build-apks` install smoke test on a device.
 
 ## 9. Phased plan
 
@@ -390,12 +541,22 @@ Kotlin and Swift (accept/reject plus error path only). Device (manual-test skill
 re-import across platforms; adb push plus VIEW import; invalid-spec error; offline with stored values;
 localhost request blocked and LAN request allowed with the switch on.
 
+Import fuzzing (#14159): `scripts/prototype/bundleFuzz.ts` holds seeded generators (byte mutation, hostile
+ZIP structure, hostile `bundle.json`/`spec.json`, DEFLATE bombs). They feed fast-check property tests in
+TS (`prototypeBundleFuzz.property.test.ts`, unit budget) and a wider sweep (`.integration.test.ts`, safe
+tier). `test/fixtures/prototype-bundle/fuzz-corpus.json` is the shared differential corpus: TS records the
+verdict (accept, or code plus path) and the Kotlin (`PrototypeBundleFuzzTest`) and Swift
+(`PrototypeBundleFuzzTests`) readers must reproduce it, alongside seeded per-platform mutation sweeps that
+assert only typed rejections. Regenerate with `bun scripts/prototype/generate-bundle-fuzz-corpus.ts
+--write`; a minimized finding becomes a fixture in `corpus.json`. Coverage-guided Jazzer/libFuzzer
+harnesses and a nightly CI job remain future work.
+
 ## 11. Risks
 
 1. Swift validator parity is the critical path (mitigated by reject-only scope and the corpus).
 2. Library network policy differs from #12518's "no allowlist"; MCP-direct `show` is unchanged.
 3. The extraction touches CtrlProxy (one mechanical change plus existing suites).
-4. The adb-based MCP channel is Android-specific; iOS uses `simctl`/`devicectl`.
+4. The adb-based MCP channel is Android-specific; iOS simulators use the filesystem and `simctl openurl`; physical-device delivery is later work.
 5. With no `specVersion`, older apps reject newer specs; `requires` and capability messages soften this.
 
 ## 12. Decisions

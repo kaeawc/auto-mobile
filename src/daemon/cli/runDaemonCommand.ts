@@ -1,10 +1,11 @@
+import { sessionDeviceInfo } from "../sessionDeviceBinding";
 import { z } from "zod";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   getCliSessionIdleTimeoutMs,
-} from "../constants";
+} from "../wire/constants";
 import { vetoedIdleReleaseAt } from "../sessionHoldDiagnostics";
 import { isSessionReleasing } from "../sessionReleaseState";
 import { releaseSessionAndDevice } from "../releaseSessionAndDevice";
@@ -24,7 +25,7 @@ import {
   buildIdentitiesMatch,
   describeBuildIdentity,
   type BuildIdentity,
-} from "../buildIdentity";
+} from "../wire/buildIdentity";
 import type { DaemonClientFactory } from "../client";
 import type { DaemonStateLike } from "../daemonState";
 import type { DaemonManager, DaemonManagerOptions } from "../manager";
@@ -619,6 +620,7 @@ async function querySessionInfo(rawArgs: string[], manager: DaemonManager): Prom
         JSON.stringify({
           sessionId: session.sessionId,
           assignedDevice: session.assignedDevice,
+          ...sessionDeviceInfo(session),
           createdAt: session.createdAt,
           lastUsedAt: session.lastUsedAt,
           expiresAt: session.expiresAt,

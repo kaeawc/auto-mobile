@@ -1,7 +1,7 @@
 import type { DeviceProfileSelector } from "../../models/ManufacturerProfileIds";
 
 export type IosArchetype = "phone" | "tablet" | "duo";
-export type AndroidArchetype = "phone" | "tablet";
+export type AndroidArchetype = "phone" | "tablet" | "foldable";
 
 export type IosModelType =
   | {
@@ -178,6 +178,7 @@ export interface IosHardwareDefaults {
 }
 
 export interface AndroidProfileDefault {
+  memoryMb?: number;
   archetype: AndroidArchetype;
   profileId: string;
 }
@@ -204,6 +205,16 @@ export interface AndroidSessionRequirementDefaults {
 export type SessionRequirementDefaults =
   | IosSessionRequirementDefaults
   | AndroidSessionRequirementDefaults;
+
+/**
+ * Operator-enabled host capabilities for hardware that is recognized but not executable
+ * everywhere. Every capability is off when omitted, so a recognized request is refused with
+ * a non-retryable `capability_disabled` failure.
+ */
+export interface SessionRequirementCapabilities {
+  /** iPhone Duo simulators (iOS 27.1+ runtimes). */
+  iosDuo?: boolean;
+}
 
 export interface RequirementProvenance {
   policyVersion: string;
@@ -250,6 +261,7 @@ export interface IosSessionDeviceProfile {
 }
 
 export interface AndroidSessionDeviceProfile {
+  memoryMb?: number;
   platform: "android";
   metadataState: CatalogMetadataState;
   profileId?: string;
@@ -300,6 +312,7 @@ export interface ResolvedIosSessionDeviceProfile {
 }
 
 export interface ResolvedAndroidSessionDeviceProfile {
+  memoryMb?: number;
   platform: "android";
   metadataState: "current";
   profileId: string;

@@ -17,7 +17,7 @@ Add the JUnit runner to the module that owns the tests:
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.87")
+    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.88")
 }
 ```
 
@@ -34,7 +34,7 @@ Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), 
 For a Swift package manifest, use the released package:
 
 ```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.87")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.88")
 ```
 
 `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
@@ -265,12 +265,12 @@ Use one release version for the test runner and the AutoMobile CLI. Restart a
 shared daemon so it receives the pin, then check the environment before tests:
 
 ```bash
-export AUTOMOBILE_VERSION=0.0.87
-bunx @kaeawc/auto-mobile@0.0.87 --daemon restart
-bunx @kaeawc/auto-mobile@0.0.87 --cli doctor
+export AUTOMOBILE_VERSION=0.0.88
+bunx @kaeawc/auto-mobile@0.0.88 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.88 --cli doctor
 ```
 
-Replace `0.0.87` with the version used by your test runner dependency.
+Replace `0.0.88` with the version used by your test runner dependency.
 
 `--cli doctor` reports the status of AutoMobile on each booted Android device,
 including whether the accessibility service is installed and up to date. It is

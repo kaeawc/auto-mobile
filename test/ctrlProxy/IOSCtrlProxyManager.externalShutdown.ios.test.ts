@@ -36,7 +36,12 @@ describe("external simulator shutdown", () => {
       return createExecResult(
         state === "unknown"
           ? "{}"
-          : JSON.stringify({ devices: { runtime: [{ udid: device.deviceId, state }] } }),
+          : // "deleted": a complete listing that no longer names this simulator (#15309).
+            JSON.stringify({
+              devices: {
+                runtime: [{ udid: state === "deleted" ? "OTHER-SIM" : device.deviceId, state }],
+              },
+            }),
         "",
       );
     });
@@ -74,13 +79,15 @@ describe("external simulator shutdown", () => {
     };
   }
 
-  test.each(["Shutdown", "Booting", "Booted", "unknown", "error"])(
+  test.each(["Shutdown", "Booting", "Booted", "unknown", "error", "deleted"])(
     "confirms simulator state %s before retiring the runner",
     async (state) => {
       const f = fixture(state);
       const stop = spyOn(f.manager, "stop").mockResolvedValue();
       await f.manager.markSimulatorShutDownIfNotBooted();
-      expect(stop).toHaveBeenCalledTimes(state === "Shutdown" || state === "Booting" ? 1 : 0);
+      expect(stop).toHaveBeenCalledTimes(
+        state === "Shutdown" || state === "Booting" || state === "deleted" ? 1 : 0,
+      );
     },
   );
 
@@ -135,6 +142,20 @@ describe("external simulator shutdown", () => {
       () => f.manager.getForcedRestartBudget().snapshot().state === "suspended",
       "removal suspension",
     );
+  });
+
+  test("start refuses a simulator deleted behind the daemon and suspends its runner (#15309)", async () => {
+    const f = fixture("deleted");
+    timer.enableAutoAdvance();
+    await expect(f.manager.start()).rejects.toBeInstanceOf(SimulatorShutDownError);
+    expect(f.launches()).toBe(0);
+    await flushUntil(
+      () => f.manager.getForcedRestartBudget().snapshot().state === "suspended",
+      "removal suspension",
+    );
+    // A deleted simulator never comes back, so a later start stays refused.
+    await expect(f.manager.start()).rejects.toBeInstanceOf(SimulatorShutDownError);
+    expect(f.launches()).toBe(0);
   });
 
   test("forceRestart rejects shutdown without waiting on its own teardown", async () => {

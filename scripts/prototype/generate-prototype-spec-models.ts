@@ -1,9 +1,19 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import contract from "../../schemas/prototype-spec-contract.json";
 import type { Rule } from "../../src/features/prototype/prototypeBindingValidation";
-import { prototypeModelOverrides } from "./prototype-model-overrides";
+import { prototypeModelSelection, prototypeTypeRefs } from "./prototype-model-selection";
 
-export type ModelSelection = Readonly<Record<string, Readonly<Record<string, "Int" | "Double">>>>;
+import { renderObject } from "./prototype-model-rendering";
+import { renderUnion } from "./prototype-model-unions";
+export { escapeModelIdentifier } from "./prototype-model-rendering";
+
+import type { ModelSelection, TypeRefs } from "./prototype-model-selection";
+export type {
+  ModelLanguage,
+  ModelOptions,
+  ModelSelection,
+  TypeRefs,
+} from "./prototype-model-selection";
 export interface ModelSources {
   kotlin: string;
   swift: string;
@@ -21,14 +31,11 @@ const header = [
   "// Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts",
 ];
 
-/**
- * Deliberately only plain objects with number fields. Rules still validate at the existing
- * contract boundary; models do not duplicate numeric bounds or add decoding error paths.
- * Everything else (including refs and nested objects) must remain hand-written for now.
- */
+/** Render contract objects, refs, nested objects and tagged unions; validation stays in the contract interpreters. */
 export function renderPrototypeSpecModels(
   source: { definitions: Readonly<Record<string, Rule>> },
   selection: ModelSelection,
+  refs: TypeRefs = {},
 ): ModelSources {
   const kotlin = [
     ...header,
@@ -37,43 +44,46 @@ export function renderPrototypeSpecModels(
     "import kotlinx.serialization.Serializable",
   ];
   const swift = [...header];
-  for (const [name, numbers] of Object.entries(selection)) {
+  if (
+    Object.entries(selection).some(
+      ([name, options]) =>
+        source.definitions[name]?.kind === "tagged" &&
+        (!options.languages || options.languages.includes("kotlin")),
+    )
+  ) {
+    kotlin.splice(kotlin.length - 1, 0, "import kotlinx.serialization.SerialName");
+  }
+  const kotlinImports = new Set<string>();
+  for (const [name, options] of Object.entries(selection)) {
     const definition = source.definitions[name];
     if (!definition) {
       throw new Error(`Definition ${name}: not found`);
     }
-    if (definition.kind !== "object" || !definition.fields) {
-      throw new Error(`Definition ${name}: unsupported kind ${definition.kind}; expected object`);
-    }
-    const fields = Object.entries(definition.fields);
-    if (!fields.length) {
-      throw new Error(`Definition ${name}: empty objects are unsupported`);
-    }
-    const typeName = name.charAt(0).toUpperCase() + name.slice(1);
-    kotlin.push("", "@Serializable", `data class Prototype${typeName}(`);
-    swift.push("", `struct ${typeName}: Decodable, Encodable {`);
-    for (const [fieldName, field] of fields) {
-      if (!field || field.rule.kind !== "number") {
+    for (const language of options.languages ?? ["kotlin", "swift"]) {
+      const context = {
+        kotlinImports,
+        definitions: source.definitions,
+        selection,
+        refs,
+        language,
+        output: language === "kotlin" ? kotlin : swift,
+      };
+      if (definition.kind === "object" && definition.fields) {
+        renderObject(name, definition, options, context, [name]);
+      } else if (definition.kind === "tagged") {
+        renderUnion(name, definition, options, context);
+      } else {
         throw new Error(
-          `Definition ${name}.${fieldName}: unsupported kind ${field?.rule.kind ?? "missing"}; expected number`,
+          `Definition ${name}: unsupported kind ${definition.kind}; expected object or tagged`,
         );
       }
-      const kotlinType = numbers[fieldName];
-      if (kotlinType !== "Int" && kotlinType !== "Double") {
-        throw new Error(`Definition ${name}.${fieldName}: missing Kotlin Int/Double override`);
-      }
-      const swiftType = field.rule.integer ? "Int" : "Double";
-      kotlin.push(`  val ${fieldName}: ${kotlinType}${field.optional ? "? = null" : ""},`);
-      swift.push(`    let ${fieldName}: ${swiftType}${field.optional ? "?" : ""}`);
     }
-    for (const fieldName of Object.keys(numbers)) {
-      if (!Object.hasOwn(definition.fields, fieldName)) {
-        throw new Error(`Definition ${name}.${fieldName}: unused Kotlin number override`);
-      }
-    }
-    kotlin.push(")");
-    swift.push("}");
   }
+  kotlin.splice(
+    kotlin.indexOf("import kotlinx.serialization.Serializable") + 1,
+    0,
+    ...[...kotlinImports].sort().map((name) => `import ${name}`),
+  );
   return { kotlin: kotlin.join("\n") + "\n", swift: swift.join("\n") + "\n" };
 }
 
@@ -88,7 +98,7 @@ export function staleModelOutputs(
 }
 
 if (import.meta.main) {
-  const sources = renderPrototypeSpecModels(contract, prototypeModelOverrides);
+  const sources = renderPrototypeSpecModels(contract, prototypeModelSelection, prototypeTypeRefs);
   const urls = {
     kotlin: new URL(`../../${modelOutputPaths.kotlin}`, import.meta.url),
     swift: new URL(`../../${modelOutputPaths.swift}`, import.meta.url),

@@ -49,6 +49,7 @@ export function createSessionLogService(
         fileSystem,
         timer,
         deps.unifiedLogTimeoutMs ?? UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+        deps.containerOwnership,
       ),
       createPhysicalIosProvider(deps.physicalIos, fileSystem, timer),
     ),

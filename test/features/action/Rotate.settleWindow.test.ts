@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { Rotate } from "../../../src/features/action/Rotate";
+import { Rotate, type RotationRestoreState } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { createExecResult as makeExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -164,6 +164,59 @@ describe("Android rotation settle window", () => {
     },
   );
 
+  test.each(["normal", "recovered", "unconfirmed", "reverted"])(
+    "session omission restores only after confirmation: %s",
+    async (outcome) => {
+      let state: RotationRestoreState | undefined;
+      rotate = new Rotate(
+        { name: "Test", platform: "android", deviceId: "test", source: "local" },
+        adb,
+        timer,
+        {
+          sessionRotation: async (mutation) =>
+            mutation({
+              get: () => state,
+              record: (original) => {
+                state = original;
+              },
+              clear: () => {
+                state = undefined;
+              },
+            }),
+        },
+        { awaitIdle: idle, observeScreen: observe, window },
+      );
+      adb.setCommandResponse(
+        "shell settings get secure device_state_rotation_lock",
+        createExecResult("0:2"),
+      );
+      spyOn(idle, "waitForRotation").mockImplementation(async () => {
+        beforeRestore = () => (outcome === "unconfirmed" ? "" : landscape);
+        if (outcome === "recovered" || outcome === "unconfirmed") {
+          throw new Error("rotation wait failed");
+        }
+      });
+      if (outcome === "reverted") {
+        postRestore = () => portrait;
+      }
+      const result = await rotate.execute("landscape");
+      expect(result.success).toBe(outcome === "normal" || outcome === "recovered");
+      const commands = adb.getExecutedCommands();
+      expect(commands.includes(restoreCommand)).toBe(outcome !== "unconfirmed");
+      expect(commands.includes("shell settings put system user_rotation 0")).toBe(
+        outcome === "reverted",
+      );
+      expect(state?.accelerometerRotation).toBe(1);
+      if (outcome !== "unconfirmed") {
+        const mapRestore = commands.indexOf(
+          "shell settings put secure device_state_rotation_lock 0:2",
+        );
+        expect(mapRestore).toBeGreaterThan(-1);
+        expect(mapRestore).toBeLessThan(commands.indexOf(restoreCommand));
+      }
+    },
+  );
+
   test("bounds post-restore reads when sleep does not advance the clock", async () => {
     spyOn(timer, "sleep").mockResolvedValue(undefined);
     const cap = Math.ceil(3000 / 150) + 2;
@@ -210,12 +263,12 @@ describe("Android rotation settle window", () => {
     expect(samples).toHaveLength(20);
   });
 
-  test("already-applied orientation with an unconfirmed automatic-rotation restore fails", async () => {
+  test("already-applied orientation with an unreadable automatic-rotation restore fails", async () => {
     beforeRestore = () => landscape;
     postRestore = () => "";
     adb.setCommandResponse(
       "shell settings get system accelerometer_rotation",
-      createExecResult("0"),
+      createExecResult("null"),
     );
     const result = await rotate.execute("landscape", { lockOrientation: false });
     expect(result.success).toBe(false);

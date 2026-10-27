@@ -1,0 +1,43 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "column",
+        "repeat": {
+          "as": "item",
+          "items": [
+            {
+              "name": "one"
+            }
+          ]
+        },
+        "children": [
+          {
+            "type": "button",
+            "id": "target",
+            "label": "Help"
+          }
+        ]
+      },
+      {
+        "type": "tooltip",
+        "text": "Helpful hint",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "anchorTo": "target"
+      }
+    ]
+  }
+}

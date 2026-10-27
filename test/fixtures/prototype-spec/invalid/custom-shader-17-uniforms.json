@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "shader",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Custom effect",
+      "style": {
+        "shader": {
+          "asset": "effect",
+          "uniforms": {
+            "u0": 1,
+            "u1": 1,
+            "u2": 1,
+            "u3": 1,
+            "u4": 1,
+            "u5": 1,
+            "u6": 1,
+            "u7": 1,
+            "u8": 1,
+            "u9": 1,
+            "u10": 1,
+            "u11": 1,
+            "u12": 1,
+            "u13": 1,
+            "u14": 1,
+            "u15": 1,
+            "u16": 1
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.shader.uniforms"
+}

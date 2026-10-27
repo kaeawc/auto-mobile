@@ -93,8 +93,7 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
     deadlineMs: number,
   ): Promise<boolean> {
     const remainingMs = Math.max(0, deadlineMs - this.timer.now());
-    const retryAfterMs =
-      "retryAfterMs" in refusal ? refusal.retryAfterMs : DEFAULT_ADMISSION_RETRY_AFTER_MS;
+    const retryAfterMs = refusal.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
     logger.warn(
       `[Android reboot] Restart admission refused for ${target.name}: ${refusal.code}; ` +
         `boot capacity/discovery retry in ${Math.min(retryAfterMs, remainingMs)}ms`,

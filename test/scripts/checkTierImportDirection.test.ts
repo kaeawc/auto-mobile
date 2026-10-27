@@ -47,4 +47,13 @@ describe("tier import direction rules (#11789)", () => {
       expect(isViolation(client, "src/server/toolRegistry")).toBe(false);
     }
   });
+
+  test("the daemon wire package imports only itself from the daemon (#11790)", () => {
+    const wire = rule("daemon/wire");
+    expect(isViolation(wire, "src/daemon/wire/constants")).toBe(false);
+    expect(isViolation(wire, "src/daemon/sessionManager")).toBe(true);
+    expect(isViolation(wire, "src/daemon/types")).toBe(true);
+    expect(isViolation(wire, "src\\daemon\\wire\\LineFramer")).toBe(false);
+    expect(isViolation(wire, "src/utils/logger")).toBe(false);
+  });
 });

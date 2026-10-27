@@ -9,12 +9,6 @@ struct PrototypeChartSeries: Decodable, Equatable, Sendable {
     let color: PrototypeModeValue?
 }
 
-/// A fixed y axis for a chart.
-struct PrototypeChartRange: Decodable, Equatable, Sendable {
-    let min: Double
-    let max: Double
-}
-
 /// One drawn point: its `x` label, if the series names an `x` member, and its `y` value.
 struct PrototypeChartPoint: Equatable, Sendable {
     let x: String?

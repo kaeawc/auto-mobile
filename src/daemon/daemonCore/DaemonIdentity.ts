@@ -9,7 +9,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { writeSync } from "node:fs";
 import { republishOwnedIdentity } from "../identityRecovery";
 import { logger } from "../../utils/logger";
-import { SOCKET_PATH } from "../constants";
+import { SOCKET_PATH } from "../wire/constants";
 import { ENV, readEnvRaw } from "../../config/env";
 import { PidFileData, type AuxiliaryDaemonSocketName } from "../types";
 import { statFileIdentity, type SocketFileIdentity } from "../socketFileIdentity";
@@ -20,8 +20,8 @@ import {
   DAEMON_VERSION,
   resolveDaemonVersion,
   syncSettledDaemonVersion,
-} from "../constants";
-import { getCurrentBuildIdentity } from "../buildIdentity";
+} from "../wire/constants";
+import { getCurrentBuildIdentity } from "../wire/buildIdentity";
 import {
   cleanupDaemonFiles,
   readPidFileDataSync,

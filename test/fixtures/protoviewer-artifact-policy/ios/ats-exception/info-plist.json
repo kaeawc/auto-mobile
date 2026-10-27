@@ -1,0 +1,53 @@
+{
+  "CFBundleName": "ProtoViewer",
+  "CFBundleDevelopmentRegion": "en",
+  "CFBundleVersion": "1",
+  "CFBundleDocumentTypes": [
+    {
+      "CFBundleTypeName": "AutoMobile Prototype",
+      "CFBundleTypeRole": "Viewer",
+      "LSItemContentTypes": ["dev.jasonpearson.automobile.prototype", "public.json"],
+      "LSHandlerRank": "Alternate"
+    }
+  ],
+  "CFBundlePackageType": "APPL",
+  "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
+  "CFBundleShortVersionString": "1.0",
+  "UILaunchScreen": {},
+  "NSAppTransportSecurity": { "NSAllowsArbitraryLoads": true },
+  "CFBundleInfoDictionaryVersion": "6.0",
+  "CFBundleExecutable": "ProtoViewer",
+  "NSLocalNetworkUsageDescription": "Used only when you allow network for imported prototypes, to reach devices on your local network.",
+  "LSSupportsOpeningDocumentsInPlace": false,
+  "CFBundleIdentifier": "dev.jasonpearson.automobile.protoviewer",
+  "CFBundleURLTypes": [
+    {
+      "CFBundleTypeRole": "Viewer",
+      "CFBundleURLName": "AutoMobile ProtoViewer",
+      "CFBundleURLSchemes": ["automobile-proto"]
+    }
+  ],
+  "MinimumOSVersion": "17.0",
+  "UIApplicationSceneManifest": { "UIApplicationSupportsMultipleScenes": false },
+  "CFBundleIcons": { "CFBundlePrimaryIcon": { "CFBundleIconFiles": ["ProtoViewerIcon60x60"] } },
+  "LSRequiresIPhoneOS": true,
+  "CFBundleDisplayName": "ProtoViewer",
+  "CFBundleLocalizations": ["en"],
+  "UIDeviceFamily": [1],
+  "UISupportedInterfaceOrientations": [
+    "UIInterfaceOrientationPortrait",
+    "UIInterfaceOrientationLandscapeLeft",
+    "UIInterfaceOrientationLandscapeRight"
+  ],
+  "UTExportedTypeDeclarations": [
+    {
+      "UTTypeIdentifier": "dev.jasonpearson.automobile.prototype",
+      "UTTypeDescription": "AutoMobile Prototype",
+      "UTTypeConformsTo": ["public.data", "public.zip-archive"],
+      "UTTypeTagSpecification": {
+        "public.mime-type": "application\/vnd.automobile.prototype+zip",
+        "public.filename-extension": ["automobile-proto"]
+      }
+    }
+  ]
+}

@@ -1,11 +1,10 @@
 import { z } from "zod";
+import { prototypeTransitionSchema } from "./prototypeChoreographySchema";
 import { imageAssetSchema } from "./prototypePresentationSchemas";
 
 /** Every node's `transition` and `animate` (#14208), spread into the common node shape. */
 export const prototypeMotionNodeShape = {
-  transition: z
-    .enum(["none", "fade", "expand", "slide", "slideStart", "slideEnd", "scale"])
-    .optional(),
+  transition: prototypeTransitionSchema.optional(),
   // Animates styleWhen-driven alpha, offset, scale, rotation, background and color.
   animate: z
     .object({

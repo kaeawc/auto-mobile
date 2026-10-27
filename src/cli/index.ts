@@ -33,7 +33,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
 import { cliDeviceOwnershipHint } from "./deviceOwnershipHint";
-import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/constants";
+import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/wire/constants";
 import {
   ensureCliToolSelectionProfileStoreWritable,
   loadPersistedCliToolSelectionProfile,
@@ -753,6 +753,8 @@ AutoMobile CLI - Android Device Automation
 Usage:
   bunx ${installSpecifier} --cli [--session-uuid <uuid>] <tool-name> [--param value ...]
   bunx ${installSpecifier} --cli help [tool-name]
+  bunx ${installSpecifier} --ios-templates build --runtime <identifier> --device-type <identifier>
+  bunx ${installSpecifier} --ios-templates clean (--all | --stale | --runtime <identifier> [--device-type <identifier>]) [--force]
 
 Examples:
   bunx ${installSpecifier} --cli listDeviceImages

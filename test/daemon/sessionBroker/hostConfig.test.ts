@@ -134,6 +134,26 @@ describe("session broker host configuration", () => {
     ).toEqual({ mode: "erase", maxUses: 20, fallback: "erase" });
   });
 
+  test("iOS keep-booted accepts a destroy fallback; erase mode keeps erase only (#15232)", () => {
+    expect(
+      iosReusePolicy(
+        parseSessionBrokerHostConfig(
+          config({ reuse: { ios: { mode: "keep-booted", maxUses: 4, fallback: "destroy" } } }),
+        ),
+      ),
+    ).toEqual({ mode: "keep-booted", maxUses: 4, fallback: "destroy" });
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({ reuse: { ios: { mode: "erase", fallback: "destroy" } } }),
+      ),
+    ).toThrow("Invalid session broker host configuration");
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({ reuse: { ios: { mode: "keep-booted", fallback: "snapshot" } } }),
+      ),
+    ).toThrow("Invalid session broker host configuration");
+  });
+
   test("iOS reuse rejects conflicting aliases, invalid bounds, unsupported fallback and Android keys", () => {
     for (const ios of [{ mode: "keep-booted" }, { mode: "off" }]) {
       expect(() =>
@@ -197,10 +217,28 @@ describe("session broker host configuration", () => {
       iosClassifications: [],
       reuseCleanDevices: false,
       reuseAndroidCleanDevices: false,
+      capabilities: { iosDuo: false },
     });
     expect(() => parseSessionBrokerHostConfig(config({ defaults: {} }))).toThrow(
       "At least one platform must have an explicit default policy",
     );
+  });
+
+  test("iOS Duo execution is an explicit operator capability that needs iOS defaults", () => {
+    expect(
+      parseSessionBrokerHostConfig(config({ capabilities: { iosDuo: true } })).capabilities,
+    ).toEqual({ iosDuo: true });
+    expect(parseSessionBrokerHostConfig(config({ capabilities: {} })).capabilities).toEqual({
+      iosDuo: false,
+    });
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({ defaults: { android: androidDefaults() }, capabilities: { iosDuo: true } }),
+      ),
+    ).toThrow("capabilities.iosDuo requires an explicit defaults.ios policy");
+    expect(() =>
+      parseSessionBrokerHostConfig(config({ capabilities: { iosDuo: true, androidFold: true } })),
+    ).toThrow("Invalid session broker host configuration");
   });
 
   test("preserves operator defaults, classifications, and zero or bounded caps", () => {

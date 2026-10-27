@@ -151,6 +151,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "focusNavigate",
       "highlight",
       "homeScreen",
+      "hoverAt",
       "multiTouch",
       "pinchOn",
       "recentApps",

@@ -4,7 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/wire/constants";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import {
@@ -295,6 +295,12 @@ describe("a plan whose base idles out while its steps run on a label", () => {
         expect(plan.released).toEqual([]);
         expect(sessionManager.hasSession(BASE)).toBe(true);
         expect(sessionManager.getSession(LABEL_B)?.lastUsedAt).toBe(stampedAt);
+        // A side-effect-free peek hides the expired base but does not release it.
+        expect(sessionManager.peekSession(BASE)).toBeNull();
+        expect(sessionManager.hasSession(BASE)).toBe(true);
+        // The idle scan, rather than building error fields, releases base and labels.
+        sessionManager.cleanupExpiredSessions();
+        await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
         throw new Error("ordinary probe failure unrelated to sessions");
       });
       const result = await plan.run();

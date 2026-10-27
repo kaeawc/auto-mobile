@@ -11,7 +11,7 @@ import {
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
   SUSPECT_GRACE_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 

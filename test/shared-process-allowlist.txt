@@ -103,13 +103,11 @@ test/daemon/connectionOwnership.test.ts
 test/daemon/crossDaemonCorruptClaim.test.ts
 test/daemon/crossDaemonSystemUiRecoveryClaim.test.ts
 test/daemon/daemonCapabilitiesCommand.test.ts
-test/daemon/daemonCapturedDisconnectArguments.test.ts
 test/daemon/daemonCleanupHandoff.test.ts
 test/daemon/daemonClientNotifications.test.ts
 test/daemon/daemonCommandRouting.test.ts
 test/daemon/daemonCompactMetadataReuse.test.ts
 test/daemon/daemonDependencies.test.ts
-test/daemon/daemonDisconnectRecordingStop.test.ts
 test/daemon/daemonFatalHandler.test.ts
 test/daemon/daemonFlagEqualsForm.test.ts
 test/daemon/daemonHandshake.test.ts
@@ -214,10 +212,8 @@ test/daemon/deviceSessionResolver.test.ts
 test/daemon/deviceShutdownReservations.test.ts
 test/daemon/deviceTable.test.ts
 test/daemon/directModeStartup.test.ts
-test/daemon/disconnectMonitor-offlineRecovery.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
 test/daemon/disconnectMonitor-sourceUnavailable.test.ts
-test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/displayProfileSessionCleanup.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
@@ -1318,6 +1314,7 @@ test/features/prototype/prototypeSelectionControls.test.ts
 test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeStack.test.ts
 test/features/prototype/prototypeStorage.test.ts
+test/features/prototype/prototypeStringConditions.test.ts
 test/features/prototype/prototypeSwipeActions.test.ts
 test/features/prototype/prototypeTextFieldActions.test.ts
 test/features/prototype/prototypeTextFieldOptions.test.ts
@@ -1614,7 +1611,6 @@ test/scripts/androidVideoBaselineGate.test.ts
 test/scripts/attestation/attestationCli.test.ts
 test/scripts/attestation/attestationCliArgs.test.ts
 test/scripts/attestation/attestationSchema.test.ts
-test/scripts/attestation/gate/adapters.test.ts
 test/scripts/attestation/gate/attestationGate.test.ts
 test/scripts/attestation/gate/attestationGateWorkflow.test.ts
 test/scripts/attestation/gitTreeProbe.test.ts

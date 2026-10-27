@@ -4,7 +4,7 @@ import { describe, expect, spyOn } from "bun:test";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { SESSION_EXPERIMENTAL_CAPABILITY } from "../../src/devices/sessionConfig";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";

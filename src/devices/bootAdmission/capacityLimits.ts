@@ -5,6 +5,12 @@ export const MEMORY_BUDGET_FRACTION = 0.5;
 /** One booted device is budgeted two cores. */
 const CORES_PER_DEVICE = 2;
 
+/** Hardware the AVD about to boot resolved to (`hardware-qemu.ini`), each field when known. */
+export interface CandidateHardware {
+  guestBytes?: number;
+  cpuCores?: number;
+}
+
 export type MaxBootedSource = "env" | "derived";
 
 export interface CapacityLimits {
@@ -27,8 +33,13 @@ export interface PerDeviceMemoryPolicy {
   maxBytes: number;
 }
 
+/**
+ * Per-simulator `phys_footprint` of the whole tree including the runner. Round 6 (#15288)
+ * measured 2.1–2.4 GiB settled; the default covers an unmeasured simulator with that plus
+ * headroom, and `maxBytes` is only a sanity bound on a measured average.
+ */
 export const IOS_SIMULATOR_MEMORY_POLICY: PerDeviceMemoryPolicy = {
-  defaultBytes: 3 * GIB,
+  defaultBytes: 2.5 * GIB,
   minBytes: 1.5 * GIB,
   maxBytes: 6 * GIB,
 };
@@ -43,7 +54,7 @@ export const ANDROID_EMULATOR_MEMORY_POLICY: PerDeviceMemoryPolicy = {
   maxBytes: 8 * GIB,
 };
 
-/** Average measured RSS clamped to the policy's range, or its default when nothing was measured. */
+/** Average measured memory (emulator RSS, simulator footprint) clamped to the policy's range, or its default when nothing was measured. */
 export function estimatePerDeviceBytes(
   measuredRssBytes: readonly number[],
   policy: PerDeviceMemoryPolicy,
@@ -53,6 +64,23 @@ export function estimatePerDeviceBytes(
   }
   const average = measuredRssBytes.reduce((sum, bytes) => sum + bytes, 0) / measuredRssBytes.length;
   return Math.min(policy.maxBytes, Math.max(policy.minBytes, average));
+}
+
+/**
+ * Raises a per-device estimate to at least the guest RAM the next AVD will resolve to
+ * (`hardware-qemu.ini`, #15475), capped by the policy maximum. Never lowers the estimate: an
+ * emulator's host footprint exceeds its guest RAM, so a small configured value saves nothing
+ * until a device measurement says so.
+ */
+export function raisePerDeviceBytes(
+  estimateBytes: number,
+  candidateGuestBytes: number | undefined,
+  policy: PerDeviceMemoryPolicy,
+): number {
+  if (candidateGuestBytes === undefined || !Number.isFinite(candidateGuestBytes)) {
+    return estimateBytes;
+  }
+  return Math.min(policy.maxBytes, Math.max(estimateBytes, candidateGuestBytes));
 }
 
 /** One sampled emulator process, with identities when the source can provide them. */
@@ -129,6 +157,7 @@ export function resolveBootCapacityLimits(
   envName: string,
   resources: CapacityHostResources,
   perDeviceBytes: number,
+  coresPerDevice: number = CORES_PER_DEVICE,
 ): CapacityLimits {
   const raw = env[envName];
   const override = parseOverride(raw);
@@ -138,7 +167,7 @@ export function resolveBootCapacityLimits(
   const byMemory = Math.floor(
     (resources.totalMemoryBytes * MEMORY_BUDGET_FRACTION) / perDeviceBytes,
   );
-  const byCpu = Math.floor(resources.cpuCount / CORES_PER_DEVICE);
+  const byCpu = Math.floor(resources.cpuCount / Math.max(1, coresPerDevice));
   const derived: CapacityLimits = {
     maxBooted: Math.max(1, Math.min(byMemory, byCpu)),
     source: "derived",

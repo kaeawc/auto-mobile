@@ -78,6 +78,10 @@ research/
 __pycache__/
 .pack-trim-backup/
 *.orig
+*.rej
 
 # Spotlight exclusions for generated directories and worktree roots
 .metadata_never_index
+
+# ProtoViewer store listing icon and screenshot renders (generated, routed through LFS)
+/build/store-listing/

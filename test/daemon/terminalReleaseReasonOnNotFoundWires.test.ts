@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DAEMON_SESSION_NOT_FOUND_CODE as NOT_FOUND } from "../../src/daemon/types";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -368,17 +368,18 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     expect((await r.persistence.getSession(SESSION))?.release_reason).toBe("device-killed");
   });
 
-  test("a commit fence superseded after the terminal fence never names the surviving session", async () => {
+  // #11799 W5: no fence is evaluated after the terminal write began, so a confirmation that
+  // arrives during it is too late and nothing "survives" to be named; the wires end up naming the
+  // release, as for any other terminal release.
+  test("a commit fence superseded after the terminal fence is too late and the release is named", async () => {
     rig = await setUpRig(120_000);
     const r = rig;
-    const session = r.manager.getSession(SESSION);
     const gate = gateReleaseWrite(r);
     let shouldCommit = true;
-    const release = r.manager.releaseSessionUnlessSuperseded(
-      SESSION,
-      "device-disconnected:emulator-5554",
-      { commitFence: () => shouldCommit },
-    );
+    const reason = "device-disconnected:emulator-5554";
+    const release = r.manager.releaseSessionUnlessSuperseded(SESSION, reason, {
+      commitFence: () => shouldCommit,
+    });
     await settle();
     expect(r.manager.getTerminalReleaseSnapshot(SESSION)).toBeDefined();
     await expectNotFoundWires(r, bare);
@@ -386,14 +387,11 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     const joined = r.manager.releaseSession(SESSION, "device-killed");
     await expectNotFoundWires(r, bare);
     gate.open();
-    expect(await release).toEqual({ superseded: true });
+    expect(await release).toEqual({ superseded: false, deviceId: "emulator-5554" });
     await joined;
-    expect(r.manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
-    expect(r.manager.getSession(SESSION)).toBe(session);
-    expect(await r.manager.getReleasedSessionReason(SESSION)).toBeUndefined();
-    expect((await r.persistence.getSession(SESSION))?.status).toBe("active");
-    expect((await heartbeat(r)).success).toBe(true);
-    expect((await r.request("daemon/sessionInfo", { sessionId: SESSION })).success).toBe(true);
+    expect(r.manager.getSession(SESSION)).toBeNull();
+    expect((await r.persistence.getSession(SESSION))?.status).not.toBe("active");
+    await expectNotFoundWires(r, { ...bare, releaseReason: "device-killed" });
   });
 });
 

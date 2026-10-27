@@ -1,9 +1,11 @@
+import type { SessionDeviceRebound } from "../sessionDeviceReboundBroadcast";
 import { serializeControlFrame } from "../socketServer/controlRoutes";
 import {
   applyResourceSubscription,
   broadcastListChanged as fanOutListChanged,
   broadcastResourceUpdated as fanOutResourceUpdated,
   broadcastSessionReleased as fanOutSessionReleased,
+  broadcastSessionDeviceRebound as fanOutSessionDeviceRebound,
   pushProgressNotification as fanOutProgress,
   type NotificationTransport,
 } from "../socketServer/notificationFanOut";
@@ -27,7 +29,7 @@ import {
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
-} from "../constants";
+} from "../wire/constants";
 import { SocketRequestAdmissionQueue } from "../socketRequestAdmission";
 
 import { type ResourceUpdateTargets, type ListChangedKind } from "../listChangedBroadcast";
@@ -103,6 +105,7 @@ type Callbacks = Pick<
   | "forgetLateSessionToolBindings"
   | "abortRequestControllers"
   | "writeFrameData"
+  | "holdsSession"
 >;
 /** Socket Transport over shared connection state and explicit callbacks. */
 export class SocketTransport {
@@ -543,6 +546,19 @@ export class SocketTransport {
    * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
    * distinct from the released daemon session carried in the frame.
    */
+  broadcastSessionDeviceRebound(event: SessionDeviceRebound): void {
+    // Only sockets that hold the session learn its serial and AVD name (#15456).
+    const holders = Array.from(this.state.notificationSubscribers).filter((socketSessionId) =>
+      this.callbacks.holdsSession(socketSessionId, event.sessionId),
+    );
+    fanOutSessionDeviceRebound(
+      holders,
+      this.notificationTransport,
+      this.state.pendingSessionReleaseWrites,
+      event,
+    );
+  }
+
   broadcastSessionReleased(
     releasedSessionId: string,
     reason?: string,

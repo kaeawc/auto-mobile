@@ -68,5 +68,5 @@ or follow the [installation guide](docs/index.md#install).
 ## Contributing
 
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- Please report security vulnerabilities via GitHub
+- [Security policy](SECURITY.md) - report vulnerabilities privately via GitHub
 - [Contributing](.github/CONTRIBUTING.md)

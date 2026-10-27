@@ -157,6 +157,7 @@
                 }
             }
             .onChange(of: focused) { _, value in
+                if value { model.consumeDeadTap() }
                 if !value {
                     model.blur(node)
                     draft.endEditing(stored: model.state[key]?.displayString ?? "")
@@ -239,7 +240,7 @@
         }
 
         @ViewBuilder private var accessibleInput: some View {
-            let hint = PrototypeTextFieldOptions.accessibilityHint(
+            let hint = model.shownError(node).map { "Error: \($0)" } ?? PrototypeTextFieldOptions.accessibilityHint(
                 supportingText: options.supportingAccessibilityValue,
                 count: options.clip(draft.text).utf16.count,
                 maxLength: options.maxLength
@@ -259,7 +260,11 @@
                     .padding(12)
                     .overlay {
                         RoundedRectangle(cornerRadius: 4)
-                            .stroke(focused ? colors.primary : colors.fieldOutline, lineWidth: focused ? 2 : 1)
+                            .stroke(
+                                model.fieldError(node)
+                                    .isError ? .red : (focused ? colors.primary : colors.fieldOutline),
+                                lineWidth: focused ? 2 : 1
+                            )
                             .accessibilityHidden(true)
                     }
             } else {
@@ -271,9 +276,11 @@
                             .accessibilityHidden(true)
                     }
                     .overlay(alignment: .bottom) {
-                        Rectangle().fill(focused ? colors.primary : colors.fieldOutline)
-                            .frame(height: 1)
-                            .accessibilityHidden(true)
+                        Rectangle().fill(
+                            model.fieldError(node).isError ? .red : (focused ? colors.primary : colors.fieldOutline)
+                        )
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
                     }
             }
         }
@@ -288,7 +295,7 @@
                     chromedInput
                     if node.supportingText != nil || options.maxLength != nil {
                         HStack(alignment: .top) {
-                            if let supporting = node.supportingText {
+                            if let supporting = node.supportingText, !model.fieldError(node).isError {
                                 Text(supporting).accessibilityHidden(true)
                             }
                             Spacer(minLength: 8)
@@ -394,9 +401,10 @@
         let node: PrototypeNode
         let model: PrototypeModel
         let style: Style?
+        var cornerRadius: Double = 12
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: 12)
+            let shape = RoundedRectangle(cornerRadius: cornerRadius)
             let defaultFill = node.variant == "filled" || node.variant == nil
                 ? colors.surfaceHigh
                 : colors.surface
@@ -471,7 +479,7 @@
             let isOn = node.toggleKey.flatMap { model.state[$0]?.boolValue } ?? false
             if node.toggleKey != nil {
                 let button = Button { model.activate(.node(node)) } label: { row(isOn: isOn) }.buttonStyle(.plain)
-                if node.trailing?.type == "switch" {
+                if case .switch = node.trailing {
                     button.accessibilityAddTraits(.isToggle).accessibilityValue(isOn ? "1" : "0")
                 } else {
                     button.accessibilityValue(isOn ? "checked" : "unchecked")
@@ -508,13 +516,13 @@
 
         @ViewBuilder
         private func trailing(isOn: Bool) -> some View {
-            switch node.trailing?.type {
-            case "switch":
+            switch node.trailing {
+            case .switch:
                 PrototypeSwitchTrack(isOn: isOn)
-            case "checkbox":
+            case .checkbox:
                 PrototypeGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
-            case "icon":
-                if let symbol = prototypeSymbol(node.trailing?.name) {
+            case let .icon(name):
+                if let symbol = prototypeSymbol(name) {
                     PrototypeGlyph(symbol: symbol).foregroundColor(colors.contentVariant)
                 }
             default:
@@ -605,6 +613,7 @@
         let node: PrototypeNode
         let model: PrototypeModel
         let style: Style?
+        let label: String
 
         var body: some View {
             let (side, radius): (CGFloat, CGFloat) = switch node.label == nil ? node.size : nil {
@@ -617,7 +626,7 @@
                     if let symbol = prototypeSymbol(node.icon) {
                         PrototypeGlyph(symbol: symbol).font(.system(size: side >= 96 ? 36 : 22))
                     }
-                    if let label = node.label { Text(label).font(.body.weight(.medium)) }
+                    if node.label != nil { Text(label).font(.body.weight(.medium)) }
                 }
                 .foregroundColor(colors.authored(style?.color) ?? colors.primary)
                 .padding(.horizontal, node.label == nil ? 0 : 20)
@@ -680,6 +689,7 @@
     /// `<tag>.navigation` and `<tag>.actions.<index>`. Insets come only from `safeAreaPadding`.
     @MainActor
     struct PrototypeTopAppBarView: View {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.prototypePalette) private var palette
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let node: PrototypeNode
@@ -689,6 +699,12 @@
 
         var body: some View {
             let variant = node.variant ?? "small"
+            let extent = PrototypeBarScrollState.extent(variant: variant, behavior: node.onScroll)
+            let fraction = model.barScroll(node).collapse(
+                node.onScroll,
+                extent: extent,
+                reduced: reduceMotion || model.spec?.motion == "none"
+            )
             VStack(alignment: .leading, spacing: 0) {
                 ZStack {
                     if variant == "centerAligned" {
@@ -698,7 +714,7 @@
                         if let navigation = node.navigationIcon {
                             button(navigation, identifier: node.partIdentifier("navigation"))
                         }
-                        if variant == "small" {
+                        if variant == "small" || (fraction >= 1 && node.onScroll == "exitUntilCollapsed") {
                             titleText(.title3.weight(.semibold)).padding(.leading, node.navigationIcon == nil ? 12 : 4)
                         }
                         Spacer(minLength: 0)
@@ -713,8 +729,16 @@
                     titleText(variant == "large" ? .largeTitle : .title)
                         .padding(.horizontal, 16)
                         .padding(.bottom, variant == "large" ? 28 : 20)
+                        .frame(
+                            height: ["enterAlways", "exitUntilCollapsed"]
+                                .contains(node.onScroll ?? "") ? (variant == "large" ? 88 : 48) : nil,
+                            alignment: .bottomLeading
+                        )
+                        .modifier(PrototypeBarClip(fraction: node.onScroll == "exitUntilCollapsed" ? fraction : 0))
+                        .accessibilityHidden(node.onScroll == "exitUntilCollapsed" && fraction >= 1)
                 }
             }
+            .modifier(PrototypeBarClip(fraction: node.onScroll == "enterAlways" ? fraction : 0))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(style?.hasAuthoredFill ?? false ? .clear : colors.surface)
         }
@@ -798,6 +822,7 @@
     /// unbound it is indeterminate.
     @MainActor
     struct PrototypeProgressView: View {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.prototypePalette) private var palette
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let node: PrototypeNode
@@ -808,6 +833,7 @@
                 model.state[$0]?.numberValue ?? 0,
                 max: node.max
             ) }
+            let animated = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
             if node.variant == "circular" {
                 if let fraction {
                     ZStack {
@@ -820,13 +846,19 @@
                     .accessibilityElement()
                     .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
                     .accessibilityAddTraits(.updatesFrequently)
-                } else {
+                } else if animated {
                     ProgressView().progressViewStyle(.circular)
+                } else {
+                    Circle().trim(from: 0, to: 0.3)
+                        .stroke(colors.primary, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 40, height: 40)
+                        .accessibilityLabel("In progress")
                 }
             } else if let fraction {
                 ProgressView(value: fraction).progressViewStyle(.linear)
             } else {
-                IndeterminateBar()
+                IndeterminateBar(animated: animated)
             }
         }
     }
@@ -834,12 +866,15 @@
     /// SwiftUI's linear `ProgressView` has no indeterminate form, so the sweep is drawn here.
     @MainActor
     private struct IndeterminateBar: View {
+        let animated: Bool
         @Environment(\.prototypePalette) private var palette
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         var body: some View {
-            TimelineView(.animation) { context in
+            TimelineView(.animation(paused: !animated)) { context in
                 GeometryReader { proxy in
-                    let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.5) / 1.5
+                    let phase = animated
+                        ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.5) / 1.5
+                        : 0.5
                     let width = proxy.size.width * 0.3
                     Capsule()
                         .fill(colors.primary)
@@ -992,12 +1027,25 @@
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let model: PrototypeModel
+        @State private var retainedDrawers: [PrototypeNode] = []
 
         var body: some View {
             let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks) ?? []
+            let displayed = modals + retainedDrawers.filter { old in !modals.contains { $0 === old } }
             ZStack {
-                ForEach(Array(modals.enumerated()), id: \.offset) { index, node in
-                    if node.type == "menu" {
+                ForEach(Array(displayed.enumerated()), id: \.element.identity) { index, node in
+                    if node.type == "tooltip" {
+                        PrototypeTooltipOverlay(node: node, model: model, hitKey: "modal.\(index)")
+                    } else if node.type == "drawer" {
+                        PrototypeDrawerOverlay(
+                            node: node,
+                            model: model,
+                            isOpen: modals.contains { $0 === node },
+                            hitKey: "modal.\(index)"
+                        ) {
+                            retainedDrawers.removeAll { $0 === node }
+                        }
+                    } else if node.type == "menu" {
                         PrototypeMenuOverlay(node: node, model: model)
                             .reportFrame(key: "modal.\(index)", model: model)
                     } else if node.type == "dialog" {
@@ -1036,6 +1084,13 @@
                 {
                     PrototypeSelectOverlay(node: selected, model: model)
                         .reportFrame(key: "modal.select", model: model)
+                }
+            }
+            .onChange(of: modals.map(\.identity), initial: true) { _, _ in
+                for drawer in modals
+                    where drawer.type == "drawer" && !retainedDrawers.contains(where: { $0 === drawer })
+                {
+                    retainedDrawers.append(drawer)
                 }
             }
             .onChange(of: modals.dialogIdentities) { before, _ in

@@ -53,8 +53,8 @@ async function harness() {
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
   client.ensureConnected = async () => true;
-  client["connectWebSocket"] = async () => true;
-  client["cancelScreenshotBackoff"] = () => {};
+  client.testHooks.overrideConnectWebSocket(async () => true);
+  client.testHooks.overrideCancelScreenshotBackoff(() => {});
   return { client, timer, socket, manager };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;
@@ -329,7 +329,7 @@ const methods: Method[] = [
     name: "install certificate from file",
     invoke: (h) => {
       const certificates = new CtrlProxyCertificates(
-        h.client["createCertificatesDelegateContext"](),
+        h.client.testHooks.createCertificatesDelegateContext(),
         { stat: async () => ({ size: 1, isFile: () => true }) },
       );
       certificates["pushCertificateToDevice"] = async () => "/sdcard/ca.pem";

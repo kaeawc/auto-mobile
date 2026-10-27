@@ -1,3 +1,5 @@
+import { SimCtlCreation } from "./SimCtlCreation";
+import { isTemplateSimName } from "./SimulatorTemplateKey";
 import {
   type SimCtlCatalog,
   AppleDevice,
@@ -26,11 +28,12 @@ import { SingleFlight } from "../cache/SingleFlight";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 
-import { inferIosFormFactor } from "./iosDeviceType";
+import { inferIosFormFactor, isIosDuoDeviceType } from "./iosDeviceType";
 
 import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 
 import { iosSimulatorCapabilityInventory } from "../virtualDeviceCapabilities";
+import { hostAudioSnapshot } from "../audio/defaultHostAudioProbe";
 
 import { compareStrictNumericVersions } from "../deviceMatcher";
 
@@ -208,6 +211,17 @@ export class SimCtlInventory {
     { lastUsedAt?: string; promise: Promise<SimulatorDisplay[]> }
   >();
 
+  /**
+   * Drop the shared device-list snapshot so the next list re-reads simctl.
+   * Also drops the last-good fallback: a caller invalidating the cache knows
+   * something changed (a device was created/deleted, or a test is resetting
+   * state), so a subsequent transient failure must not resurrect the
+   * pre-invalidation snapshot as if it were still trustworthy (issue #6576).
+   *
+   * Also bumps `deviceListGeneration` so an in-flight listing that was already
+   * running when this invalidation fires cannot repopulate the cache with the
+   * obsolete snapshot it captured before the mutation (issue #6576).
+   */
   static invalidateDeviceListCache(): void {
     SimCtlInventory.lastLoggedDeviceListSignature = undefined;
     SimCtlInventory.simulatorDisplays.clear();
@@ -475,49 +489,52 @@ export class SimCtlInventory {
     this.retireStoppedSimulatorDisplays(simulatorList);
     const devices = await Promise.all(
       Object.entries(simulatorList.devices).flatMap(([runtimeId, runtimeDevices]) =>
-        runtimeDevices.map(async (device): Promise<DeviceInfo> => {
-          if (changed) {
-            logger.debug(
-              `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
-            );
-          }
-          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
-          const [profile, displays] = await Promise.all([
-            device.deviceTypeIdentifier
-              ? this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
-              : Promise.resolve(null),
-            this.displaysForBootedSimulator(device, deadlineMs, signal),
-          ]);
-          const deviceDisplays = simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
-          return {
-            name: device.name,
-            platform: "ios",
-            deviceId: device.udid,
-            isRunning: device.state === "Booted",
-            state: device.state,
-            isAvailable: device.isAvailable,
-            availabilityError: device.availabilityError,
-            iosVersion,
-            osVersion: iosVersion,
-            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
-            deviceType: device.deviceTypeIdentifier,
-            runtimeId,
-            runtime: runtimeId,
-            model: simulatorModel(device.model, profile),
-            // Simulator processes execute on the host architecture; this does not
-            // require another simctl invocation.
-            architecture: this.context.hostArchitecture,
-            screenWidth: profile?.pixelWidth ?? undefined,
-            screenHeight: profile?.pixelHeight ?? undefined,
-            screenDensity: profile?.dpi ?? undefined,
-            ...(deviceDisplays ? { displays: deviceDisplays } : {}),
-            capabilityInventory: iosSimulatorCapabilityInventory({
+        runtimeDevices
+          .filter((device) => !isTemplateSimName(device.name))
+          .map(async (device): Promise<DeviceInfo> => {
+            if (changed) {
+              logger.debug(
+                `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
+              );
+            }
+            const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
+            const [profile, displays] = await Promise.all([
+              device.deviceTypeIdentifier
+                ? this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
+                : Promise.resolve(null),
+              this.displaysForBootedSimulator(device, deadlineMs, signal),
+            ]);
+            const deviceDisplays = simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
+            return {
+              name: device.name,
+              platform: "ios",
+              deviceId: device.udid,
+              isRunning: device.state === "Booted",
+              state: device.state,
               isAvailable: device.isAvailable,
               availabilityError: device.availabilityError,
+              iosVersion,
+              osVersion: iosVersion,
+              formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
+              deviceType: device.deviceTypeIdentifier,
+              runtimeId,
               runtime: runtimeId,
-            }),
-          } as DeviceInfo;
-        }),
+              model: simulatorModel(device.model, profile),
+              // Simulator processes execute on the host architecture; this does not
+              // require another simctl invocation.
+              architecture: this.context.hostArchitecture,
+              screenWidth: profile?.pixelWidth ?? undefined,
+              screenHeight: profile?.pixelHeight ?? undefined,
+              screenDensity: profile?.dpi ?? undefined,
+              ...(deviceDisplays ? { displays: deviceDisplays } : {}),
+              capabilityInventory: iosSimulatorCapabilityInventory({
+                isAvailable: device.isAvailable,
+                availabilityError: device.availabilityError,
+                runtime: runtimeId,
+                hostAudio: hostAudioSnapshot(),
+              }),
+            } as DeviceInfo;
+          }),
       ),
     );
     SimCtlInventory.lastLoggedDeviceListSignature = signature;
@@ -550,7 +567,7 @@ export class SimCtlInventory {
       return [];
     }
     // Duo panels can change with fold state without a new boot timestamp.
-    const cacheable = !device.deviceTypeIdentifier?.endsWith(".iPhone-Duo");
+    const cacheable = !isIosDuoDeviceType(device.deviceTypeIdentifier);
     const cached = SimCtlInventory.simulatorDisplays.get(device.udid);
     if (cacheable && cached?.displays && cached.lastUsedAt === device.lastUsedAt) {
       return cached.displays;
@@ -990,48 +1007,25 @@ export class SimCtlInventory {
     return parseSimctlRuntimes(result.stdout);
   }
 
-  /**
-   * Create a new simulator
-   * @param name - Name for the new simulator
-   * @param deviceType - Device type identifier (e.g., "iPhone 15")
-   * @param runtime - Runtime identifier (e.g., "iOS 17.0")
-   * @returns Promise with the UDID of the created simulator
-   */
-  async createSimulator(
+  /** Clone without changing argv boundaries; every outcome invalidates inventory. */
+  cloneSimulator(sourceUdid: string, name: string, signal?: AbortSignal): Promise<string> {
+    return new SimCtlCreation(this.context, () => this.invalidateCatalog()).cloneSimulator(
+      sourceUdid,
+      name,
+      signal,
+    );
+  }
+  createSimulator(
     name: string,
     deviceType: string,
     runtime: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    logger.debug(`Creating iOS simulator: ${name} (${deviceType}, ${runtime})`);
-    let result: ExecResult;
-    try {
-      result = await this.context.executeCommandArgs(
-        ["create", name, deviceType, runtime],
-        undefined,
-        signal,
-      );
-    } catch (error) {
-      if (/invalid (?:runtime|device type)/i.test(errorMessage(error))) {
-        this.invalidateCatalog();
-      }
-      logger.warn(`Failed to create iOS simulator ${name}: ${errorMessage(error)}`, error);
-      throw error;
-    } finally {
-      // A freshly created simulator must be visible to the very next
-      // listSimulatorImages() call, otherwise the provisioning path boots off a
-      // snapshot that predates the device it just created. A cancelled or
-      // failed `simctl create` may still have created it, so invalidate on
-      // every outcome (#11100).
-      this.context.invalidateDeviceListCache();
-    }
-    const simulatorUdid = result.stdout.trim();
-
-    if (!simulatorUdid) {
-      throw new ActionableError(`Failed to create iOS simulator ${name}`);
-    }
-
-    logger.debug(`Created iOS simulator ${name} with UDID: ${simulatorUdid}`);
-    return simulatorUdid;
+    return new SimCtlCreation(this.context, () => this.invalidateCatalog()).createSimulator(
+      name,
+      deviceType,
+      runtime,
+      signal,
+    );
   }
 }

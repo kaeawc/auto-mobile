@@ -15,9 +15,9 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
-} from "../../../../src/daemon/sessionLivenessWindows";
+} from "../../../../src/daemon/wire/sessionLivenessWindows";
 import { SessionManager } from "../../../../src/daemon/sessionManager";
-import { CLI_SESSION_LIVENESS_POLICY } from "../../../../src/daemon/constants";
+import { CLI_SESSION_LIVENESS_POLICY } from "../../../../src/daemon/wire/constants";
 import {
   MAX_BINDING_IDLE_TIMEOUT_MS,
   BindingConfigError,

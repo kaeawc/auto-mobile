@@ -64,6 +64,16 @@ Other refusals you may meet, and what to do:
 | `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                              |
 | `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                  |
 
+### Choosing a device when a call is ambiguous
+
+If your MCP client declares the elicitation capability (form mode) and connects
+over stdio, an `ambiguous_device_target` refusal first becomes a question: the
+client shows the candidate devices and the call continues on the one you pick.
+If you decline or cancel, do not answer within about 20 seconds, or your client
+does not declare elicitation, you get the `ambiguous_device_target` refusal
+above, unchanged. Unattended agents are never held open. Pass `deviceId` on the
+call to skip the question.
+
 When a refusal carries `retryAfterMs`, wait that long before retrying.
 Refusals do not count as session use and do not extend the session's idle window.
 
@@ -105,6 +115,13 @@ device's readiness lock, so a concurrent `startDevice` or session upgrade for th
 simulator waits within its own deadline. Retry the observe shortly.
 A warm retry can complete in about 1.4 seconds; timing depends on the device and host.
 
+A rollback of an Android AVD that `provisionDevice` created and never attempted to boot
+is not blocked by an unrelated unnamed sibling emulator while the request holds the
+lifecycle reservation. If rollback is refused before changing the device, the response
+keeps the original failure's retryability and reports the retained device in `lifecycle`;
+follow `recovery.nextAction`, which permits reacquiring an intact retained device when
+the original failure is retryable.
+
 ## When a session is released
 
 A session is released by an explicit release, a lost owner heartbeat, the idle
@@ -131,9 +148,24 @@ the windows with the variables in
   same UUID for 180 seconds; other sessions cannot take that device meanwhile
   (a start naming it is refused with a retry hint). If the window passes without
   a resume the session ends with `session_ownership_lost`.
-- **Device killed or lost.** The session ends with `session_ownership_lost`;
-  while a kill is running, calls get `session_terminal_release_in_progress`
-  (`retryable: false`). Acquire the device again under a new session.
+- **Device killed or lost.** An explicit kill ends the session with
+  `session_ownership_lost`; while it runs, calls get
+  `session_terminal_release_in_progress` (`retryable: false`). Acquire again
+  under a new session. With session continuity enabled, a connection loss can
+  instead return `device_lost` while the session is retained. Its `deviceId`
+  names the lost serial; `replacementDeviceId`, when present, names the live
+  replacement. `retry.sameSession: true` and `requiresNewSession: false` mean
+  retry using the same `sessionUuid`. `recovery.status: "pending"` means recovery
+  is still settling, even if a replacement serial is already known; wait and
+  retry. `"recovered"` means recovery completed, and `recovery.attempts` counts
+  recorded attempts (zero when only live-session evidence is available). An
+  exhausted or unattempted recovery retains its reported status; follow
+  `sessionState` and `retry` to decide whether to reacquire. Without a retained
+  session or incident, no retry guidance is inferred. Verify continuity using
+  the [binding metadata and liveness notification](environment-variables.md#session-heartbeat-timeout). The generation counter is valid only within one daemon
+  lifetime and restarts at zero after a daemon restart. `session_device_rebound`
+  is sent at `info` level, so a client that raised its log level above `info`
+  will not see it; read `session-info` instead.
 - **Plan labels.** A multi-device plan runs its extra labels on derived
   `<base>:<label>` sessions that live only as long as the plan run and end with
   the base session. The next plan run mints them again; do not create
@@ -159,7 +191,7 @@ the windows with the variables in
 | `restart-recovery-timeout`                                                                              | Yes        | `session_ownership_lost`, without `idle`: the device-restart recovery window ended without a resume. Acquire a new session.                                                                                                                                         |
 | `device-restart:<device>`                                                                               | No         | The owner can resume the same UUID within the fixed 180 s recovery window. If it lapses unresumed, the session ends terminally as `restart-recovery-timeout`; an earlier idle deadline ends it as `expired` with `idle: true`.                                      |
 | `superseded`                                                                                            | No         | Nothing: a newer incarnation of the same UUID holds the device.                                                                                                                                                                                                     |
-| `plan-auto-release`                                                                                     | No         | The plan freed the device. Naming the same session UUID in a later plan re-issues the session; another client may take the device in between. It is not rehydrated after a daemon restart.                                                                          |
+| `plan-auto-release`                                                                                     | No         | The plan freed a device it acquired; caller-held sessions stay held. Naming the same session UUID in a later plan re-issues the session; another client may take the device in between. It is not rehydrated after a daemon restart.                                |
 | `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                                                                                                                                                                    |
 | `expired`                                                                                               | No         | A non-terminal row past its idle deadline: a control call naming it is refused with `session_ownership_lost`, reason `expired` and `idle: true`; heartbeat and `daemon/sessionInfo` answer `daemon_session_not_found`, `releaseReason: "expired"` and `idle: true`. |
 
@@ -250,8 +282,9 @@ in error stays `error`. `idle + assigned + error` equals the total.
 
 Cold boots are admitted against host capacity. Each platform has its own limit on
 booted devices: for Android, the smaller of half the host RAM divided by the
-measured per-device memory and half the CPU cores; for iOS, the smaller of that
-memory budget and a settled-CPU budget (about 0.055 core per simulator, half the
+measured per-device memory and half the CPU cores; for iOS, the smaller of
+60% of host RAM divided by the measured per-simulator memory footprint (about 2.4 GiB;
+2.5 GiB when unmeasured) and a settled-CPU budget (about 0.1 core per simulator, half the
 cores), at least 1. Every booted emulator or
 simulator counts, including ones started outside AutoMobile. A boot over the
 count limit is not queued: it fails at once with the retryable `capacity_exhausted`,

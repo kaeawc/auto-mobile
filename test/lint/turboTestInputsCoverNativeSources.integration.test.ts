@@ -103,12 +103,20 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // Info.plists to pin the profile payloads to the shipped app.
     "ios/network-filter/Packaging/**",
     // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecContractData.swift",
     // prototypeAccessibilityLint.test.ts pins the TypeScript baseline palette to the Swift tables.
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeTheme.swift",
     "ios/prototype-agent/ICON-SYMBOLS.md",
+    // checkPrivacyManifests.test.ts scans the compiled Swift sources and both privacy manifests,
+    // and pins the Package.swift resource and the protoviewer-build.sh copy step (#14151).
+    "ios/prototype-agent/Sources/**",
+    "ios/prototype-agent/ProtoViewer/*.swift",
+    "ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy",
+    "Package.swift",
+    "scripts/ios/protoviewer-build.sh",
   ] as const;
 
   interface TurboConfig {
@@ -709,6 +717,22 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     [
       "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj",
       "same xcodegen drift fixture, copied into a temp repo",
+    ],
+    [
+      "android/build.gradle.kts",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
+    ],
+    [
+      "android/gradle/libs.versions.toml",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
+    ],
+    [
+      "android/gradle/wrapper/gradle-wrapper.properties",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
+    ],
+    [
+      "ios/Playground/project.yml",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
     ],
     [
       "ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Plans/launch-reminders-app.yaml",

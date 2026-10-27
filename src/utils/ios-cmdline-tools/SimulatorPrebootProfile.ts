@@ -1,5 +1,14 @@
+import {
+  findUnsafeResourceCombinations,
+  iosDeviceResourceHazards,
+  type IosDeviceResourceHazard,
+} from "../iosDeviceResourceHazards";
+import { UnsafeDeviceResourceCombinationError } from "../../models/UnsafeDeviceResourceCombinationError";
 import { ENV, readEnvTrimmed } from "../../config/env";
-import type { DeviceResourceConfiguration } from "../../models/DeviceResourceConfiguration";
+import type {
+  ConfigurableDeviceResource,
+  DeviceResourceConfiguration,
+} from "../../models/DeviceResourceConfiguration";
 import { iosDeviceResourceCatalog } from "../iosDeviceResourceCatalog";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -12,6 +21,7 @@ import {
 export type { SimulatorHostState } from "./NodeSimulatorHostState";
 
 export type PrebootLeanProfileName = "none" | "minimal" | "catalog-cpu";
+export const PREBOOT_LEAN_PROFILE_DEFAULT: PrebootLeanProfileName = "minimal";
 export const PREBOOT_LEAN_PROFILES = {
   none: [],
   minimal: ["wallpaperRendering", "widgets", "liveActivities"],
@@ -30,13 +40,13 @@ export const PREBOOT_LEAN_PROFILES = {
   readonly (keyof typeof iosDeviceResourceCatalog)[]
 >;
 
-export function resolvePrebootLabels({
+function resolvePrebootResources({
   profile,
   resources = {},
 }: {
   profile: PrebootLeanProfileName;
   resources?: DeviceResourceConfiguration;
-}): string[] {
+}): (keyof typeof iosDeviceResourceCatalog)[] {
   const selected = new Set<keyof typeof iosDeviceResourceCatalog>(PREBOOT_LEAN_PROFILES[profile]);
   for (const key of Object.keys(
     iosDeviceResourceCatalog,
@@ -47,19 +57,30 @@ export function resolvePrebootLabels({
       selected.delete(key);
     }
   }
-  return [...new Set([...selected].flatMap((key) => [...iosDeviceResourceCatalog[key]]))].sort();
+  return [...selected];
+}
+
+export function resolvePrebootLabels(options: {
+  profile: PrebootLeanProfileName;
+  resources?: DeviceResourceConfiguration;
+}): string[] {
+  return [
+    ...new Set(
+      resolvePrebootResources(options).flatMap((key) => [...iosDeviceResourceCatalog[key]]),
+    ),
+  ].sort();
 }
 
 export function resolveDefaultPrebootProfile(env: NodeJS.ProcessEnv): PrebootLeanProfileName {
   const value = readEnvTrimmed(ENV.IOS_PREBOOT_LEAN_PROFILE, env);
   if (value === undefined) {
-    return "none";
+    return PREBOOT_LEAN_PROFILE_DEFAULT;
   }
   if (value === "none" || value === "minimal" || value === "catalog-cpu") {
     return value;
   }
-  logger.warn(`Unknown iOS preboot lean profile '${value}'; using none`);
-  return "none";
+  logger.warn(`Unknown iOS preboot lean profile '${value}'; using ${PREBOOT_LEAN_PROFILE_DEFAULT}`);
+  return PREBOOT_LEAN_PROFILE_DEFAULT;
 }
 
 export const simulatorHostStateDir = (udid: string): string =>
@@ -69,9 +90,11 @@ export const simulatorDisabledDbPath = (udid: string): string =>
 
 export interface PrebootApplyResult {
   applied: boolean;
+  resources: ConfigurableDeviceResource[];
   labels: string[];
   path?: string;
   reason?: string;
+  unsafe?: readonly IosDeviceResourceHazard[];
 }
 
 export class SimulatorPrebootProfile {
@@ -79,6 +102,7 @@ export class SimulatorPrebootProfile {
     private readonly host: SimulatorHostState = new NodeSimulatorHostState(),
     private readonly defaultProfile: () => PrebootLeanProfileName = () =>
       resolveDefaultPrebootProfile(process.env),
+    private readonly hazards: readonly IosDeviceResourceHazard[] = iosDeviceResourceHazards,
   ) {}
   async apply(
     udid: string,
@@ -86,14 +110,25 @@ export class SimulatorPrebootProfile {
     signal?: AbortSignal,
   ): Promise<PrebootApplyResult> {
     if (!isIosSimulatorUdid(udid)) {
-      return { applied: false, labels: [], reason: "Invalid simulator UDID" };
+      return { applied: false, resources: [], labels: [], reason: "Invalid simulator UDID" };
     }
     let labels: string[] = [];
     try {
       signal?.throwIfAborted();
-      labels = resolvePrebootLabels({ profile: this.defaultProfile(), resources });
+      const options = { profile: this.defaultProfile(), resources };
+      const unsafe = findUnsafeResourceCombinations(
+        resolvePrebootResources(options),
+        this.hazards,
+        "preboot",
+      );
+      if (unsafe.length) {
+        const refusal = new UnsafeDeviceResourceCombinationError(unsafe);
+        logger.warn(refusal.message);
+        return { applied: false, resources: [], labels: [], reason: refusal.message, unsafe };
+      }
+      labels = resolvePrebootLabels(options);
       if (!labels.length) {
-        return { applied: false, labels: [] };
+        return { applied: false, resources: [], labels: [] };
       }
       signal?.throwIfAborted();
       const path = simulatorDisabledDbPath(udid);
@@ -105,15 +140,15 @@ export class SimulatorPrebootProfile {
         { ...existing, ...Object.fromEntries(labels.map((label) => [label, true])) },
         signal,
       );
-      return { applied: true, labels, path };
+      return { applied: true, resources: resolvePrebootResources(options), labels, path };
     } catch (error) {
       if (signal?.aborted) {
         // Cancellation is expected when the provisioning request ends.
         logger.debug("Simulator preboot profile apply aborted", error);
-        return { applied: false, labels, reason: "aborted" };
+        return { applied: false, resources: [], labels, reason: "aborted" };
       }
       logger.warn(`Failed to apply simulator preboot profile: ${errorMessage(error)}`, error);
-      return { applied: false, labels, reason: errorMessage(error) };
+      return { applied: false, resources: [], labels, reason: errorMessage(error) };
     }
   }
   async removeHostState(udid: string): Promise<void> {

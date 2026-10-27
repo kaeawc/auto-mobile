@@ -288,6 +288,7 @@ export class AppPermissions {
     const permissions = normalizePermissions(input.permissions);
     const requestedPermissions = input.permissions ?? [];
     const operations: AppPermissionOperationResult[] = [];
+    let notificationUserId = input.userId;
     const invalidResetRequest =
       action === "reset" &&
       (input.userId !== undefined ||
@@ -303,6 +304,7 @@ export class AppPermissions {
         permissions: action === "reset" ? requestedPermissions : permissions,
         userId: input.userId,
       });
+      notificationUserId = permissionResult.userId;
       const changedCount = permissionResult.results.filter(
         (result) => result.success && !result.skipped,
       ).length;
@@ -320,7 +322,11 @@ export class AppPermissions {
     }
 
     if (!invalidResetRequest) {
-      await this.setAndroidSpecificPermissions(appId, input, operations);
+      await this.setAndroidSpecificPermissions(
+        appId,
+        { ...input, userId: notificationUserId },
+        operations,
+      );
     }
 
     if (operations.length === 0) {
@@ -364,6 +370,7 @@ export class AppPermissions {
         appId,
         {
           enabled: input.notificationsEnabled,
+          userId: input.userId,
         },
       );
       operations.push({

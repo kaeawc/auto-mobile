@@ -2,7 +2,7 @@ import { z } from "zod";
 import type {
   StreamSubscriptionKind,
   StreamSubscriptionEndReason,
-} from "./streamSubscriptionPolicy";
+} from "./wire/streamSubscriptionPolicy";
 import type { SocketRequest, SocketResponse } from "./socketServer/index";
 import type { WebRtcStreamDescriptor } from "../features/webrtc";
 

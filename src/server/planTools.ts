@@ -20,7 +20,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
-} from "../daemon/constants";
+} from "../daemon/wire/constants";
 
 const testMetadataSchema = z.object({
   testClass: z.string(),

@@ -1,13 +1,13 @@
 import OSLog
 import SwiftUI
 
-private let libraryLog = Logger(subsystem: "dev.jasonpearson.automobile.protoviewer", category: "library")
+let libraryLog = Logger(subsystem: "dev.jasonpearson.automobile.protoviewer", category: "library")
 
 @main
 @MainActor
 struct ProtoViewerApp: App {
     @State private var networkSwitch = PrototypeLibraryNetworkSwitch()
-    private let library: Result<(PrototypeLibraryStore, PrototypeLibraryImportService), Error>
+    private let library: Result<(PrototypeLibraryStore, PrototypeLibraryImportService, PrototypeMcpInbox), Error>
 
     init() {
         library = Result {
@@ -26,15 +26,29 @@ struct ProtoViewerApp: App {
             let imports = PrototypeLibraryImportService(root: root, storageRoot: storage, inbox: inbox) {
                 libraryLog.error("\($0, privacy: .public)")
             }
-            return (store, imports)
+            let mcp = PrototypeMcpInbox(
+                root: support.appendingPathComponent("mcp", isDirectory: true), libraryRoot: root, storageRoot: storage
+            ) {
+                libraryLog.warning("\($0, privacy: .private)")
+            }
+            Task {
+                do { try await mcp.ensureDirectories() }
+                catch {
+                    libraryLog
+                        .warning("Cannot create MCP directories: \(error.localizedDescription, privacy: .private)")
+                }
+                // Drop results and pushed bundles whose host request is long over (#13621).
+                await mcp.sweepOrphans()
+            }
+            return (store, imports, mcp)
         }
     }
 
     var body: some Scene {
         WindowGroup {
             switch library {
-            case let .success((store, imports)):
-                LibraryView(store: store, importService: imports, networkSwitch: networkSwitch)
+            case let .success((store, imports, mcp)):
+                LibraryView(store: store, importService: imports, mcpInbox: mcp, networkSwitch: networkSwitch)
             case let .failure(error): LibraryErrorView(error: error)
             }
         }
@@ -47,7 +61,7 @@ struct LibraryErrorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Unable to open prototype").font(.headline)
+                Text("Unable to open prototype").font(.headline).accessibilityAddTraits(.isHeader)
                 if let failure = error as? PrototypeLibraryFailure {
                     Text(failure.path).font(.system(.body, design: .monospaced))
                     Text(failure.message)
@@ -58,6 +72,7 @@ struct LibraryErrorView: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
+            .readableContentWidth()
         }
     }
 }

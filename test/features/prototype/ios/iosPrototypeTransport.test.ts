@@ -1,7 +1,10 @@
 import { PrototypeAgentSuspendedError } from "../../../../src/features/prototype/ios/prototypeAgentSuspended";
 import { PrototypeAgentRequestTimeoutError } from "../../../../src/features/prototype/ios/prototypeAgentClient";
 import { ActionableError, toActionableError } from "../../../../src/models/ActionableError";
-import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PATCH_CAPABILITY,
+  PROTOTYPE_STORAGE_CAPABILITY,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { FakePrototypeAgentClient } from "../../../fakes/FakePrototypeAgentClient";
@@ -235,6 +238,18 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
       expect(bodies).toEqual([{ spec, appearance: "dark" }, { spec }]);
     });
 
+    test("a reported backdrop outcome is kept when blur or fallback and dropped otherwise (#15126)", async () => {
+      const replies = [{ backdrop: "blur" }, { backdrop: "fallback" }, { backdrop: "frosted" }];
+      const agent = fakeAgent(["show_prototype"], [], () => ({
+        success: true,
+        ...replies.shift(),
+      }));
+      const transport = new IosPrototypeTransport(agent);
+      expect<unknown>((await transport.show(spec)).backdrop).toBe("blur");
+      expect<unknown>((await transport.show(spec)).backdrop).toBe("fallback");
+      expect(await transport.show(spec)).not.toHaveProperty("backdrop");
+    });
+
     test("an agent without the capability refuses appearance before sending anything", async () => {
       const { agent, bodies } = recording(["show_prototype"]);
       const transport = new IosPrototypeTransport(agent);
@@ -281,6 +296,52 @@ describe("iOS status suspension deadline", () => {
     const error = new ActionableError("connection closed");
     const transport = new IosPrototypeTransport(fakeAgent([], [], () => error));
     await expect(transport.status()).rejects.toBe(error);
+  });
+});
+
+describe("iOS per-call timeoutMs (#15116)", () => {
+  const spec = {
+    id: "test",
+    window: { placement: { type: "fullscreen" as const }, opacity: 1 },
+    root: { type: "text" as const, text: "Hello" },
+  };
+  const rig = () => {
+    const requestCalls: Parameters<PrototypeAgentClient["request"]>[] = [];
+    const agent = fakeAgent(
+      [PROTOTYPE_PATCH_CAPABILITY, PROTOTYPE_STORAGE_CAPABILITY],
+      [],
+      undefined,
+      requestCalls,
+    );
+    return { requestCalls, transport: new IosPrototypeTransport(agent) };
+  };
+  const ops: PrototypePatchOp[] = [{ op: "replace", path: "/data/x", value: 1 }];
+
+  test("show, patch, dismiss and clearStorage pass the given deadline to the agent", async () => {
+    const { requestCalls, transport } = rig();
+
+    await transport.show(spec, { timeoutMs: 4_000 });
+    await transport.patch({ id: "test", ops }, 5_000);
+    await transport.dismiss({ id: "test" }, 6_000);
+    await transport.clearStorage("test", 7_000);
+
+    expect(requestCalls.map(([type, , options]) => [type, options])).toEqual([
+      ["show_prototype", { timeoutMs: 4_000 }],
+      ["patch_prototype", { timeoutMs: 5_000 }],
+      ["dismiss_prototype", { timeoutMs: 6_000 }],
+      ["clear_prototype_storage", { timeoutMs: 7_000 }],
+    ]);
+  });
+
+  test("without a deadline they keep the client default and send no options", async () => {
+    const { requestCalls, transport } = rig();
+
+    await transport.show(spec);
+    await transport.patch({ id: "test", ops });
+    await transport.dismiss({ all: true });
+    await transport.clearStorage("test");
+
+    expect(requestCalls.map((call) => call.length)).toEqual([2, 2, 2, 2]);
   });
 });
 

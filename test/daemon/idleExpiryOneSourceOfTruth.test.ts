@@ -14,7 +14,7 @@ import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SeededRandom } from "../fakes/SeededRandom";

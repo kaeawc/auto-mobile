@@ -7,7 +7,7 @@ import {
   type DaemonNotification,
 } from "../types";
 import { toActionableError } from "../../models";
-import { McpTimeoutError } from "../McpTimeoutError";
+import { McpTimeoutError } from "../wire/McpTimeoutError";
 
 function isPermanentResourceSubscriptionRejection(error: unknown): boolean {
   if (error instanceof McpTimeoutError || error instanceof DaemonUnavailableError) {

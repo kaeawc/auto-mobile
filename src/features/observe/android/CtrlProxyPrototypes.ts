@@ -1,3 +1,4 @@
+import { requirePrototypeTimersSupport } from "../../prototype/prototypeTimers";
 import { collectPrototypeStrings } from "../../prototype/prototypeAssetReferences";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import {
@@ -25,6 +26,17 @@ import {
   prototypeAssetUploadProblem,
   type PrototypeAssetUpload,
 } from "../../prototype/prototypeAssets";
+import {
+  cachedPrototypeShaderAssetProblem,
+  prototypeShaderOptInProblem,
+  prototypeShaderFields,
+  prototypeShadersUnsupportedMessage,
+  prototypeShaderPatchSpec,
+  prototypeShadersEnabled,
+  PROTOTYPE_SHADERS_OPT_IN_ERROR,
+} from "../../prototype/prototypeShaders";
+import { PROTOTYPE_SHADER_MIME_TYPE } from "../../prototype/prototypeShaderSource";
+import { boundedPrototypeError } from "../../prototype/prototypeErrors";
 import { validatePrototypeSpec } from "../../prototype/prototypeValidation";
 import { requirePrototypeStorageSupport } from "../../prototype/prototypeStorage";
 import {
@@ -57,6 +69,7 @@ import {
   type PinSavedPrototypeMessage,
   type ListSavedPrototypesMessage,
   type ClearPrototypeStorageMessage,
+  type AdvancePrototypeClockMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
@@ -320,7 +333,10 @@ export class CtrlProxyPrototypes {
   private readonly staged: PrototypeEvent[] = [];
   private requestHost: PrototypeRequestHost | undefined;
 
-  constructor(private readonly context: DelegateContext) {}
+  constructor(
+    private readonly context: DelegateContext,
+    private readonly shaderEnvironment: NodeJS.ProcessEnv = process.env,
+  ) {}
 
   /**
    * [displayId] is the Android logical display; undefined and 0 both mean the default display and
@@ -339,6 +355,7 @@ export class CtrlProxyPrototypes {
     appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
     this.validateSpec(spec);
+    await this.validateShaderAssets(spec);
     const overrides = typeof appearance === "string" ? { appearance } : appearance;
     const target = displayId === undefined || displayId === 0 ? undefined : displayId;
     return this.request(
@@ -348,6 +365,7 @@ export class CtrlProxyPrototypes {
         displayId: target,
         reset,
         appearance: overrides?.appearance,
+        locale: spec.strings ? overrides?.locale : undefined,
         replaceOthers: overrides?.replaceOthers,
       }),
       timeoutMs,
@@ -362,6 +380,7 @@ export class CtrlProxyPrototypes {
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult> {
     this.validateSpec(save.spec);
+    await this.validateShaderAssets(save.spec);
     if (typeof save.label !== "string" || save.label.length === 0 || save.label.length > 120) {
       throw new ActionableError(
         "Invalid saved prototype label: expected a non-empty string of at most 120 characters",
@@ -415,6 +434,22 @@ export class CtrlProxyPrototypes {
   ): Promise<PrototypeResult> {
     return this.request(ctrlProxyRequests.listSavedPrototypes({ requestId: "" }), timeoutMs, perf);
   }
+  async requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    if (!id || !Number.isInteger(advanceTimeMs) || advanceTimeMs < 1 || advanceTimeMs > 3600000) {
+      throw new ActionableError("simulate requires id and advanceTimeMs (integer 1..3600000)");
+    }
+    return this.request(
+      ctrlProxyRequests.advancePrototypeClock({ requestId: "", id, advanceTimeMs }),
+      timeoutMs,
+      perf,
+    );
+  }
+
   /**
    * Wipes the values the device stored for prototype `id` (#12522). Refused before anything is
    * sent when the device does not advertise `prototype_storage_v1`.
@@ -527,6 +562,7 @@ export class CtrlProxyPrototypes {
     let dispatched = false;
     let unconfirmed = false;
     try {
+      await this.validateShaderPatch(patch);
       const result = await this.request(
         ctrlProxyRequests.patchPrototype({ requestId: "", ...patch }),
         timeoutMs,
@@ -595,6 +631,12 @@ export class CtrlProxyPrototypes {
     asset: PrototypeAssetUpload,
     options: PrototypeAssetRequestOptions = {},
   ): Promise<PrototypeAssetResult> {
+    if (
+      asset.mimeType === PROTOTYPE_SHADER_MIME_TYPE &&
+      !prototypeShadersEnabled(this.shaderEnvironment)
+    ) {
+      throw new ActionableError(PROTOTYPE_SHADERS_OPT_IN_ERROR);
+    }
     const problem = prototypeAssetUploadProblem(asset);
     if (problem !== null) {
       throw new ActionableError(`Invalid prototype asset: ${problem}`);
@@ -603,6 +645,7 @@ export class CtrlProxyPrototypes {
     const dataBase64 = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(
       "base64",
     );
+    await this.requireShaderAssetSupport(asset.mimeType);
     const snapshot = { ...asset, bytes: Uint8Array.from(asset.bytes) };
     const reply = await this.sendAssetRequest(
       ctrlProxyRequests.putPrototypeAsset({
@@ -624,7 +667,7 @@ export class CtrlProxyPrototypes {
         }
       }
     }
-    return reply;
+    return reply.error ? { ...reply, error: boundedPrototypeError(reply.error) } : reply;
   }
 
   /** Removes one asset. Idempotent on the device: an unknown id still succeeds. */
@@ -744,7 +787,53 @@ export class CtrlProxyPrototypes {
     }
   }
 
+  private requireShaderSpecSupport(
+    message: { type: string; spec?: unknown; ops?: readonly { op: string; node?: unknown }[] },
+    supports: (capability: string) => boolean | undefined,
+  ): void {
+    const spec = message.spec ?? prototypeShaderPatchSpec(message.ops ?? []);
+    if (prototypeShaderFields(spec).length && supports("prototype_custom_shaders_v1") !== true) {
+      throw new ActionableError(prototypeShadersUnsupportedMessage([], "android"));
+    }
+  }
+
+  private async requireShaderAssetSupport(mimeType: string): Promise<void> {
+    if (mimeType !== PROTOTYPE_SHADER_MIME_TYPE) {
+      return;
+    }
+    await this.context.ensureConnected();
+    if (this.context.isCommandSupported?.("prototype_custom_shaders_v1") !== true) {
+      throw new ActionableError(
+        "AGSL uploads require an Android CtrlProxy advertising prototype_custom_shaders_v1; update CtrlProxy.",
+      );
+    }
+  }
+
+  private async validateShaderPatch(patch: PrototypePatchRequest): Promise<void> {
+    const spec = prototypeShaderPatchSpec(patch.ops);
+    const problem = prototypeShaderOptInProblem(spec, this.shaderEnvironment);
+    if (problem) {
+      throw new ActionableError(problem);
+    }
+    await this.validateShaderAssets(spec);
+  }
+
+  private async validateShaderAssets(spec: unknown): Promise<void> {
+    const cached = this.context.prototypeAssetCache;
+    if (!cached) {
+      return;
+    }
+    const problem = await cachedPrototypeShaderAssetProblem(spec, cached.serial, cached.cache);
+    if (problem) {
+      throw new ActionableError(boundedPrototypeError(problem));
+    }
+  }
+
   private validateSpec(spec: PrototypeSpec): void {
+    const optIn = prototypeShaderOptInProblem(spec, this.shaderEnvironment);
+    if (optIn) {
+      throw new ActionableError(optIn);
+    }
     // Host enforces strict properties and limits; device decoding remains lenient.
     // Device re-validation belongs to #9297/#9299. Reuse the schema-backed path formatter.
     const validated = validatePrototypeSpec(spec);
@@ -765,7 +854,8 @@ export class CtrlProxyPrototypes {
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage,
+      | ClearPrototypeStorageMessage
+      | AdvancePrototypeClockMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -803,9 +893,11 @@ export class CtrlProxyPrototypes {
       | SavePrototypeMessage
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage,
+      | ClearPrototypeStorageMessage
+      | AdvancePrototypeClockMessage,
   ): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
+    this.requireShaderSpecSupport(message, supports);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
       throw new ActionableError(prototypePatchUnsupportedMessage("android"));
     }
@@ -818,6 +910,7 @@ export class CtrlProxyPrototypes {
     }
     this.requireMultiSurfaceSupport(message, supports);
     requirePrototypeStorageSupport(message.type, supports);
+    requirePrototypeTimersSupport(message.type, supports);
     const type = message.type;
     if (
       [

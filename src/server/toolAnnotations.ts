@@ -92,6 +92,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   exportPlan: entry("Export Plan", controlDevice),
   highlight: entry("Highlight Screen Element", controlDevice),
   homeScreen: entry("Open Home Screen", controlDevice),
+  hoverAt: entry("Hover Over Path", destructiveDevice),
   keyboard: entry("Control Keyboard", destructiveDevice),
   multiTouch: entry("Multi Touch Gesture", destructiveDevice),
   mockNetwork: entry("Mock Network Response", controlDevice),

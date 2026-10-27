@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 
 /** Smallest subtree (node count, the node included) worth keeping composed while hidden. */
 internal const val PROTOTYPE_RETAIN_MIN_NODES = 24
@@ -33,6 +34,8 @@ private val RETENTION_EXCLUDED_ROLES =
     "datePicker",
     "progress",
     "bottomSheet",
+    "tooltip",
+    "drawer",
     "dialog",
     "snackbar",
     "menu",
@@ -64,7 +67,10 @@ internal fun prototypeRetainedSubtrees(root: PrototypeRenderNode): Set<String> {
 
 private class RetentionEntry(val node: PrototypeRenderNode, val eligible: Boolean) {
   var size = 1
-  var excluded = isLayeredPrototypeAnchor(node) || node.role in RETENTION_EXCLUDED_ROLES
+  var excluded =
+    node.source?.resolvedSharedKey != null ||
+      isLayeredPrototypeAnchor(node) ||
+      node.role in RETENTION_EXCLUDED_ROLES
 }
 
 private fun collectRetentionEntries(
@@ -86,7 +92,7 @@ private fun collectRetentionEntries(
 
 private fun retentionCandidate(node: PrototypeRenderNode, parent: PrototypeRenderNode?): Boolean =
   node.source?.visibleWhen != null &&
-    node.source.transition in RETENTION_TRANSITIONS &&
+    node.source.transition?.type in RETENTION_TRANSITIONS &&
     retentionNeutralParent(parent) &&
     node.style.source.weight == null &&
     !isLayeredPrototypeAnchor(node)
@@ -159,7 +165,11 @@ internal fun PrototypeRetainedVisibility(
     modifier = visibilityModifier,
     content = {
       if (history.shown) {
-        CompositionLocalProvider(LocalPrototypeShowEpoch provides epoch, content = content)
+        CompositionLocalProvider(
+          LocalPrototypeShowEpoch provides epoch,
+          LocalPrototypeShadersVisible provides (LocalPrototypeShadersVisible.current && !hidden),
+          content = content,
+        )
       }
     },
   ) { measurables, constraints ->
@@ -177,9 +187,13 @@ internal fun PrototypeRetainedVisibility(
 @Composable
 private fun retainedVisibilityAlpha(visible: Boolean, fade: Boolean): State<Float> =
   if (fade) {
-    animateFloatAsState(
-      if (visible) 1f else 0f,
-      spring(stiffness = Spring.StiffnessMediumLow),
-      label = "prototypeRetainedVisibility",
-    )
+    val target = if (visible) 1f else 0f
+    val alpha =
+      animateFloatAsState(
+        target,
+        spring(stiffness = Spring.StiffnessMediumLow),
+        label = "prototypeRetainedVisibility",
+      )
+    ReportPrototypeMotion { alpha.value != target }
+    alpha
   } else rememberUpdatedState(if (visible) 1f else 0f)

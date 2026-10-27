@@ -1,3 +1,11 @@
+import { collectBoundedStdout, type BoundedStdout } from "./boundedChildOutput";
+import {
+  resolveOwnAppDataContainer,
+  resolveOwnAppGroupContainer,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+  type SimulatorContainerChoice,
+} from "../utils/ios-cmdline-tools/simulatorOwnContainer";
 import { dirname, join, posix } from "node:path";
 import { ActionableError, type BootedDevice } from "../models";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
@@ -22,7 +30,11 @@ import {
   type ResetAppLogsRequest,
 } from "./DefaultSessionLogService";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
-import { logShowArgs, unifiedLogPredicate, unifiedLogWindowResult } from "./unifiedLogWindow";
+import {
+  logShowArgs,
+  unifiedLogPredicate,
+  streamedUnifiedLogWindowResult,
+} from "./unifiedLogWindow";
 import type {
   SessionLogAppGroupRequest,
   SessionLogAppGroupResult,
@@ -63,6 +75,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     private readonly fileSystem: AppFileFileSystem,
     private readonly timer: Timer,
     private readonly unifiedLogTimeoutMs: number,
+    private readonly ownership: SimulatorContainerOwnershipOptions = {},
   ) {}
 
   async readAppLogs(
@@ -71,7 +84,9 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     request: SessionLogFilesRequest,
     maxBytes: number,
   ): Promise<SessionLogFilesResult> {
-    const root = await this.resolveContainerRoot(device, appId, request.container, "read", "data");
+    const root = await this.resolveContainerRoot(device, appId, request.container, "read", {
+      container: "data",
+    });
     const containerRoot = join(
       root,
       iosContainerRelativePath(request.container, "read", appId, device.platform),
@@ -85,7 +100,9 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
 
   async resetAppLogs(request: ResetAppLogsRequest): Promise<ResetAppLogsPathOutcome[]> {
     const { device, appId, container } = request;
-    const root = await this.resolveContainerRoot(device, appId, container, "reset", "data");
+    const root = await this.resolveContainerRoot(device, appId, container, "reset", {
+      container: "data",
+    });
     const containerRoot = join(
       root,
       iosContainerRelativePath(container, "reset", appId, device.platform),
@@ -107,13 +124,10 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     request: SessionLogAppGroupRequest,
     maxBytes: number,
   ): Promise<SessionLogAppGroupResult> {
-    const root = await this.resolveContainerRoot(
-      device,
-      appId,
-      request.groupId,
-      "read",
-      request.groupId,
-    );
+    const root = await this.resolveContainerRoot(device, appId, request.groupId, "read", {
+      container: "group",
+      groupId: request.groupId,
+    });
     const files: LocalFileListEntry[] = await listLocalFiles(root, this.fileSystem);
     const entries: SessionLogFileOutcome[] = [];
     for (const path of request.paths) {
@@ -128,13 +142,14 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     request: UnifiedLogWindowRequest,
     maxBytes: number,
     signal?: AbortSignal,
+    retain: "head" | "tail" = "head",
   ): Promise<UnifiedLogWindowResult> {
     this.requireSimulator(device, "collect the unified log");
     const predicate = unifiedLogPredicate(appId, request.processName);
     const args = ["spawn", device.deviceId, "log", ...logShowArgs(request, predicate)];
     const startedAt = this.timer.now();
-    const stdout = await this.runBounded(device, args, signal);
-    return unifiedLogWindowResult(request, stdout, maxBytes, {
+    const stdout = await this.runBounded(device, args, maxBytes, retain, signal);
+    return streamedUnifiedLogWindowResult(request, stdout, {
       predicate,
       mechanism: "simctl-log-show",
       collectionMs: this.timer.now() - startedAt,
@@ -150,28 +165,33 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
   private async runBounded(
     device: BootedDevice,
     args: string[],
+    maxBytes: number,
+    retain: "head" | "tail",
     callerSignal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<BoundedStdout> {
     const simctl = this.simctlFactory(device);
     const controller = new AbortController();
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, controller.signal])
       : controller.signal;
     // Arm the collection deadline before simctl so its typed timeout wins equal deadlines.
-    const run = () => simctl.executeCommandArgs(args, this.unifiedLogTimeoutMs, signal);
+    const run = async () => {
+      signal.throwIfAborted();
+      // The collector owns cancellation; native spawn signals also emit a late AbortError.
+      const child = await simctl.startCommandArgs(args, { stdio: ["ignore", "pipe", "pipe"] });
+      return collectBoundedStdout(child, { maxBytes, retain, signal });
+    };
     let timeoutError: SessionLogTimeoutError | undefined;
-    return (
-      await raceWithDeadline(run, {
-        timer: this.timer,
-        timeoutMs: this.unifiedLogTimeoutMs,
-        label: "Unified log collection",
-        timeoutError: () =>
-          (timeoutError = new SessionLogTimeoutError(
-            `Unified log collection timed out after ${this.unifiedLogTimeoutMs}ms on ${device.deviceId}.`,
-          )),
-        onTimeout: () => controller.abort(timeoutError),
-      })
-    ).stdout;
+    return raceWithDeadline(run, {
+      timer: this.timer,
+      timeoutMs: this.unifiedLogTimeoutMs,
+      label: "Unified log collection",
+      timeoutError: () =>
+        (timeoutError = new SessionLogTimeoutError(
+          `Unified log collection timed out after ${this.unifiedLogTimeoutMs}ms on ${device.deviceId}.`,
+        )),
+      onTimeout: () => controller.abort(timeoutError),
+    });
   }
 
   private requireSimulator(device: BootedDevice, action: string): void {
@@ -188,20 +208,34 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     appId: string,
     containerLabel: string,
     operation: string,
-    simctlContainer: string,
+    choice: SimulatorContainerChoice,
   ): Promise<string> {
     this.requireSimulator(device, `${operation} ${containerLabel} logs for ${appId}`);
-    const result = await executeIosAppContainerCommand(
-      this.simctlFactory(device),
-      `get_app_container ${shellQuote(device.deviceId)} ${shellQuote(appId)} ${shellQuote(simctlContainer)}`,
-      { device, appId, container: containerLabel, operation },
-    );
-    const root = result.stdout.trim();
-    if (!root) {
-      throw new ActionableError(
-        `Unable to resolve the ${containerLabel} container for ${appId} on ${device.deviceId}. ` +
-          "Confirm the simulator is booted, the app is installed, and the app declares the container.",
-      );
+    let root: string;
+    try {
+      const options = {
+        ...this.ownership,
+        deviceId: device.deviceId,
+        bundleId: appId,
+        run: (args: string[]) =>
+          executeIosAppContainerCommand(
+            this.simctlFactory(device),
+            args.map(shellQuote).join(" "),
+            { device, appId, container: containerLabel, operation },
+          ),
+      };
+      root =
+        choice.container === "data"
+          ? await resolveOwnAppDataContainer(options)
+          : await resolveOwnAppGroupContainer({ ...options, groupId: choice.groupId });
+    } catch (error) {
+      if (error instanceof SimulatorContainerUnresolvedError) {
+        throw new ActionableError(
+          `Unable to resolve the ${containerLabel} container for ${appId} on ${device.deviceId}. ` +
+            "Confirm the simulator is booted, the app is installed, and the app declares the container.",
+        );
+      }
+      throw error;
     }
     return root;
   }

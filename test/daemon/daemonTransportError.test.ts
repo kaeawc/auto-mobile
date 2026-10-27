@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DaemonUnavailableError, toDaemonTransportError } from "../../src/daemon/client";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 
 test("daemon disconnect context is distinct from a deadline breach", () => {
   const error = new DaemonDisconnectError({ toolName: "tools/list", origin: "test" });

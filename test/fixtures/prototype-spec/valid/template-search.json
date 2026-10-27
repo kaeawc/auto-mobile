@@ -1,0 +1,240 @@
+{
+  "id": "template-search",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "query": "blue",
+    "active": true,
+    "submitted": false,
+    "picked": ""
+  },
+  "data": {
+    "results": [
+      {
+        "id": "r1",
+        "title": "Blue Bottle Coffee",
+        "meta": "Cafe, 0.3 km"
+      },
+      {
+        "id": "r2",
+        "title": "Bluebird Books",
+        "meta": "Bookshop, 0.8 km"
+      },
+      {
+        "id": "r3",
+        "title": "Blue Hour Gallery",
+        "meta": "Gallery, 1.2 km"
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "search",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "search": {
+        "type": "searchBar",
+        "testTag": "search_bar",
+        "stateKey": "query",
+        "placeholder": "Search places",
+        "leadingIcon": "search",
+        "variant": "docked",
+        "activeKey": "active",
+        "trailingActions": [
+          {
+            "icon": "close",
+            "label": "Clear",
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "query",
+                "value": ""
+              },
+              {
+                "type": "setData",
+                "path": "/data/results",
+                "value": {
+                  "value": []
+                }
+              },
+              {
+                "type": "setState",
+                "key": "submitted",
+                "value": true
+              }
+            ]
+          }
+        ],
+        "onSubmit": [
+          {
+            "type": "setState",
+            "key": "submitted",
+            "value": true
+          }
+        ],
+        "child": {
+          "type": "column",
+          "children": [
+            {
+              "type": "column",
+              "repeat": {
+                "items": {
+                  "path": "/results"
+                },
+                "as": "result",
+                "key": "id"
+              },
+              "children": [
+                {
+                  "type": "listItem",
+                  "testTag": "result_row",
+                  "headline": "{result.title}",
+                  "supporting": "{result.meta}",
+                  "leadingIcon": "place",
+                  "onTap": [
+                    {
+                      "type": "setState",
+                      "key": "picked",
+                      "value": "{result.title}"
+                    },
+                    {
+                      "type": "push",
+                      "stack": "nav",
+                      "screen": "place"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "column",
+              "children": [
+                {
+                  "type": "text",
+                  "text": "No results for {query}",
+                  "style": {
+                    "textStyle": "titleMedium"
+                  },
+                  "testTag": "empty_title"
+                },
+                {
+                  "type": "button",
+                  "label": "Show suggestions",
+                  "testTag": "empty_reset",
+                  "onTap": [
+                    {
+                      "type": "setState",
+                      "key": "query",
+                      "value": "blue"
+                    },
+                    {
+                      "type": "setData",
+                      "path": "/data/results",
+                      "value": {
+                        "value": [
+                          {
+                            "id": "r1",
+                            "title": "Blue Bottle Coffee",
+                            "meta": "Cafe, 0.3 km"
+                          },
+                          {
+                            "id": "r2",
+                            "title": "Bluebird Books",
+                            "meta": "Bookshop, 0.8 km"
+                          },
+                          {
+                            "id": "r3",
+                            "title": "Blue Hour Gallery",
+                            "meta": "Gallery, 1.2 km"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "variant": "tonal"
+                }
+              ],
+              "visibleWhen": {
+                "all": [
+                  {
+                    "key": "submitted",
+                    "equals": true
+                  },
+                  {
+                    "data": "/results",
+                    "empty": true
+                  }
+                ]
+              },
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 24,
+                  "bottom": 24
+                },
+                "spacing": 12
+              }
+            }
+          ]
+        }
+      },
+      "place": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "place_bar",
+            "title": "Place",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "text",
+                "text": "{picked}",
+                "style": {
+                  "textStyle": "headlineSmall"
+                },
+                "testTag": "place_title"
+              },
+              {
+                "type": "text",
+                "text": "Open today until 6 pm.",
+                "style": {
+                  "textStyle": "bodyMedium"
+                }
+              }
+            ],
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            }
+          }
+        ]
+      }
+    }
+  }
+}

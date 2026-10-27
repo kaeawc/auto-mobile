@@ -4,7 +4,7 @@ import type { DeviceInfo } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
-import { deleteInternalToolParams, INTERNAL_ONE_SHOT_CLI_PARAM } from "../daemon/constants";
+import { deleteInternalToolParams, INTERNAL_ONE_SHOT_CLI_PARAM } from "../daemon/wire/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";

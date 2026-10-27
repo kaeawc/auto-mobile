@@ -352,6 +352,11 @@ class PrototypeThemeTest {
       assertEquals(scheme.surfaceContainerHigh, close.background)
       assertEquals(scheme.onSurface, close.content)
       assertTrue(abs(close.background.luminance() - close.content.luminance()) > 0.3f)
+      // The chip's glyph carries the contrast (#15119); its opaque fill is a surface step, so it is
+      // distinct from, but not high-contrast against, the surface it can sit on.
+      assertTrue(close.content.contrastWith(close.background) >= 4.5f)
+      assertEquals(1f, close.background.alpha, 0f)
+      assertNotEquals(scheme.surface, close.background)
     }
     // The dark scheme's Close control is a dark block, not the old white one.
     assertTrue(prototypeCloseColors(darkColorScheme()).background.luminance() < 0.2f)

@@ -74,6 +74,12 @@ type; pick a plain id such as `checkoutFlow` for a hash-free name.
 A missing asset falls back to the renderer's placeholder, and a missing spec shows the renderer's
 load-error view, on both platforms.
 
+An embedded prototype draws edge to edge inside the space the app gives it, and an image with no
+authored size takes its natural size. Place the composable inside the content area of your
+screen, below any app bar or status bar. If a custom layout offsets it by a fixed pixel amount
+that is smaller than the bar's height, the image row is laid out but hidden behind the bar, and the
+text appears to start right under it.
+
 ## Requests
 
 `request` actions follow the embedded routing decision
@@ -82,9 +88,37 @@ load-error view, on both platforms.
 - **Android:** pass a device client, `PrototypeNetwork(device = myClient)`. Without one, every
   request fails with a typed `network` error. A `hostHandler` takes over host-routed requests (those
   with `via: "host"` or no `via`), for example to add authentication or serve canned responses.
+  The app supplies its own HTTP client; the renderer ships none. On Android 17, a request to the
+  emulator host alias `10.0.2.2` (a local-network address) times out until the app declares
+  `android.permission.ACCESS_LOCAL_NETWORK` and the user grants it.
 - **iOS:** the default `PrototypeNetworkConfiguration` uses the renderer's `URLSession` client with
   its egress checks. Pass `PrototypeNetworkConfiguration(hostHandler:)` to take over host-routed
   requests, or `deviceClient:` to replace the transport.
+
+## Platform modules
+
+On Android, supply app-owned modules through the renderer's `platform` parameter. The default
+registers no app modules; measured device state remains available. Keep this configuration stable
+across recompositions: replacing it reloads the prototype and cancels pending calls. Check the
+configuration's `capabilities` against the spec's requirements. An unregistered call reports
+`unsupported`; a module needing permission reports `permission_denied` without requesting it.
+The app closes its modules after all renderers using them detach.
+
+## Shrinking (R8)
+
+Android icons named in a spec are looked up by reflection, which R8 cannot see. The library ships no
+consumer keep rule for them, because one would retain all of `material-icons-extended` (about 3 MB
+of dex) in every app that embeds a prototype. An app that minifies and renders icons by name adds the
+rule itself:
+
+```
+-keep class androidx.compose.material.icons.** { *; }
+```
+
+Narrow it to the icons your specs use if size matters, for example
+`-keep class androidx.compose.material.icons.filled.HomeKt { *; }` per icon and style. An icon the
+shrinker removed draws no glyph, and the renderer logs `Prototype icon '<name>' resolved in no style`
+once per name at warn level. Apps that never shrink, and specs without icons, need nothing.
 
 ## Storage
 

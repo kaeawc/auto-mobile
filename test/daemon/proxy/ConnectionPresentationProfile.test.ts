@@ -9,7 +9,7 @@ import { SET_TOOL_ENABLED_TOOL_NAME } from "../../../src/features/toolSelection/
 import {
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-} from "../../../src/daemon/constants";
+} from "../../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
 
 class FakePort implements ConnectionPresentationProfilePort {

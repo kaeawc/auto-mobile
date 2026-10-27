@@ -330,15 +330,23 @@ export class MissingDeviceLiveness {
   }
 
   /**
-   * One fresh discovery sweep for presence checks. Bypass the Android device-list
-   * cache for this read without invalidating other callers' cached snapshot.
+   * One fresh discovery sweep for presence checks. Bypass the platform's device-list
+   * cache for this read without invalidating other callers' cached snapshot. iOS needs
+   * it too: a mapped simulator listing taken before a fast boot stays cached for 5 s and
+   * still shows the just-booted clone Shutdown, so the bind that follows the boot was
+   * refused as "not available in the device pool" (#15295).
    */
   async takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
     resetBootedDevicesResourceCache();
     resetAndroidDeviceImageResourceCache();
     const discovery = await this.pool
       .getDeviceManager()
-      .getBootedDevicesDetailed(platform, { bypassAndroidDeviceListCache: true });
+      .getBootedDevicesDetailed(
+        platform,
+        platform === "ios"
+          ? { bypassIosDeviceListCache: true }
+          : { bypassAndroidDeviceListCache: true },
+      );
     return this.pool.mapAndroidDiscovery &&
       this.pool.needsAndroidTransportNormalization?.(discovery.devices)
       ? { ...discovery, devices: this.pool.mapAndroidDiscovery(discovery.devices) }

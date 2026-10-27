@@ -1,5 +1,7 @@
+import type { PrototypeTestSessionStore } from "../../db/prototypeTestSessionRepository";
+import type { IdGenerator } from "../../utils/IdGenerator";
 import type { z } from "zod/v4";
-import type { ProtoViewerDevice } from "../../features/prototype/protoViewer/AndroidProtoViewer";
+import type { ProtoViewerDevice } from "../../features/prototype/protoViewer/protoViewerDevice";
 import type { DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
 import type { HierarchyCapture } from "../../features/observe/HierarchyCapture";
 import type { PrototypeResult } from "../../features/observe/android/ctrlProxyProtocol";
@@ -41,12 +43,23 @@ export type PrototypeClient = AndroidPrototypeClient;
 export interface PrototypeTarget {
   transport: PrototypeTransport;
   android?: AndroidPrototypeTransport;
-  ios?: Pick<IosPrototypeTransport, "supportsCapability" | "status" | "clearStorage">;
+  ios?: Pick<
+    IosPrototypeTransport,
+    "supportsCapability" | "status" | "clearStorage" | "advanceClock"
+  >;
 }
 export interface PrototypeToolDependencies {
+  testSessionStore?: PrototypeTestSessionStore;
+  idGenerator?: IdGenerator;
+  /** Host feature gates; tests supply an isolated environment. */
+  env?: NodeJS.ProcessEnv;
+  shaderAssetCache?: Pick<
+    import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
+    "get"
+  >;
   /** Saved iOS actions use the host installer without an agent connection; created lazily by default. */
   iosSavedPrototypeInstaller?: IosSavedPrototypeInstaller;
-  /** ProtoViewer on an Android device for saved `save`/`open` (#13621); adb-backed by default. */
+  /** ProtoViewer on Android or an iOS simulator for saved `save`/`open` (#13621). */
   protoViewerFactory?: (device: BootedDevice) => ProtoViewerDevice;
   /** Reads local files named by `assets`; tests inject an in-memory reader. */
   assetFileReader?: PrototypeAssetFileReader;
@@ -88,6 +101,7 @@ export interface AssetStage {
 }
 
 export interface AssetReaders {
+  env?: NodeJS.ProcessEnv;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
 }
@@ -104,6 +118,10 @@ export type PrototypeHandlerDependencies = {
   timer?: Timer;
 } & Pick<
   PrototypeToolDependencies,
-  "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+  | "adbFactory"
+  | "lastRenderedObservation"
+  | "anchorHierarchyCaptureFactory"
+  | "shaderAssetCache"
+  | "env"
 >;
 export type PrototypeOutput = z.infer<typeof prototypeOutputSchema>;

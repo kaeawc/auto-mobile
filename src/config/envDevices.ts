@@ -42,6 +42,12 @@ export const DEVICES_ENV = {
     min: 1,
     doc: "Positive integer cap on concurrently booted Android emulators.",
   },
+  ANDROID_BOOT_BUDGET_VCPUS: {
+    name: "AUTOMOBILE_ANDROID_BOOT_BUDGET_VCPUS",
+    kind: "string",
+    default: "fixed (2 cores per emulator)",
+    doc: "`configured` budgets each emulator at the vCPU count its AVD resolved to (hardware-qemu.ini) when sizing the boot limit; any other value keeps two cores per emulator.",
+  },
   IOS_SIM_BOOT_CONCURRENCY: {
     name: "AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY",
     kind: "int",
@@ -161,11 +167,17 @@ export const DEVICES_ENV = {
     default: "on",
     doc: "Boot admission gate for every platform; exact 0 disables.",
   },
+  IOS_TEMPLATE_CLONE: {
+    name: "AUTOMOBILE_IOS_TEMPLATE_CLONE",
+    kind: "string",
+    default: "false",
+    doc: "Provision iOS simulators from settled templates; off by default (clones share Safari and system-app data, #15327): 1/true opts in.",
+  },
   IOS_PREBOOT_LEAN_PROFILE: {
     name: "AUTOMOBILE_IOS_PREBOOT_LEAN_PROFILE",
     kind: "string",
-    default: "none",
-    doc: "Pre-boot iOS simulator lean profile: none, minimal, or catalog-cpu; unknown values use none.",
+    default: "minimal",
+    doc: "Pre-boot iOS simulator lean profile: minimal by default, none opts out, or catalog-cpu; unknown values use the default.",
   },
   IOS_SIM_CAPACITY_GATE: {
     name: "AUTOMOBILE_IOS_SIM_CAPACITY_GATE",

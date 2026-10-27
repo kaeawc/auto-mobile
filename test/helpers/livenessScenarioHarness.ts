@@ -11,7 +11,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_VERSION,
   getCliSessionIdleTimeoutMs,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
 import { ScenarioDaemon } from "./scenarioDaemon";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
@@ -27,7 +27,7 @@ import { defaultRecordingSessionCleanupDeps } from "../../src/daemon/recordingSe
 import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
-import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import { appearanceSocketResponseSchema } from "./wireMessageSchemas";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -38,7 +38,7 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
-} from "../../src/daemon/sessionLivenessWindows";
+} from "../../src/daemon/wire/sessionLivenessWindows";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SessionManager,

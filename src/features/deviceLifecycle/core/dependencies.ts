@@ -1,3 +1,4 @@
+import { getDefaultSimulatorCreationService } from "../../iosTemplates/defaultSimulatorCreationService";
 import { type DevicePool } from "../../../daemon/devicePool";
 import { defaultDaemonContext, daemonStateLikeFrom } from "../../../daemon/daemonContext";
 import { bindingPoolGate } from "../../../daemon/sessionBroker/provisioning/poolGate";
@@ -291,14 +292,9 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       androidAdbFactory: unadmittedAdbClientFactory,
       daemonState: daemonStateLikeFrom(defaultDaemonContext),
       deviceResourceControllerFactory: () =>
-        new DefaultDeviceResourceController(
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          new DeviceResourceApplicationRepository(),
-        ),
+        new DefaultDeviceResourceController(undefined, undefined, undefined, undefined, undefined, {
+          applications: new DeviceResourceApplicationRepository(),
+        }),
       deviceResourceObserverFactory: () =>
         new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
       deviceResourceReconcilerFactory: () => {
@@ -313,15 +309,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       },
       // The shared manager keeps devicectl caching/coalescing/last-good retention
       // and the Android model/arch caches across calls (#11063).
-      deviceManagerFactory: () => {
-        const manager = PlatformDeviceManagerFactory.getInstance();
-        manager.withForeignAndroidSerialSource?.({
-          foreignSerials: (serials, signal) =>
-            defaultDaemonContext.fullDevicePool()?.foreignSerials(serials, signal) ??
-            Promise.resolve(new Set<string>()),
-        });
-        return manager;
-      },
+      deviceManagerFactory: () => PlatformDeviceManagerFactory.getInstance(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       displayInventory: defaultDisplayInventoryProvider,
@@ -332,13 +320,15 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
           getDeviceToolsDependencies().appResourceDependencies,
         ),
       deviceCreationGateFactory: () => getDeviceCreationGate(),
-      deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
+      deviceProvisionerFactory: () =>
+        createDefaultDeviceProvisioner(undefined, undefined, getDefaultSimulatorCreationService()),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
         createDefaultExactDeviceProvisioner(
           deviceManager,
           deviceCreationGate,
           undefined,
           assertNotBindingDeviceForAdoption,
+          getDefaultSimulatorCreationService(),
         ),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),

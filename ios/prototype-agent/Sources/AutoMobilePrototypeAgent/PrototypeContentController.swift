@@ -80,6 +80,12 @@
             ] {
                 center.addObserver(self, selector: #selector(assistiveEscapeChanged(_:)), name: name, object: nil)
             }
+            center.addObserver(
+                self,
+                selector: #selector(localeChanged(_:)),
+                name: NSLocale.currentLocaleDidChangeNotification,
+                object: nil
+            )
             syncAssistiveEscape()
             syncAppearance()
         }
@@ -143,12 +149,16 @@
             observedScene = nil
         }
 
+        @objc
+        private func localeChanged(_: Notification) { syncAppearance() }
+
         func syncAppearance() {
             guard contentEnabled else { return }
             // Read the scene, as PrototypeAgent.syncDeviceAppearance does: the content's override
             // carries the resolved prototype mode and cannot tell us the device's own setting.
             let traits = view.window?.windowScene?.traitCollection ?? UITraitCollection.current
             model.setDeviceDark(traits.userInterfaceStyle == .dark)
+            model.setDeviceLocales(SystemPrototypeLocaleProvider().preferredLanguages)
             apply(model.session)
         }
 

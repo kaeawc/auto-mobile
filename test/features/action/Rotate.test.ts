@@ -401,7 +401,6 @@ describe("Rotate", () => {
       expect(result.message).toContain("automatic rotation is on");
       expect(result.message).toContain("at the time the call returned");
       expect(result.message).toContain("lockOrientation: true");
-      expect(result.message).toContain("device session");
       expect(result.observation?.rotation).toBe(1);
       expect(commandsAtObservation.filter((command) => command === liveCommand)).toHaveLength(9);
       expect(commandsAtObservation).toContain("shell settings put system accelerometer_rotation 1");
@@ -468,7 +467,7 @@ describe("Rotate", () => {
           });
         }
         const result = await rotate.execute("landscape", {
-          lockOrientation: mode === "session" ? undefined : true,
+          lockOrientation: true,
         });
         expect(result.success).toBe(true);
         expect(result.currentOrientation).toBe("landscape");
@@ -618,14 +617,14 @@ describe("Rotate", () => {
       ]);
     }
 
-    test("session default holds auto-rotate off and records originals before writes", async () => {
+    test("session default restores auto-rotate and records originals before writes", async () => {
       const original = useSession();
-      settingsSequence(["1", "0"]);
+      settingsSequence(["1"]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("locked");
+      expect(result.orientationLockState).toBe("unlocked");
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
-        false,
+        true,
       );
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
       const calls = fakeAdb.getExecutedCommands();
@@ -642,7 +641,7 @@ describe("Rotate", () => {
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
     });
 
-    test("session already-matching orientation locks and records before its first write", async () => {
+    test("session already-matching orientation preserves automatic rotation without writes", async () => {
       const original = useSession();
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
       fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
@@ -651,8 +650,8 @@ describe("Rotate", () => {
       ]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("locked");
-      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+      expect(result.orientationLockState).toBe("unlocked");
+      expect(original()).toBeUndefined();
     });
 
     test("session unknown initial auto-rotate preserves guard and records null", async () => {

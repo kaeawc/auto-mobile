@@ -42,8 +42,8 @@ import type {
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent, parseLockContent } from "../../src/utils/fileLock";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { getCurrentBuildIdentity } from "../../src/daemon/buildIdentity";
-import { DAEMON_STARTUP_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import { getCurrentBuildIdentity } from "../../src/daemon/wire/buildIdentity";
+import { DAEMON_STARTUP_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DAEMON_REPUBLISH_IDENTITY_METHOD as REPUBLISH,
   DAEMON_PREPARE_MAINTENANCE_METHOD as PREPARE,

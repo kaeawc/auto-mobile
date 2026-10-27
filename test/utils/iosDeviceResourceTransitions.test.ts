@@ -47,7 +47,7 @@ describe("iOS Simulator service transitions (#6693)", () => {
       timer,
       (path) => plist.readDirectory(path),
       undefined,
-      store,
+      { applications: store },
     );
     request = {
       device: { platform: "ios", name: "Phone", deviceId: udid },

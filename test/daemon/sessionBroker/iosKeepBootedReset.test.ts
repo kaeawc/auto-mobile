@@ -75,7 +75,7 @@ async function harness(
   missingBaseline = false,
   budgets: Pick<
     IosKeepBootedResetDependencies,
-    "hostLoad" | "budgetCeilingMs" | "recordingGaps"
+    "hostLoad" | "budgetCeilingMs" | "recordingGaps" | "fallback"
   > = {},
 ) {
   const timer = new FakeTimer();
@@ -461,6 +461,70 @@ describe("iOS keep-booted best-effort cleaning", () => {
     expect(await rig.run(3)).toMatchObject({ outcome: "clean" });
     expect(await rig.run(5)).toMatchObject({ outcome: "fallback:erase" });
     expect(rig.state.eraseCalls).toBe(2);
+  });
+
+  describe("destroy fallback (#15232)", () => {
+    const destroyRig = (missingBaseline = false) =>
+      harness([], missingBaseline, { fallback: "destroy" });
+
+    test("a cleaning failure returns a non-clean outcome and never erases", async () => {
+      const rig = await destroyRig();
+      rig.state.healthy = false;
+      const result = await rig.run();
+      expect(result).toMatchObject({ outcome: "pending", mode: "keep-booted" });
+      expect(result.fallbackReason).toContain("unhealthy");
+      expect(rig.state.eraseCalls).toBe(0);
+    });
+
+    test("a missing installed-app baseline never erases", async () => {
+      const rig = await destroyRig(true);
+      const result = await rig.run();
+      expect(result).toMatchObject({ outcome: "pending", mode: "keep-booted" });
+      expect(result.fallbackReason).toContain("captured app baseline");
+      expect(rig.state.eraseCalls).toBe(0);
+    });
+
+    test("a fallback-forcing opaque journal row never erases", async () => {
+      const rig = await destroyRig();
+      await rig.journal.record(SCOPE, {
+        kind: "opaque",
+        key: opaqueIntentKey("sendBroadcast", "com.example.app"),
+        priorValue: { state: "unobservable" },
+        toolName: "sendBroadcast",
+      });
+      const result = await rig.run();
+      expect(result).toMatchObject({ outcome: "pending", mode: "keep-booted" });
+      expect(result.fallbackReason).toContain("sendBroadcast");
+      expect(rig.state.eraseCalls).toBe(0);
+    });
+
+    test("maxUses destroys after N uses instead of erasing", async () => {
+      const rig = await destroyRig();
+      expect(await rig.run(1)).toMatchObject({ outcome: "clean" });
+      expect(await rig.run(2)).toMatchObject({
+        outcome: "pending",
+        mode: "keep-booted",
+        fallbackReason: "maxUses reached",
+      });
+      expect(rig.state.eraseCalls).toBe(0);
+    });
+
+    test("a redrive after a cleaning failure stays a destroy without cleaning again", async () => {
+      const rig = await destroyRig();
+      rig.state.healthy = false;
+      const first = await rig.run();
+      rig.state.healthy = true;
+      const redrive = await rig.run();
+      expect(first).toMatchObject({ outcome: "pending" });
+      expect(redrive).toMatchObject({ outcome: "pending", fallbackReason: first.fallbackReason });
+      expect(rig.state.healthCalls).toBe(1);
+      expect(rig.state.eraseCalls).toBe(0);
+    });
+
+    test("a clean reset still keeps the simulator booted", async () => {
+      const rig = await destroyRig();
+      expect(await rig.run()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    });
   });
 
   test.each(["health", "state", "runtime", "type", "udid", "os", "available"])(

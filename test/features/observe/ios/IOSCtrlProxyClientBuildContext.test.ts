@@ -131,8 +131,8 @@ describe("IOSCtrlProxyClient lazy build context", () => {
   }
 
   function hierarchyUpdate(bundleId = appId): void {
-    client["lastForegroundBundleId"] = bundleId;
-    client["handleHierarchyUpdateForNavigation"]({
+    client.testHooks.lastForegroundBundleId = bundleId;
+    client.testHooks.handleHierarchyUpdateForNavigation({
       updatedAt: timer.now(),
       packageName: bundleId,
       hierarchy: { text: "Home" },
@@ -664,7 +664,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       } finally {
         client.clearSdkScreenIdentity(appId);
         sessionManager.mockRestore();
-        client["boundSessionId"] = null;
+        client.testHooks.boundSessionId = null;
       }
     },
   );

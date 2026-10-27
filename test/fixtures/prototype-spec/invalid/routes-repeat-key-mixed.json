@@ -1,0 +1,48 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "column",
+          "repeat": {
+            "as": "row",
+            "items": [
+              {
+                "id": "a-b",
+                "other": "ok"
+              }
+            ]
+          },
+          "children": [
+            {
+              "type": "switch",
+              "stateKey": "fav_{row.id}_{route.x}"
+            }
+          ]
+        }
+      },
+      "routes": {
+        "detail": {
+          "params": {
+            "x": "string"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"detail\"].repeat.items[0]",
+  "expectedMessage": "Bound state key \"fav_a-b_{route.x}\" is invalid"
+}

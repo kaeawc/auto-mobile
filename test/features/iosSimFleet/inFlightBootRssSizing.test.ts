@@ -35,7 +35,9 @@ function simulator(udid: string, gib?: number, state = "Booted"): SimulatorCost 
     state,
     quality: gib === undefined ? "no-processes" : "measured",
     process:
-      gib === undefined ? undefined : { rssBytes: gib * GIB, cpuPercent: 0, processCount: 1 },
+      gib === undefined
+        ? undefined
+        : { rssBytes: gib * GIB * 10, footprintBytes: gib * GIB, cpuPercent: 0, processCount: 1 },
   };
 }
 
@@ -98,20 +100,20 @@ test("an external Booting simulator is protected without an admission", async ()
   await expect(gate.assertCapacityAvailable()).rejects.toBeInstanceOf(BootCapacityExhaustedError);
 });
 
-test("an unmeasured Booting simulator is charged at least the 3 GiB default", async () => {
+test("an unmeasured Booting simulator is charged at least the 2.5 GiB default", async () => {
   const { gate } = setup([simulator("settled", 1.5), simulator("external", undefined, "Booting")]);
-  // (1.5 + 3) / 2 = 2.25 GiB, so floor(8 / 2.25) = 3, rather than floor(8 / 1.5) = 5.
-  expect((await gate.describeCapacity()).limit).toBe(3);
+  // (1.5 + 2.5) / 2 = 2 GiB, so floor(9.6 / 2) = 4, rather than floor(9.6 / 1.5) = 6.
+  expect((await gate.describeCapacity()).limit).toBe(4);
 });
 
 test("a lone admitted simulator's small RSS keeps the default-derived limit", async () => {
   const { gate, report } = setup([]);
   const boot = await gate.admitBoot(undefined, { bootUdid: "new" });
   report.simulators.push(simulator("new", 0.8));
-  expect((await gate.describeCapacity()).limit).toBe(2);
+  expect((await gate.describeCapacity()).limit).toBe(3);
   boot.releaseAdmission?.();
   // Release defines settlement: no new grace timer changes the existing steady-fleet behavior.
-  expect((await gate.describeCapacity()).limit).toBe(5);
+  expect((await gate.describeCapacity()).limit).toBe(6);
 });
 
 test("a boot released during sampling stays excluded for that sample", async () => {
@@ -123,7 +125,7 @@ test("a boot released during sampling stays excluded for that sample", async () 
     return report;
   };
   expect((await gate.describeCapacity()).limit).toBe(2);
-  expect((await gate.describeCapacity()).limit).toBe(3);
+  expect((await gate.describeCapacity()).limit).toBe(4);
 });
 
 test("duplicate admissions for one UDID charge the boot only once", async () => {
@@ -131,7 +133,7 @@ test("duplicate admissions for one UDID charge the boot only once", async () => 
   const first = await gate.admitBoot(undefined, { bootUdid: "new" });
   const second = await gate.admitBoot(undefined, { bootUdid: "new" });
   report.simulators.push(simulator("new", 0.8, "Booting"));
-  expect((await gate.describeCapacity()).limit).toBe(4);
+  expect((await gate.describeCapacity()).limit).toBe(5);
   first.releaseAdmission?.();
   second.releaseAdmission?.();
 });
@@ -156,16 +158,16 @@ test("an anonymous boot's process id cannot match a simulator RSS row index", ()
 test("an admission without a UDID still charges the policy default", async () => {
   const { gate } = setup([simulator("settled", 1.5)]);
   const boot = await gate.admitBoot(undefined, {});
-  expect((await gate.describeCapacity()).limit).toBe(3);
+  expect((await gate.describeCapacity()).limit).toBe(4);
   boot.releaseAdmission?.();
 });
 
 test.each([
-  { rss: [], expectedGiB: 3, limit: 2 },
-  { rss: [0.8], expectedGiB: 1.5, limit: 5 },
+  { rss: [], expectedGiB: 2.5, limit: 3 },
+  { rss: [0.8], expectedGiB: 1.5, limit: 6 },
   { rss: [2], expectedGiB: 2, limit: 4 },
   { rss: [3.5], expectedGiB: 3.5, limit: 2 },
-  { rss: [2, 4], expectedGiB: 3, limit: 2 },
+  { rss: [2, 4], expectedGiB: 3, limit: 3 },
   { rss: [12], expectedGiB: 6, limit: 1 },
 ])(
   "no in-flight boots: $rss GiB retains the previous estimate and limit",

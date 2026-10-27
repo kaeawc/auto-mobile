@@ -1,4 +1,5 @@
 import { runOutsideRequestContext } from "../../../utils/AbortContext";
+import type { DeviceLockState } from "../../../models/DeviceLockState";
 import type { IosLockStateProbe, IosLockStateReading } from "./IosLockStateProbe";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -12,6 +13,8 @@ interface Entry {
   epoch: number;
   reading?: IosLockStateReading;
   expiresAt: number;
+  /** Last known reading and when it stopped being fresh; served while a refresh runs. */
+  lastKnown?: { lock: DeviceLockState; staleSince: number };
   flight?: Promise<IosLockStateReading>;
 }
 
@@ -27,6 +30,10 @@ export class CachedIosLockStateProbe implements IosLockStateProbe, IosLockStateI
       lockedTtlMs?: number;
       failureTtlMs?: number;
       settleTtlMs?: number;
+      /** How long past expiry an unlocked reading may be served while it refreshes. */
+      staleUnlockedMs?: number;
+      /** Same for a locked reading; short, because a locked device is about to change. */
+      staleLockedMs?: number;
     } = {},
   ) {}
 
@@ -59,16 +66,35 @@ export class CachedIosLockStateProbe implements IosLockStateProbe, IosLockStateI
     let entry = this.entries.get(deviceId);
     if (entry?.reading) {
       if (this.timer.now() < entry.expiresAt) {
-        return Promise.resolve(entry.reading);
+        // A cached failure must not hide a recent known reading while the probe is unhealthy.
+        const kept = entry.reading.kind === "known" ? undefined : this.staleReading(entry);
+        return Promise.resolve(kept ?? entry.reading);
       }
     }
-    if (entry?.flight) {
-      return entry.flight;
+    if (!entry?.flight) {
+      entry = { expiresAt: 0, epoch: this.epochs.get(deviceId) ?? 0, lastKnown: entry?.lastKnown };
+      this.entries.set(deviceId, entry);
+      entry.flight = this.fill(deviceId, entry);
     }
-    entry = { expiresAt: 0, epoch: this.epochs.get(deviceId) ?? 0 };
-    this.entries.set(deviceId, entry);
-    entry.flight = this.fill(deviceId, entry);
-    return entry.flight;
+    // Stale-while-revalidate (#15311): a burst of observes after a TTL expiry would otherwise
+    // all wait on one slow `simctl spawn`, miss the observe budget, and report the lock as
+    // unknown. A recent known reading is a better answer than "pending"; the refresh already
+    // runs, and any button press, wake or release invalidated this entry (dropping lastKnown).
+    const stale = this.staleReading(entry);
+    return stale ? Promise.resolve(stale) : entry.flight;
+  }
+
+  private staleReading(entry: Entry): IosLockStateReading | undefined {
+    const known = entry.lastKnown;
+    if (!known) {
+      return undefined;
+    }
+    const windowMs = known.lock.locked
+      ? (this.options.staleLockedMs ?? 10_000)
+      : (this.options.staleUnlockedMs ?? 120_000);
+    return this.timer.now() - known.staleSince < windowMs
+      ? { kind: "known", lock: known.lock }
+      : undefined;
   }
 
   private async fill(deviceId: string, entry: Entry): Promise<IosLockStateReading> {
@@ -94,6 +120,9 @@ export class CachedIosLockStateProbe implements IosLockStateProbe, IosLockStateI
       }
       entry.reading = reading;
       entry.expiresAt = this.timer.now() + ttlMs;
+      if (reading.kind === "known") {
+        entry.lastKnown = { lock: reading.lock, staleSince: entry.expiresAt };
+      }
       entry.flight = undefined;
     }
     return reading;

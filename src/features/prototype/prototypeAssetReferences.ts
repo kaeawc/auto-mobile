@@ -1,9 +1,17 @@
+import { prototypeShaderUses } from "./prototypeShaders";
+import { isPrototypeMediaId } from "./prototypeMediaItems";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
 
+const REPEAT_PLACEHOLDER = /\{[^{}]+\}/;
+
 function addImage(value: unknown, ids: Set<string>): void {
   if (typeof value === "string") {
-    ids.add(value);
+    // A `media:` id is minted on the device: never a host upload, never reported missing (#14192).
+    // A repeat placeholder ("{item.thumbnail}") is a template, not an id, until the row is bound.
+    if (!isPrototypeMediaId(value) && !REPEAT_PLACEHOLDER.test(value)) {
+      ids.add(value);
+    }
   } else {
     const pair = record(value);
     if (pair) {
@@ -24,9 +32,15 @@ function addFont(style: unknown, fonts: Set<string>): void {
 export function collectPrototypeAssetReferences(spec: unknown): {
   images: Set<string>;
   fonts: Set<string>;
+  shaders: Set<string>;
 } {
   const images = new Set<string>();
   const fonts = new Set<string>();
+  const shaders = new Set(
+    prototypeShaderUses(spec)
+      .map(({ shader }) => shader.asset)
+      .filter((asset): asset is string => typeof asset === "string"),
+  );
   walkPrototypeNodes(spec, (node) => {
     if (node.type === "image") {
       addImage(node.asset, images);
@@ -42,7 +56,7 @@ export function collectPrototypeAssetReferences(spec: unknown): {
       addFont(record(span)?.style, fonts);
     }
   });
-  return { images, fonts };
+  return { images, fonts, shaders };
 }
 /** Saved-layout mirroring also preserves cached IDs found in opaque JSON for dynamic uses. */
 export function collectPrototypeStrings(
@@ -59,8 +73,8 @@ export function collectPrototypeStrings(
       pending.push(...Object.values(child));
     }
   }
-  const { images, fonts } = collectPrototypeAssetReferences(value);
-  for (const id of [...images, ...fonts]) {
+  const { images, fonts, shaders } = collectPrototypeAssetReferences(value);
+  for (const id of [...images, ...fonts, ...shaders]) {
     references.add(id);
   }
 }

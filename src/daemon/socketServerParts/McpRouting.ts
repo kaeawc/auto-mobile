@@ -3,7 +3,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 
 import { DaemonRequest } from "../types";
-import { DAEMON_BOUND_SESSION_PARAM, DAEMON_RELEASED_SESSION_PARAM } from "../constants";
+import { DAEMON_BOUND_SESSION_PARAM, DAEMON_RELEASED_SESSION_PARAM } from "../wire/constants";
 import { isHostInventoryCall } from "../socketRequestAdmission";
 
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";

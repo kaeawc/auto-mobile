@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { bindDevice } from "../../src/daemon/deviceBinding";
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
@@ -263,6 +264,7 @@ describe.each([
       },
     };
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env,
       deviceManagerFactory: () => devices,
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),

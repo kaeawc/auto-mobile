@@ -2,6 +2,8 @@
 
 Controls remain independent. No profiles or automatic package disabling.
 
+Host-side cost evidence and the device measurement plan: [Android emulator host cost](android-emulator-host-cost.md).
+
 ## Available controls
 
 The resource catalog, restoration receipt, and AVD hardware fields are documented
@@ -51,6 +53,18 @@ Local evidence is macOS/arm64 only: it does not validate Linux KVM/Cuttlefish, W
 hypervisors, custom images, or multi-host fleet density, and an unconfigured AVD cannot
 validate push, login, attachments or huddles (those need their own app fixtures and
 credentials).
+
+## macOS software-rendering fallback
+
+Emulator 37.2 and later resolve `-gpu auto` to a software renderer on macOS, because the
+deprecated host OpenGL drivers cannot provide the GLES 3.1 features newer system images
+require. Nothing fails; the emulator runs at about 10 FPS. The `doctor` check
+`Emulator Rendering` warns when the host is macOS, `emulator -version` reports 37.2 or
+later, and an AVD's effective GPU mode is still `auto`. An explicit `hw.gpu.mode` in the
+AVD, `-gpu` in `AUTOMOBILE_EMULATOR_ARGS`, or `-feature GuestAngle` clears it. AutoMobile
+does not change the GPU mode itself: `-gpu host` can break Google sign-in and limits
+snapshots. The version threshold lives in `EmulatorSoftwareRendering.ts`; raise its upper
+bound once a fixed emulator ships.
 
 ## Linux GPU renderer qualification
 

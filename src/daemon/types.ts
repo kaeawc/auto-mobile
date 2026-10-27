@@ -7,9 +7,9 @@ import {
 } from "./releaseReasons";
 import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
 import type { SessionReleaseSnapshot } from "./sessionManager";
-import type { DaemonHandshakeFailure } from "./daemonHandshake";
+import type { DaemonHandshakeFailure } from "./wire/daemonHandshake";
 import type { DaemonShuttingDownFailure } from "./daemonShutdownOutcome";
-import type { McpOverloadFailure } from "./McpTimeoutError";
+import type { McpOverloadFailure } from "./wire/McpTimeoutError";
 import type { SocketRequestAdmissionQueue } from "./socketRequestAdmission";
 import type { RelayedJsonRpcError, TaskRelayFrame } from "./tasks/taskRelay";
 
@@ -440,6 +440,11 @@ export interface DaemonNotification {
    * binding only when this exactly equals its bound (base) session UUID.
    */
   sessionId?: string;
+  previousDeviceId?: string;
+  deviceId?: string;
+  stableDeviceId?: string;
+  avdName?: string;
+  generation?: number;
   /** Diagnostic release reason for `notifications/session/released`. */
   reason?: string;
   /** True only for an idle release reason; absent otherwise. */

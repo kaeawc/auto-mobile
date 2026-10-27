@@ -274,6 +274,29 @@ describe("startDevice handler", () => {
     expect(received).toBe("/poster.png");
   });
 
+  it("passes discardSnapshotOnExit through the boot service on a cold Android launch (#15477)", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const received: Array<boolean | undefined> = [];
+    const originalStart = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    const manager: import("../../src/devices/deviceUtils").PlatformDeviceManager = fakeDeviceUtils;
+    manager.startDevice = async (device, timeoutMs, options) => {
+      received.push(options?.discardSnapshotOnExit);
+      return originalStart(device, timeoutMs);
+    };
+    const bootService = new DeviceBootService({
+      deviceCreationGate: new FakeDeviceCreationGate(),
+      deviceProvisioner: new FakeDeviceProvisioner(),
+      matchingStrategy: DEVICE_POOL_MATCHING,
+      deviceManager: fakeDeviceUtils,
+      deviceMatcher: fakeMatcher,
+      timer: new FakeTimer(),
+    });
+    await bootService.boot({ platform: "android", discardSnapshotOnExit: true });
+    await bootService.boot({ platform: "android" });
+    expect(received).toEqual([true, undefined]);
+  });
+
   it("renders cameraPosterQr to a poster and passes its path to the cold Android launch", async () => {
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setImageResult(androidImage);
@@ -3096,6 +3119,47 @@ describe("startDevice handler", () => {
       ownerResult.runtime.session.sessionUuid,
     );
   });
+
+  it.each(["created-ios", "adopted-ios", "created-android"] as const)(
+    "reports preboot disabled resources only for created iOS (%s)",
+    async (kind) => {
+      const platform = kind === "created-android" ? "android" : "ios";
+      const device = platform === "ios" ? iosDevice : androidDevice;
+      const adopted = kind === "adopted-ios";
+      fakeMatcher.setBootedResult(adopted ? device : null);
+      fakeMatcher.setImageResult(null);
+      fakeDeviceUtils.setBootedDevices(platform, adopted ? [device] : []);
+      setDeviceToolsDependencies({
+        deviceCreationGateFactory: () => ({
+          isCreationAllowed: () => true,
+          describeSource: () => "test",
+        }),
+        deviceProvisionerFactory: () =>
+          new FakeDeviceProvisioner({
+            platform,
+            name: device.name,
+            deviceId: device.deviceId,
+            prebootDisabledResources: ["widgets"],
+          }),
+      });
+      const tool = ToolRegistry.getTool("startDevice")!;
+      const response = await tool.handler({ platform, createIfMissing: true });
+      const result = toolJson(response);
+      if (kind === "created-ios") {
+        expect(result.disabledResources).toEqual([
+          expect.objectContaining({
+            resource: "widgets",
+            labels: expect.any(Array),
+            automobileImpact: expect.any(Array),
+            appImpact: expect.any(Array),
+          }),
+        ]);
+        expect(tool.outputSchema!.safeParse(result).success).toBe(true);
+      } else {
+        expect(result.disabledResources).toBeUndefined();
+      }
+    },
+  );
 
   it("passes timeout to the cold boot start operation", async () => {
     fakeDeviceUtils.setBootedDevices("ios", []);

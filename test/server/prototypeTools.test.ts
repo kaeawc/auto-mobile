@@ -32,7 +32,7 @@ import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
-import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/wire/constants";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { prototypeTextFieldBindings } from "../../src/features/prototype/prototypeTextTarget";
 import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycle";
@@ -141,6 +141,7 @@ describe("prototype MCP tool", () => {
   test("an unknown action names the supported actions", async () => {
     const { payload } = await call({ action: "explode" });
     expect(payload.error).toContain("show, patch, dismiss, status, inspect or awaitEvent");
+    expect(payload.error).toContain("timer action: simulate");
   });
 
   test.each([

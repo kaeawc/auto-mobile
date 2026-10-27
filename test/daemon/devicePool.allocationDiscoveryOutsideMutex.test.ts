@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/devicePoolRefresh";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
 import { ActionableError } from "../../src/models/ActionableError";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constants";
 import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import type { CallToolResult } from "@modelcontextprotocol/client";

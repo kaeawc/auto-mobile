@@ -5,7 +5,10 @@ struct PrototypeBundleReferences {
     var fonts: [PrototypeBundleID] = []
 
     init(_ bytes: Data) throws {
-        let json = try PrototypeBundleJSON(bytes, code: .specInvalidJSON, path: "spec.json")
+        let json = try PrototypeBundleJSON(bytes, code: .specInvalidJSON, path: "spec.json", valueFailure: .specInvalid)
+        if PrototypeCustomShaders.uses(json.value.objectFields ?? [:]) {
+            throw PrototypeBundleFailure(.customShadersUnsupported, "spec.json")
+        }
         do {
             try PrototypeContractValidator.validate(data: json.data)
             _ = try JSONDecoder().decode(PrototypeSpec.self, from: json.data)
@@ -23,8 +26,13 @@ struct PrototypeBundleReferences {
     }
 
     private mutating func image(_ value: JSONValue?) {
-        if let id = value?.stringValue { images.append(PrototypeBundleID(id)) }
-        else if let fields = value?.objectFields {
+        // A `media:` id is minted on the device and a placeholder is a template (#14192): neither is an
+        // asset the bundle carries.
+        if let id = value?.stringValue {
+            if !PrototypeMediaItems.isMediaId(id), id.range(of: #"\{[^{}]+\}"#, options: .regularExpression) == nil {
+                images.append(PrototypeBundleID(id))
+            }
+        } else if let fields = value?.objectFields {
             image(fields["light"])
             image(fields["dark"])
         }

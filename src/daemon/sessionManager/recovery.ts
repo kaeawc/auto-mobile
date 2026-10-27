@@ -10,7 +10,7 @@ import { logger } from "../../utils/logger";
 import {
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
-} from "../constants";
+} from "../wire/constants";
 import { clampManagedExecutionIdleTimeoutMs } from "../sessionBroker/provisioning/executionLiveness";
 import { TerminalSessionError } from "../sessionErrors";
 import {
@@ -57,9 +57,6 @@ export interface SessionRecoveryHost {
     "claimRecoverableSession" | "releaseRecoverableSessionClaim"
   >;
   readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
-  unlessBeingReplaced(
-    release: SessionReleaseSnapshot | undefined,
-  ): SessionReleaseSnapshot | undefined;
   terminalReleaseFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -156,9 +153,7 @@ export class SessionRecovery {
     if (this.host.isLapsedUnownedRestartRecovery(current)) {
       current = await this.host.admitPersistedSession(sessionId, current);
     }
-    const terminalRelease = this.host.unlessBeingReplaced(
-      current && this.host.terminalReleaseFromPersisted(sessionId, current),
-    );
+    const terminalRelease = current && this.host.terminalReleaseFromPersisted(sessionId, current);
     if (terminalRelease) {
       this.host.sessionSlots.setTerminalSnapshot(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);

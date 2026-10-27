@@ -1,11 +1,11 @@
-import { DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM } from "../../src/daemon/constants";
+import { DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM } from "../../src/daemon/wire/constants";
 import { describe, expect, test } from "bun:test";
 import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
 import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { currentForwardSessionKey } from "../../src/daemon/socketServer/forwardSessionKey";
-import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";

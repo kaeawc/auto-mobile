@@ -1,7 +1,13 @@
+import { SimulatorContainerOwnershipError } from "../../../src/utils/ios-cmdline-tools/simulatorOwnContainer";
+import { cloneContainerFixture } from "../../helpers/simulatorContainerFixture";
+import {
+  simulatorOwnership,
+  simulatorDataContainer,
+} from "../../helpers/simulatorContainerFixture";
 import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   AppPreferences,
   isIosPreferenceSdkUnavailable,
@@ -33,7 +39,7 @@ const input = {
   suite: "mt8327Suite",
   key: "kv8327",
 } as const;
-const container = "/fake/app container";
+const container = simulatorDataContainer(device.deviceId);
 const PHYSICAL_UDID = "00008110-0012345678901234";
 const fixtureXml = readFileSync(
   new URL("../../fixtures/ios-userdefaults-plist/xml-origin.plist", import.meta.url),
@@ -175,6 +181,7 @@ function harness(state: "open" | "closed" | "absent" = "open") {
   const timer = new FakeTimer();
   simctl.timer = timer;
   const preferences = new AppPreferences(device, {
+    containerOwnership: simulatorOwnership,
     iosKeyValueClientProvider: () => (state === "absent" ? null : sdk),
     simctl,
     plistReader: plist,
@@ -645,7 +652,12 @@ describe("iOS app UserDefaults resolution", () => {
         expect(adapter).not.toHaveBeenCalled();
         const simctl = new FakeContainerSimctl();
         const plist = new FakePlistReader();
-        const preferences = new AppPreferences(device, { simctl, plistReader: plist, timer });
+        const preferences = new AppPreferences(device, {
+          containerOwnership: simulatorOwnership,
+          simctl,
+          plistReader: plist,
+          timer,
+        });
         const read = await preferences.getPreference(input);
         await preferences.setPreference({ ...input, value: 42, type: "int" });
         expect(existing).toHaveBeenCalledWith(device.deviceId);
@@ -972,7 +984,11 @@ describe("iOS app UserDefaults resolution", () => {
       `spawn ${device.deviceId} defaults read globalSuite k`,
       new Error("Domain 'globalSuite' not found"),
     );
-    const preferences = new AppPreferences(device, { simctl, timer: new FakeTimer() });
+    const preferences = new AppPreferences(device, {
+      containerOwnership: simulatorOwnership,
+      simctl,
+      timer: new FakeTimer(),
+    });
     const result = await preferences.getPreference({
       scope: "userDefaults",
       suite: "globalSuite",
@@ -1043,7 +1059,11 @@ describe("real plutil fixtures and route type consistency", () => {
         `spawn ${device.deviceId} defaults read-type globalSuite ${key}`,
         `Type is ${legacyType}\n`,
       );
-      const defaults = new AppPreferences(device, { simctl, timer: new FakeTimer() });
+      const defaults = new AppPreferences(device, {
+        containerOwnership: simulatorOwnership,
+        simctl,
+        timer: new FakeTimer(),
+      });
       expect(await sdk.preferences.getPreference({ ...input, key })).toMatchObject({
         type,
         value,
@@ -1239,7 +1259,11 @@ describe("SDK redaction and collection encoding", () => {
       `spawn ${device.deviceId} defaults read-type globalSuite ${input.key}`,
       "Type is string\n",
     );
-    const defaults = new AppPreferences(device, { simctl, timer: new FakeTimer() });
+    const defaults = new AppPreferences(device, {
+      containerOwnership: simulatorOwnership,
+      simctl,
+      timer: new FakeTimer(),
+    });
     const global = await defaults.getPreference({
       scope: "userDefaults",
       suite: "globalSuite",
@@ -1478,3 +1502,46 @@ describe("iOS preference timeout messages name the bound that expired (#14683)",
     );
   });
 });
+
+for (const proven of [true, false]) {
+  test(`container-plist read and write clone ownership: ${proven}`, async () => {
+    const clone = cloneContainerFixture(device.deviceId, proven ? input.appId : null);
+    const simctl = new FakeContainerSimctl();
+    simctl.containerPath = clone.reported;
+    const plist = new FakePlistReader();
+    plist.setValue(42, "int");
+    const preferences = new AppPreferences(device, {
+      containerOwnership: clone.ownership,
+      simctl,
+      timer: new FakeTimer(),
+      plistReader: plist,
+      iosKeyValueClientProvider: () => null,
+    });
+    if (!proven) {
+      await expect(preferences.getPreference(input)).rejects.toBeInstanceOf(
+        SimulatorContainerOwnershipError,
+      );
+      await expect(
+        preferences.setPreference({ ...input, value: 42, type: "int" }),
+      ).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
+      expect(plist.paths).toEqual([]);
+      expect(simctl.calls).toHaveLength(2);
+      expect(simctl.calls.every(({ args }) => args[0] === "get_app_container")).toBe(true);
+      return;
+    }
+    expect(await preferences.getPreference(input)).toMatchObject({ value: 42 });
+    expect(await preferences.setPreference({ ...input, value: 42, type: "int" })).toMatchObject({
+      verified: true,
+    });
+    expect(plist.paths).not.toHaveLength(0);
+    expect(
+      plist.paths.every((path) => path.startsWith(join(clone.own, "Library", "Preferences") + sep)),
+    ).toBe(true);
+    const writes = simctl.calls.filter(({ args }) => args[3] === "write");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.args[4]).toBe(join(clone.own, "Library", "Preferences", input.suite!));
+    expect(
+      simctl.calls.some(({ args }) => args.some((arg) => arg.startsWith(clone.reported))),
+    ).toBe(false);
+  });
+}

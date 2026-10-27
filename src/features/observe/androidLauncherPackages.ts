@@ -1,6 +1,7 @@
 import type { BootedDevice, GfxMetrics } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
+import { prototypeMotionActive } from "./prototypeMotion";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { ViewHierarchy } from "./ViewHierarchy";
@@ -386,6 +387,10 @@ export class QuietTreeStability {
     );
     if (!tree.hierarchy.error) {
       this.lastUpdatedAt = hierarchyUpdatedAtToMillis(tree) ?? this.lastUpdatedAt;
+    }
+    // A tree read while the prototype still animates is not evidence of a settled screen (#15114).
+    if (prototypeMotionActive(tree) > 0) {
+      return null;
     }
     return tree.fresh === true && !tree.hierarchy.error ? hierarchyFingerprint(tree) : null;
   }

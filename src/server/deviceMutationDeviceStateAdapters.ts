@@ -4,6 +4,7 @@ import {
   powerIntentKey,
   type PowerIntent,
 } from "../daemon/sessionBroker/mutations/deviceStateKeys";
+import { appFallback } from "./deviceMutationLifecycleAdapters";
 import { isRecord } from "./pipeline/isRecord";
 
 type ToolMutation = Pick<DeviceMutationInput, "kind" | "key">;
@@ -84,7 +85,9 @@ function opaqueDeviceState(...parts: readonly string[]): ToolMutation {
  * Android effects nothing reverts and the baseline clean does not cover (#14359):
  * - an emulator GPS fix: the console has no unset command and the prior fix is unreadable;
  * - a lock-screen credential: clearing it needs the secret, which the journal never holds;
- * - a camera poster: the virtual scene has no read-back, so no prior can be captured.
+ * - a camera poster: the virtual scene has no read-back, so no prior can be captured;
+ * - a `deviceCondition` package-data clear (`faults.clearPackageData`): it wipes app data nothing
+ *   restores, so it records the same destructive-app intent as `launchApp(clearAppData)`.
  * Each forces keep-booted reset to escalate. A route `stop` and a credential/poster clear apply
  * no new state, so they record nothing extra.
  */
@@ -104,7 +107,17 @@ export function deviceStateFallbackMutations(
       ? [opaqueDeviceState("screenLock")]
       : []),
     ...(poster === "image" || poster === "qr" ? [opaqueDeviceState("cameraPoster")] : []),
+    ...clearedPackageFallbacks(args.deviceCondition),
   ];
+}
+
+/** The destructive-app intent for the app a `deviceCondition.faults.clearPackageData` request wipes. */
+function clearedPackageFallbacks(deviceCondition: unknown): ToolMutation[] {
+  const faults = isRecord(deviceCondition) ? deviceCondition.faults : undefined;
+  const target = isRecord(faults) ? faults.clearPackageData : undefined;
+  return isRecord(target) && typeof target.package === "string"
+    ? [appFallback("clearAppData", target.package)]
+    : [];
 }
 
 /**
@@ -115,7 +128,7 @@ export function deviceStateFallbackMutations(
  */
 export function deviceStateToolMutations(
   name: string,
-  _args: Record<string, unknown>,
+  args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] | undefined {
   if (name !== "setPosture") {
@@ -124,5 +137,9 @@ export function deviceStateToolMutations(
   return [
     { kind: "device-setting", key: "tool:setPosture" },
     ...(platform === "ios" ? [] : [opaqueDeviceState("posture")]),
+    // A display preset resizes the display, which the foldable posture restore does not undo.
+    ...(platform !== "ios" && args.displayPreset !== undefined
+      ? [opaqueDeviceState("posture", "displayPreset")]
+      : []),
   ];
 }

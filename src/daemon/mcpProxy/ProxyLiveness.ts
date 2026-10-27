@@ -3,7 +3,7 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
 import { DaemonUnavailableError, type DaemonClientLike } from "../client";
-import { DAEMON_HEARTBEAT_METHOD } from "../constants";
+import { DAEMON_HEARTBEAT_METHOD } from "../wire/constants";
 import { BoundSessionHeartbeat } from "../proxy/BoundSessionHeartbeat";
 import { HeldSessionHeartbeatOutcomes } from "../proxy/HeldSessionHeartbeatOutcomes";
 import { type StallHandoverRecord } from "../proxy/ProxySessionState";

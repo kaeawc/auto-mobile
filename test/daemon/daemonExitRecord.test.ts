@@ -10,7 +10,7 @@ import {
   type DaemonExitRecord,
 } from "../../src/daemon/daemonExitRecord";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { logger } from "../../src/utils/logger";
 import type { DaemonProcessRecord } from "../../src/daemon/processTable";
 import { FakeTimer } from "../fakes/FakeTimer";

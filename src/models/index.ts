@@ -113,4 +113,8 @@ export * from "./SetUIStateOptions";
 export * from "./SetUIStateResult";
 export * from "./DragPathOptions";
 export * from "./DragPathResult";
+export * from "./HoverAtOptions";
+export * from "./HoverAtResult";
 export * from "./DeviceServiceDisabledError";
+
+export * from "./UnsafeDeviceResourceCombinationError";

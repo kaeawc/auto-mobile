@@ -31,6 +31,13 @@ each test file.
     lets an ignore pattern win over an explicit file argument, and a config file
     has no command-line length limit, which a list of ~280 paths would hit on
     Windows.
+  - Bun replaces the config's `pathIgnorePatterns` with any
+    `--path-ignore-patterns` flag (#15237). A lane that relies on the config
+    therefore carries none: the unit lane's own two patterns
+    (`**/*.integration.test.ts`, `test/stress/**`) move into the generated
+    config (`write-bunfig <out> --ignore <glob>`), and lanes that keep their own
+    flags (Windows safe integration shards, the Linux integration filter)
+    restate the few macOS-only integration files as flags next to them.
   - Explicit targets (`test-ts.sh unit test/utils/ios-cmdline-tools`) drop the
     skipped files, and exit 0 when none remain.
 - Each skipping lane prints a count line and, in CI, appends a "macOS-only (iOS)

@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+    import GameController
     import SwiftUI
     import UIKit
 
@@ -26,6 +27,7 @@
             page = UIHostingController(rootView: PrototypeRootView(model: model, layer: .page))
             top = UIHostingController(rootView: PrototypeRootView(model: model, layer: .top))
             super.init(nibName: nil, bundle: nil)
+            model.syncDeviceState = { [weak self] in self?.syncDeviceState() }
         }
 
         @available(*, unavailable)
@@ -39,6 +41,15 @@
 
         override func viewDidLoad() {
             super.viewDidLoad()
+            let center = NotificationCenter.default
+            for name in [Notification.Name.GCMouseDidConnect, Notification.Name.GCMouseDidDisconnect] {
+                center.addObserver(self, selector: #selector(pointerChanged(_:)), name: name, object: nil)
+            }
+            registerForTraitChanges(
+                [UITraitHorizontalSizeClass.self, UITraitUserInterfaceIdiom.self]
+            ) { (controller: PrototypeLayersViewController, _: UITraitCollection) in
+                controller.syncDeviceState()
+            }
             view.backgroundColor = .clear
             for host in [page, top] {
                 // Only `PrototypeKeyboardLift` moves anything for the keyboard (#11042), and the window's
@@ -64,6 +75,35 @@
             escape.delaysTouchesEnded = false
             escape.delegate = self
             view.addGestureRecognizer(escape)
+        }
+
+        override func viewWillLayoutSubviews() {
+            syncDeviceState()
+            super.viewWillLayoutSubviews()
+        }
+
+        @objc
+        private func pointerChanged(_: Notification) { syncDeviceState() }
+
+        private func syncDeviceState() {
+            loadViewIfNeeded()
+            let idiom: PrototypeDeviceIdiom
+            #if targetEnvironment(macCatalyst)
+                idiom = .mac
+            #else
+                switch traitCollection.userInterfaceIdiom {
+                case .pad: idiom = .pad
+                case .mac: idiom = .mac
+                case .vision: idiom = .vision
+                default: idiom = .phone
+                }
+            #endif
+            model.updateDeviceState(PrototypeDeviceState(
+                idiom: idiom,
+                horizontalSizeClass: traitCollection.horizontalSizeClass == .regular ? .regular : .compact,
+                windowWidth: view.bounds.width, windowHeight: view.bounds.height,
+                systemVersion: UIDevice.current.systemVersion, pointer: GCMouse.current != nil
+            ))
         }
 
         func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
@@ -141,6 +181,11 @@
         let model: PrototypeModel
         let layer: PrototypeHostLayer
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+        @Environment(\.layoutDirection) private var layoutDirection
+        @Namespace private var sharedNamespace
+        @State private var swipe = PrototypeStackSwipeState()
+        @GestureState private var swipeActive = false
 
         var body: some View {
             // The model's one resolved mode, not this window's `colorScheme`: the window carries that
@@ -218,6 +263,7 @@
             }
             // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
             .environment(\.colorScheme, palette.dark ? .dark : .light)
+            .environment(\.prototypeSharedNamespace, sharedNamespace)
             .environment(\.prototypePalette, palette)
             .environment(\.prototypeTypography, PrototypeTypography(theme: model.spec?.theme?.typography))
             .environment(\.prototypeShapes, PrototypeShapes(theme: model.spec?.theme?.shapes))
@@ -227,15 +273,90 @@
             // Android: the hosts keep no safe area (`PrototypeKeyboardLift.hostSafeAreaRegions`), and
             // this ignores every region too, so no second lift can stack on the sheet's (#11042).
             .ignoresSafeArea()
-            // Observe edge drags alongside authored gestures without reserving a tappable strip.
-            .simultaneousGesture(DragGesture(minimumDistance: 10, coordinateSpace: .local).onEnded { value in
-                if value.startLocation.x <= 20,
-                   value.translation.width >= 60,
-                   abs(value.translation.height) < abs(value.translation.width)
-                {
+            // Edge navigation observes authored scroll/pager gestures without reserving a touch strip.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 10, coordinateSpace: .global)
+                    .updating($swipeActive) { _, active, _ in active = true }
+                    .onChanged(edgeSwipeChanged)
+                    .onEnded(edgeSwipeEnded)
+            )
+            .onChange(of: swipeActive) { _, active in
+                if !active { cancelEdgeSwipe() }
+            }
+            .onDisappear { cancelEdgeSwipe() }
+        }
+
+        private var swipeRTL: Bool { layoutDirection == .rightToLeft }
+
+        private func swipeAnimation(_ target: String) -> PrototypeStackAnimation {
+            switch model.stackTransition(target) {
+            case .sharedAxisX, .sharedAxisY, .fadeThrough: return .none
+            default: break
+            }
+            return PrototypeStackNavigation.animation(
+                declared: model.stackTransition(target), specMotion: model.spec?.motion,
+                reduceMotion: reduceMotion, direction: .pop
+            )
+        }
+
+        private func edgeSwipeChanged(_ value: DragGesture.Value) {
+            guard model.stackDrag?.settling != true, let target = model.stackPopTarget,
+                  let revision = model.stackChanges[target]?.revision else { return }
+            swipe.update(
+                target: target, revision: revision, start: value.startLocation.x,
+                translation: value.translation.width, vertical: value.translation.height,
+                width: model.windowSize.width, rtl: swipeRTL
+            )
+            guard swipe.target == target, swipe.revision == revision else {
+                cancelEdgeSwipe()
+                return
+            }
+            guard swipeAnimation(target) == .slide else { return }
+            model.stackDrag = PrototypeModel.StackDrag(
+                target: target, revision: revision, progress: swipe.progress
+            )
+        }
+
+        private func cancelEdgeSwipe() {
+            swipe.cancel()
+            guard model.stackDrag?.settling != true else { return }
+            withAnimation(
+                PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
+                    ? .easeOut(duration: 0.2) : nil
+            ) { model.stackDrag = nil }
+        }
+
+        private func edgeSwipeEnded(_ value: DragGesture.Value) {
+            guard let ended = swipe.end() else { return }
+            let (target, revision) = ended
+            guard model.stackPopTarget == target, model.stackChanges[target]?.revision == revision else {
+                cancelEdgeSwipe()
+                return
+            }
+            guard swipeAnimation(target) == .slide, let drag = model.stackDrag else {
+                model.stackDrag = nil
+                if PrototypeStackSwipe.distance(translation: value.translation.width, rtl: swipeRTL) >= 60,
+                   abs(value.translation.height) < abs(value.translation.width) { model.popTopmostStack() }
+                return
+            }
+            let commit = PrototypeStackSwipe.commits(
+                translation: value.translation.width, predicted: value.predictedEndTranslation.width,
+                width: model.windowSize.width, rtl: swipeRTL
+            )
+            model.stackDrag?.settling = true
+            withAnimation(
+                .easeOut(duration: 0.35 * (commit ? 1 - drag.progress : drag.progress)), completionCriteria: .removed
+            ) {
+                model.stackDrag?.progress = commit ? 1 : 0
+            } completion: {
+                guard model.stackChanges[target]?.revision == revision else { return }
+                if commit, model.stackPopTarget == target {
+                    model.completedStackSwipe = target
                     model.popTopmostStack()
+                } else {
+                    model.stackDrag = nil
                 }
-            })
+            }
         }
 
         /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
@@ -290,6 +411,7 @@
                 root
                     .frame(maxWidth: .infinity)
                     .frame(height: placement.height ?? PrototypeSheetFrame.defaultHeight)
+                    .background { backdrop(spec, palette: palette) }
                     .reportFrame(key: "content", model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge)
                     // The sheet's frame is reported from inside, so its touch rect follows the lift.
@@ -297,6 +419,7 @@
                     .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
             case "floating":
                 root
+                    .background { backdrop(spec, palette: palette) }
                     .offset(x: placement.offset?.x ?? 0, y: placement.offset?.y ?? 0)
                     .reportFrame(key: "content", model: model)
                     .padding(EdgeInsets(
@@ -307,12 +430,29 @@
             default:
                 // Fullscreen blocks the app, like the Android full-screen window.
                 ZStack(alignment: .topLeading) {
+                    backdrop(spec, palette: palette)
                     palette.scrim(placement.scrim).map { Color($0) } ?? .clear
                     root
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .contentShape(Rectangle())
                 .reportFrame(key: "content", model: model)
+            }
+        }
+
+        /// `window.backdrop` (#15126): the Material, or the tonal fill where blur is unavailable.
+        /// Nothing is drawn without one.
+        @ViewBuilder
+        private func backdrop(_ spec: PrototypeSpec, palette: PrototypePalette) -> some View {
+            if let backdrop = spec.window.backdrop {
+                PrototypeBackdropView(
+                    plan: PrototypeBackdropPlan.resolve(
+                        backdrop,
+                        osMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                        reduceTransparency: reduceTransparency
+                    ),
+                    palette: palette
+                )
             }
         }
 
@@ -402,11 +542,13 @@
         let model: PrototypeModel
         let clip: CGRect?
         let enabled: Bool
+        @Environment(\.prototypeStackActive) private var stackActive
         // Branches sharing a key still have distinct view lifetimes (#12207).
         @State private var owner = PrototypeHitRectOwner()
         @State private var frame: CGRect?
 
-        private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled) }
+        private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled && stackActive)
+        }
 
         func body(content: Content) -> some View {
             content
@@ -467,6 +609,51 @@
             self = []
             if regions.contains(.container) { insert(.container) }
             if regions.contains(.keyboard) { insert(.keyboard) }
+        }
+    }
+
+    /// The colour layers of a `window.backdrop`: Material (or Liquid Glass) plus a light tint, or the
+    /// tonal fill (#15126).
+    private struct PrototypeBackdropView: View {
+        let plan: PrototypeBackdropPlan
+        let palette: PrototypePalette
+
+        var body: some View {
+            ZStack {
+                switch plan.mode {
+                case .blur:
+                    blurLayer
+                    if let tint { tint.opacity(PrototypeBackdropPlan.blurTintAlpha) }
+                case .fallback:
+                    (tint ?? Self.color(palette, PrototypeBackdropPlan.defaultTonalRole))
+                        .opacity(PrototypeBackdropPlan.tonalAlpha)
+                }
+            }
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+
+        private var tint: Color? {
+            plan.tint.map { Self.color(palette, $0) }
+        }
+
+        private static func color(_ palette: PrototypePalette, _ spec: String) -> Color {
+            palette.resolve(spec).map { Color($0) } ?? .clear
+        }
+
+        @ViewBuilder private var blurLayer: some View {
+            switch plan.material {
+            case .ultraThin: Rectangle().fill(.ultraThinMaterial)
+            case .thin: Rectangle().fill(.thinMaterial)
+            case .regular: Rectangle().fill(.regularMaterial)
+            case .thick: Rectangle().fill(.thickMaterial)
+            case .glass:
+                if #available(iOS 26, *) {
+                    Rectangle().fill(.clear).glassEffect(.regular, in: Rectangle())
+                } else {
+                    Rectangle().fill(.regularMaterial)
+                }
+            }
         }
     }
 #endif

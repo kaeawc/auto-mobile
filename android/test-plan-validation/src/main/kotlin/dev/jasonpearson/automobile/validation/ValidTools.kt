@@ -44,6 +44,7 @@ object ValidTools {
         "getNotificationPolicy",
         "highlight",
         "homeScreen",
+        "hoverAt",
         "identifyInteractions",
         "inspectPackageSigning",
         "installApp",

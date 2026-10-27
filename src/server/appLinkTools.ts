@@ -42,10 +42,10 @@ export const setAppLinksSchema = withAppIdAliases(
         action: z
           .enum(SET_APP_LINKS_ACTIONS)
           .describe(
-            "approve: force-approve autoVerify domains (pm set-app-links 2). reset: clear verification " +
+            "approve: force-approve autoVerify domains (pm set-app-links 2), leaving already-verified domains in non-settable states (system_configured, pre_verified, migrated, restored) untouched. reset: clear verification " +
               "to none (pm set-app-links 0). reverify: ask the verifier again (asynchronous). " +
               "userSelection: enable or disable domains for the user. restore: write back the state " +
-              "recorded before the first setAppLinks change.",
+              "recorded before the first setAppLinks change, using the closest settable state when exact restoration is unavailable.",
           ),
         domains: z
           .array(z.string().regex(APP_LINK_DOMAIN, "Expected a host name such as example.com"))
@@ -135,9 +135,9 @@ export const createSetAppLinksHandler =
 
 const SET_APP_LINKS_DESCRIPTION =
   "Android 12+: change an app's App Links state so https links open the app directly (or not). " +
-  "approve force-verifies autoVerify domains, reset clears them to none, reverify re-runs " +
+  "approve force-verifies autoVerify domains, leaving already-verified domains in non-settable states (system_configured, pre_verified, migrated, restored) untouched; reset clears them to none, reverify re-runs " +
   "verification, userSelection enables/disables domains for a user, restore writes back the " +
-  "state recorded before the first change. Returns what changed, the per-domain state after, " +
+  "state recorded before the first change, or the closest shell-settable state with a note. Returns what changed, skipped domains, the per-domain state after, " +
   "and a restore receipt; in a daemon session, release or rebind restores it. Read state with " +
   "getDeepLinks.";
 

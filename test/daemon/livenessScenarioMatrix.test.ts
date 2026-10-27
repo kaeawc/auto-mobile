@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
@@ -14,7 +14,7 @@ import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
+import { decideOwnershipChange } from "../../src/daemon/wire/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
   type LivenessHandover,
@@ -27,7 +27,7 @@ import {
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
+import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/wire/sessionLivenessWindows";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
 import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -53,7 +53,7 @@ import {
 //   held      the device stays with its session for as long as the policy says
 //   released  and is freed, with the right reason, within the policy's bound afterwards
 //
-// The windows are the owner decisions of 2026-10-08 (src/daemon/sessionLivenessWindows.ts):
+// The windows are the owner decisions of 2026-10-08 (src/daemon/wire/sessionLivenessWindows.ts):
 // ~10 s after the owner's last heartbeat, 2 min after the END of the last tool call while
 // heartbeats keep arriving, and a call in flight is never released. Each row names the issue
 // whose fix flips it.

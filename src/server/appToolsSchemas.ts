@@ -284,7 +284,9 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(
           notificationsEnabled: z
             .boolean()
             .optional()
-            .describe("Android notification state, independent of POST_NOTIFICATIONS"),
+            .describe(
+              "Android notification state: POST_NOTIFICATIONS permission on API 33+; POST_NOTIFICATION appop before API 33",
+            ),
           notificationPolicyAccess: z
             .boolean()
             .optional()

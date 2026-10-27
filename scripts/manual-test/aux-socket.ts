@@ -3,7 +3,7 @@ import "./harnessLogSink";
 import {
   AUX_SOCKET_MAX_FRAME_BYTES,
   FAILURES_STREAM_MAX_FRAME_BYTES,
-} from "../../src/daemon/socketServer/LineFramer";
+} from "../../src/daemon/wire/LineFramer";
 import { basename, join, isAbsolute } from "node:path";
 import {
   DEVICE_GESTURE_RECORDING_SOCKET_CONFIG,
@@ -15,7 +15,7 @@ import {
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
-} from "../../src/daemon/constants";
+} from "../../src/daemon/wire/constants";
 import type {
   DeviceGestureRecordingCommand,
   DeviceGestureRecordingResponse,
@@ -23,7 +23,7 @@ import type {
 import type {
   VideoStreamSocketRequest,
   VideoStreamSocketResponse,
-} from "../../src/daemon/videoStreamSocketTypes";
+} from "../../src/daemon/wire/videoStreamSocketTypes";
 import type { WebRtcStreamSocketRequest } from "../../src/daemon/webrtcStreamSocketTypes";
 import { sendWebRtcStreamRequest } from "../lib/webrtcStreamClient";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";

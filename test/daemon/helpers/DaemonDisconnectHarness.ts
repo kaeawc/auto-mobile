@@ -108,7 +108,7 @@ export class DaemonDisconnectHarness extends Daemon {
   }
 
   stopMissingDeviceListener(): void {
-    this.unsubscribeAdbMissingDevice?.();
+    this.runtime.unsubscribeAdbMissingDevice?.();
   }
 
   shouldSkipStaleCleanup(
@@ -124,7 +124,7 @@ export class DaemonDisconnectHarness extends Daemon {
   }
 
   get disconnectMonitor(): SingleFlightInterval | null {
-    return this.deviceDisconnectMonitor;
+    return this.runtime.deviceDisconnectMonitor;
   }
 
   get disconnectMisses(): Map<string, number> {

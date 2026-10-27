@@ -42,6 +42,7 @@ import {
   type DeviceShutdownOptions,
   type DeviceStartOptions,
   type DeviceStartResult,
+  androidLaunchOptions,
   PHYSICAL_IOS_SCAN_BUDGET_MS,
   type PlatformDeviceManager,
   androidDiscoveryErrorCode,
@@ -618,7 +619,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: await this.emulator.getBootedDevicesChecked(
           false,
           {
-            resolveForeignSerials: options.skipForeignEnrichment ? this.foreignResolver : undefined,
+            resolveForeignSerials: this.foreignResolver,
             coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
             memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
@@ -866,18 +867,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android": {
         const signal = getAbortSignal();
         const admitter = this.androidBootAdmitter;
-        // Admission is awaited inside the launch, only on its cold-spawn path, so
-        // adopting an AVD that is running or starting is never refused for capacity. By the time a
-        // caller gets here it already holds the Android startup lease and the AVD's
-        // lifecycle lease: a request takes a capacity slot only once it is certain
-        // to cold-boot, and the order is always lease -> admission, so no request
-        // holds a slot while it waits on a lease. Admission itself never waits: at
-        // the limit it fails at once with capacity_exhausted.
+        // Admission is awaited inside the launch, only on its cold-spawn path, so adopting an AVD
+        // that is running or starting is never refused for capacity. By the time a caller gets here
+        // it already holds the Android startup lease and the AVD's lifecycle lease: a request takes
+        // a capacity slot only once it is certain to cold-boot, and the order is always lease ->
+        // admission, so no request holds a slot while it waits on a lease. Admission itself never
+        // waits: at the limit it fails at once with capacity_exhausted.
         const launch = await this.emulator.launchEmulator({
           avdName: device.name,
           deviceId: device.deviceId,
           signal,
-          cameraPosterPath: options.cameraPosterPath,
+          ...androidLaunchOptions(options),
           ...(admitter
             ? {
                 admitColdBoot: () => admitter.admit({ timeoutMs, signal, avdName: device.name }),

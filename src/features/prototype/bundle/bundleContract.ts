@@ -43,6 +43,7 @@ export const BUNDLE_ERROR_CODES = [
   "unreferenced_asset",
   "asset_type_mismatch",
   "requires_invalid",
+  "custom_shaders_unsupported",
 ] as const;
 export type BundleErrorCode = (typeof BUNDLE_ERROR_CODES)[number];
 export interface BundleRejection {
@@ -68,7 +69,9 @@ export class BundleFailure extends Error {
   constructor(
     readonly code: BundleErrorCode,
     readonly path?: string,
-    message = code as string,
+    message = code === "custom_shaders_unsupported"
+      ? "ProtoViewer bundles refuse style.shader and application/vnd.automobile.agsl assets; remove custom shaders."
+      : (code as string),
   ) {
     super(message);
   }

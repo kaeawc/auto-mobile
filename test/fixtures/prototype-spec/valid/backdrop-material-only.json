@@ -1,0 +1,14 @@
+{
+  "id": "strict",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "backdrop": {
+      "material": "thin"
+    }
+  },
+  "root": {
+    "type": "spacer"
+  }
+}

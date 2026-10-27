@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "type": "column",
+      "stagger": {
+        "ms": 10,
+        "order": "random"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Row 0",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.stagger.order",
+  "expectedMessage": "Invalid enum value"
+}

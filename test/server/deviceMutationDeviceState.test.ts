@@ -7,7 +7,10 @@ import { DefaultMutationPriorReader } from "../../src/server/deviceMutationPrior
 import { setDeviceStateSchema } from "../../src/server/utilityTools";
 import { addDeviceTargetingToSchema } from "../../src/utils/schemaHelpers";
 import { AdbPowerClient } from "../../src/features/utility/power/AndroidPowerClient";
-import { opaqueForcesFallback } from "../../src/daemon/sessionBroker/mutations/types";
+import {
+  opaqueForcesFallback,
+  opaqueIntentKey,
+} from "../../src/daemon/sessionBroker/mutations/types";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakePowerAdb } from "../fakes/FakePowerAdb";
 
@@ -137,6 +140,24 @@ describe("setDeviceState journal intents", () => {
     ]);
   });
 
+  test("a deviceCondition package-data clear records the destructive-app intent for that app", () => {
+    const clear = {
+      deviceCondition: { faults: { clearPackageData: { package: "com.example.app" } } },
+    };
+    const android = deviceToolMutations("setDeviceState", clear, "android");
+    expect(android).toContainEqual({
+      kind: "opaque",
+      key: opaqueIntentKey("clearAppData", "com.example.app"),
+    });
+    expect(
+      deviceToolMutations("setDeviceState", clear, "ios").filter(opaqueForcesFallback),
+    ).toEqual([]);
+    const unset = { deviceCondition: { faults: { clearPackageData: "unset" } } };
+    expect(
+      deviceToolMutations("setDeviceState", unset, "android").filter(opaqueForcesFallback),
+    ).toEqual([]);
+  });
+
   test("calls that apply no new Android state add no fallback", () => {
     const entries = deviceToolMutations(
       "setDeviceState",
@@ -175,6 +196,13 @@ describe("setPosture and changeLocalization journal intents", () => {
     const entries = deviceToolMutations("setPosture", { posture: "closed" }, "android");
     expect(entries[0]).toEqual({ kind: "device-setting", key: "tool:setPosture" });
     expect(entries.filter(opaqueForcesFallback)).toHaveLength(1);
+    expect(
+      deviceToolMutations(
+        "setPosture",
+        { posture: "opened", displayPreset: "tablet" },
+        "android",
+      ).filter(opaqueForcesFallback),
+    ).toHaveLength(2);
     expect(
       deviceToolMutations("setPosture", { hingeAngle: 90 }, "ios").filter(opaqueForcesFallback),
     ).toEqual([]);

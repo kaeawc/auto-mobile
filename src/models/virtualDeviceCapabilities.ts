@@ -15,7 +15,7 @@ export interface VirtualDeviceCapability {
   /** Whether the capability is usable, configured off, or impossible on this platform. */
   state: VirtualDeviceCapabilityState;
   /** Where AutoMobile obtained the capability state. */
-  source: "avd_config" | "platform";
+  source: "avd_config" | "platform" | "host_audio";
   /** Explanation for a capability that cannot be enabled by device configuration. */
   reason?: string;
 }

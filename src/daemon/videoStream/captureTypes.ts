@@ -2,8 +2,8 @@ import type { Socket } from "node:net";
 import type { BootedDevice } from "../../models";
 import type { H264CaptureSource } from "../../features/webrtc/H264CaptureSource";
 import type { H264AccessUnitAssembler, H264AnnexBParser } from "../../features/webrtc/h264";
-import type { StreamSubscriptionKind } from "../streamSubscriptionPolicy";
-import type { VideoStreamSocketRequest } from "../videoStreamSocketTypes";
+import type { StreamSubscriptionKind } from "../wire/streamSubscriptionPolicy";
+import type { VideoStreamSocketRequest } from "../wire/videoStreamSocketTypes";
 
 /** Creates the capture source for a device. Injected so tests never touch adb. */
 export type CaptureSourceFactory = (options: {

@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "onTap": [
+        {
+          "type": "appendData",
+          "path": "/data/liked",
+          "value": {
+            "value": true
+          }
+        },
+        {
+          "type": "startTimer",
+          "id": "tick",
+          "afterMs": 100,
+          "maxRuns": 1,
+          "actions": [
+            {
+              "type": "emit",
+              "name": "tick"
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "liked": false
+    }
+  },
+  "expectedPath": "root.onTap[0].path",
+  "expectedMessage": "appendData target is not an array"
+}

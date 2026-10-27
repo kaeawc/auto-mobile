@@ -1,10 +1,16 @@
 import {
+  resolveOwnAppDataContainer,
+  SimulatorContainerOwnershipError,
+  SimulatorContainerUnresolvedError,
+  type SimulatorContainerOwnershipOptions,
+} from "../utils/ios-cmdline-tools/simulatorOwnContainer";
+import {
   IOS_FILES_FIXTURE_BUNDLE_ID,
   normalizeIosFilesRequest,
   requireIosFilesSimulator,
   type IosFilesFixtureContainer,
 } from "./IosSimulatorUserFilesProvider";
-import { ActionableError, BootedDevice, toActionableError, type ExecResult } from "../models";
+import { ActionableError, BootedDevice, toActionableError } from "../models";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
   type AppFileFileSystem,
@@ -18,12 +24,13 @@ import {
   type LocalFileListEntry,
 } from "./appFileSupport";
 import * as hostPath from "node:path";
-import { isAbsolute, posix, resolve } from "node:path";
+import { posix, resolve } from "node:path";
 import {
   UserFilesTarget,
   normalizeAppFileRelativePath,
   normalizeUserFilesNamespace,
 } from "./appFileContract";
+import type { IosFilesFixtureInstaller } from "./IosFilesFixtureInstaller";
 import { isPathInside } from "../utils/filesystem/pathContainment";
 import { logger } from "../utils/logger";
 
@@ -36,7 +43,12 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
       device: BootedDevice,
     ) => Pick<SimCtlClient, "executeCommandArgs">,
     private readonly fileSystem: AppFileFileSystem,
+    private readonly ownership: SimulatorContainerOwnershipOptions = {},
+    private readonly installer?: IosFilesFixtureInstaller,
   ) {}
+
+  /** Devices whose fixture app this instance installed during the current stage. */
+  private installedDuringStage = new Set<string>();
 
   /** Read only the same managed namespace used by putAppFile. */
   async listNamespace(
@@ -89,7 +101,15 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     return target;
   }
 
-  async stageFiles(requests: readonly PutAppFileProviderRequest[]): Promise<void> {
+  async stageFiles(
+    requests: readonly PutAppFileProviderRequest[],
+  ): Promise<{ providerInstalled: boolean }> {
+    this.installedDuringStage = new Set();
+    await this.stageNormalized(requests);
+    return { providerInstalled: this.installedDuringStage.size > 0 };
+  }
+
+  private async stageNormalized(requests: readonly PutAppFileProviderRequest[]): Promise<void> {
     const normalized = requests.map(normalizeIosFilesRequest);
     const roots = new Map<string, string>();
     const destinations: Array<{
@@ -100,7 +120,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     for (const request of normalized) {
       let container = roots.get(request.device.deviceId);
       if (container === undefined) {
-        container = await this.resolveContainer(request);
+        container = await this.resolveContainer(request, true);
         roots.set(request.device.deviceId, container);
       }
       const root = resolve(container, "Documents", "automobile");
@@ -171,27 +191,51 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
 
   private async resolveContainer(
     request: Pick<PutAppFileProviderRequest, "device" | "signal">,
+    mayInstall: boolean = false,
   ): Promise<string> {
     const guidance = `Install the managed iOS Files fixture app (${IOS_FILES_FIXTURE_BUNDLE_ID}) on the booted simulator and retry; no alternate storage path is used.`;
-    let output: ExecResult;
     try {
-      output = await this.simctlFactory(request.device).executeCommandArgs(
-        ["get_app_container", request.device.deviceId, IOS_FILES_FIXTURE_BUNDLE_ID, "data"],
-        5_000,
-        request.signal,
-      );
+      return await this.resolveFixtureContainer(request, mayInstall);
     } catch (error) {
+      if (error instanceof SimulatorContainerUnresolvedError) {
+        throw new ActionableError(
+          `Unable to resolve the managed iOS Files fixture container. ${guidance}`,
+        );
+      }
       throw toActionableError(
         error,
         `Unable to resolve the managed iOS Files fixture container. ${guidance}`,
       );
     }
-    const container = output.stdout.trim();
-    if (!container || !isAbsolute(container)) {
-      throw new ActionableError(
-        `Unable to resolve the managed iOS Files fixture container. ${guidance}`,
-      );
+  }
+
+  /** Resolve the fixture's container; install the fixture once when a write needs it (#15404). */
+  private async resolveFixtureContainer(
+    request: Pick<PutAppFileProviderRequest, "device" | "signal">,
+    mayInstall: boolean = true,
+  ): Promise<string> {
+    try {
+      return await resolveOwnAppDataContainer({
+        ...this.ownership,
+        deviceId: request.device.deviceId,
+        bundleId: IOS_FILES_FIXTURE_BUNDLE_ID,
+        run: (args) =>
+          this.simctlFactory(request.device).executeCommandArgs(args, 5_000, request.signal),
+      });
+    } catch (error) {
+      // simctl exits non-zero for an app that is not installed, so a command failure is as much
+      // "missing" as an empty path; an ownership refusal or a cancelled call is never fixed by it.
+      if (
+        !mayInstall ||
+        !this.installer ||
+        error instanceof SimulatorContainerOwnershipError ||
+        request.signal?.aborted
+      ) {
+        throw error;
+      }
+      await this.installer.install(request.device, request.signal);
+      this.installedDuringStage.add(request.device.deviceId);
+      return this.resolveFixtureContainer(request, false);
     }
-    return container;
   }
 }

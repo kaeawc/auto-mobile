@@ -141,6 +141,31 @@ function scalar(value: unknown): boolean {
   );
 }
 
+/** A bound page write clamps before control validation; ordinary state writes are unchanged. */
+function pagerStateValue(spec: Raw, key: string, value: unknown): unknown {
+  const root = record(spec.root);
+  if (!root || typeof value !== "number" || !Number.isInteger(value)) {
+    return value;
+  }
+  for (const { node } of tree({
+    node: root,
+    path: "root",
+    parent: spec,
+    key: "root",
+    insideRepeat: false,
+  })) {
+    if (
+      node.type === "pager" &&
+      node.stateKey === key &&
+      Array.isArray(node.children) &&
+      node.children.length
+    ) {
+      return Math.min(Math.max(value, 0), node.children.length - 1);
+    }
+  }
+  return value;
+}
+
 function applyState(spec: Raw, op: DataOp, at: string, skip: boolean): Error {
   const tokens = prototypeDataPointerTokens(op.path.slice(6));
   if (tokens.length !== 1) {
@@ -165,7 +190,7 @@ function applyState(spec: Raw, op: DataOp, at: string, skip: boolean): Error {
   if (op.op === "remove") {
     delete state[key];
   } else {
-    put(state, key, op.value);
+    put(state, key, pagerStateValue(spec, key, op.value));
   }
   // The key was written into the working copy; retain the state object even when empty.
   Object.defineProperty(spec, "state", {

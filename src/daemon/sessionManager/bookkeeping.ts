@@ -5,7 +5,7 @@ import { requestAcquisitionReceipt } from "../acquisitionReceipt";
 import { DeviceCleanupQuarantine } from "../deviceCleanupQuarantine";
 import {} from "../deviceStateRestoreQueue";
 import { isTerminalReleaseReason } from "../releaseReasons";
-import { getSessionHeartbeatCheckIntervalMs } from "../sessionLivenessWindows";
+import { getSessionHeartbeatCheckIntervalMs } from "../wire/sessionLivenessWindows";
 import {
   Session,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
@@ -112,7 +112,6 @@ export class SessionBookkeeping {
       }
     } finally {
       this.host.rowWriter.clearPendingNonTerminalReleases();
-      this.host.superseded.clearRowsUnderPendingRelease();
     }
   }
 

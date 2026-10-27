@@ -1,3 +1,7 @@
+import {
+  getSharedIosRunnerLaunchQueueView,
+  type IosRunnerLaunchQueueView,
+} from "../../ctrlProxy/ios/IosRunnerLaunchGate";
 import { androidCtrlProxyClientForPlatform } from "./android/androidCtrlProxyClientFor";
 import {
   BootedDevice,
@@ -39,7 +43,7 @@ import type {
   HierarchyReadOptions,
   ViewHierarchy as ViewHierarchyInterface,
 } from "./interfaces/ViewHierarchy";
-import { IOSCtrlProxyClient, type IosCtrlProxy } from "./ios";
+import { IOSCtrlProxyClient } from "./ios";
 import { IosRunnerStalledError } from "./ios/IosRunnerStalledError";
 import type { CtrlProxyHierarchyResponse } from "./ios/types";
 import { iosHierarchyAcquisition } from "./ios/types";
@@ -49,7 +53,12 @@ import {
   androidNullHierarchyFailure,
   annotateAndroidHierarchyAvailability,
 } from "./ViewHierarchyAndroidAvailability";
-import { iosHierarchyUnavailable, type RecoveryReadContext } from "./ViewHierarchyRecovery";
+import {
+  classifyDisconnectedIosHierarchy,
+  iosHierarchyUnavailable,
+  typeQueuedRunnerLaunch,
+  type RecoveryReadContext,
+} from "./ViewHierarchyRecovery";
 
 /**
  * Maximum number of direct children the raw-element-search filter walks per node.
@@ -69,6 +78,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   private adbFactory: AdbClientFactory;
   private timer: Timer;
   private observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory;
+  private launchQueue: IosRunnerLaunchQueueView;
 
   /**
    * Create a ViewHierarchy instance
@@ -82,6 +92,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy | null = null,
     timer: Timer = defaultTimer,
     observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
+    launchQueue: IosRunnerLaunchQueueView = getSharedIosRunnerLaunchQueueView(),
   ) {
     this.device = device;
     this.parser = new DefaultElementParser();
@@ -92,6 +103,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     this.adbFactory = adbFactory;
     this.timer = timer;
     this.observeAccessibilityManagerFactory = observeAccessibilityManagerFactory;
+    this.launchQueue = launchQueue;
   }
 
   async configureRecompositionTracking(
@@ -214,11 +226,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     result: ViewHierarchyResult,
     context: RecoveryReadContext,
   ): Promise<ViewHierarchyResult> {
+    // Before recovery, so a healthy queued launch never triggers a runner restart (#15291).
+    typeQueuedRunnerLaunch(result, this.device.deviceId, this.launchQueue);
     if (result.hierarchy.unavailableReason === "runner_launch_queued") {
       return result;
     }
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    this.classifyDisconnectedIosHierarchy(result, client);
+    classifyDisconnectedIosHierarchy(result, client);
     if (
       (result.hierarchy.unavailableReason !== "runner_not_running" &&
         result.hierarchy.unavailableReason !== "runner_stalled" &&
@@ -248,18 +262,6 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       this.remainingRecoveryBudget(context),
       context.signal,
     );
-  }
-
-  private classifyDisconnectedIosHierarchy(
-    result: ViewHierarchyResult,
-    client: Pick<IosCtrlProxy, "isConnected">,
-  ): void {
-    // A request-scoped runner error can be untyped while the host socket has
-    // already closed. The known disconnect is sufficient to join recovery.
-    if (result.hierarchy.unavailableReason === "unknown" && client.isConnected?.() === false) {
-      result.hierarchy.unavailableReason = "connection_lost";
-      result.hierarchy.iosUnavailableReason = "connection_lost";
-    }
   }
 
   private async retryAndroidAfterRecovery(
@@ -807,6 +809,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "tooltip-text",
       "pane-title",
       "live-region",
+      "heading",
       "collection-info",
       "collection-item-info",
       "range-info",
@@ -980,6 +983,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "tooltip-text",
       "pane-title",
       "live-region",
+      "heading",
       "collection-info",
       "collection-item-info",
       "range-info",

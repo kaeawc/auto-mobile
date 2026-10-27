@@ -1,3 +1,10 @@
+import {
+  ProvisionDeviceRollbackError,
+  type ProvisionDeviceCleanup,
+} from "../../src/features/deviceLifecycle/provisioning/provisioning";
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
+import { fakeIosDeviceResourceHazards as hazards } from "../helpers/fakeIosDeviceResourceHazards";
+import { UnsafeDeviceResourceCombinationError } from "../../src/models/UnsafeDeviceResourceCombinationError";
 import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
   BindingReconciler,
@@ -11,8 +18,8 @@ import {
   FakeInventory,
   FakeMatcher,
 } from "../daemon/sessionBroker/registry/fixtures/reconcilerFakes";
-import * as buildIdentity from "../../src/daemon/buildIdentity";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import * as buildIdentity from "../../src/daemon/wire/buildIdentity";
+import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -40,7 +47,15 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test as unitTest,
+} from "bun:test";
 import { z } from "zod/v4";
 import {
   provisionDeviceSchema,
@@ -429,6 +444,7 @@ describe("provisionDevice handler", () => {
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       env: autolockEnv,
       deviceResourceObserverFactory: () => resourceObserver,
       deviceManagerFactory: () => deviceManager,
@@ -476,6 +492,27 @@ describe("provisionDevice handler", () => {
       provisionDeviceSchema.safeParse({ ...args, resources: { "com.apple.apsd": "disabled" } })
         .success,
     ).toBe(false);
+  });
+
+  test("provisionDevice relays the controller's typed unsafe-resource refusal and binds no session", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.onRequest = async () => {
+      throw new UnsafeDeviceResourceCombinationError(hazards);
+    };
+    const harness = setupSimulator(false, resources);
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios"),
+        resources: { calendarServices: "disabled" },
+      }),
+    );
+    const payload = JSON.parse(response.content[0].text);
+    expect(response.isError).toBe(true);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.error).toMatchObject({ code: "unsafe_device_resource_combination" });
+    expect(resources.requests).toHaveLength(1);
+    expect(harness.readinessCalls()).toBe(0);
+    await expectDeviceFree(harness.coordinator);
   });
 
   test.each(["ios", "android"] as const)(
@@ -702,6 +739,102 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
+
+  test("rolls back a never-launched created AVD despite a local unnamed sibling", async () => {
+    const created = provisionedTestDevice("android", true);
+    const failDiscovery = configurePostCreateAndroidDiscoveryFailure(deviceManager);
+    exactProvisioner.provision = async (request) => {
+      request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [created.device]);
+      deviceManager.setBootedDevices("android", [
+        { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+      ]);
+      failDiscovery();
+      return created;
+    };
+    setDeviceToolsDependencies({ timer: new FakeTimer() });
+
+    const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(response).toMatchObject({
+      error: { code: "discovery_incomplete", retryable: true },
+      cleanup: { status: "succeeded" },
+      lifecycle: { state: "removed", device: { stableId: created.device.name } },
+    });
+    expect(deviceManager.wasMethodCalled("destroyDevice")).toBe(true);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("an adopted AVD keeps the full unnamed-sibling rollback veto", async () => {
+    const adopted = provisionedTestDevice("android", false);
+    const failDiscovery = configurePostCreateAndroidDiscoveryFailure(deviceManager);
+    exactProvisioner.provision = async (request) => {
+      // A creation attempt can discover a concurrent winner and adopt its image.
+      request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [adopted.device]);
+      deviceManager.setBootedDevices("android", [
+        { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+      ]);
+      failDiscovery();
+      return adopted;
+    };
+    setDeviceToolsDependencies({ timer: new FakeTimer() });
+
+    const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(response).toMatchObject({
+      error: { code: "cleanup_failed" },
+      cleanup: {
+        status: "failed",
+        failure: { code: "target_identity_unresolved", phase: "precondition" },
+      },
+    });
+    expect(deviceManager.wasMethodCalled("destroyDevice")).toBe(false);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test.each([true, false])(
+    "a rollback refused after a boot attempt preserves original retryable=%s",
+    async (retryable) => {
+      const created = provisionedTestDevice("android", true);
+      exactProvisioner.provision = async (request) => {
+        request.onBeforeCreate?.();
+        deviceManager.setDeviceImages("android", [created.device]);
+        return created;
+      };
+      deviceManager.startDevice = async () => {
+        deviceManager.setBootedDevices("android", [
+          { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+        ]);
+        throw new ProvisionDeviceError(
+          "timeout",
+          "launch failed before producing a runtime",
+          retryable,
+        );
+      };
+      setDeviceToolsDependencies({ timer: new FakeTimer() });
+
+      const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+      expect(response).toMatchObject({
+        error: { code: "cleanup_failed", retryable },
+        cleanup: {
+          status: "failed",
+          failure: { code: "target_identity_unresolved", phase: "precondition" },
+        },
+        lifecycle: { state: "retained", device: { stableId: created.device.name } },
+        recovery: {
+          cleanup: { status: "failed_device_retained" },
+          nextAction: {
+            action: retryable ? "reacquire_retained_device" : "perform_cleanup",
+            automaticRetrySafe: retryable,
+          },
+        },
+      });
+      expect(deviceManager.wasMethodCalled("destroyDevice")).toBe(false);
+      expect(response.error.retainedDevice).toBeUndefined();
+    },
+  );
 
   test("boots a newly created AVD despite an unresolved sibling emulator", async () => {
     const timer = new FakeTimer();
@@ -1464,6 +1597,46 @@ describe("provisionDevice handler", () => {
     expect(response.isError).not.toBe(true);
     expect(JSON.parse(response.content[0].text).resources.disabledResources).toBeUndefined();
   });
+
+  test.each([true, false])(
+    "preboot report follows creation ownership with boot=%s",
+    async (boot) => {
+      const { buildProvisionDeviceResult } =
+        await import("../../src/server/provisioning/provisioningReadiness");
+      const { createPerformanceTracker } = await import("../../src/utils/PerformanceTracker");
+      const args = { ...provisionTestArgs("ios"), boot, readiness: "none" as const };
+      const provisioned = {
+        ...provisionedTestDevice("ios", true),
+        prebootDisabledResources: ["widgets" as const],
+      };
+      for (const created of [true, false]) {
+        const result = buildProvisionDeviceResult(
+          args,
+          provisioned,
+          created,
+          createPerformanceTracker(false),
+          boot
+            ? {
+                device: { name: "phone", platform: "ios", deviceId: "UDID" },
+                sessionId: "session",
+              }
+            : undefined,
+        );
+        if (created) {
+          expect(result.disabledResources).toEqual([
+            expect.objectContaining({
+              resource: "widgets",
+              labels: expect.any(Array),
+              automobileImpact: expect.any(Array),
+              appImpact: expect.any(Array),
+            }),
+          ]);
+        } else {
+          expect(result.disabledResources).toBeUndefined();
+        }
+      }
+    },
+  );
 
   test("accepts omitted boot and readiness with their documented defaults", () => {
     expect(
@@ -5021,6 +5194,23 @@ describe("provisionDevice handler", () => {
     });
   });
 
+  test("public provisionDevice schema does not expose the exit-snapshot control, an internal call keeps it (#15477)", async () => {
+    const { parseProvisionDeviceArgs } =
+      await import("../../src/features/deviceLifecycle/provisioning/provisioning");
+    expect(
+      provisionDeviceSchema.safeParse({
+        ...provisionTestArgs("android"),
+        discardSnapshotOnExit: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      parseProvisionDeviceArgs({ ...provisionTestArgs("android"), discardSnapshotOnExit: true }),
+    ).toMatchObject({ discardSnapshotOnExit: true });
+    expect(parseProvisionDeviceArgs(provisionTestArgs("android"))).not.toHaveProperty(
+      "discardSnapshotOnExit",
+    );
+  });
+
   test("public provisionDevice schema does not expose binding rollback control", () => {
     expect(
       provisionDeviceSchema.safeParse({
@@ -5796,4 +5986,38 @@ describe("provisionDevice handler", () => {
 
     expect(provisionDeadlineMs).toBe(80_000);
   });
+});
+
+describe("ProvisionDeviceRollbackError intact refusal retryability", () => {
+  for (const retryable of [true, false]) {
+    for (const status of ["failed", "succeeded"] as const) {
+      for (const retained of [true, false]) {
+        unitTest(`original=${retryable} cleanup=${status} retained=${retained}`, () => {
+          const original = new ProvisionDeviceError("timeout", "original failure", retryable, {
+            retryAfterMs: 123,
+          });
+          const retainedDevice = {
+            platform: "android" as const,
+            stableId: "new-avd",
+            name: "new-avd",
+          };
+          const cleanup: ProvisionDeviceCleanup = {
+            status,
+            target: { platform: "android", isVirtual: true, stableId: "new-avd" },
+          };
+          const error = new ProvisionDeviceRollbackError(
+            original,
+            cleanup,
+            retained ? { retainedDevice } : undefined,
+          );
+          expect(error.retryable).toBe(status === "failed" && !retained ? false : retryable);
+          expect(error.code).toBe(status === "failed" ? "cleanup_failed" : "timeout");
+          expect(error.diagnostics.retryAfterMs).toBe(123);
+          expect(error.diagnostics.retainedDevice).toEqual(
+            status === "failed" && retained ? retainedDevice : undefined,
+          );
+        });
+      }
+    }
+  }
 });

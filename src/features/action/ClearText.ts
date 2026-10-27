@@ -1,3 +1,4 @@
+import { isAndroidHintText } from "./androidHintText";
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
@@ -57,15 +58,12 @@ function getEditableTextLength(
 ): number | undefined {
   const searchable = toSearchable(properties);
   const text = searchable.textSources.value ?? searchable.textSources.text;
-  const hint = properties["hint-text"];
   const android = ["android.", "androidx."].some((prefix) =>
     searchable.className?.startsWith(prefix),
   );
-  // Android hierarchy nodes carry no showing-hint flag. Typed text identical to
-  // the hint is indistinguishable and counts as empty for verification/skip-clear.
   // SendKeys includes the raw hint length for deletes so replace cannot under-delete
   // that real text; the existing clear sequence runs before verification and typing.
-  if (!includeHintText && android && typeof hint === "string" && hint !== "" && text === hint) {
+  if (!includeHintText && isAndroidHintText(searchable.className, properties["hint-text"], text)) {
     return 0;
   }
   const capturedLength = typeof text === "string" ? text.length : searchable.capturedTextLength;
@@ -135,6 +133,38 @@ export function hasFocusedTextInput(
   }
 
   return false;
+}
+
+/**
+ * Stable identity of the focused editable control: resource id, class and top-left corner. The
+ * size is left out so a multiline field that grows after a newline keeps its identity.
+ */
+export function getFocusedTextFieldIdentity(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): string | undefined {
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    let identity: string | undefined;
+    for (const rootNode of rootGroup) {
+      parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (identity !== undefined || !isFocusedTextInputProperties(properties)) {
+          return;
+        }
+        const searchable = toSearchable(properties);
+        identity = JSON.stringify([
+          searchable.nativeId ?? null,
+          searchable.className ?? null,
+          searchable.bounds?.left ?? null,
+          searchable.bounds?.top ?? null,
+        ]);
+      });
+    }
+    if (identity !== undefined) {
+      return identity;
+    }
+  }
+  return undefined;
 }
 
 /** Read the editable value, never an iOS field's accessibility label or placeholder. */

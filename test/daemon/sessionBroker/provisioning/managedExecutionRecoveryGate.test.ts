@@ -396,7 +396,7 @@ describe("managed execution recovery is gated before publication", () => {
     Reflect.set(daemon, "sessionManager", sessions);
     sessions.setManagedExecutionRecoveryListener(installed);
     const registryWait = Promise.withResolvers<ManagedExecutionReownRegistry>();
-    Reflect.set(daemon, "bindingRegistry", registryWait.promise);
+    Reflect.set(daemon["runtime"], "bindingRegistry", registryWait.promise);
     const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
     reowners.push(reowner);
     await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
@@ -430,7 +430,7 @@ describe("managed execution recovery is gated before publication", () => {
     sessions.setReleaseDeviceHold(Reflect.get(original, "releaseDeviceHold"));
     Reflect.set(daemon, "sessionManager", sessions);
     const registryWait = Promise.withResolvers<ManagedExecutionReownRegistry>();
-    Reflect.set(daemon, "bindingRegistry", registryWait.promise);
+    Reflect.set(daemon["runtime"], "bindingRegistry", registryWait.promise);
     const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
     reowners.push(reowner);
     const originalRelease = Reflect.get(daemon, "cancelAndReleaseSession");
@@ -493,7 +493,7 @@ describe("managed execution recovery is gated before publication", () => {
           Awaited<ReturnType<ManagedExecutionReownRegistry["findExecutionAssignments"]>>
         >();
       Reflect.set(
-        daemon,
+        daemon["runtime"],
         "bindingRegistry",
         Promise.resolve({
           findExecutionAssignments: () => lookup.promise,

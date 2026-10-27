@@ -1,3 +1,4 @@
+import type { SimulatorContainerOwnershipOptions } from "./simulatorOwnContainer";
 import type { SimCtlClient } from "./SimCtlClient";
 import { isIosPhysicalUdid } from "./iosDeviceType";
 import { resolveIosLenientAppListBackend, SimulatorIosAppListBackend } from "./IosDeviceBackend";
@@ -21,6 +22,7 @@ export interface IosSimulatorSnapshotBackend {
 export type IosSnapshotBackend = IosSimulatorSnapshotBackend | { readonly kind: "physical" };
 
 export interface IosSnapshotBackendDeps {
+  containerOwnership?: SimulatorContainerOwnershipOptions;
   simctl: Pick<
     SimCtlClient,
     | "getDeviceInfo"
@@ -54,7 +56,12 @@ export class SimulatorIosSnapshotBackend implements IosSimulatorSnapshotBackend 
   }
 
   getAppDataContainerPath(bundleId: string): Promise<string | null> {
-    return getAppDataContainerPath(this.options.simctl, this.options.deviceId, bundleId);
+    return getAppDataContainerPath(
+      this.options.simctl,
+      this.options.deviceId,
+      bundleId,
+      this.options.containerOwnership,
+    );
   }
 
   terminateAppIfRunning(bundleId: string): Promise<void> {
@@ -77,5 +84,9 @@ export function resolveIosSnapshotBackend(
 ): IosSnapshotBackend {
   return isIosPhysicalUdid(deviceId)
     ? { kind: "physical" }
-    : new SimulatorIosSnapshotBackend({ deviceId, simctl: deps.simctl });
+    : new SimulatorIosSnapshotBackend({
+        deviceId,
+        simctl: deps.simctl,
+        containerOwnership: deps.containerOwnership,
+      });
 }

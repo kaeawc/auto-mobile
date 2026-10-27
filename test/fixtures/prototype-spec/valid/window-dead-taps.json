@@ -1,0 +1,13 @@
+{
+  "id": "window-dead-taps",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "deadTaps": true
+  },
+  "root": {
+    "type": "text",
+    "text": "Hello"
+  }
+}

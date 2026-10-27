@@ -19,8 +19,8 @@ import {
   buildIdentityFromStatus,
   describeBuildIdentity,
   getCurrentBuildIdentity,
-} from "../../daemon/buildIdentity";
-import type { BuildIdentity } from "../../daemon/buildIdentity";
+} from "../../daemon/wire/buildIdentity";
+import type { BuildIdentity } from "../../daemon/wire/buildIdentity";
 import {
   LATEST_RELEASE_VERSION,
   resolveApkUrl,
@@ -43,7 +43,10 @@ import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import { checkForeignLeaseHolders } from "./foreignLeaseHolders";
 import { checkDeviceOwnership } from "./deviceOwnership";
-import { createReadOnlyBindingRegistry } from "../../daemon/readOnlyBindingRegistry";
+import {
+  createReadOnlyBindingRegistry,
+  createReadOnlyDeviceClaims,
+} from "../../daemon/readOnlyBindingRegistry";
 import {
   DeviceOwnershipView,
   createDefaultDeviceOwnershipSources,
@@ -750,7 +753,10 @@ export async function runAutoMobileChecks(
       (() =>
         checkDeviceOwnership({
           view: new DeviceOwnershipView(
-            createDefaultDeviceOwnershipSources({ registry: createReadOnlyBindingRegistry() }),
+            createDefaultDeviceOwnershipSources({
+              registry: createReadOnlyBindingRegistry(),
+              claims: createReadOnlyDeviceClaims(),
+            }),
           ),
         }))
     )(),

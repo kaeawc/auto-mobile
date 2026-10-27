@@ -1,7 +1,7 @@
 import Foundation
 
 /// Arbitrary JSON, used for state values and emit payloads.
-enum JSONValue: Codable, Equatable, Sendable {
+public enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case number(Double)
@@ -9,7 +9,7 @@ enum JSONValue: Codable, Equatable, Sendable {
     case array([JSONValue])
     case object([String: JSONValue])
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             self = .null
@@ -26,7 +26,7 @@ enum JSONValue: Codable, Equatable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .null: try container.encodeNil()
@@ -213,6 +213,11 @@ struct PrototypeSpec: Decodable {
     }
 
     func replacingPlatform(_ platform: [String: JSONValue]) throws -> PrototypeSpec {
+        guard try JSONEncoder().encode(platform).count <= PrototypeContractValidator
+            .limit("MAX_PROTOTYPE_PLATFORM_STATE_BYTES")
+        else {
+            throw PrototypeLimits.violation("platform", "Platform state exceeds limit")
+        }
         let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:], platform: platform)
         var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
         next.platformState = platform
@@ -538,6 +543,8 @@ struct PrototypeAction: Decodable, Sendable {
     // `request` (#12529): method defaults to GET and `via` to host. `headers` and `query` entries
     // are a literal string or a binding object; `body` is a binding; `url`, `statusKey` and `into`
     // are bound per repeat row at expansion like the data actions' paths.
+    let call: String?
+    let args: [String: JSONValue]?
     let method: String?
     let url: String?
     let headers: [String: JSONValue]?
@@ -556,7 +563,7 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, call, args
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
@@ -570,8 +577,11 @@ struct PrototypeAction: Decodable, Sendable {
         into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
-        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
+        call: String? = nil, args: [String: JSONValue]? = nil
     ) {
+        self.call = call
+        self.args = args
         self.id = id
         self.afterMs = afterMs
         self.everyMs = everyMs

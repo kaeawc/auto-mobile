@@ -190,3 +190,17 @@ coordinate spaces differ). Device results are still to be collected.
    likely outcome "document as unsupported").
 9. Optional `uinput` pen device for rooted devices and userdebug emulators, only if
    instrumentation proves insufficient for fidelity or record/replay symmetry.
+
+## Implemented: route selection (#13098)
+
+`src/features/action/pointer/` holds the `PointerInjector` interface and three routes:
+`ctrlproxy-a11y` (finger only), `adb-input-source` (constant-pressure stylus on API 31+) and
+`instrumentation` (stylus pressure, and stylus or mouse hover, gated on the runner flags
+`stylus_input_v1` / `hover_input_v1`). `selectPointerRoute` takes the first supporting route in that
+order, so finger touches keep the accessibility path; a request no route can honour is refused
+before dispatch with the missing capability named, and contradictory requests (a finger hover,
+hover with pressure, a mouse click) are refused as invalid. `derivePointerInput` reports, per
+feature, the route that would carry it from the same support, never a second source of truth.
+The `uinput` and emulator gRPC route ids are reserved; their injectors arrive with their spikes.
+No runner advertises the flags yet (the instrumentation transport is #13097), so hover and
+pressure requests are refused today.

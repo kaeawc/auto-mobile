@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { CLIENT_CAPABILITIES_META_KEY } from "@modelcontextprotocol/server";
 import { TASKS_EXTENSION_ID } from "../../../src/daemon/tasks/mcpTasksExtension";
 import { deviceChoiceRequest } from "../../../src/server/ambiguousDeviceElicitation";
@@ -108,6 +108,15 @@ async function waitForStatus(manager: FakeTaskManager, taskId: string, status: s
   }
   throw new Error(`Task did not reach ${status}`);
 }
+
+// beforeAll time is excluded from the per-test budget; this absorbs one-time module startup.
+beforeAll(async () => {
+  const { manager, call, execute } = arrange(scenarios[0]);
+  const handle = await execute(call);
+  if ("taskId" in handle && typeof handle.taskId === "string") {
+    await manager.cancel("owner", handle.taskId);
+  }
+});
 
 for (const scenario of scenarios) {
   test(`task device choice: ${scenario.name}`, async () => {

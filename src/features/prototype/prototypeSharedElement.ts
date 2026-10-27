@@ -1,4 +1,4 @@
-import { isPrototypeGlassShared } from "./prototypeGlass";
+import { prototypeGlassSharedGroup } from "./prototypeGlass";
 import {
   PROTOTYPE_REDUCED_MOTION_CAPABILITY,
   PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
@@ -37,6 +37,7 @@ function sharedKeys(
   node: Located,
   nodes: Located[],
   data: PrototypeRepeatData,
+  glass: boolean,
 ): string[] | PrototypeValidationError {
   const shared = record(node.value.shared);
   const key = shared?.key ?? node.value.sharedKey;
@@ -52,11 +53,11 @@ function sharedKeys(
     return literalKeys(
       key,
       shared !== undefined,
-      parent !== undefined && node.path !== parent.path,
+      parent !== undefined && (glass || node.path !== parent.path),
       at,
     );
   }
-  return repeatTemplateKeys(key, parent, node.path, at, data);
+  return repeatTemplateKeys(key, parent, node.path, at, data, glass);
 }
 
 function repeatTemplateKeys(
@@ -65,9 +66,10 @@ function repeatTemplateKeys(
   path: string,
   at: string,
   data: PrototypeRepeatData,
+  glass: boolean,
 ): string[] | PrototypeValidationError {
   const repeat = record(parent?.value.repeat);
-  if (!repeat || parent?.path === path || typeof repeat.key !== "string") {
+  if (!repeat || (!glass && parent?.path === path) || typeof repeat.key !== "string") {
     return fail(at, "shared key template requires repeat.key");
   }
   return templateKeys(key, repeat, at, data);
@@ -132,8 +134,9 @@ export function prototypeSharedElementError(
   }
   const sources = prototypeZoomSources(nodes, actions);
   const pairs = new Map<string, SharedOccurrence[]>();
+  const glassKeys = new Map<string, Set<string>>();
   for (const located of nodes) {
-    const error = addSharedNode(located, nodes, data, pairs, sources);
+    const error = addSharedNode(located, nodes, data, pairs, sources, glassKeys);
     if (error) {
       return error;
     }
@@ -152,6 +155,7 @@ function addSharedNode(
   data: PrototypeRepeatData,
   pairs: Map<string, SharedOccurrence[]>,
   sources: Set<string>,
+  glassKeys: Map<string, Set<string>>,
 ): PrototypeValidationError | undefined {
   const { value: node, path } = located;
   const shared = record(node.shared);
@@ -159,14 +163,19 @@ function addSharedNode(
     return undefined;
   }
   const at = `${path}.${shared ? "shared.key" : "sharedKey"}`;
-  const source = isSharedSource(located, nodes, sources);
+  const group = prototypeGlassSharedGroup(node, path, nodes);
+  const source = isSharedSource(node, group, sources);
   const usage = sharedUsageError(node, path, at, source);
   if (usage) {
     return usage;
   }
-  const keys = sharedKeys(located, nodes, data);
+  const keys = sharedKeys(located, nodes, data, group !== undefined);
   if (!Array.isArray(keys)) {
     return keys;
+  }
+  const glassError = glassSharedKeysError(keys, group, at, pairs, glassKeys);
+  if (glassError) {
+    return glassError;
   }
   if (source) {
     return undefined;
@@ -184,12 +193,36 @@ function addSharedNode(
   return undefined;
 }
 
-function isSharedSource(located: Located, nodes: Located[], sources: Set<string>): boolean {
-  const { value: node, path } = located;
-  return (
-    sources.has(String(record(node.shared)?.key ?? node.sharedKey)) ||
-    isPrototypeGlassShared(node, path, nodes)
-  );
+function isSharedSource(
+  node: Record<string, unknown>,
+  group: string | undefined,
+  sources: Set<string>,
+): boolean {
+  return group !== undefined || sources.has(String(record(node.shared)?.key ?? node.sharedKey));
+}
+
+function glassSharedKeysError(
+  keys: string[],
+  group: string | undefined,
+  at: string,
+  pairs: Map<string, SharedOccurrence[]>,
+  glassKeys: Map<string, Set<string>>,
+): PrototypeValidationError | undefined {
+  for (const key of keys) {
+    const scopes = glassKeys.get(key);
+    if ((group !== undefined && pairs.has(key)) || (group === undefined && scopes)) {
+      return fail(at, `glass shared key "${key}" cannot also be used by a visibility pair`);
+    }
+    if (group !== undefined) {
+      if (scopes?.has(group)) {
+        return fail(at, `shared key "${key}" must be unique within its glassGroup`);
+      }
+      const groups = scopes ?? new Set<string>();
+      groups.add(group);
+      glassKeys.set(key, groups);
+    }
+  }
+  return undefined;
 }
 
 function sharedUsageError(

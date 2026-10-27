@@ -24,7 +24,7 @@ internal object PrototypeBundleNodeCapabilities {
         "grid" to "flow_grid_v1",
       )
     typed[type]?.let { caps.add("prototype_$it") }
-    if ("ios" in n || "android" in n) caps.add("prototype_platform_namespace_v1")
+    if (PrototypeGlassRules.needsNamespace(n)) caps.add("prototype_platform_namespace_v1")
     if (type == "icon" && "effect" in n) caps.add("prototype_icon_effects_v1")
     val trigger = (n["effect"] as? JsonObject)?.get("trigger") as? JsonObject
     if (type == "icon" && trigger?.containsKey("data") == true) caps.add("prototype_data_model_v1")
@@ -39,7 +39,7 @@ internal object PrototypeBundleNodeCapabilities {
       if (used) caps.add("prototype_$name")
     }
     mark("semantics_v1", "semantics" in n)
-    mark("platform_namespace_v1", "ios" in n || "android" in n)
+    mark("platform_namespace_v1", PrototypeGlassRules.needsNamespace(n))
     mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
     mark("platform_media_items_v1", PrototypeMediaItemBindings.usedBy(n))
     mark("shared_element_v1", "sharedKey" in n)

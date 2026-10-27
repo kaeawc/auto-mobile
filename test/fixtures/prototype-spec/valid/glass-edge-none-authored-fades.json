@@ -1,0 +1,23 @@
+{
+  "id": "glass",
+  "state": {
+    "on": true,
+    "t": "a"
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "scroll",
+    "axis": "horizontal",
+    "edgeEffect": "none",
+    "fadeEdges": {
+      "start": 3
+    },
+    "child": {
+      "type": "spacer"
+    }
+  }
+}

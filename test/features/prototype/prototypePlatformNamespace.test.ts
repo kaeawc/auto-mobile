@@ -151,9 +151,14 @@ test("every namespace leaf has exactly one why and capability entry", () => {
     expect(Object.keys(metadata).sort()).toEqual(
       leaves(contract.definitions[`${platform}Namespace`] as Rule).sort(),
     );
-    for (const entry of Object.values(metadata)) {
+    for (const [key, entry] of Object.entries(metadata)) {
       expect(entry.why.length).toBeGreaterThan(0);
-      expect(entry.requires).toBe(PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY);
+      expect(entry.requires).toBe(
+        platform === "ios" &&
+          ["glassGroup", "glassUnion", "glassTransition", "backgroundExtension"].includes(key)
+          ? "prototype_glass_v1"
+          : PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY,
+      );
     }
   }
 });

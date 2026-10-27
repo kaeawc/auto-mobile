@@ -57,14 +57,13 @@ export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
  */
 export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string>> = {
   "android-ctrlproxy-apk": {
-    prototype_glass_v1:
-      "Real Android backdrop blur is deferred to PR 2; no simulated glass is rendered",
-    prototype_scroll_edge_effect_v1: "Android scroll edge rendering is deferred to PR 2",
     prototype_platform_share_v1:
       "Share has a validated contract only; Android does not implement the system share sheet yet",
   },
   "ios-runner": {},
   "prototype-agent-dylib": {
+    prototype_platform_namespace_v1:
+      "Only glass node fields are implemented; other iOS namespace fields remain refused",
     prototype_platform_share_v1:
       "Share has a validated contract only; the iOS agent does not implement the system share sheet yet",
     prototype_chat_scroll_v1:

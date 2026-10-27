@@ -3868,9 +3868,9 @@ Intl.DateTimeFormat and Intl.RelativeTimeFormat.
 Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
 namespace objects on nodes, window and theme for native semantics. Each field has a
 `why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
-Own-platform blocks require `prototype_platform_namespace_v1`. The iOS agent advertises
-it on iOS 26+ for its glass namespace renderer; Android does not advertise it. Glass namespace fields
-also require `prototype_glass_v1` on iOS. Foreign glass namespace fields are ignored
+Own-platform blocks require `prototype_platform_namespace_v1`, which neither renderer
+advertises. The four node glass fields require only `prototype_glass_v1` on iOS;
+a block mixing glass with any other iOS key requires both capabilities. Foreign glass namespace fields are ignored
 on Android with their individual paths in `platformNotes`.
 
 ## Glass surfaces and scroll edges
@@ -3878,7 +3878,8 @@ on Android with their individual paths in `platformNotes`.
 `style.surface` is a closed enum containing only `"glass"`. Optional strict
 `style.glass: {variant?, tint?, interactive?}` takes `regular|clear` (default
 regular), an existing hex/role/light-dark colour slot, and a boolean (default
-false). `glass` without `surface: "glass"` is invalid. `cornerRadius` chooses the
+false). `glass` without `surface: "glass"` in the same style is invalid, including
+`styleWhen` entries; conditional glass options must repeat the surface. `cornerRadius` chooses the
 shape; omission uses a capsule. Base and conditional styles require
 `prototype_glass_v1`; bundles must list every required capability.
 
@@ -3886,20 +3887,23 @@ shape; omission uses a capsule. Base and conditional styles require
 `prototype_scroll_edge_effect_v1`. iOS 26 uses the native scroll edge style;
 iOS 17–25 reuse the scrollability-aware `fadeEdges` mask, 24 dp for soft and
 8 dp for hard. Authored `fadeEdges` lengths override those defaults; `none`
-disables the fallback mask. On iOS 26 authored fades remain independent of the
-native edge treatment. Android accepts the contract but does not advertise or
+disables only the default fallback mask or native effect. Explicit `fadeEdges`
+remain applied on every supported iOS version. Android accepts the contract but does not advertise or
 render edgeEffect until its renderer slice; Android below API 31 refuses glass.
 
 In `ios`, `glassGroup: {spacing}` accepts finite 0–200 dp on column, row, box,
 flow, grid, list and listItem containers. Descendant glass nodes with `shared`
 keys use group-scoped glassEffectID, independently of visibility-pair matching;
-nested groups establish a new namespace. Existing shared-key template and
-capability rules still apply. `glassUnion` is a 1–64 character ASCII id token
+nested groups establish a new namespace. Keys must be unique within the nearest
+group and cannot also belong to visibility pairs. Under repeat, including on the
+repeated node, a glass shared key must be a template referencing repeat.key.
+Existing capability rules still apply. `glassUnion` is a 1–64 character ASCII id token
 (`[A-Za-z_][A-Za-z0-9_]*`); `glassTransition` is matchedGeometry, materialize or
 identity. Both require a base glass surface on the same node.
 `backgroundExtension: true` is image-only and does not require the image itself
-to be glass. All four fields require both namespace and glass capabilities on
-iOS; Android ignores them with field paths in platformNotes.
+to be glass. All four fields are node-only (invalid in window.ios/theme.ios) and
+require only the glass capability on iOS; Android ignores them with field paths
+in platformNotes.
 
 Reduce Transparency and Increase Contrast are handled by the system's Liquid
 Glass implementation. Verification pins accessibility settings and checks

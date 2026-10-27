@@ -20,7 +20,7 @@ export function prototypeGlassEdgeNotes(
           paths: paths.slice(0, 20),
           ...(paths.length > 20 ? { total: paths.length } : {}),
           detail:
-            "Scroll edge effects use a scrollability-aware gradient fade on iOS before 26 (soft 24 dp, hard 8 dp; fadeEdges overrides lengths; none disables the mask).",
+            "Scroll edge effects use a scrollability-aware gradient fade on iOS before 26 (soft 24 dp, hard 8 dp; fadeEdges overrides lengths; none disables only the default fallback; explicit fadeEdges still apply).",
         },
       ]
     : [];

@@ -24,6 +24,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // no renderer yet, and so do device media items (#14192).
         // Routes are contract-only until navigation and restore semantics ship.
         let exclusions: Set<String> = [
+            "prototype_platform_namespace_v1", // Only the separately gated node glass fields are implemented.
             "prototype_network_upload_v1", // Contract only until upload execution ships.
             // Realtime transport, routing and lifecycle remain owed by the runtime slices.
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",

@@ -1219,8 +1219,9 @@ The contract has no system-sheet dispatcher or fake-mode behavior. `platformMode
 Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
 namespace objects on nodes, window and theme for native semantics. Each field has a
 `why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
-Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
-ignore both blocks and do not advertise it.
+Own-platform blocks require `prototype_platform_namespace_v1`, which current renderers
+do not advertise. The four node glass fields below require only `prototype_glass_v1`;
+mixing any other iOS key requires both capabilities.
 
 ## Icon effects
 
@@ -1249,22 +1250,28 @@ Expressive motion, node `press`, and layout `animate` are Android only until #14
 
 The agent advertises `prototype_glass_v1` only on iOS 26+, and
 `prototype_scroll_edge_effect_v1` on every supported OS. Glass namespace fields
-also require `prototype_platform_namespace_v1` (advertised on iOS 26+). Specs and library bundles are
+require only `prototype_glass_v1`; the namespace capability stays unadvertised
+because other iOS fields are unimplemented. Specs and library bundles are
 validated before rendering and must satisfy these gates, including conditional
 styles and hidden templates. iOS 17–25 refuse glass; no material substitute is
 used.
 
 `style.surface: "glass"` applies Liquid Glass regular/clear, optional colour tint
 and interactive feedback, after layout and paint. `cornerRadius` selects the
-shape; absent means Capsule. `ios.glassGroup` owns a GlassEffectContainer and
+shape; absent means Capsule. Conditional `styleWhen` glass options must repeat
+`surface: "glass"` in the same style. `ios.glassGroup` owns a GlassEffectContainer and
 namespace; descendant glass nodes use `shared.key` for glassEffectID,
 `ios.glassUnion` for union identity and `ios.glassTransition` for the native
-transition. Nested groups scope their own IDs. `ios.backgroundExtension: true`
-on images uses backgroundExtensionEffect.
+transition. Nested groups scope their own IDs. Keys must be unique per nearest
+group, cannot collide with visibility-pair keys, and must use repeat.key templates
+under repeat (including on the repeated node). `ios.backgroundExtension: true`
+on images uses backgroundExtensionEffect. All four glass keys are node-only and
+are rejected in window.ios/theme.ios.
 
 `scroll.edgeEffect` uses scrollEdgeEffectStyle on iOS 26 (none hides the effect).
 Older systems reuse the existing scrollability-aware fade mask: soft 24 dp,
-hard 8 dp, authored fadeEdges lengths taking precedence, none disabling fades.
+hard 8 dp, authored fadeEdges lengths taking precedence. None disables only the
+native effect or default fallback; explicit fadeEdges still apply on every iOS version.
 Reduce Transparency and Increase Contrast use system behaviour. Tests assert
 structure and bounds with pinned settings; group morphing and the visual result
 still require an iOS 26 simulator check. Android rendering is a separate slice.

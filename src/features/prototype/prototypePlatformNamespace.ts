@@ -1,5 +1,6 @@
 import { PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { prototypeGlassNamespaceFields } from "./prototypeGlass";
 import { record } from "./prototypeTemplate";
 
 export { PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY };
@@ -11,9 +12,19 @@ export function prototypePlatformNamespaceFields(
 ): string[] {
   const paths: string[] = [];
   walkPrototypeNodes(spec, (node, path) => {
-    if (record(node[platform])) {
-      paths.push(`${path}.${platform}`);
+    const namespace = record(node[platform]);
+    if (!namespace) {
+      return;
     }
+    const keys = Object.keys(namespace);
+    if (
+      platform === "ios" &&
+      keys.length > 0 &&
+      keys.every((key) => prototypeGlassNamespaceFields.includes(key))
+    ) {
+      return;
+    }
+    paths.push(`${path}.${platform}`);
   });
   const object = record(spec);
   for (const key of ["window", "theme"]) {
@@ -40,7 +51,7 @@ export function prototypeIgnoredNamespaceFields(
     return prototypePlatformNamespaceFields(spec, platform);
   }
   const paths: string[] = [];
-  const glassKeys = ["glassGroup", "glassUnion", "glassTransition", "backgroundExtension"];
+  const glassKeys = prototypeGlassNamespaceFields;
   walkPrototypeNodes(spec, (node, path) => {
     const ios = record(node.ios);
     if (!ios) {

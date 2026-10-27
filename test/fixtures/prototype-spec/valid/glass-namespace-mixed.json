@@ -1,0 +1,22 @@
+{
+  "id": "glass",
+  "state": {
+    "on": true,
+    "t": "a"
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "row",
+    "ios": {
+      "glassGroup": {
+        "spacing": 8
+      },
+      "hover": "lift"
+    },
+    "children": []
+  }
+}

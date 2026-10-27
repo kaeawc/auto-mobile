@@ -119,9 +119,9 @@ class PrototypeSpecCorpusTest {
             "lazy_list",
           )
           .any(file.name::contains)
-      if (
-        (messageCase || file.name.startsWith("share-")) && fixture.containsKey("expectedMessage")
-      ) {
+      val compareMessage =
+        messageCase || listOf("share-", "glass-").any { file.name.startsWith(it) }
+      if (compareMessage && fixture.containsKey("expectedMessage")) {
         assertEquals(
           fixture.getValue("expectedMessage").jsonPrimitive.content,
           result.error.message,

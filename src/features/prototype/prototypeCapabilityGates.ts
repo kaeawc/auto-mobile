@@ -219,8 +219,8 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
   {
     capability: "prototype_glass_v1",
     fields: prototypeGlassFields,
-    unsupportedMessage: (fields) =>
-      `The device does not advertise prototype_glass_v1, required by ${fields[0]}. Nothing was shown. Glass needs iOS 26 or later, or an Android renderer with real backdrop blur.`,
+    unsupportedMessage: (fields, platform) =>
+      `The device does not advertise prototype_glass_v1, required by ${fields[0]}. Nothing was shown.${platform === "android" ? " Glass needs an Android renderer with real backdrop blur." : ""}`,
   },
   {
     capability: "prototype_scroll_edge_effect_v1",

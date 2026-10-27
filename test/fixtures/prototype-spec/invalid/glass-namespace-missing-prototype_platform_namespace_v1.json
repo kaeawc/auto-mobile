@@ -2,7 +2,8 @@
   "spec": {
     "id": "glass",
     "state": {
-      "active": true
+      "on": true,
+      "t": "a"
     },
     "window": {
       "placement": {
@@ -10,11 +11,12 @@
       }
     },
     "root": {
-      "type": "box",
+      "type": "row",
       "ios": {
         "glassGroup": {
-          "spacing": 1
-        }
+          "spacing": 8
+        },
+        "hover": "lift"
       },
       "children": []
     }

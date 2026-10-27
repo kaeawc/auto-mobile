@@ -590,5 +590,5 @@ private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (Strin
     need("content_transition")
   val nodeTypes =
     PrototypeSpecContract.definitions.getValue("node").jsonObject.getValue("variants").jsonObject
-  if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
+  if (type in nodeTypes && PrototypeGlassRules.needsNamespace(fields)) need("platform_namespace")
 }

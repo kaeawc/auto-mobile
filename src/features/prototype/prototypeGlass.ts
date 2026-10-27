@@ -1,7 +1,12 @@
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
 
-const glassNamespaceFields = ["glassGroup", "glassUnion", "glassTransition", "backgroundExtension"];
+export const prototypeGlassNamespaceFields = [
+  "glassGroup",
+  "glassUnion",
+  "glassTransition",
+  "backgroundExtension",
+];
 const glassContainers = ["column", "row", "box", "flow", "grid", "list", "listItem"];
 
 /** Visit authored styles, including conditional styles and unexpanded component templates. */
@@ -24,7 +29,7 @@ export function prototypeGlassFields(spec: unknown, platform?: "ios" | "android"
       }
     }
     if (platform !== "android") {
-      for (const key of glassNamespaceFields) {
+      for (const key of prototypeGlassNamespaceFields) {
         if (record(node.ios)?.[key] !== undefined) {
           paths.push(`${path}.ios.${key}`);
         }
@@ -51,7 +56,18 @@ export function prototypeGlassObjectError(
   path: string,
 ): { path: string; message: string } | undefined {
   if (kind === "style" && data.glass !== undefined && data.surface !== "glass") {
-    return { path: `${path}.glass`, message: 'glass requires surface: "glass"' };
+    return {
+      path: `${path}.glass`,
+      message: path.includes(".styleWhen[")
+        ? 'styleWhen glass requires surface: "glass" in the same style'
+        : 'glass requires surface: "glass"',
+    };
+  }
+  if (path === "window" || path === "theme") {
+    const key = prototypeGlassNamespaceFields.find((key) => record(data.ios)?.[key] !== undefined);
+    if (key) {
+      return { path: `${path}.ios.${key}`, message: `${key} is only valid on a node` };
+    }
   }
   return glassNamespaceError(data, path);
 }
@@ -81,18 +97,16 @@ function glassNamespaceError(
 }
 
 /** Glass IDs belong to the containing group, independently of two-node visibility pairs. */
-export function isPrototypeGlassShared(
+export function prototypeGlassSharedGroup(
   node: Record<string, unknown>,
   path: string,
   nodes: { value: Record<string, unknown>; path: string }[],
-): boolean {
-  return (
-    record(node.shared) !== undefined &&
-    record(node.style)?.surface === "glass" &&
-    nodes.some(
-      (ancestor) =>
-        path.startsWith(`${ancestor.path}.`) &&
-        record(ancestor.value.ios)?.glassGroup !== undefined,
-    )
-  );
+): string | undefined {
+  if (!record(node.shared) || record(node.style)?.surface !== "glass") {
+    return undefined;
+  }
+  return nodes.findLast(
+    (ancestor) =>
+      path.startsWith(`${ancestor.path}.`) && record(ancestor.value.ios)?.glassGroup !== undefined,
+  )?.path;
 }

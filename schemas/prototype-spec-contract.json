@@ -20768,19 +20768,19 @@
       },
       "glassGroup": {
         "why": "iOS Liquid Glass composition has no Android equivalent.",
-        "requires": "prototype_platform_namespace_v1"
+        "requires": "prototype_glass_v1"
       },
       "glassUnion": {
         "why": "iOS Liquid Glass composition has no Android equivalent.",
-        "requires": "prototype_platform_namespace_v1"
+        "requires": "prototype_glass_v1"
       },
       "glassTransition": {
         "why": "iOS Liquid Glass composition has no Android equivalent.",
-        "requires": "prototype_platform_namespace_v1"
+        "requires": "prototype_glass_v1"
       },
       "backgroundExtension": {
         "why": "iOS Liquid Glass composition has no Android equivalent.",
-        "requires": "prototype_platform_namespace_v1"
+        "requires": "prototype_glass_v1"
       }
     },
     "android": {

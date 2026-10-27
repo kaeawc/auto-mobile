@@ -9,6 +9,10 @@ enum PrototypeBundleCapabilities {
         var names = Set<String>()
         if spec["motion"] == .string("expressive") { names.insert(PrototypeMotionV3.capability) }
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
+        for key in ["window", "theme"] {
+            if let block = spec[key]?.objectFields,
+               block["ios"] != nil || block["android"] != nil { need("platform_namespace") }
+        }
         if spec["strings"] != nil { need("strings") }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
@@ -45,6 +49,7 @@ enum PrototypeBundleCapabilities {
         }
         while let node = pending.popLast()?.objectFields {
             names.formUnion(PrototypeGlass.capabilities(node))
+            if PrototypeGlass.needsNamespace(node) { need("platform_namespace") }
             if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
             if node["semantics"] != nil { need("semantics") }

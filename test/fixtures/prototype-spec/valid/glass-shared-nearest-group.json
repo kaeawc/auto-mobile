@@ -1,0 +1,54 @@
+{
+  "id": "glass",
+  "state": {
+    "on": true,
+    "t": "a"
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "row",
+    "ios": {
+      "glassGroup": {
+        "spacing": 8
+      }
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Glass",
+        "style": {
+          "surface": "glass"
+        },
+        "shared": {
+          "key": "a",
+          "as": "bounds"
+        }
+      },
+      {
+        "type": "row",
+        "ios": {
+          "glassGroup": {
+            "spacing": 8
+          }
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "Glass",
+            "style": {
+              "surface": "glass"
+            },
+            "shared": {
+              "key": "a",
+              "as": "bounds"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

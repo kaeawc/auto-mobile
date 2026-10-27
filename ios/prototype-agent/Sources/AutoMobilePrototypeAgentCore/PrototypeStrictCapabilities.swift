@@ -79,7 +79,7 @@ enum PrototypeStrictCapabilities {
             if (type == "stack" && fields["routes"] != nil) ||
                 (["push", "replace"].contains(type) && fields["params"] != nil) ||
                 (type == "pop" && fields["force"] != nil) || type == "setStack" { need("routes") }
-            if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
+            if PrototypeGlass.needsNamespace(fields) { need("platform_namespace") }
             if type == "icon", fields["effect"] != nil { need("icon_effects") }
             if type == "icon",
                fields["effect"]?.objectFields?["trigger"]?.objectFields?["data"] != nil { need("data_model") }

@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "style": {
+        "surface": "glass"
+      },
+      "styleWhen": [
+        {
+          "when": {
+            "key": "on",
+            "equals": true
+          },
+          "style": {
+            "glass": {
+              "variant": "clear"
+            }
+          }
+        }
+      ],
+      "children": []
+    }
+  },
+  "expectedPath": "root.styleWhen[0].style.glass",
+  "expectedMessage": "styleWhen glass requires surface: \"glass\" in the same style"
+}

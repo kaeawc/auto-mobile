@@ -44,7 +44,9 @@ internal object PrototypeBundleManifestCodec {
     }
 
   fun validId(id: String): Boolean =
-    id.isNotEmpty() && id.length <= PrototypeAssetContract.MAX_PROTOTYPE_ASSET_ID_LENGTH
+    id.isNotEmpty() &&
+      id.length <= PrototypeAssetContract.MAX_PROTOTYPE_ASSET_ID_LENGTH &&
+      !PrototypeAssetContract.isMediaId(id)
 
   fun file(type: String, sha: String) =
     "${if (type.startsWith("font/")) "fonts" else "assets"}/$sha.${extensions.getValue(type)}"

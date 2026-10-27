@@ -50,5 +50,10 @@ object PrototypeAssetContract {
   val MIME_TYPES: Set<String> =
     contract.getValue("mimeTypes").jsonArray.map { it.jsonPrimitive.content }.toSet()
 
+  /** Ids the device mints for its own media items (#14192); a host asset id may not start so. */
+  const val MEDIA_ID_PREFIX = "media:"
+
+  fun isMediaId(id: String): Boolean = id.startsWith(MEDIA_ID_PREFIX)
+
   private fun limit(name: String) = limits.getValue(name).jsonPrimitive.int
 }

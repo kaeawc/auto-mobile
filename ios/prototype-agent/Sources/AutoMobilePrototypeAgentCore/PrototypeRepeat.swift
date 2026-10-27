@@ -277,6 +277,8 @@ enum PrototypeRepeat {
                 })
             }
         case .string("button")?, .string("fab")?: string("label", &fields)
+        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+        case .string("image")?: string("asset", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)

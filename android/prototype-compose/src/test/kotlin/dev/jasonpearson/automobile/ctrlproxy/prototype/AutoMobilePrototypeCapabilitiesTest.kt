@@ -43,6 +43,11 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_haptics_v1",
       "prototype_platform_sound_v1",
     )
+  /**
+   * The test module is a placeholder no production runtime advertises. `imageAsset.data` (#14192)
+   * has a validated contract and no media store yet.
+   */
+  private val exclusions = setOf("prototype_platform_test_v1", "prototype_platform_media_items_v1")
 
   @Test
   fun `shared spec capabilities are supported`() {

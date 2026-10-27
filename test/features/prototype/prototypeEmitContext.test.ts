@@ -214,7 +214,7 @@ test("arbitrary context names survive validation and wire/output decoding", () =
   if (!validated.success) {
     throw new Error(validated.error.message);
   }
-  expect(validated.data.root.onTap?.[0]).toMatchObject({
+  expect((validated.data.root as { onTap?: unknown[] }).onTap?.[0]).toMatchObject({
     context: (fixture.spec.root.onTap as Raw[])[0].context,
   });
   const pushed = { ...event(1), context: fixture.expected.context };

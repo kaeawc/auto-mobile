@@ -15,6 +15,7 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
 import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
 import { isFocusEditableElement } from "../utility/ElementResolver";
+import { hasAccessibilityAction } from "../utility/elementProperties";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange } from "./BaseVisualChange";
 import {
@@ -307,6 +308,7 @@ export class TapExecution {
       return {
         ...result,
         ...metadata,
+        ...this.longClickAdvertisement(result.element),
       };
     }
     return result;
@@ -976,6 +978,18 @@ export class TapExecution {
       },
       error,
     );
+  }
+
+  /**
+   * Whether the pressed Android node advertises a long-click accessibility action. A node without
+   * one has no View/semantics long-click handler, so the app treats the hold like a tap on release.
+   * Handlers built on raw touch input (for example drag-to-reorder) are not visible here.
+   */
+  private longClickAdvertisement(element: Element | undefined): { longClickAdvertised?: boolean } {
+    if (this.host.device().platform !== "android" || !Array.isArray(element?.actions)) {
+      return {};
+    }
+    return { longClickAdvertised: hasAccessibilityAction(element.actions, "long_click") };
   }
 
   detectLongPressMetadata(

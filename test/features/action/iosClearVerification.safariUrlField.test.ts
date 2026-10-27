@@ -6,7 +6,7 @@ import type { ObserveResult } from "../../../src/models";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import clearedCapture from "../../fixtures/ios-safari-url-field/runner-cleared-keyboard-up.json";
 import typedCapture from "../../fixtures/ios-safari-url-field/runner-typed-keyboard-up.json";
-import { observationFromRunnerCapture } from "../../helpers/iosSafariRunnerCapture";
+import { observationFromRunnerCapture } from "../../helpers/iosRunnerCapture";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Real iOS runner captures (iPhone 18 Pro, iOS 27.0, round 4 of #15175, taken 2026-10-23 around a

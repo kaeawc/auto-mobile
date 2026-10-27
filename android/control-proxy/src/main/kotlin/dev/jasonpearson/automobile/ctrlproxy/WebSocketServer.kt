@@ -381,8 +381,9 @@ class WebSocketServer(
     // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
-    add("prototype_platform_v1")
+    add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
+    add("prototype_platform_v1")
     addAll(platform.registry.capabilities)
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
@@ -402,6 +403,7 @@ class WebSocketServer(
     add("prototype_string_conditions_v1")
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
+    add("prototype_motion_v3")
     add("prototype_window_motion_v1")
     // style.effects (#15129): noise, gradientMesh, shimmer, glow, vignette, blur, pixelate,
     // chromaticAberration, wave and ripple. Every effect renders on its API floor or is omitted and
@@ -410,6 +412,7 @@ class WebSocketServer(
     // Transition delayMs, container stagger and the blurReplace transition (#15247).
     add("prototype_choreography_v1")
     add("prototype_stack_transitions_v1")
+    add("prototype_stack_patterns_v1")
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")
     add("prototype_shared_element_v2")

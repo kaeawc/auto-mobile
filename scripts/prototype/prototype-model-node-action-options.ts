@@ -54,6 +54,8 @@ export const actionModelOptions = {
 
 export const nodeModelOptions = {
   languages: ["kotlin"],
+  // The paste button computes its clipboard tap rather than accepting authored actions.
+  kotlinHandWrittenVariants: ["pasteButton"],
   fieldTypes: {
     validateOn: { kotlin: "PrototypeValidateOn" },
     transition: { kotlin: "PrototypeTransition" },
@@ -174,6 +176,7 @@ export const nodeModelOptions = {
       "shared",
       "sharedKey",
       "transition",
+      "press",
       "animate",
       "anchor",
       "span",
@@ -188,8 +191,8 @@ export const nodeModelOptions = {
         "The node's accessible label; replaces the label derived from its text, icon or kind.",
       transition:
         "`none`, `fade`, `expand`, `slide`, or (#14208) `slideStart`, `slideEnd` or `scale`, or (#15247)\n`blurReplace`: the `visibleWhen` enter/exit; absent is fade + expand. Start and end follow the\nlayout direction. Written as the type alone or `{type, delayMs?}`.",
-      animate:
-        "Animates styleWhen-driven alpha, offset, scale, rotation, background and color (#14208).",
+      press: "Draw-only press feedback, independent of the minimum touch target.",
+      animate: "Animates styleWhen-driven draw and layout styles.",
     },
   },
 } as const satisfies ModelOptions;

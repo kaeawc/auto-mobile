@@ -116,9 +116,14 @@ const fixtures: Record<string, Node> = {
   prototype_string_conditions_v1: { ...label, visibleWhen: { key: "name", contains: "A" } },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
+  prototype_motion_v3: { ...label, animate: {}, style: { cornerRadius: 8 } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_shared_element_v2: { ...label, shared: { key: "hero", as: "bounds" } },
   prototype_shared_element_v1: { ...label, sharedKey: "hero" },
+  prototype_stack_patterns_v1: {
+    ...label,
+    onTap: [{ type: "push", stack: "nav", screen: "home", transition: "sharedAxisX" }],
+  },
   prototype_stack_transitions_v1: {
     ...label,
     onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
@@ -177,6 +182,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
+  prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,
   prototype_platform_media_items_v1: mediaImage,

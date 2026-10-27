@@ -177,6 +177,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     style: { shimmer: true },
     children: [{ type: "spacer" }],
   }),
+  prototype_motion_v3: {
+    ...fixture({ ...label, animate: {}, style: { cornerRadius: 8 } }),
+    with: ["prototype_motion_v2"],
+  },
   prototype_window_motion_v1: fixture({
     type: "column",
     id: "label",
@@ -212,6 +216,16 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       { ...label, id: "second", sharedKey: "hero", visibleWhen: { key: "liked", equals: false } },
     ],
   }),
+  prototype_stack_patterns_v1: {
+    ...fixture({
+      type: "stack",
+      id: "label",
+      start: "home",
+      transition: "sharedAxisY",
+      screens: { home: { type: "spacer" } },
+    }),
+    with: ["prototype_stack_v1", "prototype_stack_transitions_v1"],
+  },
   prototype_stack_transitions_v1: {
     ...fixture({
       type: "stack",
@@ -331,6 +345,15 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       requires: { permissions: [{ name: "camera", purpose: "Scan a code" }] },
     },
     ops: [],
+  },
+  prototype_platform_clipboard_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["clipboard"] },
+      root: { type: "pasteButton", into: "/data/paste" },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
   },
   prototype_platform_device_v1: {
     minimalSpec: {

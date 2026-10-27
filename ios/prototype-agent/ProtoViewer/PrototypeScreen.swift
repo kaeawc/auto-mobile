@@ -26,7 +26,7 @@ struct PrototypeScreen: View {
 
     init(
         store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch,
-        registry: PrototypePlatformRegistry = .empty,
+        registry: PrototypePlatformRegistry = .system,
         onLoaded: @escaping @MainActor () -> Void = {}, onLoadFailed: @escaping @MainActor () -> Void = {},
         onClose: @escaping @MainActor () -> Void
     ) {

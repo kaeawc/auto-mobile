@@ -35,6 +35,10 @@ class PrototypeStackTransitionTest {
       return when {
         !motion || chosen == PrototypeStackTransition.NONE -> StackTransitionKind.None
         chosen == PrototypeStackTransition.FADE || reduced -> StackTransitionKind.Fade
+        chosen == PrototypeStackTransition.SHARED_AXIS_X -> StackTransitionKind.SharedAxisX
+        chosen == PrototypeStackTransition.SHARED_AXIS_Y -> StackTransitionKind.SharedAxisY
+        chosen in setOf(PrototypeStackTransition.FADE_THROUGH, PrototypeStackTransition.ZOOM) ->
+          StackTransitionKind.FadeThrough
         else -> StackTransitionKind.Slide
       }
     }

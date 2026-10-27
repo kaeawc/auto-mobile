@@ -251,6 +251,7 @@ internal object PrototypeStrictPolicy {
 
     fun envelope(spec: JsonObject) {
       PrototypeEnvelopeFeatures.collect(spec).forEach(::need)
+      if (spec.text("motion") == "expressive") result.add(PrototypeMotionV3.CAPABILITY)
       if (
         ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().any {
           it.jsonPrimitive.content.startsWith("stack:")
@@ -285,6 +286,7 @@ internal object PrototypeStrictPolicy {
 
     private fun scanFields(fields: JsonObject, field: String, routeAlias: Boolean) {
       val type = fields.text("type") ?: ""
+      if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
         if (key == "repeat") {
@@ -309,7 +311,7 @@ internal object PrototypeStrictPolicy {
       when {
         key == "linkify" ->
           (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
-        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition", "press") ->
           scan(child, key, routeAlias)
       }
     }
@@ -325,6 +327,7 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
+      if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
       val type = fields.text("type") ?: ""
       val nodeTypes =
         PrototypeSpecContract.definitions

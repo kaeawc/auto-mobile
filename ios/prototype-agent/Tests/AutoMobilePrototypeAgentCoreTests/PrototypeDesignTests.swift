@@ -52,7 +52,7 @@ final class PrototypeDesignTests: XCTestCase {
         // The renderer's Button styles, Slider and date/time DatePicker controls already exist.
         XCTAssertEqual(
             Set(contract.designCoverage.filter { $0.value.ios == "native" }.keys),
-            ["button", "slider", "datePicker", "timePicker"]
+            ["button", "slider", "datePicker", "timePicker", "pasteButton"]
         )
         for entry in contract.designCoverage.values {
             XCTAssertTrue(["native", "material", "neutral"].contains(entry.ios))

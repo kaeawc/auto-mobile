@@ -76,3 +76,15 @@ setup() {
   run bash "$SCRIPT" --allow-grow
   [ "$status" -eq 2 ]
 }
+
+@test "the test project is split into shards that together cover every test file (#15580)" {
+  # The rest shard excludes exactly the directories the other two shards include, so a new test
+  # directory falls into it by construction.
+  grep -q 'tsconfig.test-daemon.json' "$REPO_ROOT/scripts/typecheck-baseline.sh"
+  grep -q 'tsconfig.test-features.json' "$REPO_ROOT/scripts/typecheck-baseline.sh"
+  grep -q 'tsconfig.test-rest.json' "$REPO_ROOT/scripts/typecheck-baseline.sh"
+  for dir in 'test/daemon/\*\*' 'test/server/\*\*' 'test/features/\*\*'; do
+    grep -q "$dir" "$REPO_ROOT/tsconfig.test-rest.json"
+  done
+  grep -q 'test/\*\*/\*.ts' "$REPO_ROOT/tsconfig.test-rest.json"
+}

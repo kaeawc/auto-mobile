@@ -20,6 +20,7 @@ import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
+import { prototypeMotionV3Error } from "./prototypeMotionV3";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
@@ -465,6 +466,7 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || !prototypeContractPatterns.blankText.test(value)) &&
     value.length <= (rule.max ?? Infinity) &&
+    Buffer.byteLength(value, "utf8") <= (rule.maxBytes ?? Infinity) &&
     (!rule.pattern ||
       new RegExp(contract.patterns[rule.pattern as keyof typeof contract.patterns]).test(value)),
   pointer: isPrototypeDataPointer,
@@ -824,7 +826,11 @@ function hostVocabularyError(
 
 /** Motion and choreography share one set of located nodes. */
 function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
-  return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
+  return (
+    prototypeMotionV3Error(nodes) ??
+    prototypeMotionV2Error(nodes) ??
+    prototypeChoreographyError(nodes)
+  );
 }
 
 /** Cross-node references share the component-expanded tree and repeat cardinalities. */
@@ -881,7 +887,7 @@ function validateValue(
     prototypeLazyListLimitError(value) ??
     walk(value, definitions.spec, "", context, 0) ??
     prototypeRoutesError(value, context.nodes, context.actions) ??
-    prototypeSharedElementError(context.nodes, repeats) ??
+    prototypeSharedElementError(context.nodes, repeats, context.actions) ??
     layoutErrors(value, context, repeats) ??
     prototypeScrollMotionError(value, context.nodes) ??
     behaviourErrors(value, context, data, repeats, componentTimers);

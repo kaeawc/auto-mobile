@@ -1,3 +1,4 @@
+import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -114,7 +115,7 @@ Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optiona
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
 Transitions snap under \`motion: "none"\` or Android animator/transition scale 0, and fade under
 \`motion: "reduced"\` or iOS Reduce Motion. A stack's
-\`transition\` accepts only those four values and no longer animates the stack's own visibility
+\`transition\` accepts only those navigation values and no longer animates the stack's own visibility
 (earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
 are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
 that. Each entry's scroll position is restored on pop. A stack cannot appear inside a repeat template.
@@ -253,7 +254,7 @@ other ambient/attention loops stop at rest and report no loop; color, alpha and 
 Off makes every change instant.
 
 \`shared: {key, as: "element" | "bounds"}\` requires \`prototype_shared_element_v2\` and
-\`visibleWhen\` on the same node. Element shares identical content (a hero image); bounds shares
+\`visibleWhen\` on the same node (zoom sources exempt). Element shares identical content (a hero image); bounds shares
 a container with changing content and crossfades both sides. \`sharedKey\` remains the
 \`prototype_shared_element_v1\` bounds alias; a node cannot set both. Literal v2 keys allow
 letters, digits, underscore and hyphen, starting with a letter or underscore (1-64 characters).
@@ -277,6 +278,8 @@ node's centre without moving siblings. \`transition\` also takes \`slideStart\` 
 accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
 \`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial changes
 snap or crossfade; color and alpha still animate. The iOS agent does not support Motion v2 yet (#14684).
+
+${GUIDE_MOTION_V3}
 
 ## Choreography
 

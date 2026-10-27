@@ -10,7 +10,7 @@ struct PrototypeViewerApp: App {
     private let content: PrototypeViewerContent
     private static let terminationObserver = ViewerTerminationObserver()
 
-    init() { self.init(registry: .empty) }
+    init() { self.init(registry: .system) }
 
     init(registry: PrototypePlatformRegistry) {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first

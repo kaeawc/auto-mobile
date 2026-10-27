@@ -64,13 +64,16 @@ library store layout, the bundle format or the import flow.
 - `components` / `use` expansion exists only on the host (`expandPrototypeComponents` in
   `src/features/prototype/prototypeComponents.ts`). Devices receive expanded specs, and the
   ProtoViewer import path accepts only expanded specs.
-- The platform vocabulary (#14294) has landed in the contract and in all three validators: the
-  `platform` action, platform event handlers, `{platform}` reads, the spec-level `requires` and
-  `platform` fields, and gates generated from the contract's `platformModules` table. That table
-  holds only the placeholder `test` module (`test.echo`, `test.protected`, and the `tick` event).
-  The device registries that run calls (#14295 Android, #14296 iOS) do not exist yet, so no
-  renderer or app advertises a platform capability and a spec that needs one is rejected at import
-  with "needs a newer ProtoViewer".
+- The platform vocabulary uses the shared `platformModules` contract and native registries.
+  `device` publishes read-only device state; `clipboard` provides `copy`, `paste` and `hasText`
+  without events or state. Clipboard text is bounded to 65,536 UTF-8 bytes; pastes truncate at a
+  Unicode scalar boundary and write `{text, truncated}` to `/data`. Copy can mark content
+  sensitive (Android's sensitive clip flag; iOS local-only with a 60-second expiration).
+  Completion and fake-clipboard audit metadata contains only `op` and `bytes`, never text.
+  `pasteButton` uses the system SwiftUI paste control on iOS and dispatches `clipboard.paste`
+  from an ordinary button on Android. It owns its tap action while retaining common layout fields.
+  CtrlProxy temporarily acquires prototype-window focus for clipboard reads and restores its flags.
+  The placeholder `test` module is available only in test/debug registrations.
 
 **Koog (checked 2026-10-22)**
 

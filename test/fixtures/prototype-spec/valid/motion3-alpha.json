@@ -1,0 +1,27 @@
+{
+  "id": "motion3",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "on": false
+  },
+  "root": {
+    "type": "text",
+    "text": "Hi",
+    "animate": {},
+    "styleWhen": [
+      {
+        "when": {
+          "key": "on",
+          "equals": true
+        },
+        "style": {
+          "alpha": 0.5
+        }
+      }
+    ]
+  }
+}

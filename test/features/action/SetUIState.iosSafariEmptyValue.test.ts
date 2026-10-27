@@ -11,7 +11,7 @@ import {
 } from "../../fakes/FakeSetUIStateDependencies";
 import clearedCapture from "../../fixtures/ios-safari-url-field/runner-cleared-keyboard-up.json";
 import typedCapture from "../../fixtures/ios-safari-url-field/runner-typed-keyboard-up.json";
-import { observationFromRunnerCapture } from "../../helpers/iosSafariRunnerCapture";
+import { observationFromRunnerCapture } from "../../helpers/iosRunnerCapture";
 
 // Round 5 of #15175 (issue #15212): on Safari's address field a `setUIState` clear (`value: ""`)
 // cleared the field but reported failure after about 30 s, because the step after the verified

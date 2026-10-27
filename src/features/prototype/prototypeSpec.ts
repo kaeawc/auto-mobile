@@ -1,3 +1,4 @@
+import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
 import { themeSchema } from "./prototypeThemeSchema";
@@ -201,6 +202,7 @@ export const commonNodeShape = {
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   sharedKey: keySchema.optional(),
+  press: prototypePressSchema.optional(),
   shared: z
     .object({ key: z.string().min(1).max(256), as: z.enum(["element", "bounds"]) })
     .strict()
@@ -368,6 +370,13 @@ const checkboxBaseSchema = z
     type: z.enum(["checkbox"]),
     stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
+  })
+  .strict();
+const pasteButtonBaseSchema = z
+  .object({
+    ...z.object(commonNodeShape).omit({ onTap: true }).shape,
+    type: z.enum(["pasteButton"]),
+    into: pointerSchema,
   })
   .strict();
 const buttonBaseSchema = z
@@ -715,6 +724,7 @@ export type PrototypeNode =
   | (z.infer<typeof searchBarBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
+  | z.infer<typeof pasteButtonBaseSchema>
   | z.infer<typeof buttonBaseSchema>
   | z.infer<typeof radioGroupBaseSchema>
   | z.infer<typeof selectBaseSchema>
@@ -795,6 +805,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       searchBarBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       switchBaseSchema,
       checkboxBaseSchema,
+      pasteButtonBaseSchema,
       buttonBaseSchema,
       radioGroupBaseSchema,
       selectBaseSchema,
@@ -893,7 +904,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
-    motion: z.enum(["none", "standard", "reduced"]).optional(),
+    motion: z.enum(["none", "standard", "reduced", "expressive"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
@@ -903,51 +914,7 @@ const specSchema = z
   .strict();
 export const prototypeSpecSchema = specSchema;
 export type PrototypeSpec = z.infer<typeof prototypeSpecSchema>;
-export const PROTOTYPE_NODE_TYPES = [
-  "box",
-  "row",
-  "column",
-  "flow",
-  "grid",
-  "carousel",
-  "text",
-  "image",
-  "icon",
-  "spacer",
-  "textField",
-  "searchBar",
-  "switch",
-  "checkbox",
-  "button",
-  "radioGroup",
-  "select",
-  "listItem",
-  "slider",
-  "chip",
-  "card",
-  "iconButton",
-  "fab",
-  "segmentedButton",
-  "topAppBar",
-  "divider",
-  "badge",
-  "progress",
-  "chart",
-  "dialog",
-  "menu",
-  "snackbar",
-  "timePicker",
-  "datePicker",
-  "list",
-  "scroll",
-  "pager",
-  "stack",
-  "tabBar",
-  "bottomNav",
-  "bottomSheet",
-  "tooltip",
-  "drawer",
-] as const;
+export { PROTOTYPE_NODE_TYPES } from "./prototypeNodeTypes";
 export const PROTOTYPE_ACTION_TYPES = [
   "emit",
   "setPage",

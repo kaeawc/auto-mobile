@@ -18,6 +18,10 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeAnimate
+import dev.jasonpearson.automobile.protocol.PrototypeCornerRadius
+import dev.jasonpearson.automobile.protocol.PrototypeDimension
+import dev.jasonpearson.automobile.protocol.PrototypePadding
+import dev.jasonpearson.automobile.protocol.PrototypeStyle
 
 private const val DEFAULT_ANIMATE_MS = 300
 
@@ -30,11 +34,14 @@ private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
  * `observe` and screenshots never see a value in flight. `spring` ignores the duration.
  */
 @Composable
-internal fun <T> prototypeStyleAnimation(animate: PrototypeAnimate?): AnimationSpec<T> {
+internal fun <T> prototypeStyleAnimation(
+  animate: PrototypeAnimate?,
+  effects: Boolean = false,
+): AnimationSpec<T> {
   if (animate == null || !LocalPrototypeMotion.current) return snap()
   val duration = animate.durationMs ?: DEFAULT_ANIMATE_MS
   return when (animate.easing) {
-    "spring" -> spring()
+    "spring" -> if (LocalPrototypeExpressive.current) prototypeExpressiveSpec(effects) else spring()
     "linear" -> tween(duration, easing = LinearEasing)
     "emphasized" -> tween(duration, easing = EmphasizedEasing)
     else -> tween(duration, easing = FastOutSlowInEasing)
@@ -49,8 +56,13 @@ internal fun <T> prototypeStyleAnimation(animate: PrototypeAnimate?): AnimationS
 internal fun prototypeAnimatedAlpha(node: PrototypeRenderNode): Float {
   val target = (node.style.source.alpha ?: 1.0).toFloat()
   val animate = node.source?.animate ?: return target
+  if (!LocalPrototypeMotion.current) return target
   val alpha =
-    animateFloatAsState(target, prototypeStyleAnimation(animate), label = "prototypeAlpha")
+    animateFloatAsState(
+      target,
+      prototypeStyleAnimation(animate, effects = true),
+      label = "prototypeAlpha",
+    )
   ReportPrototypeMotion { alpha.value != target }
   return alpha.value
 }
@@ -58,11 +70,12 @@ internal fun prototypeAnimatedAlpha(node: PrototypeRenderNode): Float {
 /** An authored colour, animated when the node declares `animate`; unspecified stays unspecified. */
 @Composable
 internal fun prototypeAnimatedColor(node: PrototypeRenderNode, color: Color): Color {
-  if (!color.isSpecified || node.source?.animate == null) return color
+  if (!LocalPrototypeMotion.current || !color.isSpecified || node.source?.animate == null)
+    return color
   val animated =
     animateColorAsState(
       color,
-      prototypeStyleAnimation(node.source.animate),
+      prototypeStyleAnimation(node.source.animate, effects = true),
       label = "prototypeColor",
     )
   ReportPrototypeMotion { animated.value != color }
@@ -83,7 +96,7 @@ internal fun Modifier.prototypeStyleTransform(node: PrototypeRenderNode): Modifi
   val y = style.offset?.y?.toFloat() ?: 0f
   val scale = style.scale?.toFloat() ?: 1f
   val rotation = style.rotation?.toFloat() ?: 0f
-  if (animate == null) {
+  if (animate == null || !LocalPrototypeMotion.current) {
     val shifted = if (style.offset != null) offset(x.dp, y.dp) else this
     return if (style.scale == null && style.rotation == null) shifted
     else shifted.graphicsLayer(scaleX = scale, scaleY = scale, rotationZ = rotation)
@@ -119,4 +132,87 @@ private fun Modifier.animatedTransform(
       scaleY = animatedScale.value
       rotationZ = animatedRotation.value
     }
+}
+
+/** One animated layout number; static when motion is off or the profile is not full. */
+@Composable
+private fun animatedLayoutNumber(target: Double, animate: PrototypeAnimate): Double {
+  if (LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL) return target
+  val state =
+    animateFloatAsState(
+      target.toFloat(),
+      prototypeStyleAnimation(animate),
+      label = "prototypeLayout",
+    )
+  ReportPrototypeMotion { state.value != target.toFloat() }
+  return state.value.toDouble().coerceAtLeast(0.0)
+}
+
+@Composable
+private fun animatedLayoutCorner(
+  style: PrototypeStyle,
+  authored: List<PrototypeStyle>,
+  animate: PrototypeAnimate,
+): PrototypeCornerRadius? {
+  val animated =
+    authored.any { it.cornerRadius != null } && style.cornerRadius !is PrototypeCornerRadius.Token
+  if (!animated) return style.cornerRadius
+  val value = style.cornerRadius
+  val all = (value as? PrototypeCornerRadius.Dp)?.dp ?: 0.0
+  val corners = value as? PrototypeCornerRadius.Corners
+  return PrototypeCornerRadius.Corners(
+    topStart = animatedLayoutNumber(corners?.topStart ?: all, animate),
+    topEnd = animatedLayoutNumber(corners?.topEnd ?: all, animate),
+    bottomStart = animatedLayoutNumber(corners?.bottomStart ?: all, animate),
+    bottomEnd = animatedLayoutNumber(corners?.bottomEnd ?: all, animate),
+  )
+}
+
+@Composable
+private fun animatedLayoutPadding(
+  style: PrototypeStyle,
+  authored: List<PrototypeStyle>,
+  animate: PrototypeAnimate,
+): PrototypePadding? {
+  if (authored.none { it.padding != null }) return style.padding
+  return PrototypePadding(
+    top = animatedLayoutNumber(style.padding?.top ?: 0.0, animate),
+    bottom = animatedLayoutNumber(style.padding?.bottom ?: 0.0, animate),
+    start = animatedLayoutNumber(style.padding?.start ?: 0.0, animate),
+    end = animatedLayoutNumber(style.padding?.end ?: 0.0, animate),
+  )
+}
+
+@Composable
+private fun animatedLayoutDimension(value: PrototypeDimension?, animate: PrototypeAnimate) =
+  if (value is PrototypeDimension.Dp) PrototypeDimension.Dp(animatedLayoutNumber(value.dp, animate))
+  else value
+
+/** Layout styles keep stable animation slots when styleWhen adds or removes numeric fields. */
+@Composable
+internal fun prototypeAnimatedLayout(node: PrototypeRenderNode): PrototypeStyle {
+  val style = node.style.source
+  val animate = node.source?.animate ?: return style
+  if (!LocalPrototypeMotion.current) return style
+  val authored = listOfNotNull(node.source.style) + node.source.styleWhen.orEmpty().map { it.style }
+  val corner = animatedLayoutCorner(style, authored, animate)
+  val borderWidth =
+    if (authored.any { it.border != null }) {
+      animatedLayoutNumber(style.border?.width ?: 0.0, animate)
+    } else 0.0
+  // Retain the authored border while its width returns to zero on removal.
+  val border = style.border ?: authored.firstNotNullOfOrNull { it.border }
+  val padding = animatedLayoutPadding(style, authored, animate)
+  val elevation =
+    if (authored.any { it.elevation != null }) {
+      animatedLayoutNumber(style.elevation ?: 0.0, animate)
+    } else style.elevation
+  return style.copy(
+    width = animatedLayoutDimension(style.width, animate),
+    height = animatedLayoutDimension(style.height, animate),
+    cornerRadius = corner,
+    elevation = elevation,
+    border = border?.copy(width = borderWidth),
+    padding = padding,
+  )
 }

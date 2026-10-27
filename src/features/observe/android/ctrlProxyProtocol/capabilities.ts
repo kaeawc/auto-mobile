@@ -120,6 +120,7 @@ export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
  */
 export const PROTOTYPE_MEDIA_ITEMS_CAPABILITY = "prototype_platform_media_items_v1";
 /** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
+export const PROTOTYPE_MOTION_V3_CAPABILITY = "prototype_motion_v3";
 export const PROTOTYPE_WINDOW_MOTION_CAPABILITY = "prototype_window_motion_v1";
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 /** Transition `delayMs`, container `stagger` and the `blurReplace` transition (#15247). */
@@ -158,6 +159,7 @@ export const PROTOTYPE_SHARED_ELEMENT_CAPABILITY = "prototype_shared_element_v1"
 export const PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY = "prototype_shared_element_v2";
 
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_PATTERNS_CAPABILITY = "prototype_stack_patterns_v1";
 export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
 
@@ -492,3 +494,5 @@ export const PROTOTYPE_STRINGS_CAPABILITY = "prototype_strings_v1";
 export const PROTOTYPE_SEMANTICS_CAPABILITY = "prototype_semantics_v1";
 
 export const PROTOTYPE_FORMAT_CAPABILITY = "prototype_format_v1";
+
+export const PROTOTYPE_PLATFORM_CLIPBOARD_CAPABILITY = "prototype_platform_clipboard_v1";

@@ -855,7 +855,11 @@
         "type": "emit",
         "name": "appear"
       }
-    ]
+    ],
+    "press": {
+      "scale": 0.9,
+      "alpha": 0.8
+    }
   },
   "actionRequestFilled": {
     "type": "request",
@@ -922,6 +926,10 @@
   "actionCancelTimer": {
     "type": "cancelTimer",
     "id": "tick"
+  },
+  "nodePasteButton": {
+    "type": "pasteButton",
+    "into": "/data/pasted"
   },
   "actionSetStack": {
     "type": "setStack",

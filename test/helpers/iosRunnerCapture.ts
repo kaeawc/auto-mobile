@@ -19,7 +19,7 @@ function isConvertibleHierarchy(value: unknown): value is ConvertibleHierarchy {
   );
 }
 
-/** Portrait iPhone 18 Pro point size the Safari captures were taken at. */
+/** Portrait iPhone 18 Pro point size the runner captures were taken at. */
 const CAPTURE_SCREEN = { width: 402, height: 874 };
 
 /**

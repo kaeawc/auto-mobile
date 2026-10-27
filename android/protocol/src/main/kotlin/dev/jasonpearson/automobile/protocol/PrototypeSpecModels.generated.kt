@@ -8,6 +8,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
+data class PrototypePress(
+  val scale: Double? = null,
+  val alpha: Double? = null,
+)
+
+@Serializable
 data class PrototypeShared(
   val key: String,
   val `as`: String,
@@ -117,6 +123,7 @@ data class PrototypePushAction(
   val stack: String,
   val screen: String,
   val transition: String? = null,
+  val source: String? = null,
   val params: Map<String, JsonElement>? = null,
 ) : PrototypeAction()
 
@@ -137,6 +144,7 @@ data class PrototypeReplaceAction(
   val stack: String,
   val screen: String,
   val transition: String? = null,
+  val source: String? = null,
   val params: Map<String, JsonElement>? = null,
 ) : PrototypeAction()
 
@@ -253,7 +261,9 @@ sealed class PrototypeNode {
   abstract val testTag: String?
   /** The node's accessible label; replaces the label derived from its text, icon or kind. */
   abstract val contentDescription: String?
-  abstract val onTap: List<PrototypeAction>?
+  open val onTap: List<PrototypeAction>?
+    get() = null
+
   open val onLongPress: List<PrototypeAction>?
     get() = null
 
@@ -271,7 +281,9 @@ sealed class PrototypeNode {
    * layout direction. Written as the type alone or `{type, delayMs?}`.
    */
   abstract val transition: PrototypeTransition?
-  /** Animates styleWhen-driven alpha, offset, scale, rotation, background and color (#14208). */
+  /** Draw-only press feedback, independent of the minimum touch target. */
+  abstract val press: PrototypePress?
+  /** Animates styleWhen-driven draw and layout styles. */
   abstract val animate: PrototypeAnimate?
   abstract val anchor: PrototypeAnchor?
   abstract val span: Int?
@@ -297,6 +309,7 @@ data class PrototypeBoxNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -326,6 +339,7 @@ data class PrototypeRowNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -356,6 +370,7 @@ data class PrototypeColumnNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -383,6 +398,7 @@ data class PrototypeFlowNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -409,6 +425,7 @@ data class PrototypeGridNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -440,6 +457,7 @@ data class PrototypeCarouselNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -470,6 +488,7 @@ data class PrototypeTextNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -499,6 +518,7 @@ data class PrototypeImageNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -530,6 +550,7 @@ data class PrototypeIconNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -556,6 +577,7 @@ data class PrototypeSpacerNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -579,6 +601,7 @@ data class PrototypeTextFieldNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -622,6 +645,7 @@ data class PrototypeSwitchNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -650,6 +674,7 @@ data class PrototypeCheckboxNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -678,6 +703,7 @@ data class PrototypeButtonNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -705,6 +731,7 @@ data class PrototypeRadioGroupNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -733,6 +760,7 @@ data class PrototypeSelectNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -759,6 +787,7 @@ data class PrototypeListItemNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -788,6 +817,7 @@ data class PrototypeSliderNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -819,6 +849,7 @@ data class PrototypeChipNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -848,6 +879,7 @@ data class PrototypeCardNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -874,6 +906,7 @@ data class PrototypeIconButtonNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -901,6 +934,7 @@ data class PrototypeFabNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -929,6 +963,7 @@ data class PrototypeSegmentedButtonNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -955,6 +990,7 @@ data class PrototypeTopAppBarNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -985,6 +1021,7 @@ data class PrototypeDividerNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1010,6 +1047,7 @@ data class PrototypeBadgeNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1038,6 +1076,7 @@ data class PrototypeProgressNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1068,6 +1107,7 @@ data class PrototypeDialogNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1098,6 +1138,7 @@ data class PrototypeMenuNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1128,6 +1169,7 @@ data class PrototypeSnackbarNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1156,6 +1198,7 @@ data class PrototypeTimePickerNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1186,6 +1229,7 @@ data class PrototypeDatePickerNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1213,6 +1257,7 @@ data class PrototypeScrollNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1248,6 +1293,7 @@ data class PrototypePagerNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1278,6 +1324,7 @@ data class PrototypeTabBarNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1307,6 +1354,7 @@ data class PrototypeBottomNavNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1335,6 +1383,7 @@ data class PrototypeBottomSheetNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1364,6 +1413,7 @@ data class PrototypeSearchBarNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1395,6 +1445,7 @@ data class PrototypeStackNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1426,6 +1477,7 @@ data class PrototypeChartNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1454,6 +1506,7 @@ data class PrototypeTooltipNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1483,6 +1536,7 @@ data class PrototypeDrawerNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,
@@ -1511,6 +1565,7 @@ data class PrototypeListNode(
   override val shared: PrototypeShared? = null,
   override val sharedKey: String? = null,
   override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
   override val animate: PrototypeAnimate? = null,
   override val anchor: PrototypeAnchor? = null,
   override val span: Int? = null,

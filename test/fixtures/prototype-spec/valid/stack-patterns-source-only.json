@@ -1,0 +1,27 @@
+{
+  "id": "stack-patterns",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "text",
+        "text": "Home"
+      }
+    },
+    "onTap": [
+      {
+        "type": "push",
+        "stack": "nav",
+        "screen": "home",
+        "source": "hero"
+      }
+    ]
+  }
+}

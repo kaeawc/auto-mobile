@@ -28,6 +28,8 @@ export interface ModelOptions {
     readonly docs?: Readonly<Record<string, string>>;
   };
   readonly kotlinStringOverloads?: readonly string[];
+  /** Variants implemented by hand, whose fields still participate in the Kotlin base. */
+  readonly kotlinHandWrittenVariants?: readonly string[];
   readonly validators?: TypeRefs;
 }
 export type ModelSelection = Readonly<Record<string, ModelOptions>>;
@@ -38,6 +40,7 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},

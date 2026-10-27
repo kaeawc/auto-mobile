@@ -7,6 +7,7 @@ enum PrototypeBundleCapabilities {
         let value = try PrototypeBundleJSON(data, code: .specInvalidJSON, path: "spec.json").value
         guard let spec = value.objectFields else { return [] }
         var names = Set<String>()
+        if spec["motion"] == .string("expressive") { names.insert(PrototypeMotionV3.capability) }
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
         if spec["strings"] != nil { need("strings") }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
@@ -42,6 +43,7 @@ enum PrototypeBundleCapabilities {
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
             if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["sharedKey"] != nil { need("shared_element") }
+            if PrototypeMotionV3.required(node) { names.insert(PrototypeMotionV3.capability) }
             if PrototypeMediaItems.usedBy(node) { names.insert(PrototypeMediaItems.capability) }
             if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
@@ -97,6 +99,9 @@ enum PrototypeBundleCapabilities {
                 if node["indicator"] != nil { need("carousel") }
             }
             if type == "stack", node["transition"] != nil { need("stack_transitions") }
+            if type == "stack",
+               ["sharedAxisX", "sharedAxisY", "fadeThrough", "zoom"]
+               .contains(node["transition"]?.stringValue ?? "") { need("stack_patterns") }
             let transition = type == "stack" ? nil : node["transition"]
             let transitionType = transition?.objectFields?["type"]?.stringValue
                 ?? transition?.stringValue ?? ""
@@ -140,11 +145,21 @@ enum PrototypeBundleCapabilities {
         if ["push", "replace"].contains(type ?? ""), fields["transition"] != nil {
             names.insert("prototype_stack_transitions_v1")
         }
+        if ["push", "replace"].contains(type ?? ""),
+           fields["source"] != nil || ["sharedAxisX", "sharedAxisY", "fadeThrough", "zoom"]
+           .contains(fields["transition"]?.stringValue ?? "")
+        {
+            names.insert("prototype_stack_patterns_v1")
+        }
         if type == nil, fields["data"]?.stringValue != nil { names.insert("prototype_data_model_v1") }
         if type == nil, let pointer = fields["platform"]?.stringValue {
             names.insert("prototype_platform_v1")
             if let module = PrototypeDataPointer.tokens(pointer).first,
                let capability = PrototypePlatformValidator.modules[module]?.capability { names.insert(capability) }
+        }
+        if type == "pasteButton" {
+            names.insert("prototype_platform_v1")
+            names.insert("prototype_platform_clipboard_v1")
         }
         if type == "platform", let method = fields["call"]?.stringValue {
             names.insert("prototype_platform_v1")

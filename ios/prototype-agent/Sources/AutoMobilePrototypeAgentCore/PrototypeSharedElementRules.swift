@@ -11,7 +11,14 @@ enum PrototypeSharedElementRules {
         let repeatPath: String?
     }
 
-    static func validate(_ nodes: [PrototypeLocatedValue], data: [String: JSONValue]?) throws {
+    static func validate(
+        _ nodes: [PrototypeLocatedValue],
+        data: [String: JSONValue]?,
+        actions: [PrototypeLocatedValue] = []
+    )
+        throws
+    {
+        let sources = try PrototypeStackPatterns.sources(nodes, actions: actions)
         var pairs: [String: [Occurrence]] = [:]
         var order: [String] = []
         for node in nodes {
@@ -24,13 +31,15 @@ enum PrototypeSharedElementRules {
                     "shared and sharedKey cannot both be set"
                 )
             }
-            guard node.value["visibleWhen"] != nil else {
+            let source = sources.contains(key)
+            guard node.value["visibleWhen"] != nil || source else {
                 throw PrototypeContractValidator.invalid(at, "sharedKey requires visibleWhen on the same node")
             }
             let parent = nodes.last { $0.value["repeat"] != nil &&
                 (node.path == $0.path || node.path.hasPrefix("\($0.path)."))
             }
             let keys = try resolvedKeys(key, shared: shared != nil, parent: parent, path: node.path, at: at, data: data)
+            if source { continue }
             let boundary = nodes.filter {
                 ["dialog", "bottomSheet"].contains($0.value["type"]?.stringValue ?? "") &&
                     (node.path == $0.path || node.path.hasPrefix("\($0.path)."))

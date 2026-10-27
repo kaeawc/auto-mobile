@@ -48,6 +48,13 @@
             return view
         }
 
+        /// Internal host seam; reports the first resolved mode and subsequent light/dark changes.
+        func onAppearanceChange(_ action: @escaping @MainActor (PrototypeChromeAppearance) -> Void) -> Self {
+            var view = self
+            view.renderer.onAppearanceChange = action
+            return view
+        }
+
         /// The embedded renderer or a diagnostic covering the entire presentation.
         public var body: some View {
             renderer.id(identity)
@@ -91,6 +98,13 @@
         let onLoadError: @MainActor (PrototypeLoadError) -> Void
         var onStop: @MainActor () -> Void = {}
         var onFirstRender: (@MainActor () -> Void)?
+        var onAppearanceChange: (@MainActor (PrototypeChromeAppearance) -> Void)?
+
+        private func appearanceCallback() -> (@MainActor (PrototypeChromeAppearance) -> Void)? {
+            guard let onAppearanceChange else { return nil }
+            // UIKit can resolve appearance during a SwiftUI update. Deliver host state changes afterwards.
+            return { mode in Task { @MainActor in onAppearanceChange(mode) } }
+        }
 
         @MainActor
         final class Coordinator {
@@ -107,6 +121,7 @@
                 onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError
             )
             controller.onFirstRender = onFirstRender
+            controller.onAppearanceChange = appearanceCallback()
             return controller
         }
 
@@ -114,6 +129,7 @@
             context.coordinator.onStop = onStop
             controller.updateNetwork(network)
             controller.updateCallbacks(onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError)
+            controller.onAppearanceChange = appearanceCallback()
             controller.syncAppearance()
         }
 

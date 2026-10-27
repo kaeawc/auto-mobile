@@ -374,6 +374,15 @@
         /// `style` with every matching `styleWhen` entry merged over it.
         private var style: Style? { node.resolvedStyle(state: model.state) }
 
+        private var keyframeTrigger: JSONValue? {
+            let trigger = node.keyframes?.objectFields?["trigger"]?.objectFields
+            if let key = trigger?["key"]?.stringValue { return model.state[key] }
+            if let pointer = trigger?["data"]?.stringValue {
+                return PrototypeDataPointer.resolve(model.spec?.data, pointer: pointer)
+            }
+            return nil
+        }
+
         @ViewBuilder private var content: some View {
             switch node.type {
             case "box":
@@ -961,8 +970,14 @@
                     motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion),
                     authorsEffects: PrototypeEffects.authorsEffects(node)
                 ))
-                .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)
+                .modifier(PrototypeKeyframesModifier(
+                    frames: node.keyframes,
+                    trigger: keyframeTrigger,
+                    profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile,
+                    activity: model.keyframeActivity
+                ))
+                .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
                 .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(TapModifier(
@@ -1212,7 +1227,8 @@
                 )
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0, maximumDistance: 10)
-                        .updating($pressed) { _, state, _ in state = true }
+                        .updating($pressed) { _, state, _ in state = true },
+                    including: style?.hasPressScaleGesture == true ? .all : .subviews
                 )
                 .accessibilityAddTraits(.isButton)
                 .disabled(!model.isEnabled(node))

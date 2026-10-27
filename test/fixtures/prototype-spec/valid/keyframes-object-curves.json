@@ -1,0 +1,55 @@
+{
+  "id": "keyframes",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "liked": false
+  },
+  "root": {
+    "type": "icon",
+    "name": "favorite",
+    "keyframes": {
+      "trigger": {
+        "key": "liked"
+      },
+      "durationMs": 600,
+      "tracks": {
+        "scaleX": {
+          "points": [
+            [0, 1],
+            [0.5, 1.2],
+            [1, 1]
+          ],
+          "curve": "linear"
+        },
+        "scaleY": {
+          "points": [
+            [0, 1],
+            [0.5, 1.2],
+            [1, 1]
+          ],
+          "curve": "standard"
+        },
+        "offsetY": {
+          "points": [
+            [0, 0],
+            [0.5, 0.2],
+            [1, 0]
+          ],
+          "curve": "spring"
+        },
+        "alpha": {
+          "points": [
+            [0, 1],
+            [0.5, 0.5],
+            [1, 1]
+          ],
+          "curve": "spring"
+        }
+      }
+    }
+  }
+}

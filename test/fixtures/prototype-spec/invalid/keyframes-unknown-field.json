@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "keyframes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked": false
+    },
+    "root": {
+      "type": "icon",
+      "name": "favorite",
+      "keyframes": {
+        "trigger": {
+          "key": "liked"
+        },
+        "durationMs": 600,
+        "tracks": {
+          "scale": [
+            [0, 1],
+            [0.35, 1.3],
+            [1, 1]
+          ],
+          "rotation": [
+            [0, 0],
+            [0.2, -12],
+            [0.5, 8],
+            [1, 0]
+          ]
+        },
+        "repeat": true
+      }
+    }
+  },
+  "expectedPath": "root.keyframes.repeat",
+  "expectedMessage": "Unknown property"
+}

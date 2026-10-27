@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "keyframes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked": false
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "icon",
+          "name": "favorite",
+          "keyframes": {
+            "trigger": {
+              "key": "missing"
+            },
+            "durationMs": 600,
+            "tracks": {
+              "alpha": [
+                [0, 1],
+                [1, 1]
+              ]
+            }
+          }
+        },
+        {
+          "type": "icon",
+          "name": "favorite",
+          "keyframes": {
+            "trigger": {
+              "key": "liked"
+            },
+            "durationMs": 600,
+            "tracks": {
+              "scale": [
+                [0, 2],
+                [1, 1]
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].keyframes.tracks.scale",
+  "expectedMessage": "First and last values must equal rest value 1"
+}

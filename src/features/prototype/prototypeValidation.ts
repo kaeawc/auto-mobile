@@ -30,7 +30,13 @@ import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import {
+  chargeKeyframeNode,
+  prototypeKeyframesError,
+  prototypeKeyframeTracksError,
+} from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
+import { jsonCost } from "./prototypeJsonCost";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
   Rule,
@@ -62,6 +68,7 @@ interface Context {
   images: number;
   effects: number;
   animatedEffects: number;
+  keyframeNodes: number;
   /** Current nesting per bounded reference (see `nestedReferences`). */
   nesting: Record<string, number>;
 }
@@ -158,6 +165,10 @@ function chargeNodeBudgets(
   }
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
+  }
+  const keyframeLimit = chargeKeyframeNode(node, context, contract.limits, path);
+  if (keyframeLimit) {
+    return fail(keyframeLimit.path, keyframeLimit.message);
   }
   const uses = effectUses(node);
   context.effects += uses.total;
@@ -290,7 +301,19 @@ function visitObject(
       return error;
     }
   }
-  return objectConstraint(data, rule, path);
+  return objectRuleError(rule, data, path);
+}
+/** The `keyframes` object adds cross-point track rules on top of the generic object constraint. */
+function objectRuleError(
+  rule: Parameters<typeof objectConstraint>[1],
+  data: Record<string, unknown>,
+  path: string,
+): ReturnType<typeof objectConstraint> {
+  const tracks =
+    rule === definitions.keyframes
+      ? prototypeKeyframeTracksError(data.tracks, `${path}.tracks`)
+      : undefined;
+  return tracks ?? objectConstraint(data, rule, path);
 }
 function objectConstraint(
   data: Record<string, unknown>,
@@ -508,39 +531,6 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     return Number.isFinite(cost) && cost <= (rule.maxBytes ?? Infinity);
   },
 };
-// Reserve 32 bytes per finite number so lexical exponent/decimal spellings cannot
-// change payload acceptance between JavaScript and JVM JSON decoders.
-function jsonCost(value: unknown, depth = 0): number {
-  if (depth > contract.limits.MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH) {
-    return Infinity;
-  }
-  if (value === null) {
-    return 4;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? 32 : Infinity;
-  }
-  if (typeof value === "string" || typeof value === "boolean") {
-    return bytes(value);
-  }
-  if (Array.isArray(value)) {
-    return (
-      2 +
-      Math.max(0, value.length - 1) +
-      value.reduce<number>((sum, child) => sum + jsonCost(child, depth + 1), 0)
-    );
-  }
-  const data = object(value);
-  if (!data) {
-    return Infinity;
-  }
-  const entries = Object.entries(data);
-  return (
-    2 +
-    Math.max(0, entries.length - 1) +
-    entries.reduce((sum, [key, child]) => sum + bytes(key) + 1 + jsonCost(child, depth + 1), 0)
-  );
-}
 /** Data uses the emit payload cost after its own stricter depth-first walk. */
 export function prototypeDataError(
   value: unknown,
@@ -834,6 +824,7 @@ function platformArgumentError(
     images: 0,
     effects: 0,
     animatedEffects: 0,
+    keyframeNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   return walk(value, rule, path, context, 0);
@@ -888,6 +879,7 @@ function behaviourErrors(
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
     motionErrors(context.nodes) ??
+    prototypeKeyframesError(context.nodes, data) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
     nodeReferenceErrors(context, repeats) ??
@@ -906,6 +898,7 @@ function validateValue(
     images: 0,
     effects: 0,
     animatedEffects: 0,
+    keyframeNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};

@@ -46,6 +46,7 @@ enum PrototypeAgentProtocol {
         textFieldActionsCapability,
         carouselCapability,
         chartCapability,
+        keyframesCapability,
         lazyListCapability,
         loadingStatesCapability,
         effectsCapability,
@@ -182,6 +183,8 @@ enum PrototypeAgentProtocol {
     static let carouselCapability = "prototype_carousel_v1"
     /// The `chart` node (line, area, bar and ring over `/data` arrays) drawn with Swift Charts (#14679).
     static let chartCapability = "prototype_chart_v1"
+    /// Node `keyframes` tracks played once per trigger change (iOS 17+, #15249).
+    static let keyframesCapability = "prototype_keyframes_v1"
     /// Locale string tables and integer plural resolution (#14210).
     static let stringsCapability = "prototype_strings_v1"
     /// Authored accessibility semantics and live announcements (#14210).

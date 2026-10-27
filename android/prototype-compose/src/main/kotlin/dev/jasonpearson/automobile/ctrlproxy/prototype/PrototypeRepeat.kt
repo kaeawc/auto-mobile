@@ -420,7 +420,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onAppear = onAppear,
         onTap = onTap,
         styleWhen = styleWhen,
-        shared = shared, visibleWhen = visibleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
       )
     is PrototypeSearchBarNode ->
       copy(
@@ -649,13 +650,37 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         actions = actions?.map { it.bound(instance) },
       )
     is PrototypeDividerNode ->
-      copy(semantics = semantics, onTap = onTap, styleWhen = styleWhen, shared = shared, visibleWhen = visibleWhen)
+      copy(
+        semantics = semantics,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeBadgeNode ->
-      copy(semantics = semantics, onTap = onTap, styleWhen = styleWhen, shared = shared, visibleWhen = visibleWhen)
+      copy(
+        semantics = semantics,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeDividerNode ->
-      copy(onAppear = onAppear, onTap = onTap, styleWhen = styleWhen, shared = shared, visibleWhen = visibleWhen)
+      copy(
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeBadgeNode ->
-      copy(onAppear = onAppear, onTap = onTap, styleWhen = styleWhen, shared = shared, visibleWhen = visibleWhen)
+      copy(
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeProgressNode ->
       copy(
         semantics = semantics,

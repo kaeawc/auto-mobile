@@ -17,6 +17,7 @@ import {
 } from "../../src/daemon/statelessMcpServerFactory";
 import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../src/daemon/ResourceUpdatedBroadcasterClass";
 import { installToolCallDispatcher } from "../../src/server/toolCallDispatch";
 import {
   TASKS_EXTENSION_ID,
@@ -213,7 +214,7 @@ test("real handler discovers Tasks from the shared modern server factory", async
   expect(frame.error).toBeUndefined();
   expect(frame.result.capabilities.extensions[TASKS_EXTENSION_ID]).toEqual({});
   expect(frame.result.capabilities.tools).toEqual({ listChanged: true });
-  expect(frame.result.capabilities.resources).toEqual({ listChanged: true });
+  expect(frame.result.capabilities.resources).toEqual({ subscribe: true, listChanged: true });
 });
 
 test("legacy server capabilities retain their original JSON bytes", async () => {
@@ -544,4 +545,80 @@ test("preparsed modern bodies above the SDK default body limit remain admitted",
     arguments: { payload: "x".repeat(4 * 1024 * 1024 + 1) },
   });
   expect(frame.result.resultType).toBe("task");
+});
+
+function listenToResource(server: ReturnType<typeof endpoint>, uri: string, id: string) {
+  const res = new CapturedResponse();
+  const ack = res.nextChunk();
+  const pending = server.handle(
+    {
+      method: "POST",
+      headers: {
+        "mcp-protocol-version": "2026-07-28",
+        "mcp-method": "subscriptions/listen",
+        accept: "text/event-stream, application/json",
+        "content-type": "application/json",
+      },
+    },
+    res,
+    {
+      jsonrpc: "2.0",
+      id,
+      method: "subscriptions/listen",
+      params: {
+        notifications: { resourceSubscriptions: [uri] },
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "resource-listen-test", version: "1" },
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
+    },
+    (message, error) => {
+      throw new Error(message, { cause: error });
+    },
+  );
+  return { res, ack, pending };
+}
+
+test("real listen streams receive bridged resource updates only for their filtered URI", async () => {
+  const server = endpoint();
+  const uri = "resource://table?offset=10";
+  const unrelated = "resource://other";
+  const first = listenToResource(server, uri, "listen-resource");
+  const second = listenToResource(server, unrelated, "listen-other");
+  try {
+    const ack = JSON.parse((await first.ack).split("data: ")[1]);
+    await second.ack;
+    expect(ack).toMatchObject({
+      method: "notifications/subscriptions/acknowledged",
+      params: {
+        notifications: { resourceSubscriptions: [uri] },
+        _meta: { "io.modelcontextprotocol/subscriptionId": "listen-resource" },
+      },
+    });
+    const initialBody = first.res.body;
+    const otherChunk = second.res.nextChunk();
+    ResourceUpdatedBroadcaster.emit((subscriptions) =>
+      subscriptions.has(unrelated) ? [unrelated] : [],
+    );
+    const otherChange = JSON.parse((await otherChunk).split("data: ")[1]);
+    expect(otherChange.method).toBe("notifications/resources/updated");
+    expect(otherChange.params.uri).toBe(unrelated);
+    expect(first.res.body).toBe(initialBody);
+    const changeChunk = first.res.nextChunk();
+    ResourceUpdatedBroadcaster.emit((subscriptions) =>
+      [...subscriptions].filter((subscribed) => subscribed.startsWith("resource://table?")),
+    );
+    expect(JSON.parse((await changeChunk).split("data: ")[1])).toMatchObject({
+      method: "notifications/resources/updated",
+      params: { uri, _meta: { "io.modelcontextprotocol/subscriptionId": "listen-resource" } },
+    });
+    expect(second.res.body.match(/notifications\/resources\/updated/g)?.length).toBe(1);
+  } finally {
+    server.stopAccepting();
+    await Promise.all(server.inFlightRequests().map((request) => request.close()));
+    await Promise.all([first.pending, second.pending]);
+    server.clear();
+  }
 });

@@ -171,7 +171,7 @@ final class PrototypeFeedbackTests: XCTestCase {
         var session = PrototypeSession()
         try session.show(spec())
         let like = try XCTUnwrap(session.spec?.root.children?.first?.onTap)
-        _ = try session.run(like)
+        _ = session.run(like)
         let job = try XCTUnwrap(session.takePlatformCommands().compactMap { command -> PrototypePlatformJob? in
             if case let .start(job) = command { return job } else { return nil }
         }.first)

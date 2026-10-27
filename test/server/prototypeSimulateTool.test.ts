@@ -187,12 +187,12 @@ describe("prototype simulate and timer reports", () => {
         },
       ],
     });
-    expect((await call(android, { action: "inspect" })).prototypes?.[0]?.feedbackLog).toEqual(
-      feedbackLog,
-    );
-    expect((await call(android, { action: "status" })).prototypes?.[0]?.feedbackLog).toEqual(
-      feedbackLog,
-    );
+    expect<unknown>(
+      (await call(android, { action: "inspect" })).prototypes?.[0]?.feedbackLog,
+    ).toEqual(feedbackLog);
+    expect<unknown>(
+      (await call(android, { action: "status" })).prototypes?.[0]?.feedbackLog,
+    ).toEqual(feedbackLog);
     proxy.setInspectReply({ success: true, prototypes: [{ ...reported, feedbackLog: [] }] });
     expect(
       (await call(android, { action: "inspect" })).prototypes?.[0]?.feedbackLog,

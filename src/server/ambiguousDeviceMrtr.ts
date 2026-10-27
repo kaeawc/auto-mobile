@@ -28,16 +28,17 @@ export function withAmbiguousDeviceMrtr<Req extends ToolCallRequest, Result>(
       ) {
         return backend.execute(call);
       }
-      const argumentsWithoutDevice = { ...call.args };
-      delete argumentsWithoutDevice.deviceId;
-      const argumentsHash = createHash("sha256")
-        .update(stableStringify(argumentsWithoutDevice))
-        .digest("hex");
       const result = await backend.execute(call);
       const candidates = ambiguousDeviceCandidates(result);
       if (!candidates) {
         return result;
       }
+      // Hashed only for an ambiguous result: a large-argument call that resolves never pays for it.
+      const argumentsWithoutDevice = { ...call.args };
+      delete argumentsWithoutDevice.deviceId;
+      const argumentsHash = createHash("sha256")
+        .update(stableStringify(argumentsWithoutDevice))
+        .digest("hex");
       // Any retry response map ends the question flow, including empty or malformed answers.
       if (call.extra.inputResponses !== undefined) {
         const state = deviceChoiceRequestStateSchema.safeParse(

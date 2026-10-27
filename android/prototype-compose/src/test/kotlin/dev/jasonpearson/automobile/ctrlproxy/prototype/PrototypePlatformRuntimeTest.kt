@@ -103,6 +103,7 @@ class PrototypePlatformRuntimeTest {
       onSuccess = follow,
     )
 
+  @Suppress("LongParameterList") // Test fixture: every knob has a default.
   private fun TestScope.runtime(
     module: FakePlatformModule,
     events: MutableList<PrototypeEvent>,
@@ -237,6 +238,7 @@ class PrototypePlatformRuntimeTest {
   }
 
   @Test
+  @Suppress("LongMethod") // One scenario: stream, handler and tap must interleave in order.
   fun `state streams rerender and handlers stay atomic versus tap`() = runTest {
     val module = FakePlatformModule()
     val events = mutableListOf<PrototypeEvent>()

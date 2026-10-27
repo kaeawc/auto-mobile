@@ -1,3 +1,4 @@
+import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
 import {
   prototypeStylePolishV2Fields,
   prototypeStylePolishV2UnsupportedMessage,
@@ -10,6 +11,7 @@ import {
 } from "./prototypeStackTransitions";
 import {
   PROTOTYPE_TIMERS_CAPABILITY,
+  PROTOTYPE_EFFECTS_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -210,6 +212,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
     fields: prototypeChoreographyFields,
     unsupportedMessage: prototypeChoreographyUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_EFFECTS_CAPABILITY,
+    fields: prototypeEffectFields,
+    unsupportedMessage: prototypeEffectsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CHART_CAPABILITY,

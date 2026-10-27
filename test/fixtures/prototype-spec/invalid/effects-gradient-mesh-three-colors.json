@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "gradientMesh",
+            "colors": ["primary", "tertiary", "surface"]
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].colors",
+  "expectedMessage": "Array length out of range"
+}

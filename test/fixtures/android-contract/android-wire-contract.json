@@ -8075,6 +8075,12 @@
         "hasDefault": true
       },
       {
+        "name": "effects",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "alignment",
         "type": "string",
         "nullable": true,

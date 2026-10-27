@@ -99,6 +99,7 @@ internal object PrototypeBundleNodeCapabilities {
       if ("shader" in style) caps.add("prototype_custom_shaders_v1")
       if ("runSpacing" in style) caps.add("prototype_flow_grid_v1")
       if ("scale" in style || "rotation" in style) caps.add("prototype_motion_v2")
+      if ("effects" in style) caps.add("prototype_effects_v1")
       if (themedStyle(style)) caps.add("prototype_theme_modes_v1")
     }
   }

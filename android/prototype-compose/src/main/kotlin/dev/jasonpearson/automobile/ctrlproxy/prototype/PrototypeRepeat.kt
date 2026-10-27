@@ -44,6 +44,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
+import dev.jasonpearson.automobile.protocol.PrototypeRepeatNodeBinding
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
 import dev.jasonpearson.automobile.protocol.PrototypeRequestAction
@@ -239,7 +240,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
                 ),
               )
             val bound =
-              PrototypeRepeatTemplate.bindNodeFields(
+              PrototypeRepeatNodeBinding.bindNodeFields(
                 node,
                 instance.alias,
                 instance.item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },

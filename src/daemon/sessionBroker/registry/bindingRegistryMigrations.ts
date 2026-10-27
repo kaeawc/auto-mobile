@@ -1,6 +1,7 @@
 import * as resourceIndexes011 from "./migrations/2026_10_20_011_session_broker_resource_indexes";
 import * as deviceMutations012 from "./migrations/2026_10_21_012_device_mutation_journal";
 import * as brokerTiming013 from "./migrations/2026_10_21_013_session_broker_timing";
+import * as deviceClaims014 from "./migrations/2026_10_26_014_device_claims";
 import { sql, type Kysely } from "kysely";
 import { Migrator, type Migration, type MigrationProvider } from "kysely/migration";
 import { ActionableError } from "../../../models/ActionableError";
@@ -41,6 +42,7 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   "2026_10_20_011_session_broker_resource_indexes": resourceIndexes011,
   "2026_10_21_012_device_mutation_journal": deviceMutations012,
   [BROKER_TIMING_MIGRATION]: brokerTiming013,
+  "2026_10_26_014_device_claims": deviceClaims014,
 };
 
 export const bindingRegistryMigrationProvider: MigrationProvider = {

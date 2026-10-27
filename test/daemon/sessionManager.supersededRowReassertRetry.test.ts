@@ -9,6 +9,7 @@ import {
   createDaemonTerminalReleaseJournal,
   terminalReleaseJournalPath,
 } from "../../src/daemon/terminalReleaseJournal";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -364,29 +365,16 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   );
 
   /**
-   * A device-loss release is superseded while its terminal write is parked; the write then lands
-   * late, under the session that lives on, and the rewrite of the live row fails `failures` times.
+   * The terminal row of a superseded device-loss release stands under the session that lives on,
+   * and the rewrite of the live row over it fails `failures` times (see
+   * {@link supersededReleaseWithParkedWrite} for why the owed rewrite is driven directly).
    */
   async function supersededReleaseWithFailingRewrite(failures: number): Promise<void> {
-    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
-    let landReleaseWrite!: () => void;
-    store.park = new Promise<void>((resolve) => {
-      landReleaseWrite = resolve;
-    });
-    let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
-      commitFence: () => !superseded,
-    });
-    await settleMicrotasks(100);
-    superseded = true;
-    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-    expect(await release).toEqual({ superseded: true });
-    store.park = undefined;
-    store.plainUpserts = 0;
+    const rewrite = await supersededReleaseWithParkedWrite();
     store.failPlainUpserts = failures;
-    landReleaseWrite();
+    rewrite();
     await settleMicrotasks();
-    // The scenario was driven: the terminal row landed and the one rewrite of it failed.
+    // The scenario was driven: the terminal row stands and the one rewrite of it failed.
     expect(store.plainUpserts).toBe(1);
     expect(await store.getSession(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
     expect(manager.getSession(SESSION)).not.toBeNull();
@@ -533,38 +521,47 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(releases).toEqual(["explicit-release", "device-killed"]);
   });
 
-  test("a refused superseded release owes no live rewrite", async () => {
-    manager.attachDaemonSessionId("daemon-1");
-    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
-    const session = await manager.createSession(SESSION, DEVICE, "android", {
-      timeoutMs: IDLE_WINDOW_MS,
-    });
-    let land!: () => void;
-    store.park = new Promise<void>((resolve) => {
-      land = resolve;
-    });
-    let superseded = false;
-    const released = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
-      commitFence: () => !superseded,
-    });
-    await settleMicrotasks();
-    const before = {
-      ...(await store.getSession(SESSION))!,
-      status: "released" as const,
-      release_reason: DEVICE_LOSS,
-      daemon_session_id: "daemon-peer",
-    };
-    store.seed(structuredClone(before));
-    superseded = true;
-    store.park = undefined;
-    store.plainUpserts = 0;
-    land();
-    expect(await released).toEqual({ superseded: true });
-    expect(store.plainUpserts).toBe(0);
-    expect(await store.getSession(SESSION)).toEqual(before);
-    expect(manager.getSession(SESSION)).toBe(session);
-    expect(releases).toEqual([]);
-  });
+  test.each(["durable", "volatile"] as const)(
+    "a %s release whose row a peer's terminal row refuses owes no live rewrite",
+    async (intent) => {
+      if (intent === "volatile") {
+        manager.attachTerminalReleaseJournal(new NoopTerminalReleaseJournal());
+      }
+      manager.attachDaemonSessionId("daemon-1");
+      manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+      let land!: () => void;
+      store.park = new Promise<void>((resolve) => {
+        land = resolve;
+      });
+      let superseded = false;
+      const released = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
+        commitFence: () => !superseded,
+      });
+      await settleMicrotasks();
+      const before = {
+        ...(await store.getSession(SESSION))!,
+        status: "released" as const,
+        release_reason: DEVICE_LOSS,
+        daemon_session_id: "daemon-peer",
+      };
+      store.seed(structuredClone(before));
+      // A newer confirmation after the final fence has passed (#11799 W5): the release has won.
+      superseded = true;
+      store.park = undefined;
+      store.plainUpserts = 0;
+      land();
+      await settleMicrotasks();
+      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await settleMicrotasks();
+      expect(await released).toEqual({ superseded: false, deviceId: DEVICE });
+      expect(store.plainUpserts).toBe(0);
+      expect(await store.getSession(SESSION)).toEqual(before);
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(releases).toEqual([DEVICE_LOSS]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
 
   test("the shutdown drain joins a refused rebind's terminal adoption", async () => {
     await supersededReleaseWithFailingRewrite(1);
@@ -752,31 +749,17 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(releases).toEqual([]);
   });
 
-  /** R2 fences the session long enough to drop R1's owed entry, then is superseded too. */
-  async function overlapSupersededRelease(
-    reason: SessionReleaseReason,
-    failLateWrite = false,
-  ): Promise<void> {
-    let landReleaseWrite!: () => void;
-    store.park = new Promise<void>((resolve) => {
-      landReleaseWrite = resolve;
-    });
-    let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, reason, {
-      commitFence: () => !superseded,
-    });
-    await settleMicrotasks(100);
+  /**
+   * A second superseded release's terminal row stands under the live session, with the reason it
+   * would have superseded (see {@link supersededReleaseWithParkedWrite}), and its rewrite runs.
+   */
+  async function overlapSupersededRelease(reason: SessionReleaseReason): Promise<void> {
+    const session = manager.getSession(SESSION)!;
+    const row = (await store.getSession(SESSION))!;
+    store.seed({ ...row, status: "released", release_reason: reason });
     await timer.advanceTimeAsync(RETRY_DELAY_MS);
     await settleMicrotasks();
-    expect(timer.getPendingTimeouts()).not.toContain(RETRY_DELAY_MS);
-    superseded = true;
-    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-    expect(await release).toEqual({ superseded: true });
-    store.park = undefined;
-    store.failReleaseWrites = failLateWrite ? 1 : 0;
-    landReleaseWrite();
-    await settleMicrotasks();
-    expect(store.failReleaseWrites).toBe(0);
+    await manager.testHooks.wiring.supersededRows.reassertSupersededLiveRow(session, [reason]);
     await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
     await settleMicrotasks();
   }
@@ -785,7 +768,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     "overlapping superseded %s preserves the live session after a busy rewrite",
     async (reason) => {
       await supersededReleaseWithFailingRewrite(1);
-      await overlapSupersededRelease(reason, reason === "heartbeat-timeout");
+      await overlapSupersededRelease(reason);
 
       expect(await store.getSession(SESSION)).toMatchObject({
         status: "active",
@@ -1147,24 +1130,28 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(await store.getSession(SESSION)).toMatchObject({ release_reason: DEVICE_LOSS });
   });
 
-  /** A device-loss release is superseded while its terminal write is parked past the deadline. */
+  /**
+   * The terminal row of a superseded device-loss release stands under a live session, and the
+   * rewrite of the live row over it is the returned call. A release no longer produces this state
+   * since #11799 W5 (a volatile row that landed has won, and a durable release declines before it
+   * writes), so the owed rewrite is driven directly; the retry, bound, drain and guard machinery
+   * behind it is exercised unchanged until the release-driven half is deleted.
+   */
   async function supersededReleaseWithParkedWrite(): Promise<() => void> {
-    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
-    let landReleaseWrite!: () => void;
-    store.park = new Promise<void>((resolve) => {
-      landReleaseWrite = resolve;
+    const session = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
     });
-    let superseded = false;
-    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, {
-      commitFence: () => !superseded,
-    });
-    await settleMicrotasks(100);
-    superseded = true;
-    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-    expect(await release).toEqual({ superseded: true });
-    store.park = undefined;
+    const row = (await store.getSession(SESSION))!;
+    store.seed({ ...row, status: "released", release_reason: DEVICE_LOSS });
     store.plainUpserts = 0;
-    return landReleaseWrite;
+    // The parked write's tracker expected this reassert before the row stood (#11498).
+    const settleExpected = manager.testHooks.wiring.host.superseded.expectReassert(SESSION);
+    manager.testHooks.wiring.host.superseded.remember(session, [DEVICE_LOSS]);
+    return () => {
+      void manager.testHooks.wiring.supersededRows
+        .reassertSupersededLiveRow(session, [DEVICE_LOSS])
+        .finally(settleExpected);
+    };
   }
 
   test("a non-terminal release that completes while the rewrite is in flight does not leave an active row", async () => {

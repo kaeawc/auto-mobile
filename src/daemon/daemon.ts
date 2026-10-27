@@ -666,6 +666,7 @@ export class Daemon {
       identity,
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      bindingRegistry: () => daemon.runtime.bindingRegistry,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,
       deviceStateChangeNotifier: () => daemon.deviceStateChangeNotifier,
       observerSessionRegistry: () => daemon.observerSessionRegistry,

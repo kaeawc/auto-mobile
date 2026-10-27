@@ -1,3 +1,5 @@
+import { lazyDeviceClaims, StoreDeviceClaimMirror, type DeviceClaimMirror } from "../deviceClaims";
+import type { SqliteBindingRegistry } from "../sessionBroker/registry/sqliteBindingRegistry";
 import type {
   DaemonCoreServices,
   DaemonIdentityState,
@@ -63,6 +65,14 @@ import type { DaemonBroker } from "./DaemonBroker";
 import type { DaemonStreams } from "./DaemonStreams";
 
 const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
+
+function androidOwnershipWithMirror(
+  ownership: ForwardLeaseForeignDeviceOwnership,
+  mirror: DeviceClaimMirror,
+): ForwardLeaseForeignDeviceOwnership {
+  ownership.attachClaimMirror(mirror);
+  return ownership;
+}
 export interface DaemonSessionsHost {
   services: Pick<
     DaemonCoreServices,
@@ -90,6 +100,8 @@ export interface DaemonSessionsHost {
     | "shutdownFallbackReleaseNotifications"
   >;
   bindingExclusionFactory: () => (timer: Timer) => BindingExclusion;
+  /** The open binding registry, observed only: the claims mirror never opens one. */
+  bindingRegistry: () => Promise<SqliteBindingRegistry> | undefined;
   foreignCtrlProxyForwardEvidence: () => ForeignCtrlProxyForwardEvidence | undefined;
   deviceStateChangeNotifier: () => DeviceStateChangeNotifier;
   observerSessionRegistry: () => ObserverSessionRegistry;
@@ -113,20 +125,33 @@ export class DaemonSessions {
       OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
       () => this.host.services.sessionManager().sessionNow(),
     );
+    const claimStore = lazyDeviceClaims(() => this.host.bindingRegistry());
+    const claimMirror = (platform: "android" | "ios"): StoreDeviceClaimMirror =>
+      new StoreDeviceClaimMirror({
+        platform,
+        store: claimStore,
+        timer: this.host.services.timer(),
+        daemonSessionId: this.host.identity.daemonSessionId(),
+      });
+    const androidClaimMirror = claimMirror("android");
     return DevicePool.create({
+      deviceClaimMirrors: { android: androidClaimMirror, ios: claimMirror("ios") },
       sessionManager: this.host.services.sessionManager(),
       daemonSessionId: this.host.identity.daemonSessionId(),
       timer: this.host.services.timer(),
       bindingExclusion: this.host.bindingExclusionFactory()(this.host.services.timer()),
       ...(this.host.foreignCtrlProxyForwardEvidence()
         ? {
-            foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              this.host.services.timer(),
-              this.host.foreignCtrlProxyForwardEvidence(),
+            foreignDeviceOwnership: androidOwnershipWithMirror(
+              new ForwardLeaseForeignDeviceOwnership(
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                this.host.services.timer(),
+                this.host.foreignCtrlProxyForwardEvidence(),
+              ),
+              androidClaimMirror,
             ),
           }
         : {}),

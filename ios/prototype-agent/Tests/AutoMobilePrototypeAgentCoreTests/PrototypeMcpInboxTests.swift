@@ -81,6 +81,32 @@ final class PrototypeMcpInboxTests: XCTestCase {
     }
 
     @MainActor
+    func testResultsCarryTheScreenTheAppWasOn() async throws {
+        let files = McpFiles(); let entry = entry
+        files.state.withLock { $0.data["/mcp/inbox/imp.automobile-proto"] = Data([1]) }
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, _ in entry },
+            entries: { [entry] }, warning: { _ in }
+        )
+        _ = await inbox.handle(.importBundle(request: "imp", label: nil), screen: "1902x1338")
+        XCTAssertEqual(try result(files, request: "imp")["screen"], "1902x1338")
+        let command = PrototypeMcpRequest.open(request: "opn", libraryId: id)
+        _ = await inbox.handle(command)
+        await inbox.reportOpened(command, entry: entry, screen: "1206x2622")
+        XCTAssertEqual(try result(files, request: "opn")["screen"], "1206x2622")
+        XCTAssertEqual(try result(files, request: "opn")["status"], "opened")
+    }
+
+    func testScreenFormatRejectsUnusableSizes() {
+        XCTAssertEqual(PrototypeMcpScreen.format(widthPx: 1902, heightPx: 1338), "1902x1338")
+        XCTAssertEqual(PrototypeMcpScreen.format(widthPx: 1205.6, heightPx: 2622), "1206x2622")
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: 0, heightPx: 1338))
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: .nan, heightPx: 1338))
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: 1902, heightPx: .infinity))
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: 200_000, heightPx: 1338))
+    }
+
+    @MainActor
     func testMissingInboxAndInvalidLabel() async throws {
         for label in [nil, "\u{202E}bad"] as [String?] {
             let files = McpFiles()

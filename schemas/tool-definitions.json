@@ -17204,7 +17204,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -17226,8 +17226,21 @@
             "quick_settings",
             "screenshot",
             "split_screen",
-            "dismiss_notification_shade"
+            "dismiss_notification_shade",
+            "rotary_rotate_cw",
+            "rotary_rotate_ccw",
+            "rotary_nudge_up",
+            "rotary_nudge_down",
+            "rotary_nudge_left",
+            "rotary_nudge_right",
+            "rotary_select"
           ]
+        },
+        "steps": {
+          "description": "Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
         },
         "platform": {
           "type": "string",
@@ -27134,6 +27147,21 @@
             },
             "label": {
               "type": "string"
+            },
+            "display": {
+              "description": "iOS multi-screen device (iPhone Duo): the panel the app was on when it answered. Absent on single-screen devices, older apps and ambiguous sizes.",
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": ["inner", "cover", "rear", "external", "unknown"]
+                }
+              },
+              "required": ["key", "role"],
+              "additionalProperties": false
             }
           },
           "required": ["app", "libraryId", "label"],

@@ -84,8 +84,8 @@ describe("ActivateSiri (#14109)", () => {
     expect(result.error).toContain("runner disconnected");
   });
 
-  test.each(["   ", "x".repeat(SIRI_PHRASE_MAX_LENGTH + 1)])(
-    "rejects a blank or oversized phrase before the runner",
+  test.each(["   ", "x".repeat(SIRI_PHRASE_MAX_LENGTH + 1), "open\norders", "a\u0000b"])(
+    "rejects a blank, oversized or control-character phrase before the runner",
     async (phrase) => {
       const result = await siri(SIMULATOR).execute(phrase);
       expect(result.success).toBe(false);

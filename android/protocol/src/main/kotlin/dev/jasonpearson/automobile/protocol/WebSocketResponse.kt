@@ -1082,9 +1082,9 @@ data class PrototypeStatusEntry(
 
 /**
  * One `haptics.perform` or `sound.play` call. Exactly one of [effect] and [sound] is set; [nodeId]
- * is the node whose action made the call, null for a platform handler or when no single node
- * owns it; [timeMs] is the device clock; [suppressed] is true when a system setting or the
- * ringer state stopped the feedback from being produced.
+ * is the node whose action made the call, null for a platform handler or when no single node owns
+ * it; [timeMs] is the device clock; [suppressed] is true when a system setting or the ringer state
+ * stopped the feedback from being produced.
  */
 @Serializable
 data class PrototypeFeedbackEntry(

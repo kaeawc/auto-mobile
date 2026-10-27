@@ -35506,6 +35506,23 @@
               "additionalProperties": false,
               "description": "Power and lifecycle fault injectors (Android only, behind the feature flag)."
             },
+            "vehicle": {
+              "type": "object",
+              "properties": {
+                "motion": {
+                  "type": "string",
+                  "enum": ["parked", "driving", "unset"],
+                  "description": "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset."
+                },
+                "nightMode": {
+                  "type": "string",
+                  "enum": ["on", "off", "unset"],
+                  "description": "Vehicle night-mode signal on an Android Automotive emulator, restored to its prior value; or unset."
+                }
+              },
+              "additionalProperties": false,
+              "description": "Vehicle state (Android Automotive emulators only; 'unsupported' elsewhere), via `cmd car_service inject-vhal-event`."
+            },
             "expiresInSeconds": {
               "type": "integer",
               "minimum": 1,

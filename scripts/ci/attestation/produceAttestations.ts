@@ -1,7 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, type KeyObject } from "node:crypto";
+import { signEnvelopeEd25519 } from "./envelopeSigning";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalInputEntries } from "./inputCanonical";
+import { TIER1_INPUT_HASH_ALGORITHM, tier1InputHash, type HostDescriptor } from "./tier1InputHash";
 import {
   TREE_INPUT_HASH_ALGORITHM,
   Clock,
@@ -50,6 +52,33 @@ export interface TreeProbe {
 export interface InputHasher {
   hash(lane: AttestationLane, probe: TreeProbe): Promise<{ hash: string; algorithm: string }>;
 }
+/**
+ * The hash a lane's attestation carries: tier 1's folds the host and the variables the tasks read
+ * into the tree entries (#11976); the other lanes hash tree entries alone for now.
+ */
+export class LaneInputHasher implements InputHasher {
+  constructor(
+    private readonly host: HostDescriptor,
+    private readonly env: Readonly<Record<string, string | undefined>>,
+    private readonly treeEntries: InputHasher = new TreeEntriesInputHasher(),
+  ) {}
+  async hash(
+    lane: AttestationLane,
+    probe: TreeProbe,
+  ): Promise<{ hash: string; algorithm: string }> {
+    if (lane !== "node") {
+      return this.treeEntries.hash(lane, probe);
+    }
+    const entries = await probe.inputEntries(LANE_INPUT_PATHS.node);
+    if (entries.length === 0) {
+      throw new Error("empty input entries");
+    }
+    return {
+      hash: tier1InputHash({ entries, host: this.host, env: this.env }),
+      algorithm: TIER1_INPUT_HASH_ALGORITHM,
+    };
+  }
+}
 export class TreeEntriesInputHasher implements InputHasher {
   async hash(
     lane: AttestationLane,
@@ -70,6 +99,16 @@ export class TreeEntriesInputHasher implements InputHasher {
 }
 export interface Signer {
   sign(canonicalPayload: string): Promise<AttestationSignature | null>;
+}
+/** Signs with a producer's Ed25519 key; the key itself is provisioned by the producer registry. */
+export class Ed25519Signer implements Signer {
+  constructor(
+    private readonly keyId: string,
+    private readonly privateKey: KeyObject,
+  ) {}
+  async sign(canonicalPayload: string): Promise<AttestationSignature> {
+    return signEnvelopeEd25519(this.keyId, canonicalPayload, this.privateKey);
+  }
 }
 export class UnsignedSigner implements Signer {
   async sign(_canonicalPayload: string): Promise<null> {

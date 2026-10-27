@@ -1,19 +1,18 @@
 import { ActionableError } from "../models/ActionableError";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../models";
-
-/** Set to `true` on builds whose system user (0) is headless: the driver is a secondary user. */
-export const HEADLESS_SYSTEM_USER_PROP = "ro.fw.mu.headless_system_user";
+import { logger } from "../utils/logger";
 
 /**
- * The user CtrlProxy must be set up for, or undefined when the unmodified commands (which act on the
- * system user) are right (#14918).
+ * The user CtrlProxy must be set up for, or undefined when the unmodified commands are right (#14918).
  *
- * Only a device already known to be automotive (the booted device's form factor, so no extra read) that
- * also reports a headless system user is asked anything: every other device returns undefined without
- * issuing a single command, so the phone path is byte for byte unchanged. On a headless build the foreground user comes from `am get-current-user`; when that
- * cannot be read the error names the user problem instead of a generic "accessibility service not
- * enabled".
+ * `pm grant` and `pm path` default to the system user, and on Android Automotive the driver is usually a
+ * secondary user (often 10) because the system user is headless. Only a device already known to be
+ * automotive (the booted device's form factor, so no extra read) is asked anything: every other device
+ * returns undefined without issuing a single command, so the phone path is byte for byte unchanged. On
+ * an automotive device the foreground user comes from `am get-current-user`; user 0 (a single-user build,
+ * or setup still running) needs no targeting. When the user cannot be read the error names the user
+ * problem instead of a generic "accessibility service not enabled".
  */
 export async function resolveSetupUser(
   adb: Pick<AdbExecutor, "executeCommand">,
@@ -22,21 +21,17 @@ export async function resolveSetupUser(
   if (device.formFactor !== "automotive") {
     return undefined;
   }
-  const headless = await adb.executeCommand(`shell getprop ${HEADLESS_SYSTEM_USER_PROP}`, {
-    noRetry: true,
-  });
-  if (headless.stdout.trim().toLowerCase() !== "true") {
-    return undefined;
-  }
   const current = await adb.executeCommand("shell am get-current-user", { noRetry: true });
   const user = /^\s*(\d+)\s*$/.exec(current.stdout)?.[1];
   if (user === undefined) {
     throw new ActionableError(
-      `This device has a headless system user, so CtrlProxy has to be set up for the foreground user, but \`am get-current-user\` did not return a user id (${JSON.stringify(`${current.stdout}${current.stderr}`.trim())}). Make sure a driver user is signed in and in the foreground, then retry.`,
+      `CtrlProxy has to be set up for the foreground user on an automotive device, but \`am get-current-user\` did not return a user id (${JSON.stringify(`${current.stdout}${current.stderr}`.trim())}). Make sure a driver user is signed in and in the foreground, then retry.`,
     );
   }
   const id = Number(user);
-  // The headless system user is never in the foreground; if it reports 0 there is nothing to target.
+  if (id === 0) {
+    logger.debug("[CTRL_PROXY] Automotive device reports foreground user 0; no user targeting");
+  }
   return id === 0 ? undefined : id;
 }
 

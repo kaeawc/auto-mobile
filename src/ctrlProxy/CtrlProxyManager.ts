@@ -77,9 +77,13 @@ import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyMan
 import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
 import { AndroidDeviceTraitsReader } from "../utils/android-cmdline-tools/deviceTraits";
 
+/** How long the resolved setup user is reused before `am get-current-user` is asked again. */
+const SETUP_USER_TTL_MS = 5_000;
+
 export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Kept on the manager for the observe availability-invalidation test seam.
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
+  private cachedSetupUser: { user: number | undefined; at: number } | null = null;
   private readonly accessibility: AndroidCtrlProxyAccessibility;
   private readonly deviceTraits: AndroidDeviceTraitsReader;
   private readonly rebind: AndroidCtrlProxyRebind;
@@ -90,7 +94,19 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * device, otherwise undefined and every command stays exactly as it was (#14918).
    */
   private async setupUser(): Promise<number | undefined> {
-    return resolveSetupUser(this.adb, this.device);
+    // Memoised briefly: a headless device would otherwise pay an adb round trip per status call, and a
+    // user switch is picked up within the window.
+    const now = this.timer.now();
+    if (this.cachedSetupUser && now - this.cachedSetupUser.at < SETUP_USER_TTL_MS) {
+      return this.cachedSetupUser.user;
+    }
+    const user = await resolveSetupUser(this.adb, this.device);
+    if (this.cachedSetupUser && this.cachedSetupUser.user !== user) {
+      // Installed and enabled answers belong to the previous user.
+      this.clearAvailabilityCache();
+    }
+    this.cachedSetupUser = { user, at: now };
+    return user;
   }
 
   private createAndroidCtrlProxyAccessibility(): AndroidCtrlProxyAccessibility {

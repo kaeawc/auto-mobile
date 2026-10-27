@@ -38,6 +38,8 @@ type RebindFlightKind = "check" | "force";
 interface RebindPlan {
   withoutCtrlProxy: string;
   withCtrlProxy: string;
+  /** The user the whole remove, re-add and restore sequence targets, resolved once up front. */
+  user: number | undefined;
 }
 type AccessibilityServiceState = "bound" | "binding" | "crashed" | "absent" | "unbound";
 
@@ -114,10 +116,12 @@ export class AndroidCtrlProxyRebind {
     const result = await this.host.adb.executeCommand("shell dumpsys accessibility", {
       maxBuffer: DUMPSYS_MAX_BUFFER,
     });
-    const diagnostic = `${result.stdout}\n${result.stderr}`;
-    if (isAndroidFrameworkUnavailable(diagnostic)) {
-      throw new ActionableError(diagnostic);
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (isAndroidFrameworkUnavailable(output)) {
+      throw new ActionableError(output);
     }
+    // `dumpsys accessibility` lists every user's state in id order; read the setup user's, not user 0's.
+    const diagnostic = AndroidCtrlProxyRebind.userStateBlock(output, await this.host.setupUser());
 
     const boundServices = AndroidCtrlProxyRebind.accessibilityServiceSection(
       diagnostic,
@@ -344,6 +348,7 @@ export class AndroidCtrlProxyRebind {
     return {
       withoutCtrlProxy: otherServices.join(":"),
       withCtrlProxy: [...otherServices, CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT].join(":"),
+      user,
     };
   }
 
@@ -368,16 +373,16 @@ export class AndroidCtrlProxyRebind {
 
   private async removeAndReaddShielded(plan: RebindPlan, force: boolean): Promise<void> {
     try {
-      await this.writeEnabledServicesShielded(plan.withoutCtrlProxy);
+      await this.writeEnabledServicesShielded(plan.withoutCtrlProxy, plan.user);
       // The old binding attempt ended when its enabled-service entry was removed.
       this.bindingFirstObservedAt = null;
       if (!getAbortSignal()?.aborted) {
         await this.runShieldedCommand(`shell am force-stop ${CTRL_PROXY_PACKAGE}`);
         await this.host.timer.sleep(AndroidCtrlProxyRebind.REBIND_FORCE_STOP_SETTLE_MS);
       }
-      await this.writeCtrlProxyEnabledShielded(plan.withCtrlProxy);
+      await this.writeCtrlProxyEnabledShielded(plan.withCtrlProxy, plan.user);
     } catch (error) {
-      throw await this.restoreAfterRebindFailure(error, plan.withCtrlProxy, force);
+      throw await this.restoreAfterRebindFailure(error, plan.withCtrlProxy, plan.user, force);
     }
   }
 
@@ -387,16 +392,23 @@ export class AndroidCtrlProxyRebind {
    * example TalkBack through the `accessibility` tool) must not be dropped. The
    * remembered list is only the fallback when the live one cannot be read.
    */
-  private async writeCtrlProxyEnabledShielded(rememberedServices: string): Promise<void> {
+  private async writeCtrlProxyEnabledShielded(
+    rememberedServices: string,
+    user: number | undefined,
+  ): Promise<void> {
     await this.writeEnabledServicesShielded(
-      await this.liveServicesWithCtrlProxy(rememberedServices),
+      await this.liveServicesWithCtrlProxy(rememberedServices, user),
+      user,
     );
   }
 
-  private async liveServicesWithCtrlProxy(rememberedServices: string): Promise<string> {
+  private async liveServicesWithCtrlProxy(
+    rememberedServices: string,
+    user: number | undefined,
+  ): Promise<string> {
     try {
       const result = await this.runShieldedCommand(
-        settingsCommand(await this.host.setupUser(), "get secure enabled_accessibility_services"),
+        settingsCommand(user, "get secure enabled_accessibility_services"),
       );
       const diagnostic = `${result.stdout}\n${result.stderr}`;
       if (isAndroidFrameworkUnavailable(diagnostic)) {
@@ -422,12 +434,12 @@ export class AndroidCtrlProxyRebind {
     ].join(":");
   }
 
-  private async writeEnabledServicesShielded(services: string): Promise<unknown> {
+  private writeEnabledServicesShielded(
+    services: string,
+    user: number | undefined,
+  ): Promise<unknown> {
     return this.runShieldedCommand(
-      settingsCommand(
-        await this.host.setupUser(),
-        `put secure enabled_accessibility_services ${shellQuote(services)}`,
-      ),
+      settingsCommand(user, `put secure enabled_accessibility_services ${shellQuote(services)}`),
     );
   }
 
@@ -518,10 +530,11 @@ export class AndroidCtrlProxyRebind {
   private async restoreAfterRebindFailure(
     error: unknown,
     servicesWithCtrlProxy: string,
+    user: number | undefined,
     force: boolean,
   ): Promise<unknown> {
     try {
-      await this.writeCtrlProxyEnabledShielded(servicesWithCtrlProxy);
+      await this.writeCtrlProxyEnabledShielded(servicesWithCtrlProxy, user);
       return error;
     } catch (restoreError) {
       logger.warn(
@@ -568,6 +581,24 @@ export class AndroidCtrlProxyRebind {
         Math.min(AndroidCtrlProxyRebind.REBIND_HEALTH_POLL_MS, remainingMs),
       );
     }
+  }
+
+  /**
+   * The `User state[` block of `dumpsys accessibility` for [user] (its `attributes:{id=<user>,`), or the
+   * whole dump when no user is targeted or no block names that user. AOSP prints one block per user in id
+   * order, so without this a headless device reads user 0's empty state.
+   */
+  static userStateBlock(output: string, user: number | undefined): string {
+    if (user === undefined) {
+      return output;
+    }
+    const blocks = output.split(/^[\t ]*User state\[/m).slice(1);
+    const idPattern = new RegExp(`\\bid=${user}\\b`);
+    // A dump can repeat the header line for one user; the fullest block is the one with the services.
+    const own = blocks
+      .filter((block) => idPattern.test(block.slice(0, 200)))
+      .sort((left, right) => right.length - left.length)[0];
+    return own ?? output;
   }
 
   private static accessibilityServiceSection(output: string, name: string): string {

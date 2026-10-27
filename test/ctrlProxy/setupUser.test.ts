@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { AndroidCtrlProxyRebind } from "../../src/ctrlProxy/AndroidCtrlProxyRebind";
 import { ActionableError } from "../../src/models/ActionableError";
 import { AndroidCtrlProxyAccessibility } from "../../src/ctrlProxy/AndroidCtrlProxyAccessibility";
 import { grantLocalNetworkPermission } from "../../src/ctrlProxy/grantLocalNetworkPermission";
-import {
-  HEADLESS_SYSTEM_USER_PROP,
-  resolveSetupUser,
-  settingsCommand,
-  userFlag,
-} from "../../src/ctrlProxy/setupUser";
+import { resolveSetupUser, settingsCommand, userFlag } from "../../src/ctrlProxy/setupUser";
 import { CTRL_PROXY_PACKAGE } from "../../src/ctrlProxy/constants";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -17,16 +15,17 @@ const SERVICE = `${CTRL_PROXY_PACKAGE}/${CTRL_PROXY_PACKAGE}.CtrlProxy`;
 const respond = (adb: FakeAdbExecutor, pattern: string, stdout: string) =>
   adb.setCommandResponse(pattern, createExecResult(stdout, ""));
 
-function headlessAutomotive(user = "10") {
+function automotiveWithForegroundUser(user = "10") {
   const adb = new FakeAdbExecutor();
-  respond(adb, HEADLESS_SYSTEM_USER_PROP, "true\n");
   respond(adb, "am get-current-user", `${user}\n`);
   return adb;
 }
 
 describe("resolveSetupUser (#14918)", () => {
-  test("a headless-system-user automotive device resolves to the foreground user", async () => {
-    expect(await resolveSetupUser(headlessAutomotive("10"), { formFactor: "automotive" })).toBe(10);
+  test("an automotive device resolves to the foreground user", async () => {
+    const adb = automotiveWithForegroundUser("10");
+    expect(await resolveSetupUser(adb, { formFactor: "automotive" })).toBe(10);
+    expect(adb.getExecutedCommands()).toEqual(["shell am get-current-user"]);
   });
 
   test("a phone, or any non-automotive device, issues no command at all", async () => {
@@ -37,29 +36,21 @@ describe("resolveSetupUser (#14918)", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("an automotive device whose system user is not headless keeps the default user", async () => {
-    const adb = new FakeAdbExecutor();
-    respond(adb, HEADLESS_SYSTEM_USER_PROP, "false\n");
-    expect(await resolveSetupUser(adb, { formFactor: "automotive" })).toBeUndefined();
-    expect(adb.getExecutedCommands().some((c) => c.includes("get-current-user"))).toBe(false);
-  });
-
   test("a foreground user that cannot be read is an actionable user error", async () => {
     const adb = new FakeAdbExecutor();
-    respond(adb, HEADLESS_SYSTEM_USER_PROP, "true");
-    respond(adb, "am get-current-user", "Error: system server not ready");
+    respond(adb, "am get-current-user", "Error: Current user not set");
     const error = await resolveSetupUser(adb, { formFactor: "automotive" }).catch(
       (thrown: unknown) => thrown,
     );
     expect(error).toBeInstanceOf(ActionableError);
-    expect((error as Error).message).toContain("headless system user");
     expect((error as Error).message).toContain("foreground user");
+    expect((error as Error).message).toContain("Current user not set");
   });
 
   test("a reported user 0 means there is nothing to target", async () => {
-    expect(await resolveSetupUser(headlessAutomotive("0"), { formFactor: "automotive" })).toBe(
-      undefined,
-    );
+    expect(
+      await resolveSetupUser(automotiveWithForegroundUser("0"), { formFactor: "automotive" }),
+    ).toBeUndefined();
   });
 
   test("command builders add --user only for a resolved user", () => {
@@ -176,5 +167,31 @@ describe("local-network grant for the setup user", () => {
     expect(plain.getExecutedCommands()).toEqual([
       `shell pm grant ${CTRL_PROXY_PACKAGE} android.permission.ACCESS_LOCAL_NETWORK`,
     ]);
+  });
+});
+
+describe("userStateBlock", () => {
+  const captured = readFileSync(
+    path.join(import.meta.dir, "../fixtures/ctrlproxy/accessibility-api36-bound.txt"),
+    "utf8",
+  );
+  const ownUser = captured.replaceAll("id=0,", "id=10,");
+  const emptyUser0 =
+    "User state[\n     attributes:{id=0, installedServiceCount=0}\n     Bound services:{}\n     Enabled services:{}\n     Binding services:{}\n     Crashed services:{}\n";
+  const dump = `ACCESSIBILITY MANAGER (dumpsys accessibility)\n\n${emptyUser0}\n${ownUser}`;
+
+  test("selects the setup user's block from a multi-user dump", () => {
+    const block = AndroidCtrlProxyRebind.userStateBlock(dump, 10);
+    expect(block).toContain("Enabled services:{{dev.jasonpearson.automobile.ctrlproxy");
+    expect(block).not.toContain("installedServiceCount=0");
+  });
+
+  test("user 0's block is what an untargeted read would have seen", () => {
+    expect(AndroidCtrlProxyRebind.userStateBlock(dump, 0)).toContain("installedServiceCount=0");
+    expect(AndroidCtrlProxyRebind.userStateBlock(dump, undefined)).toBe(dump);
+  });
+
+  test("a dump with no block for the user is returned whole", () => {
+    expect(AndroidCtrlProxyRebind.userStateBlock(dump, 99)).toBe(dump);
   });
 });

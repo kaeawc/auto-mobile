@@ -853,6 +853,8 @@ export interface Database {
   device_locks: DeviceLocksTable;
   device_resource_applications: DeviceResourceApplicationsTable;
   mcp_tasks: McpTasksTable;
+  prototype_test_sessions: PrototypeTestSessionsTable;
+  prototype_test_session_steps: PrototypeTestSessionEventsTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provisioned_device_transport_tombstones: ProvisionedDeviceTransportTombstonesTable;
   tool_selection_profile_provenance: ToolSelectionProfileProvenanceTable;
@@ -1040,3 +1042,28 @@ export type NewNavigationNodeFingerprint = Insertable<NavigationNodeFingerprints
 
 export type NavigationSuggestion = Selectable<NavigationSuggestionsTable>;
 export type NewNavigationSuggestion = Insertable<NavigationSuggestionsTable>;
+
+export interface PrototypeTestSessionsTable {
+  test_session_id: string;
+  prototype_id: string;
+  device_id: string;
+  session_uuid: string | null;
+  cohort: string | null;
+  goal: string | null;
+  start_screen: string;
+  status: "active" | "ended";
+  started_at_ms: number;
+  ended_at_ms: number | null;
+  ended_reason: "end" | "dismissed" | "released" | null;
+  dropped_count: number;
+}
+export interface PrototypeTestSessionEventsTable {
+  test_session_id: string;
+  seq: number;
+  event_sequence: number;
+  at_ms: number;
+  kind: string;
+  name: string | null;
+  screen: string;
+  detail_json: string;
+}

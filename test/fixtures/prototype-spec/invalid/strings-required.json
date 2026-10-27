@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{t:title}",
+      "semantics": {
+        "heading": true,
+        "label": "{t:title}",
+        "hint": "{t:hint}",
+        "traits": ["selected"]
+      }
+    }
+  },
+  "expectedPath": "root.text",
+  "expectedMessage": "String placeholders require strings"
+}

@@ -481,6 +481,7 @@ data class ShowPrototype(
   val reset: Boolean = false,
   val appearance: PrototypeAppearanceOverride? = null,
   val replaceOthers: Boolean = true,
+  val locale: String? = null,
 ) : WebSocketRequest()
 
 @Serializable

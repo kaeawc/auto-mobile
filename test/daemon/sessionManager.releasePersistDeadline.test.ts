@@ -566,21 +566,22 @@ describe("a superseded device-loss release leaves the live session's row active 
         .stable_identity_generation;
       const gate = Promise.withResolvers<void>();
       h.persistence.park = gate.promise;
-      let superseded = false;
+      // A durable intent commits the release before its row lands: the device is freed, the
+      // statement stays parked, and the lifted fence permits a new incarnation (#11799).
       const release = h.manager.releaseSessionUnlessSuperseded(
         "old",
         `device-disconnected:${device.deviceId}`,
-        { commitFence: () => !superseded },
+        { commitFence: () => true },
       );
       await flush();
       const snapshot = h.manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot("old")!;
-      superseded = true;
       await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
-      await expect(release).resolves.toEqual({ superseded: true });
-      // Lifted fence permits a new incarnation. #12515: a different Session's upsert must
-      // stay protected even when this same daemon owned the old release.
+      await expect(release).resolves.toEqual({ superseded: false, deviceId: device.deviceId });
+      // #12515: a different Session's upsert must stay protected even when this same daemon
+      // owned the old release.
       h.persistence.park = undefined;
-      await h.manager.releaseSession("old", "plan-auto-release");
+      const lift = Reflect.get(h.manager, "liftTerminalFence") as (uuid: string) => void;
+      lift.call(h.manager, "old");
       await h.manager.createSession("old", device.deviceId, "android");
       const generation = (await h.persistence.getSession("old"))!.stable_identity_generation!;
       expect(generation).toBeGreaterThan(originalGeneration!);
@@ -605,7 +606,7 @@ describe("a superseded device-loss release leaves the live session's row active 
       expect(await h.manager.drainReleasePromises(5_000)).toBe(true);
       await h.timer.advanceTimeAsync(10_000);
       await flush();
-      expect(h.persistence.releaseWrites).toHaveLength(2);
+      expect(h.persistence.releaseWrites).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }

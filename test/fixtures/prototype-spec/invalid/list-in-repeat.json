@@ -1,0 +1,62 @@
+{
+  "spec": {
+    "id": "feed",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "feed": {
+        "items": [
+          {
+            "id": 1,
+            "title": "One"
+          },
+          {
+            "id": 2,
+            "title": "Two"
+          }
+        ]
+      },
+      "page": {
+        "next": "p2"
+      }
+    },
+    "state": {
+      "refreshing": false,
+      "feedStatus": "idle"
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": 1
+          }
+        ],
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "list",
+          "repeat": {
+            "items": {
+              "path": "/feed/items"
+            },
+            "as": "post",
+            "key": "id"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "{post.title}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0]",
+  "expectedMessage": "A list cannot sit inside a repeat template"
+}

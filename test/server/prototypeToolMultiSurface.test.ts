@@ -203,6 +203,25 @@ describe("prototype multiple surfaces", () => {
     client.setInspectReply({ success: true, prototypes: [reported("b")], droppedEvents: 0 });
     expect((await call({ action: "inspect" })).prototypes?.map((entry) => entry.id)).toEqual(["b"]);
   });
+  test("inspect carries shader fallback reasons into host status and output", async () => {
+    const shaderFailures = {
+      "root/node": "Shader disabled: 8 consecutive frame intervals exceeded 24 ms.",
+    };
+    client.setInspectReply({
+      success: true,
+      prototypes: [{ ...reported("shader"), shaderFailures }],
+      droppedEvents: 0,
+    });
+    const inspected = await call({ action: "inspect" });
+    expect(inspected.prototypes?.[0]?.shaderFailures).toEqual(shaderFailures);
+    expect(prototypeOutputSchema.parse(inspected).prototypes?.[0]?.shaderFailures).toEqual(
+      shaderFailures,
+    );
+    expect((await status()).prototypes?.[0]?.shaderFailures).toEqual(shaderFailures);
+    client.setInspectReply({ success: true, prototypes: [reported("shader")], droppedEvents: 0 });
+    await call({ action: "inspect" });
+    expect((await status()).prototypes?.[0]?.shaderFailures).toBeUndefined();
+  });
   test("a refused fifth preserves all presence and event snapshots", async () => {
     for (const id of ["a", "b", "c", "d"]) {
       await show(id);

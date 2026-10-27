@@ -60,6 +60,8 @@ export interface PrototypeAgentResult extends PrototypeAgentMessage {
   requestId: string;
   success: boolean;
   error?: string;
+  /** A show of a spec with `window.backdrop` (`prototype_backdrop_v1`): `blur` or `fallback`. */
+  backdrop?: string;
 }
 
 export interface PrototypeAgentHandshake {

@@ -40,12 +40,16 @@ class CommandAdvertisementTest {
       "prototype_multi_surface_v1",
       "prototype_window_options_v1",
       "prototype_window_chrome_v1",
+      "prototype_dead_tap_v1",
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
       "prototype_tooltip_v1",
+      "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
+      "prototype_bar_scroll_v1",
       "prototype_data_model_v1",
+      "prototype_design_platform_v1",
       "prototype_data_actions_v1",
       "prototype_network_v1",
       "prototype_network_device_v1",
@@ -53,6 +57,7 @@ class CommandAdvertisementTest {
       "prototype_platform_test_v1",
       "prototype_platform_device_v1",
       "prototype_text_field_options_v1",
+      "prototype_scroll_motion_v1",
       "prototype_gestures_v1",
       "prototype_swipe_actions_v1",
       "prototype_text_field_actions_v1",
@@ -63,6 +68,9 @@ class CommandAdvertisementTest {
       "prototype_rich_text_v1",
       "prototype_loading_states_v1",
       "prototype_style_polish_v2",
+      "prototype_strings_v1",
+      "prototype_semantics_v1",
+      "prototype_string_conditions_v1",
       "prototype_motion_v2",
       "prototype_window_motion_v1",
       "prototype_effects_v1",
@@ -71,12 +79,16 @@ class CommandAdvertisementTest {
       "prototype_reduced_motion_v1",
       "prototype_shared_element_v1",
       "prototype_chart_v1",
+      "prototype_lazy_list_v1",
       "prototype_linkify_v1",
+      "prototype_format_v1",
       "prototype_chat_scroll_v1",
       "prototype_drawer_v1",
       "prototype_emit_context_v1",
       "prototype_checks_v1",
+      "prototype_custom_shaders_v1",
       "prototype_appearance_v1",
+      "prototype_backdrop_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
       "prototype_patch_v1",
@@ -109,6 +121,7 @@ class CommandAdvertisementTest {
           .supportedCommands()
       assertTrue("All sealed requests on API $sdk", commands.containsAll(sealedRequestTypes))
       assertTrue("Request ID echo on API $sdk", commands.contains("request_id_echo_v1"))
+      assertEquals(sdk >= 33, "prototype_custom_shaders_v1" in commands)
       assertCoreCommands(commands)
       assertPrototypeCommands(commands)
       assertEquals(commands.size, commands.toSet().size)
@@ -154,9 +167,11 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_multi_surface_v1"))
     assertTrue(commands.contains("prototype_window_options_v1"))
     assertTrue(commands.contains("prototype_window_chrome_v1"))
+    assertTrue(commands.contains("prototype_dead_tap_v1"))
     assertTrue(commands.contains("prototype_theme_modes_v1"))
     assertTrue(commands.contains("prototype_flow_grid_v1"))
     assertTrue(commands.contains("prototype_pager_options_v1"))
+    assertTrue(commands.contains("prototype_bar_scroll_v1"))
     assertTrue(commands.contains("prototype_data_model_v1"))
     assertTrue(commands.contains("prototype_data_actions_v1"))
     assertTrue(commands.contains("prototype_network_v1"))
@@ -174,6 +189,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_search_bar_v1"))
     assertTrue(commands.contains("prototype_rich_text_v1"))
     assertTrue(commands.contains("prototype_linkify_v1"))
+    assertTrue(commands.contains("prototype_format_v1"))
     assertTrue(commands.contains("prototype_chat_scroll_v1"))
     assertTrue(commands.contains("prototype_emit_context_v1"))
     assertTrue(commands.contains("prototype_checks_v1"))

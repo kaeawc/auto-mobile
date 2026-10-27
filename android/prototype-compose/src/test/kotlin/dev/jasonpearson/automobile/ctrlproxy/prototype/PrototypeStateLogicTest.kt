@@ -194,6 +194,7 @@ class PrototypeStateLogicTest {
         fontStyle = "italic",
         overflow = "ellipsis",
         fontFamily = PrototypeFontFamily.Named("serif"),
+        shader = PrototypeShader("effect", mapOf("strength" to 0.5)),
         textStyle = "titleLarge",
         effects = listOf(buildJsonObject { put("type", "noise") }),
       )

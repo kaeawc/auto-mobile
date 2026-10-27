@@ -40,8 +40,10 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -62,6 +64,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+
+/** The window blur-behind radius a request asks for; only a real-blur plan has one. */
+internal fun backdropBlurPx(request: PrototypeRequest, density: Float): Int =
+  request.backdrop
+    ?.takeIf { it.mode == PrototypeBackdropMode.BLUR }
+    ?.let { (it.radiusDp * density).toInt() } ?: 0
 
 const val MIN_TOUCH_THROUGH_SETTLE_MILLIS = 100L
 const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
@@ -132,6 +140,8 @@ data class PrototypeRequest(
   val motionActivity: PrototypeMotionActivity? = null,
   val hasStackBack: Boolean = false,
   val onHostBack: (suspend () -> Unit)? = null,
+  /** `window.backdrop` as resolved for this show (#15126); null without one. */
+  val backdrop: PrototypeBackdropPlan? = null,
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
   val focusable: Boolean
@@ -359,6 +369,7 @@ class DefaultPrototypeHost(
           hasStackBack = request.hasStackBack,
           opaque = prototypeWindowOpaque(request),
           surfaceId = request.surfaceId,
+          blurBehindRadiusPx = backdropBlurPx(request, target.density()),
         )
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -551,6 +562,7 @@ class DefaultPrototypeHost(
         hasStackBack = current.request.hasStackBack,
         opaque = prototypeWindowOpaque(current.request),
         surfaceId = current.request.surfaceId,
+        blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
@@ -775,6 +787,7 @@ class DefaultPrototypeHost(
   /** The view hidden for a capture, or null when no window is showing. */
   private fun hideForCaptureOnMain(): View? {
     val current = window ?: return null
+    current.owner.pause()
     current.view.visibility = View.INVISIBLE
     return current.view
   }
@@ -799,9 +812,10 @@ class DefaultPrototypeHost(
   private suspend fun restoreAfterCapture(view: View) {
     try {
       mainThread.onMain {
-        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true)
+        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true) {
           view.visibility = View.VISIBLE
-        else if (window?.view === view) dismissOnMain()
+          if (window?.view === view) window?.owner?.resume()
+        } else if (window?.view === view) dismissOnMain()
       }
     } catch (error: Exception) {
       Log.e(TAG, "Failed to restore prototype after capture", error)
@@ -1204,6 +1218,8 @@ private fun PrototypeChromelessContent(
   // Keep dismiss semantics on an unfaded host wrapper, accessible even at opacity zero.
   Box(
     Modifier.fillMaxSize().semantics {
+      // The escape pill's tag is the resource id observe and tapOn see (#15120).
+      testTagsAsResourceId = true
       dismiss(label = "Dismiss AutoMobile prototype") {
         scope.launch { request.onHostDismiss() }
         true
@@ -1238,7 +1254,8 @@ private fun PrototypeChromelessContent(
         val colors = prototypeCloseColors(MaterialTheme.colorScheme)
         TextButton(
           onClick = { scope.launch { request.onHostDismiss() } },
-          modifier = Modifier.background(colors.background, CircleShape),
+          modifier =
+            Modifier.testTag(PROTOTYPE_DISMISS_TEST_TAG).background(colors.background, CircleShape),
           colors = ButtonDefaults.textButtonColors(contentColor = colors.content),
         ) {
           Text("Dismiss AutoMobile prototype", style = MaterialTheme.typography.labelMedium)

@@ -88,6 +88,9 @@ internal object PrototypeStateChecks {
       nodeCheckError(value, path)?.let {
         return it
       }
+      conditionCheckError(value["errorWhen"], "$path.errorWhen", keys)?.let {
+        return it
+      }
       conditionCheckError(value["visibleWhen"], "$path.visibleWhen", keys)?.let {
         return it
       }

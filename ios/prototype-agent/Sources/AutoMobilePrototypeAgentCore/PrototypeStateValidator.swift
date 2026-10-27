@@ -46,6 +46,9 @@ enum PrototypeStateValidator {
         }
         for node in nodes {
             if let rejection = refreshError(node, state) { return rejection.message }
+            if node.type == "scroll", let key = node.atEndKey, state[key]?.boolValue == nil {
+                return "Chat scroll requires a declared boolean atEndKey"
+            }
         }
         return actionRejection(actions, state: state)
     }
@@ -73,6 +76,7 @@ enum PrototypeStateValidator {
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
+        actions += node.onStartReached ?? []
         actions += (node.swipeActions?.entries ?? []).flatMap(\.action.onTap)
         actions += node.trailingIcon?.onTap ?? []
         actions += node.refresh?.onRefresh ?? []
@@ -115,7 +119,7 @@ enum PrototypeStateValidator {
             ) : nil
         case "radioGroup", "segmentedButton", "select":
             return radioGroupError(node, stored)
-        case "tabBar", "bottomNav":
+        case "pager", "tabBar", "bottomNav":
             guard let number = stored?.numberValue, number.isFinite, number >= 0,
                   number.truncatingRemainder(dividingBy: 1) == 0
             else { return .init(field: "stateKey", message: "Selection requires a nonnegative integer state key")
@@ -326,10 +330,11 @@ enum PrototypeStateValidator {
 }
 
 extension Condition {
-    /// The `key` of a `{key, equals | notEquals | gt | lt}` condition; the grouping forms have none.
+    /// The state key of a scalar, numeric or string comparison; grouping forms have none.
     var key: String? {
         switch self {
-        case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _): key
+        case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _),
+             let .contains(key, _), let .startsWith(key, _), let .lengthGt(key, _), let .lengthLt(key, _): key
         case .all, .any, .not, .valid: nil
         }
     }

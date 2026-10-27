@@ -214,6 +214,7 @@ internal fun visiblePrototypeSelect(
   if (!node.visible || (node.role in PROTOTYPE_MODAL_ROLES && !node.sheetOpen)) return null
   if (node.role == "select" && node.identity == identity) return node
   val children =
-    if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
+    if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page))
+    else node.childrenForIdentity(identity)
   return children.firstNotNullOfOrNull { visiblePrototypeSelect(it, identity) }
 }

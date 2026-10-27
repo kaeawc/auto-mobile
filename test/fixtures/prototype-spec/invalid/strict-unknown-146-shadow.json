@@ -1,0 +1,100 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "scroll",
+      "axis": "vertical",
+      "fadeEdges": {
+        "top": 0,
+        "bottom": 24,
+        "start": 12,
+        "end": 1000
+      },
+      "child": {
+        "style": {
+          "cornerRadius": "full",
+          "border": {
+            "width": 2,
+            "gradient": {
+              "type": "linear",
+              "angle": 45,
+              "stops": [
+                {
+                  "color": {
+                    "light": "#FFFFFF",
+                    "dark": "#000000"
+                  }
+                },
+                {
+                  "color": "primary"
+                }
+              ]
+            }
+          },
+          "shadows": [
+            {
+              "color": "#000000",
+              "radius": 20,
+              "zzzUnknown": true
+            },
+            {
+              "color": {
+                "light": "#000000",
+                "dark": "scrim"
+              },
+              "radius": 1000,
+              "spread": -1000,
+              "offset": {
+                "x": -1000,
+                "y": 1000
+              }
+            },
+            {
+              "color": "scrim",
+              "radius": 0,
+              "spread": 1000,
+              "inner": true
+            }
+          ],
+          "cornerStyle": "continuous"
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "key": "active",
+              "equals": true
+            },
+            "style": {
+              "shadows": [
+                {
+                  "color": "#000000",
+                  "radius": 20
+                }
+              ],
+              "cornerStyle": "circular"
+            }
+          }
+        ],
+        "type": "image",
+        "asset": "photo",
+        "filter": {
+          "saturation": 2,
+          "tint": {
+            "light": "primary",
+            "dark": "#FFFFFF"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.child.style.shadows[0].zzzUnknown"
+}

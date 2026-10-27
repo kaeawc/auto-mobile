@@ -50,7 +50,7 @@ final class PrototypeZoomNavigationTests: XCTestCase {
         )
         let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
         var session = PrototypeSession()
-        try session.show(spec)
+        session.show(spec)
         _ = try session.run([action(#"{"type":"push","stack":"nav","screen":"detail","source":"hero"}"#)])
         let zoom = session.stackEntries["nav"]?.last
         XCTAssertEqual(zoom?.zoomSource, "hero")
@@ -58,7 +58,7 @@ final class PrototypeZoomNavigationTests: XCTestCase {
         XCTAssertNil(session.stackEntries["nav"]?.last?.zoomSource)
         _ = try session.run([action(#"{"type":"pop","stack":"nav"}"#)])
         XCTAssertEqual(session.stackEntries["nav"]?.last, zoom)
-        try session.show(spec)
+        session.show(spec)
         XCTAssertEqual(session.stackEntries["nav"]?.last, zoom)
     }
 

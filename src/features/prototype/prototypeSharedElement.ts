@@ -158,12 +158,10 @@ function addSharedNode(
     return undefined;
   }
   const at = `${path}.${shared ? "shared.key" : "sharedKey"}`;
-  if (shared && node.sharedKey !== undefined) {
-    return fail(`${path}.shared`, "shared and sharedKey cannot both be set");
-  }
   const source = sources.has(String(shared?.key ?? node.sharedKey));
-  if (node.visibleWhen === undefined && !source) {
-    return fail(at, "sharedKey requires visibleWhen on the same node");
+  const usage = sharedUsageError(node, path, at, source);
+  if (usage) {
+    return usage;
   }
   const keys = sharedKeys(located, nodes, data);
   if (!Array.isArray(keys)) {
@@ -181,6 +179,21 @@ function addSharedNode(
       return error;
     }
     prior.push(entry);
+  }
+  return undefined;
+}
+
+function sharedUsageError(
+  node: Record<string, unknown>,
+  path: string,
+  at: string,
+  source: boolean,
+): PrototypeValidationError | undefined {
+  if (record(node.shared) && node.sharedKey !== undefined) {
+    return fail(`${path}.shared`, "shared and sharedKey cannot both be set");
+  }
+  if (node.visibleWhen === undefined && !source) {
+    return fail(at, "sharedKey requires visibleWhen on the same node");
   }
   return undefined;
 }

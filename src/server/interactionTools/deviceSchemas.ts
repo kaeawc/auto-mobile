@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { MAX_ROTARY_STEPS, ROTARY_BUTTONS } from "../../features/action/RotaryInput";
 import { KEYBOARD_PROFILE_IDS } from "../../features/action/keyboardProfiles";
 import { HINGE_ANGLE_MAX_DEGREES, HINGE_ANGLE_MIN_DEGREES } from "../../features/device/SetPosture";
 import { hierarchyLayerSchema } from "../../models/elementSelectorSchemas";
@@ -114,7 +115,16 @@ export const pressButtonInput = z.object({
     "screenshot",
     "split_screen",
     "dismiss_notification_shade",
+    // Rotary controller input on Android Automotive (#14920); refused on other devices.
+    ...ROTARY_BUTTONS,
   ]),
+  steps: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_ROTARY_STEPS)
+    .optional()
+    .describe("Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1)."),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on
   // its own.

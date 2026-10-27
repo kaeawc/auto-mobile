@@ -65,6 +65,13 @@ const buttonClasses: Record<string, ObservationActionClass> = {
   menu: "inPlace",
   volume_up: "inPlace",
   volume_down: "inPlace",
+  rotary_rotate_cw: "inPlace",
+  rotary_rotate_ccw: "inPlace",
+  rotary_nudge_up: "inPlace",
+  rotary_nudge_down: "inPlace",
+  rotary_nudge_left: "inPlace",
+  rotary_nudge_right: "inPlace",
+  rotary_select: "navigation",
 };
 const submittingKeys = ["enter", "done", "go", "search", "send"];
 const inPlaceKeys = [

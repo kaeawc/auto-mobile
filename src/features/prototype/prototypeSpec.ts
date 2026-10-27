@@ -224,6 +224,7 @@ const repeatSchema = z
     as: keySchema,
     derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),
+    stagger: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
@@ -846,6 +847,7 @@ const windowSchema = z
     ...prototypePlatformNamespaceShape,
     placement: placementSchema,
     backdrop: prototypeBackdropSchema.optional(),
+    transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()

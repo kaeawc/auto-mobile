@@ -9115,6 +9115,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeBackdrop",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeZoomable": [

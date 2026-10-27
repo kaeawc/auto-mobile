@@ -67,5 +67,6 @@ object AutoMobilePrototype {
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
       "prototype_tooltip_v1",
+      "prototype_window_motion_v1",
     )
 }

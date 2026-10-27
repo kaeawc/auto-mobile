@@ -9,6 +9,7 @@ enum PrototypeStrictCapabilities {
         if includeAgentGates {
             if spec["theme"] != nil { need("theme_modes") }
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
+            if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         }
         if spec["strings"] != nil { need("strings") }
         for key in ["window", "theme"] {
@@ -117,6 +118,7 @@ enum PrototypeStrictCapabilities {
                     (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
                 if key == "repeat" {
                     if child.objectFields?["derive"] != nil { need("format") }
+                    if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if let repeatSpec = child.objectFields,
                        repeatSpec["items"]?
                        .objectFields != nil || repeatSpec["key"] != nil { need("data_model") }; continue

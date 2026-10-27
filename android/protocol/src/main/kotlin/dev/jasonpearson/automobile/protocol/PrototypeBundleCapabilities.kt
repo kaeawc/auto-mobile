@@ -40,6 +40,8 @@ internal object PrototypeBundleCapabilities {
     }
     if (text(spec["motion"]) == "expressive") caps.add(PrototypeMotionV3.CAPABILITY)
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
+    if ((spec["window"] as? JsonObject)?.get("transition") != null)
+      caps.add("prototype_window_motion_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
     if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {

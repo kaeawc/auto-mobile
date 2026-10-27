@@ -171,6 +171,10 @@ private fun EmbeddedPrototype(
   onError: @Composable (PrototypeLoadError) -> Unit,
 ) {
   val context = LocalContext.current.applicationContext
+  val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+  val locales =
+    (0 until configuration.locales.size()).map { configuration.locales[it].toLanguageTag() }
+  val latestLocales by rememberUpdatedState(locales)
   val lifecycle = LocalLifecycleOwner.current.lifecycle
   val environment = LocalEmbeddedPrototypeEnvironment.current
   val compositionScope = rememberCoroutineScope()
@@ -184,7 +188,7 @@ private fun EmbeddedPrototype(
   LaunchedEffect(owner) {
     interactions.withLock {
       owner.open(
-        EmbeddedConfiguration(input, scope, environment, context),
+        EmbeddedConfiguration(input, scope, environment, context, locales = { latestLocales }),
       ) {
         environment.host?.eventSink?.send(it)
         latestCallbacks.send(it)
@@ -195,6 +199,9 @@ private fun EmbeddedPrototype(
   else EmbeddedHostLifetime(owner, host, lifecycle)
   val session = owner.session
   if (session != null) {
+    LaunchedEffect(session, locales) {
+      interactions.withLock { session.runtime.updateLocales(locales) }
+    }
     val active by session.runtime.snapshots.collectAsState()
     val seek = remember(session.runtime) { PrototypeBackSeek() }
     val dispatch: suspend (PrototypeInteraction) -> Unit = {
@@ -291,6 +298,7 @@ private class EmbeddedConfiguration(
   val scope: CoroutineScope,
   val environment: EmbeddedPrototypeEnvironment,
   context: android.content.Context,
+  val locales: () -> List<String>,
 ) {
   val spec = input.spec
   val storage = input.storage
@@ -360,7 +368,10 @@ private class EmbeddedOwner(
         newRequestId = config.environment.requestId,
         initialPlatformState = config.initialDeviceState,
       )
+    // Seed before publishing the session, so its first rendered frame is already localized.
+    runtime.updateLocales(config.locales())
     config.environment.host?.onRuntime?.invoke(runtime)
+    runtime.shown()
     session =
       EmbeddedSession(
         runtime,

@@ -14,6 +14,7 @@
         init(
             spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption,
             network: PrototypeNetworkConfiguration,
+            options: PrototypeEmbeddedOptions = PrototypeEmbeddedOptions(),
             registry: PrototypePlatformRegistry = .empty,
             onEvent: @escaping @MainActor (PrototypeEvent) -> Void,
             onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void,
@@ -24,6 +25,12 @@
             self.onLoadError = onLoadError
             let loaded: (spec: PrototypeSpec, bytes: Int)?
             do {
+                if let locale = options.locale, locale.utf16.count > 35 || !PrototypeContractValidator.matches(
+                    "localeTag",
+                    locale
+                ) {
+                    throw PrototypeLoadError.invalidSpec(path: "locale", message: "Invalid locale tag")
+                }
                 loaded = try PrototypeEmbeddedSpec.load(
                     data: spec,
                     supported: AutoMobilePrototypeCapabilities.supported + registry.capabilities
@@ -61,7 +68,8 @@
                 }
             }
             model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
-            model.show(loaded.spec, specBytes: loaded.bytes)
+            model.setDeviceLocales(SystemPrototypeLocaleProvider().preferredLanguages)
+            model.show(loaded.spec, locale: options.locale, specBytes: loaded.bytes)
         }
 
         override func viewDidLayoutSubviews() {

@@ -37,13 +37,13 @@ internal object PrototypeDataRules {
         fail("data", "Data byte limit exceeded")
       else null
 
-  val dataActionTypes = setOf("setData", "appendData", "removeData")
+  val dataActionTypes = setOf("setData", "appendData", "prependData", "removeData")
 
   /**
-   * Static checks for `setData`, `appendData` and `removeData` (#12519) that the contract cannot
-   * express: the `/data/<pointer>` path, a literal value data can hold, and an `appendData` target
-   * the spec's own data already defines as something other than an array. A target under `{index}`
-   * or one only an earlier write creates is the device's to check.
+   * Static checks for `setData`, `appendData`, `prependData` and `removeData` (#12519) that the
+   * contract cannot express: the `/data/<pointer>` path, a literal value data can hold, and an
+   * `appendData` target the spec's own data already defines as something other than an array. A
+   * target under `{index}` or one only an earlier write creates is the device's to check.
    */
   fun dataActionErrors(context: Context, root: JsonElement): PrototypeSpecError? {
     val data = (root as? JsonObject)?.get("data") as? JsonObject
@@ -64,10 +64,13 @@ internal object PrototypeDataRules {
           "A data write value must be a string, boolean, finite number, array or object",
         )
       }
-      if (type == "appendData" && !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)) {
+      if (
+        type in setOf("appendData", "prependData") &&
+          !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)
+      ) {
         val target = PrototypeDataPointer.resolve(data, pointer)
         if (target != null && target !is JsonArray) {
-          return fail("$path.path", "appendData target is not an array")
+          return fail("$path.path", "$type target is not an array")
         }
       }
     }

@@ -54,6 +54,8 @@ final class PrototypeLimitsTests: XCTestCase {
         XCTAssertEqual(PrototypeLimits.maxDataArrayItems, limits["MAX_PROTOTYPE_DATA_ARRAY_ITEMS"])
         XCTAssertEqual(PrototypeLimits.maxDataPointerLength, limits["MAX_PROTOTYPE_DATA_POINTER_LENGTH"])
         XCTAssertEqual(PrototypeLimits.maxDataBytes, limits["MAX_PROTOTYPE_DATA_BYTES"])
+        XCTAssertEqual(PrototypeLimits.maxListItems, limits["MAX_PROTOTYPE_LIST_ITEMS"])
+        XCTAssertGreaterThanOrEqual(PrototypeLimits.maxDataArrayItems, PrototypeLimits.maxListItems)
         XCTAssertEqual(PrototypeLimits.maxDataWriteBytes, limits["MAX_PROTOTYPE_DATA_WRITE_BYTES"])
         XCTAssertEqual(PrototypeLimits.maxRepeatPathCells, limits["MAX_PROTOTYPE_REPEAT_PATH_CELLS"])
         XCTAssertEqual(PrototypeLimits.maxSubstitutedTextLength, limits["MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH"])

@@ -232,7 +232,7 @@ function dataWriteGuard(
   );
   if (guard.kind === "baseRevisionRequired") {
     return failure(
-      "Invalid patch at baseRevision: required for /data ops once the device has written this prototype's data (setData, appendData, removeData); use the revision from the latest change event or patch result",
+      "Invalid patch at baseRevision: required for /data ops once the device has written this prototype's data (setData, appendData, prependData, removeData); use the revision from the latest change event or patch result",
     );
   }
   return guard.kind === "conflict"

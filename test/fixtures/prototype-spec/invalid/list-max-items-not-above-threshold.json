@@ -1,0 +1,53 @@
+{
+  "spec": {
+    "id": "feed",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "feed": {
+        "items": [
+          {
+            "id": 1,
+            "title": "One"
+          }
+        ]
+      },
+      "page": {
+        "next": "p2"
+      }
+    },
+    "state": {
+      "refreshing": false,
+      "feedStatus": "idle"
+    },
+    "root": {
+      "type": "list",
+      "repeat": {
+        "items": {
+          "path": "/feed/items"
+        },
+        "as": "post",
+        "key": "id"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{post.title}"
+        }
+      ],
+      "maxItems": 3,
+      "endThreshold": 3,
+      "onEndReached": [
+        {
+          "type": "emit",
+          "name": "end"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.maxItems",
+  "expectedMessage": "maxItems must be greater than endThreshold"
+}

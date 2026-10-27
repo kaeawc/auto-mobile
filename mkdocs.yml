@@ -130,6 +130,7 @@ nav:
       - "Keystore test state": using/keystore-test-state.md
       - "Keystore metadata": using/keystore-metadata.md
       - "SDK capabilities": using/sdk-capabilities.md
+      - "Hackathon demo kit": using/hackathon.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
       - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
@@ -170,6 +171,7 @@ nav:
       - "ProtoViewer privacy": protoviewer/privacy.md
       - "ProtoViewer store listing": design-docs/protoviewer-store-listing.md
       - "Native prototype embedding": design-docs/prototype-embedding.md
+      - "Prototype user-test sessions": design-docs/prototype-user-test-sessions.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md

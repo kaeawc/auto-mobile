@@ -447,6 +447,7 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     prototypes: "optional",
     droppedEvents: "optional",
     appearance: "optional",
+    backdrop: "optional",
     cleared: "optional",
     fired: "optional",
     degradedEffects: "optional",

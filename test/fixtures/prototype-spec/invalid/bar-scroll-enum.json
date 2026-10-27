@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "bars",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "topAppBar",
+          "title": "Feed",
+          "variant": "large",
+          "onScroll": "collapse",
+          "scroll": "feed"
+        },
+        {
+          "type": "scroll",
+          "id": "feed",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onScroll"
+}

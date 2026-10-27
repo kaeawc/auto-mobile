@@ -278,7 +278,7 @@ capture("strict-storage-unknown", {
 for (const plus of [0, 1]) {
   capture(`strict-data-bytes-${plus ? "plus-one" : "boundary"}`, {
     ...base(),
-    data: { x: "x".repeat(262144 - 8 + plus) },
+    data: { x: "x".repeat(contract.limits.MAX_PROTOTYPE_DATA_BYTES - 8 + plus) },
   });
   capture(
     `strict-payload-bytes-${plus ? "plus-one" : "boundary"}`,
@@ -289,7 +289,28 @@ for (const plus of [0, 1]) {
   );
   capture(`strict-data-array-${plus ? "plus-one" : "boundary"}`, {
     ...base(),
-    data: { x: Array.from({ length: 500 + plus }, () => false) },
+    data: {
+      x: Array.from({ length: contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS + plus }, () => false),
+    },
+  });
+  // Feed-scale list (#14183): one row template over MAX_PROTOTYPE_LIST_ITEMS posts.
+  capture(`strict-list-items-${plus ? "plus-one" : "boundary"}`, {
+    ...base(),
+    data: {
+      feed: {
+        items: Array.from({ length: contract.limits.MAX_PROTOTYPE_LIST_ITEMS + plus }, (_, id) => ({
+          id,
+          author: "user" + id,
+          caption: "Post number " + id,
+          likes: id,
+        })),
+      },
+    },
+    root: {
+      type: "list",
+      repeat: { items: { path: "/feed/items" }, as: "post", key: "id" },
+      children: [{ type: "text", text: "{post.author}: {post.caption} ({post.likes})" }],
+    },
   });
   let condition: unknown = { key: "x", equals: true };
   for (let index = 1; index < 8 + plus; index++) {
@@ -461,6 +482,32 @@ for (const name of originalValid) {
   }
   walk(result.data, result.data, definitions.spec, [], "spec");
 }
+// Frosted backdrops (#15126): a closed material list, a whole-dp blur cap and a colour tint.
+const backdropSpec = (backdrop: unknown, placement: unknown = { type: "fullscreen" }) => ({
+  ...base(),
+  window: { placement, backdrop },
+});
+capture("backdrop-material-only", backdropSpec({ material: "thin" }));
+capture(
+  "backdrop-full",
+  backdropSpec(
+    { material: "glass", blur: 150, tint: "#FFFFFF" },
+    { type: "sheet", edge: "bottom", height: 320 },
+  ),
+);
+capture("backdrop-blur-zero", backdropSpec({ material: "ultraThin", blur: 0, tint: "scrim" }));
+capture("backdrop-unknown-material", backdropSpec({ material: "frosted" }));
+capture("backdrop-missing-material", backdropSpec({ blur: 10 }));
+capture("backdrop-blur-over-cap", backdropSpec({ material: "thick", blur: 151 }));
+capture("backdrop-blur-negative", backdropSpec({ material: "thick", blur: -1 }));
+capture("backdrop-blur-fractional", backdropSpec({ material: "thick", blur: 2.5 }));
+capture(
+  "backdrop-tint-per-mode",
+  backdropSpec({ material: "thin", tint: { light: "#FFFFFF", dark: "#000000" } }),
+);
+capture("backdrop-tint-invalid", backdropSpec({ material: "thick", tint: "not-a-colour" }));
+capture("backdrop-unknown-key", backdropSpec({ material: "thick", radius: 4 }));
+capture("backdrop-not-object", backdropSpec("thin"));
 const capabilityExamples = new Map<string, unknown>();
 for (const name of readdirSync(join(directory, "valid"))
   .filter((file) => file.endsWith(".json"))

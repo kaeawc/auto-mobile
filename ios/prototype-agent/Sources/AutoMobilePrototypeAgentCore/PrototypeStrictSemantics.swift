@@ -41,7 +41,8 @@ enum PrototypeStrictSemantics {
         let children = all.filter { $0.objectFields?["visibleWhen"] != nil }
         guard !children.isEmpty else { return 0 }
         let instances: Int
-        if case let .array(items)? = fields["repeat"]?.objectFields?["items"] { instances = items.count } else { instances = 1 }
+        if case let .array(items)? = fields["repeat"]?.objectFields?["items"] { instances = items.count }
+        else { instances = 1 }
         let count = children.count * instances
         let ms = stagger["ms"]?.numberValue ?? 0
         let order = stagger["order"]?.stringValue
@@ -155,6 +156,28 @@ enum PrototypeStrictSemantics {
                 .contains(where: { $0.objectFields?[item["y"]?.stringValue ?? ""]?.numberValue == nil })
             {
                 throw PrototypeContractValidator.invalid("\(at).y", "Invalid chart ordinate")
+            }
+        }
+    }
+
+    static func pagerStateKeys(_ context: PrototypeContractValidator) throws {
+        var keys = Set<String>()
+        for node in context.locatedNodes {
+            guard node.value["type"] == .string("pager"),
+                  let key = node.value["stateKey"]?.stringValue else { continue }
+            if context.locatedNodes
+                .contains(where: { $0.value["repeat"] != nil && node.path.hasPrefix($0.path + ".") })
+            {
+                throw PrototypeContractValidator.invalid(
+                    "\(node.path).stateKey",
+                    "Pager stateKey cannot appear inside repeat"
+                )
+            }
+            if !keys.insert(key).inserted {
+                throw PrototypeContractValidator.invalid(
+                    "\(node.path).stateKey",
+                    "Two pagers cannot bind the same state key"
+                )
             }
         }
     }

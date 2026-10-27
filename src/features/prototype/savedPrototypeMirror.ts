@@ -51,7 +51,14 @@ const assetSchema = z.union([
   z
     .object({
       id: z.string().min(1),
-      mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "font/ttf", "font/otf"]),
+      mimeType: z.enum([
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "font/ttf",
+        "font/otf",
+        "application/vnd.automobile.agsl",
+      ]),
       index: z.number().int().nonnegative().max(10000),
     })
     .strict(),

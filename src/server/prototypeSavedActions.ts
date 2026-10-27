@@ -1,3 +1,4 @@
+import { prototypeIosShaderProblem } from "../features/prototype/prototypeShaders";
 import type { z } from "zod/v4";
 import {
   PROTOTYPE_SAVED_CAPABILITY,
@@ -516,6 +517,7 @@ export function validatePrototypeSavedInput(
 export type IosSavedPrototypeInstaller = Pick<IosPrototypeInstaller, "install" | "list" | "delete">;
 
 interface IosSavedDependencies {
+  env?: NodeJS.ProcessEnv;
   installer?: IosSavedPrototypeInstaller;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
@@ -615,6 +617,14 @@ async function saveIosPrototype(
   readers: IosSavedDependencies,
   signal?: AbortSignal,
 ): Promise<PrototypeSavedOutput> {
+  const shaderProblem = prototypeIosShaderProblem(args.spec, args.assets);
+  if (shaderProblem) {
+    return {
+      success: false,
+      errorCode: "unsupported_platform",
+      error: shaderProblem,
+    };
+  }
   if (hasElementAnchors(args.spec!)) {
     return savedElementAnchorFailure();
   }
@@ -622,6 +632,7 @@ async function saveIosPrototype(
     args.assets ?? [],
     readers.assetFileReader,
     readers.observationScreenshotReader,
+    readers.env,
   );
   signal?.throwIfAborted();
   if ("error" in prepared) {

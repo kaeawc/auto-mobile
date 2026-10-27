@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberDatePickerState
@@ -224,14 +225,9 @@ internal fun RenderPrototypeTopAppBar(
       PrototypeAppBarButton(action, prototypePartTag(node.testTag, "actions.$index"), interact)
     }
   }
-  val authoredFill = node.style.source.background != null || node.style.source.gradient != null
-  val colors =
-    if (authoredFill)
-      TopAppBarDefaults.topAppBarColors(
-        containerColor = Color.Transparent,
-        scrolledContainerColor = Color.Transparent,
-      )
-    else TopAppBarDefaults.topAppBarColors()
+  val colors = prototypeTopAppBarColors(node)
+  val behavior = prototypeTopBarBehavior(node)
+  if (source.onScroll == "enterAlways" && behavior?.state?.collapsedFraction == 1f) return
   val insets = WindowInsets(0, 0, 0, 0)
   when (source.variant) {
     "centerAligned" ->
@@ -242,13 +238,51 @@ internal fun RenderPrototypeTopAppBar(
         actions,
         windowInsets = insets,
         colors = colors,
+        scrollBehavior = behavior,
       )
     "medium" ->
-      MediumTopAppBar(title, modifier, navigation, actions, windowInsets = insets, colors = colors)
+      MediumTopAppBar(
+        title,
+        modifier,
+        navigation,
+        actions,
+        windowInsets = insets,
+        colors = colors,
+        scrollBehavior = behavior,
+      )
     "large" ->
-      LargeTopAppBar(title, modifier, navigation, actions, windowInsets = insets, colors = colors)
-    else -> TopAppBar(title, modifier, navigation, actions, windowInsets = insets, colors = colors)
+      LargeTopAppBar(
+        title,
+        modifier,
+        navigation,
+        actions,
+        windowInsets = insets,
+        colors = colors,
+        scrollBehavior = behavior,
+      )
+    else ->
+      TopAppBar(
+        title,
+        modifier,
+        navigation,
+        actions,
+        windowInsets = insets,
+        colors = colors,
+        scrollBehavior = behavior,
+      )
   }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun prototypeTopAppBarColors(node: PrototypeRenderNode): TopAppBarColors {
+  val authoredFill = node.style.source.background != null || node.style.source.gradient != null
+  return if (authoredFill)
+    TopAppBarDefaults.topAppBarColors(
+      containerColor = Color.Transparent,
+      scrolledContainerColor = Color.Transparent,
+    )
+  else TopAppBarDefaults.topAppBarColors()
 }
 
 @Composable

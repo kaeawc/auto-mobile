@@ -175,6 +175,7 @@ export function readBundleZipDirectory(bytes: Buffer): BundleZipEntry[] {
   }
   bundleAssert(at === end, "header_mismatch");
   for (const entry of entries) {
+    bundleAssert(!entry.name.endsWith(".agsl"), "custom_shaders_unsupported", entry.name);
     bundleAssert(ENTRY_PATTERN.test(entry.name), "entry_not_allowed", entry.name);
     localEntry(bytes, entry, directory);
   }

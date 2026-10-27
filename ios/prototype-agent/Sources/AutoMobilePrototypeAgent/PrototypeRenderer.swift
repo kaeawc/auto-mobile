@@ -201,7 +201,7 @@
         }
 
         @ViewBuilder private var validatedContent: some View {
-            if node.checks?.isEmpty == false {
+            if node.checks?.isEmpty == false || node.errorWhen != nil {
                 VStack(alignment: .leading, spacing: 4) {
                     checkedControl
                     if let message = model.shownError(node) {

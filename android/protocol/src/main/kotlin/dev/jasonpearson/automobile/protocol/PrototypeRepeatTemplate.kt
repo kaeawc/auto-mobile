@@ -273,6 +273,11 @@ internal object PrototypeBindableFields {
       field(condition, "notEquals", path, operandKind)?.let {
         return it
       }
+      for (operand in listOf("contains", "startsWith")) {
+        field(condition, operand, path, operandKind)?.let {
+          return it
+        }
+      }
       condition(condition["not"], "$path.not")?.let {
         return it
       }
@@ -560,6 +565,8 @@ internal object PrototypeBindableFields {
           visitor.field(entry, "message", entryPath, PrototypeBindableKind.TEXT)
         }
         ?: visitor.condition(node["visibleWhen"], "$path.visibleWhen")
+        ?: visitor.condition(node["errorWhen"], "$path.errorWhen")
+        ?: visitor.field(node, "errorText", path, PrototypeBindableKind.TEXT)
         ?: objects(node, "styleWhen", path).firstNotNullOfOrNull { (entry, entryPath) ->
           visitor.condition(entry["when"], "$entryPath.when")
         }

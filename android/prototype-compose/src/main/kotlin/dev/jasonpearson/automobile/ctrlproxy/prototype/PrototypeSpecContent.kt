@@ -991,7 +991,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1008,7 +1008,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1030,7 +1030,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1047,7 +1047,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1092,6 +1092,9 @@ internal fun RenderPrototypeEditableField(
     }
   }
   var fieldModifier = modifier.focusRequester(focus)
+  node.errorMessage?.let { message ->
+    fieldModifier = fieldModifier.semantics { error(message) }
+  }
   if (node.enabled && actions.isNotEmpty())
     fieldModifier = fieldModifier.semantics {
       onClick {

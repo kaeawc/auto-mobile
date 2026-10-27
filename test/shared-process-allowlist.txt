@@ -1314,6 +1314,7 @@ test/features/prototype/prototypeSelectionControls.test.ts
 test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeStack.test.ts
 test/features/prototype/prototypeStorage.test.ts
+test/features/prototype/prototypeStringConditions.test.ts
 test/features/prototype/prototypeSwipeActions.test.ts
 test/features/prototype/prototypeTextFieldActions.test.ts
 test/features/prototype/prototypeTextFieldOptions.test.ts

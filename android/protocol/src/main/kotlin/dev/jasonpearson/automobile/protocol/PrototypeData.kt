@@ -303,7 +303,8 @@ object PrototypeDataResolver {
               if ((root["type"] as? JsonPrimitive)?.content == "list") value
               else resolveRepeat(value, repeats)
             "enabledWhen",
-            "visibleWhen" -> resolveCondition(value, data, platform)
+            "visibleWhen",
+            "errorWhen" -> resolveCondition(value, data, platform)
             "styleWhen" -> resolveStyles(value, data, platform)
             else -> value
           }
@@ -475,6 +476,7 @@ private object PrototypeBindingScan {
       textBound ||
       conditionBound(node["enabledWhen"]) ||
       conditionBound(node["visibleWhen"]) ||
+      conditionBound(node["errorWhen"]) ||
       stylesBound
   }
 

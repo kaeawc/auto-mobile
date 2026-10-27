@@ -394,6 +394,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         trailingIcon = trailingIcon?.bound(instance),
         onSubmit = onSubmit?.map { it.bound(instance) },
         checks = checks?.map { it.bound(instance) },
+        errorWhen = errorWhen?.bound(instance),
+        errorText = errorText?.let(instance::interpolate),
         enabledWhen = enabledWhen?.bound(instance),
         semantics = semantics,
         onTap = onTap,
@@ -707,6 +709,8 @@ private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeConditi
     key = key?.let(instance::interpolate),
     equals = equals?.let(instance::interpolateScalar),
     notEquals = notEquals?.let(instance::interpolateScalar),
+    contains = contains?.let(instance::interpolateText),
+    startsWith = startsWith?.let(instance::interpolateText),
     all = all?.map { it.bound(instance) },
     any = any?.map { it.bound(instance) },
     not = not?.bound(instance),
@@ -715,6 +719,12 @@ private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeConditi
 /** A string operand: text values are interpolated, numbers and booleans pass through. */
 private fun RepeatInstance.interpolateScalar(scalar: PrototypeScalar): PrototypeScalar =
   if (scalar is PrototypeScalar.Text) interpolateTyped(scalar.value) else scalar
+
+/**
+ * A substring operand always binds as text, so `contains: "{item.n}"` matches the rendered number.
+ */
+private fun RepeatInstance.interpolateText(scalar: PrototypeScalar): PrototypeScalar =
+  if (scalar is PrototypeScalar.Text) PrototypeScalar.Text(interpolate(scalar.value)) else scalar
 
 /**
  * A string that is exactly one placeholder keeps the item's own type (so `equals: "{item.id}"` can

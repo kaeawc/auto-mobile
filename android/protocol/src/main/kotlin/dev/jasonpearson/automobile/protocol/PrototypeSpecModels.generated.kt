@@ -517,6 +517,8 @@ data class PrototypeTextFieldNode(
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
   val enabledWhen: PrototypeCondition? = null,
+  val errorWhen: PrototypeCondition? = null,
+  val errorText: String? = null,
   val semantics: PrototypeSemantics? = null,
 ) : PrototypeNode()
 
@@ -1516,6 +1518,10 @@ data class PrototypeCondition(
   val valid: PrototypeValidityKeys? = null,
   /** A `/platform` pointer (#14294); platform state is device-owned and read-only. */
   val platform: String? = null,
+  val contains: String? = null,
+  val startsWith: String? = null,
+  val lengthGt: Int? = null,
+  val lengthLt: Int? = null,
 )
 
 @Serializable

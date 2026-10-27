@@ -35,6 +35,7 @@ enum PrototypeBundleCapabilities {
             if PrototypeStrings.textFields(.object(node))
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
             let type = node["type"]?.stringValue ?? ""
+            if PrototypeStringConditions.uses(node) { need("string_conditions") }
             let featureTypes = [
                 "flow": "flow_grid",
                 "grid": "flow_grid",
@@ -157,6 +158,7 @@ enum PrototypeBundleCapabilities {
                 "headline",
                 "supporting",
                 "supportingText",
+                "errorText",
                 "trailingText",
                 "message",
                 "hint",

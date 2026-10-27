@@ -318,6 +318,8 @@ const textFieldBaseSchema = z
     label: z.string().min(1).optional(),
     variant: z.enum(["filled", "outlined"]).optional(),
     supportingText: z.string().min(1).optional(),
+    errorWhen: conditionSchema.optional(),
+    errorText: z.string().min(1).max(256).optional(),
     keyboardType: z
       .enum(["text", "number", "decimal", "email", "phone", "url", "password"])
       .optional(),

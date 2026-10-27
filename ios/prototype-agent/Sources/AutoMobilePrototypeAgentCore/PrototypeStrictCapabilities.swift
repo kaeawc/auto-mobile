@@ -32,6 +32,7 @@ enum PrototypeStrictCapabilities {
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }
             let type = fields["type"]?.stringValue ?? ""
+            if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",
                 "cancelTimer": "timers",

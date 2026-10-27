@@ -231,6 +231,7 @@ enum PrototypeRepeat {
             part("navigationIcon", &fields)
             list("actions", &fields)
         case .string("textField")?:
+            string("errorText", &fields)
             part("trailingIcon", &fields)
         case .string("searchBar")?:
             string("placeholder", &fields)
@@ -537,7 +538,7 @@ struct PrototypeRepeatInstance {
             refresh["onRefresh"] = .array(actions.map(bindAction))
             fields["refresh"] = .object(refresh)
         }
-        for key in ["visibleWhen", "enabledWhen"] {
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
             if let condition = fields[key] { fields[key] = bindCondition(condition) }
         }
         if case let .array(entries)? = fields["styleWhen"] {
@@ -750,6 +751,10 @@ struct PrototypeRepeatInstance {
         }
         for operand in ["equals", "notEquals"] {
             if let value = fields[operand] { fields[operand] = interpolateScalar(value) }
+        }
+        // Substring operands always bind as text, so `contains: "{item.n}"` matches the rendered number.
+        for operand in ["contains", "startsWith"] {
+            if case let .string(text)? = fields[operand] { fields[operand] = .string(interpolate(text)) }
         }
         for group in ["all", "any"] {
             if case let .array(conditions)? = fields[group] { fields[group] = .array(conditions.map(bindCondition)) }

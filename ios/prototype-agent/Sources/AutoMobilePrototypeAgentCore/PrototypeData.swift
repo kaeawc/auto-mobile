@@ -263,7 +263,7 @@ enum PrototypeDataResolver {
         PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data, platform: platform) }
         let lazy = fields["type"] == .string("list")
         if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
-        for key in ["visibleWhen", "enabledWhen"] {
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
             if let value = fields[key] { fields[key] = resolveCondition(value, data: data, platform: platform) }
         }
         if case let .array(styles)? = fields["styleWhen"] {

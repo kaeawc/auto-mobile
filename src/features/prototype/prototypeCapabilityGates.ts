@@ -31,6 +31,7 @@ import {
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
+  PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
   PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
@@ -142,6 +143,11 @@ import {
   prototypeSemanticsUnsupportedMessage,
 } from "./prototypeStrings";
 
+import {
+  prototypeStringConditionsFields,
+  prototypeStringConditionsUnsupportedMessage,
+} from "./prototypeStringConditions";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown) => string[];
@@ -179,6 +185,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_FORMAT_CAPABILITY,
     fields: prototypeFormatFields,
     unsupportedMessage: prototypeFormatUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
+    fields: prototypeStringConditionsFields,
+    unsupportedMessage: prototypeStringConditionsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,

@@ -21,16 +21,25 @@ internal fun PrototypeCondition.holds(
 ): Boolean {
   val stored = key?.let { state[it] }
   val number = (stored as? PrototypeScalar.Numeric)?.value
+  val text = (stored as? PrototypeScalar.Text)?.value
   val all = all
   val any = any
   val not = not
   val gt = gt
   val lt = lt
+  val contains = (contains as? PrototypeScalar.Text)?.value
+  val startsWith = (startsWith as? PrototypeScalar.Text)?.value
+  val lengthGt = lengthGt
+  val lengthLt = lengthLt
   val valid = valid
   return when {
     valid != null -> valid.keys().all { validity[it] == true }
     key != null && equals != null -> stored.sameValue(equals)
     key != null && notEquals != null -> !stored.sameValue(notEquals)
+    contains != null -> text != null && text.contains(contains)
+    startsWith != null -> text != null && text.startsWith(startsWith)
+    lengthGt != null -> text != null && text.length > lengthGt
+    lengthLt != null -> text != null && text.length < lengthLt
     gt != null -> number != null && number > gt
     lt != null -> number != null && number < lt
     all != null -> all.all { it.holds(state, validity) }

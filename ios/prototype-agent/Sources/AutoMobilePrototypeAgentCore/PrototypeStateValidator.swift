@@ -326,10 +326,11 @@ enum PrototypeStateValidator {
 }
 
 extension Condition {
-    /// The `key` of a `{key, equals | notEquals | gt | lt}` condition; the grouping forms have none.
+    /// The state key of a scalar, numeric or string comparison; grouping forms have none.
     var key: String? {
         switch self {
-        case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _): key
+        case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _),
+             let .contains(key, _), let .startsWith(key, _), let .lengthGt(key, _), let .lengthLt(key, _): key
         case .all, .any, .not, .valid: nil
         }
     }

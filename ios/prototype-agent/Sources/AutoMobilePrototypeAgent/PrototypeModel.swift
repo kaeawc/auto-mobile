@@ -409,12 +409,11 @@
         }
 
         func shownError(_ node: PrototypeNode) -> String? {
-            // Read the observed fields; the session itself is observation-ignored.
-            for key in node.checkedKeys where shownErrors.contains(key) {
-                let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
-                if let message = result.firstFailingMessage { return message }
-            }
-            return nil
+            fieldError(node).message
+        }
+
+        func fieldError(_ node: PrototypeNode) -> PrototypeFieldError {
+            PrototypeFieldError.shown(node, state: state, shown: shownErrors)
         }
 
         func blur(_ node: PrototypeNode) {

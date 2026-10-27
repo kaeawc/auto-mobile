@@ -187,6 +187,7 @@ internal object PrototypeStrictPolicy {
             ),
           "text_field_actions" to listOf("trailingIcon", "imeAction", "onSubmit"),
           "text_field_leading_icon" to listOf("leadingIcon"),
+          "string_conditions" to listOf("errorWhen", "errorText"),
         ),
       "pager" to
         mapOf(
@@ -262,6 +263,7 @@ internal object PrototypeStrictPolicy {
       }
       val fields = value as? JsonObject ?: return
       if (fields.size == 1 && fields.containsKey("value")) return
+      if (PrototypeStringConditions.uses(fields)) need("string_conditions")
       nodeFeatures(fields)
       scanFields(fields, field)
     }

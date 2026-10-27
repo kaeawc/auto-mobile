@@ -107,7 +107,9 @@ internal object PrototypeObjectRules {
     return null
   }
 
-  /** `exactlyOne` picks one form of a union-like object; `dependents` ties fields to a trigger. */
+  /**
+   * Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one.
+   */
   fun formConstraint(
     data: JsonObject,
     rule: JsonObject,
@@ -121,7 +123,7 @@ internal object PrototypeObjectRules {
       )
     }
     val dependents = rule["dependents"] as? JsonObject ?: return null
-    for ((trigger, names) in dependents) {
+    for ((trigger, names) in dependents.toSortedMap()) {
       val fields = names.jsonArray.map { it.jsonPrimitive.content }
       val present = fields.filter { data.containsKey(it) }
       if (trigger.split("|").none { data.containsKey(it) }) {
@@ -130,7 +132,7 @@ internal object PrototypeObjectRules {
             keyPath(path, present.first()),
             "Requires ${trigger.split("|").joinToString(" or ")}",
           )
-      } else if (present.size != 1) {
+      } else if ("|" in trigger && present.size != 1) {
         return fail(
           keyPath(path, present.getOrNull(1) ?: fields.first()),
           "Exactly one of ${fields.joinToString(", ")} is required",

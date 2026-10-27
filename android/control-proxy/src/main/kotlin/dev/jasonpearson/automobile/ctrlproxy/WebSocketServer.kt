@@ -382,6 +382,7 @@ class WebSocketServer(
     addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     add("prototype_strings_v1")
     add("prototype_semantics_v1")
+    add("prototype_string_conditions_v1")
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).

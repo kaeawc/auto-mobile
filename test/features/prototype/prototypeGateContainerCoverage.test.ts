@@ -83,6 +83,7 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_string_conditions_v1: { ...label, visibleWhen: { key: "name", contains: "A" } },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },

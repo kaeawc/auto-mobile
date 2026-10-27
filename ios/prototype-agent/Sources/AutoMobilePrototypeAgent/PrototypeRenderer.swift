@@ -451,7 +451,7 @@
             case "chip":
                 PrototypeChipView(node: node, model: model, style: style)
             case "card":
-                PrototypeCardView(node: node, model: model, style: style)
+                PrototypeCardView(node: node, model: model, style: style, cornerRadius: cardCornerRadius)
             case "radioGroup":
                 PrototypeRadioGroupView(node: node, model: model, style: style)
             case "listItem":
@@ -795,12 +795,16 @@
             // as on Android (#10912).
             .layoutPriority(1)
             switch node.variant {
-            case "outlined", "tonal": button.buttonStyle(.bordered)
-            case "elevated": button.buttonStyle(.bordered).shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-            case "text": button.buttonStyle(.borderless)
-            default: button.buttonStyle(.borderedProminent)
+            case "outlined", "tonal": button.buttonStyle(.bordered).tint(themePrimary)
+            case "elevated": button.buttonStyle(.bordered).tint(themePrimary)
+                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+            case "text": button.buttonStyle(.borderless).tint(themePrimary)
+            default: button.buttonStyle(.borderedProminent).tint(themePrimary)
             }
         }
+
+        /// The theme's `primary`, so buttons follow the spec theme rather than the system accent (#15445).
+        private var themePrimary: Color { ComponentColors(palette: palette).primary }
 
         /// Wraps onto more lines when the row is narrower than the label, never truncating.
         private var buttonLabel: some View {
@@ -882,9 +886,16 @@
 
         // MARK: Style
 
+        /// A card draws the authored uniform radius (a theme token resolves to one); without it,
+        /// Material's 12 pt (#15445).
+        private var cardCornerRadius: Double {
+            if case let .uniform(radius)? = style?.cornerRadius.map(shapes.resolve) { return radius }
+            return 12
+        }
+
         private var cornerShape: PrototypeStyleShape {
             PrototypeStyleShape(
-                radius: style?.cornerRadius.map(shapes.resolve),
+                radius: node.type == "card" ? .uniform(cardCornerRadius) : style?.cornerRadius.map(shapes.resolve),
                 continuous: style?.cornerStyle == "continuous"
             )
         }
@@ -948,22 +959,12 @@
         }
 
         private var contentAlignment: Alignment {
-            switch node.type {
-            case "row":
-                switch style?.arrangement {
-                case "center": return .center
-                case "end": return .trailing
-                default: return .leading
-                }
-            case "column", "flow", "grid":
-                switch style?.arrangement {
-                case "center": return .leading
-                case "end": return .bottomLeading
-                default: return .topLeading
-                }
-            case "box": return swiftUIAlignment(style?.alignment)
-            default: return .center
-            }
+            prototypeContentAlignment(
+                nodeType: node.type,
+                arrangement: style?.arrangement,
+                boxAlignment: swiftUIAlignment(style?.alignment),
+                textAlign: style?.textAlign
+            )
         }
 
         private var safeAreaEdges: UIEdgeInsets {

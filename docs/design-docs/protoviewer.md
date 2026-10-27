@@ -129,9 +129,19 @@ Import needs identical accept/reject behaviour on all three platforms.
 
 ### 3.4 iOS app
 
+- Both `Info.plist` files (ProtoViewer and the Viewer template) declare `UIDeviceFamily` `[1, 2]` and all four
+  iPad orientations, so the app runs natively on iPad instead of in iPhone compatibility mode. Multiple
+  scenes stay off. The artifact policy gate and privacy manifest do not constrain the device family.
 - SwiftUI `ProtoViewer`: `LibraryView` (SF Symbols only) and `PrototypeScreen` hosting
   `ViewerRenderer` with `PrototypeModel(mode: .standalone, storage: .fileBacked())` in a
   per-library-id namespace.
+- ProtoViewer's own chrome keys on the native horizontal size class (compact or regular; no Material
+  breakpoints). `LibraryView` is one `NavigationSplitView` at every width: regular (full iPad window,
+  iPhone Duo inner panel) shows the library as a sidebar beside the open prototype, compact collapses to
+  the phone stack. The selection is plain state, so a size-class change (iPad window resize, Duo fold or
+  unfold) keeps the open prototype mounted; deleting the open entry clears the detail pane. Settings,
+  licenses and error text cap at a readable width at regular size. The prototype itself still sizes from
+  its own window, and the app-reserved chrome (toolbar, network indicator) stays outside it.
 - Data lives in Application Support (not Documents, no `UIFileSharingEnabled`) with
   `isExcludedFromBackup` set. Each prototype directory is `PrototypeSavedLayout` formatVersion 1,
   unchanged, plus the sibling `library.json` (section 4).

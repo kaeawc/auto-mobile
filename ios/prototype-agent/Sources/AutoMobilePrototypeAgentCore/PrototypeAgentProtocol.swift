@@ -30,7 +30,7 @@ enum PrototypeAgentProtocol {
         inspectCapability,
         themeModesCapability,
         flowGridCapability,
-        "prototype_scroll_motion_v1",
+        scrollMotionCapability,
         pagerOptionsCapability,
         barScrollCapability,
         appearanceCapability,
@@ -46,7 +46,7 @@ enum PrototypeAgentProtocol {
         textFieldActionsCapability,
         carouselCapability,
         chartCapability,
-        PrototypeLazyList.capability,
+        lazyListCapability,
         loadingStatesCapability,
         stylePolishV2Capability,
         stringsCapability,
@@ -57,7 +57,7 @@ enum PrototypeAgentProtocol {
         searchBarCapability,
         richTextCapability,
         linkifyCapability,
-        "prototype_format_v1",
+        formatCapability,
         menusCapability,
         tooltipCapability,
         drawerCapability,
@@ -72,7 +72,7 @@ enum PrototypeAgentProtocol {
         bottomSheetDragCapability,
         clearStorageRequest,
         storageCapability,
-        "prototype_pager_state_key_v1",
+        pagerStateKeyCapability,
         backdropCapability,
         timersCapability,
         "prototype_platform_v1",
@@ -85,6 +85,10 @@ enum PrototypeAgentProtocol {
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.
     static let showInPlaceCapability = "prototype_show_in_place_v1"
+    static let scrollMotionCapability = "prototype_scroll_motion_v1"
+    static let formatCapability = "prototype_format_v1"
+    static let pagerStateKeyCapability = "prototype_pager_state_key_v1"
+    static let lazyListCapability = "prototype_lazy_list_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
     static let designPlatformCapability = "prototype_design_platform_v1"

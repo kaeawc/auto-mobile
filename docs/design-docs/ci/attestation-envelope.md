@@ -35,8 +35,28 @@ whitespace (`scripts/ci/attestation/canonicalJson.ts`). The signed bytes are:
 <canonical payload JSON>
 ```
 
-Lengths are byte lengths, so one field cannot be shifted into the next. The leading domain string
-separates this protocol from any other use of the key.
+Lengths are byte lengths, so one field cannot be shifted into the next. The leading domain line
+separates this protocol from any other use of the key and carries `envelopeVersion`, so the version is
+signed too (it was not part of the payload).
+
+### Rules for a verifier in another language
+
+The service verifies by recomputing these bytes from the parsed payload, so its serializer must match
+byte for byte. It follows RFC 8785 (JSON Canonicalization Scheme), which the TypeScript side already
+matches:
+
+- Object keys sorted by UTF-16 code unit (JCS), not by UTF-8 bytes and not by locale. The two orders
+  differ for characters outside the Basic Multilingual Plane, so Go must not use its default map-key order.
+- Strings escaped minimally: `"` and `\`, the short forms `\b \f \n \r \t`, other control characters as
+  lowercase `\u00xx`; everything else, including `<`, `>`, `&`, U+2028 and U+2029, stays raw UTF-8
+  (Go's `encoding/json` escapes those by default and must be configured not to).
+- Numbers as ECMAScript `Number.prototype.toString` (JCS 3.2.2.3). The payload carries integers and
+  gate durations.
+- The producer refuses what cannot be serialized identically: `undefined`, NaN, Infinity, negative zero
+  and lone surrogates throw before anything is signed.
+
+`test/scripts/attestation/canonicalJson.test.ts` pins a golden vector (canonical payload, signing bytes
+and a deterministic signature under a fixed key) that the service's tests should reproduce.
 
 ## Signature scheme
 

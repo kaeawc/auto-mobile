@@ -204,6 +204,21 @@ public enum PrototypeSpecStrictValidator {
                         )
                     }
                 }
+                let body = action.value["body"]?.objectFields
+                for (index, part) in PrototypeStrictBindings.array(body?["multipart"]).enumerated() {
+                    append(
+                        part.objectFields?["value"],
+                        path: "\(action.path).body.multipart[\(index)].value",
+                        request: true
+                    )
+                }
+                for (name, binding) in body?["form"]?.objectFields ?? [:] {
+                    append(
+                        binding,
+                        path: PrototypeLimits.dataMemberPath("\(action.path).body.form", key: name),
+                        request: true
+                    )
+                }
                 append(action.value["body"], path: "\(action.path).body", request: true)
             case "setData", "appendData", "prependData", "upsertData":
                 append(action.value["value"], path: "\(action.path).value")

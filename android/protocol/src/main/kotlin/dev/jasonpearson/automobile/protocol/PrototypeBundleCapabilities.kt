@@ -66,19 +66,27 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_theme_modes_v1")
   }
 
+  private fun request(action: JsonObject, caps: MutableSet<String>) {
+    if ("append" in action) {
+      caps.add("prototype_lazy_list_v1")
+      caps.add("prototype_data_model_v1")
+    }
+    caps.add("prototype_network_v1")
+    val body = action["body"] as? JsonObject
+    if (
+      action["progressKey"] != null ||
+        listOf("multipart", "form", "file").any { body?.containsKey(it) == true }
+    )
+      caps.add("prototype_network_upload_v1")
+    if (text(action["via"]) == "device") caps.add("prototype_network_device_v1")
+  }
+
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
     val type = text(action["type"])
     if (PrototypeChannels.needsRealtimeCapability(action))
       caps.add("prototype_platform_realtime_v1")
     when (type) {
-      "request" -> {
-        if ("append" in action) {
-          caps.add("prototype_lazy_list_v1")
-          caps.add("prototype_data_model_v1")
-        }
-        caps.add("prototype_network_v1")
-        if (text(action["via"]) == "device") caps.add("prototype_network_device_v1")
-      }
+      "request" -> request(action, caps)
       "prependData" -> {
         caps.add("prototype_data_actions_v1")
         caps.add("prototype_lazy_list_v1")

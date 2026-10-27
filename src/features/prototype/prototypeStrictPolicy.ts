@@ -112,7 +112,7 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     requests.some(
       (at) =>
         path === `${at}.url` ||
-        path === `${at}.body.state` ||
+        path.startsWith(`${at}.body.`) ||
         ["headers", "query"].some(
           (name) => path.startsWith(`${at}.${name}.`) || path.startsWith(`${at}.${name}[`),
         ),

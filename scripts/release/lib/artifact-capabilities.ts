@@ -74,6 +74,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
     prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
     prototype_motion_v2:
       "iOS agent does not advertise it; the host refuses motion v2 features against it",
+    prototype_network_upload_v1:
+      "Upload bodies have a validated contract only; no transport builds multipart or file bodies yet, so the host refuses them (#14272)",
     prototype_platform_media_items_v1:
       "imageAsset {data} has a validated contract only; no device media store yet, so the host refuses it (#14192)",
     prototype_platform_namespace_v1:

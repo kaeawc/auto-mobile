@@ -30,6 +30,16 @@ export function prototypeChecksFields(spec: unknown): string[] {
     const children = prototypeNodeChildren(object);
     const next: typeof pending = [];
     for (const [key, child] of Object.entries(object)) {
+      const form = key === "body" ? record(record(child)?.form) : undefined;
+      if (form) {
+        next.push(
+          ...Object.entries(form).map(([name, value]) => ({
+            value,
+            path: `${path}.body.form.${name}`,
+          })),
+        );
+        continue;
+      }
       if (["payload", "data", "state", "repeat"].includes(key)) {
         continue;
       }

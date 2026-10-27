@@ -25,6 +25,22 @@ class PrototypeSpecModelsTest {
     Json.parseToJsonElement(File(fixtureDirectory(), "models.json").readText()).jsonObject
 
   @Test
+  fun `upload contract models round trip every filled field`() {
+    assertRoundTrip("requestUploadFile", PrototypeRequestUploadFile("hero"))
+    assertRoundTrip(
+      "requestUploadPart",
+      PrototypeRequestUploadPart(
+        "photo",
+        file = PrototypeRequestUploadFile("hero"),
+        filename = "photo.png",
+        contentType = "image/png",
+      ),
+    )
+    assertEquals(10 * 1024 * 1024, PrototypeSpecValidator.MAX_PROTOTYPE_UPLOAD_BYTES)
+    assertEquals(16, PrototypeSpecValidator.MAX_PROTOTYPE_UPLOAD_PARTS)
+  }
+
+  @Test
   fun `generated leaves round trip every filled field`() {
     val offset = Json.decodeFromJsonElement<PrototypeOffset>(fixture.getValue("offset"))
     assertEquals(PrototypeOffset(-12.5, 24.25), offset)

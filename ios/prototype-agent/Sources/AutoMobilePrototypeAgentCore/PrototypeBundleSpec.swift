@@ -9,8 +9,9 @@ struct PrototypeBundleReferences {
         if PrototypeCustomShaders.uses(json.value.objectFields ?? [:]) {
             throw PrototypeBundleFailure(.customShadersUnsupported, "spec.json")
         }
+        let context: PrototypeContractValidator
         do {
-            try PrototypeContractValidator.validate(data: json.data)
+            context = try PrototypeContractValidator.inspect(data: json.data).1
             _ = try JSONDecoder().decode(PrototypeSpec.self, from: json.data)
         } catch { throw PrototypeBundleFailure(.specInvalid, "spec.json") }
         // SavedLayout's collectors combine fonts/images, use canonically comparing Set<String>,
@@ -43,10 +44,21 @@ struct PrototypeBundleReferences {
             }
         }
         images += shareAssets(json.value)
+        for action in context.actions where action.value["type"]?.stringValue == "request" {
+            uploadAssets(action.value["body"])
+        }
         var imageIDs = Set<PrototypeBundleID>()
         var fontIDs = Set<PrototypeBundleID>()
         images = images.filter { imageIDs.insert($0).inserted }
         fonts = fonts.filter { fontIDs.insert($0).inserted }
+    }
+
+    private mutating func uploadAssets(_ value: JSONValue?) {
+        guard let body = value?.objectFields else { return }
+        image(body["file"]?.objectFields?["asset"])
+        for part in PrototypeStrictBindings.array(body["multipart"]) {
+            image(part.objectFields?["file"]?.objectFields?["asset"])
+        }
     }
 
     private mutating func image(_ value: JSONValue?) {

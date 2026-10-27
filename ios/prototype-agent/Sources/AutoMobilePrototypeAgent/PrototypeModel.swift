@@ -9,8 +9,8 @@
     @Observable
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
-        let iconMotionActivity = PrototypeIconMotionActivity()
         var design: PrototypeDesign { spec?.theme?.design ?? .platform }
+        let iconMotionActivity = PrototypeIconMotionActivity()
         private(set) var spec: PrototypeSpec?
         /// The shown prototype's `window.backdrop` as it is drawn now (`blur` or the tonal `fallback`).
         var backdropPlan: PrototypeBackdropPlan? {

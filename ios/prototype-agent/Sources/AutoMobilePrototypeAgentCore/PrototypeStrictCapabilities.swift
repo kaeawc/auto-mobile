@@ -62,10 +62,10 @@ enum PrototypeStrictCapabilities {
             if ["topAppBar", "bottomNav", "tabBar"].contains(type),
                fields["onScroll"] != nil || fields["scroll"] != nil { need("bar_scroll") }
             if let feature = types[type] { need(feature) }
+            if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
             if type == "icon", fields["effect"] != nil { need("icon_effects") }
             if type == "icon",
                fields["effect"]?.objectFields?["trigger"]?.objectFields?["data"] != nil { need("data_model") }
-            if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
             if fields["sharedKey"] != nil { need("shared_element") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }

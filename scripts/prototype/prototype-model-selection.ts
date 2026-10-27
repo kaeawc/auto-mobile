@@ -174,8 +174,8 @@ export const prototypeModelSelection = {
 } as const satisfies ModelSelection;
 
 export const prototypeTypeRefs = {
-  iconEffectRepeat: { kotlin: "PrototypeIconEffectRepeat", swift: "PrototypeIconEffectRepeat" },
   ...nodeActionTypeRefs,
+  iconEffectRepeat: { kotlin: "PrototypeIconEffectRepeat", swift: "PrototypeIconEffectRepeat" },
   colorValue: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   action: { kotlin: "PrototypeAction", swift: "PrototypeAction" },
   condition: { kotlin: "PrototypeCondition" },

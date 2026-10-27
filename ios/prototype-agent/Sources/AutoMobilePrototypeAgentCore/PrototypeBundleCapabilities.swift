@@ -39,10 +39,10 @@ enum PrototypeBundleCapabilities {
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
             if node["sharedKey"] != nil { need("shared_element") }
             let type = node["type"]?.stringValue ?? ""
+            if PrototypeStringConditions.uses(node) { need("string_conditions") }
             if type == "icon", node["effect"] != nil { need("icon_effects") }
             if type == "icon",
                node["effect"]?.objectFields?["trigger"]?.objectFields?["data"] != nil { need("data_model") }
-            if PrototypeStringConditions.uses(node) { need("string_conditions") }
             let featureTypes = [
                 "flow": "flow_grid",
                 "grid": "flow_grid",

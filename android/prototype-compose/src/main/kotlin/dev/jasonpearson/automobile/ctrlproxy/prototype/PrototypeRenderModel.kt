@@ -352,20 +352,6 @@ internal class PrototypeNodeMapping(
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
         chart = chart,
-        iconEffectValue =
-          (node as? PrototypeIconNode)?.effect?.trigger?.let { trigger ->
-            trigger.data?.let {
-              dev.jasonpearson.automobile.protocol.PrototypeDataPointer.resolve(data, it)
-            }
-              ?: trigger.key?.let { key ->
-                localState[key]?.let {
-                  kotlinx.serialization.json.Json.encodeToJsonElement(
-                    PrototypeScalar.serializer(),
-                    it,
-                  )
-                }
-              }
-          },
         list =
           (node as? PrototypeListNode)?.let { list ->
             val snapshot =
@@ -396,6 +382,20 @@ internal class PrototypeNodeMapping(
                   if (inPager) localState else null,
                 )
             }
+          },
+        iconEffectValue =
+          (node as? PrototypeIconNode)?.effect?.trigger?.let { trigger ->
+            trigger.data?.let {
+              dev.jasonpearson.automobile.protocol.PrototypeDataPointer.resolve(data, it)
+            }
+              ?: trigger.key?.let { key ->
+                localState[key]?.let {
+                  kotlinx.serialization.json.Json.encodeToJsonElement(
+                    PrototypeScalar.serializer(),
+                    it,
+                  )
+                }
+              }
           },
         enterDelayMs =
           (staggerDelayMs + (node.transition?.delayMs ?: 0)).coerceAtMost(

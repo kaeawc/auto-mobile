@@ -152,12 +152,6 @@ import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtoco
 import { prototypeDrawerFields, prototypeDrawerUnsupportedMessage } from "./prototypeDrawer";
 
 import {
-  prototypeIconEffectFields,
-  prototypeIconEffectsUnsupportedMessage,
-} from "./prototypeIconEffects";
-import { PROTOTYPE_ICON_EFFECTS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-
-import {
   PROTOTYPE_STRINGS_CAPABILITY,
   PROTOTYPE_SEMANTICS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
@@ -184,6 +178,12 @@ import {
   prototypePlatformNamespaceUnsupportedMessage,
 } from "./prototypePlatformNamespace";
 
+import {
+  prototypeIconEffectFields,
+  prototypeIconEffectsUnsupportedMessage,
+} from "./prototypeIconEffects";
+import { PROTOTYPE_ICON_EFFECTS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
@@ -192,11 +192,6 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
-  {
-    capability: PROTOTYPE_ICON_EFFECTS_CAPABILITY,
-    fields: prototypeIconEffectFields,
-    unsupportedMessage: prototypeIconEffectsUnsupportedMessage,
-  },
   {
     capability: PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
     fields: prototypeShaderFields,
@@ -207,6 +202,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: (spec) => (record(record(spec)?.theme)?.design === "platform" ? ["theme.design"] : []),
     unsupportedMessage: (_fields, platform) =>
       `The connected ${platform} renderer does not advertise ${PROTOTYPE_DESIGN_PLATFORM_CAPABILITY}. Update the renderer or use theme.design: "material". Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_ICON_EFFECTS_CAPABILITY,
+    fields: prototypeIconEffectFields,
+    unsupportedMessage: prototypeIconEffectsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,

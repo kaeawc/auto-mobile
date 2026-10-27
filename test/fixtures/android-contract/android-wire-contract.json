@@ -10233,16 +10233,16 @@
         "hasDefault": true
       },
       {
-        "name": "effect",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIconEffect",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "name",
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "effect",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIconEffect",
+        "nullable": true,
+        "hasDefault": true
       },
       {
         "name": "variant",

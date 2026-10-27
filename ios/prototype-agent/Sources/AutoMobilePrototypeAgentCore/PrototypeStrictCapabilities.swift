@@ -135,7 +135,10 @@ enum PrototypeStrictCapabilities {
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
             if type == "emit", fields["context"] != nil { need("emit_context") }
-            if type == "platform" { need("platform") }
+            if type == "platform" {
+                need("platform")
+                if fields["call"] == .string("share.open") { need("platform_share") }
+            }
             for (key, child) in fields {
                 if key == "strings" { continue }
                 if key == "payload" ||

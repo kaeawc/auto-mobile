@@ -181,6 +181,11 @@ internal object PrototypePlatformRules {
     argumentsError(action, path, definition)?.let {
       return it
     }
+    if (call == "share.open")
+      PrototypeShare.argumentsError(action.member("args") ?: JsonObject(emptyMap()), "$path.args")
+        ?.let {
+          return it
+        }
     return action.text("into")?.let(::intoError)?.let { fail("$path.into", it) }
   }
 
@@ -254,10 +259,13 @@ object PrototypePlatformCalls {
     val definition = callDefinition(call)?.second ?: return fail("call", "Unknown platform call")
     val bound = JsonObject(args.mapValues { JsonObject(mapOf("value" to it.value)) })
     return PrototypePlatformRules.argumentsError(
-      JsonObject(mapOf("args" to bound)),
+      JsonObject(mapOf("args" to bound, "call" to JsonPrimitive(call))),
       "platform",
       definition,
     )
+      ?: if (call == "share.open")
+        PrototypeShare.argumentsError(args, "platform.args", resolved = true)
+      else null
   }
 }
 
@@ -273,6 +281,8 @@ private fun argumentValueError(
     return fail(at, "Invalid union value")
   }
   val literal = (binding as? JsonObject)?.get("value") ?: return null
+  if (action.text("call") == "share.open" && argument.member("value")?.text("kind") == "string")
+    return null
   walk(literal, argument.getValue("value").jsonObject, "$at.value", Context(), 0)?.let {
     return it
   }

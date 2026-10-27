@@ -10,6 +10,7 @@ internal object PrototypeStrictPolicy {
     supported: Set<String>?,
     library: Boolean,
     context: PrototypeStateChecks.Context,
+    shareAssetIds: Set<String>? = null,
   ): PrototypeSpecError? {
     if (supported != null) {
       val missing = required(spec) - supported
@@ -18,6 +19,9 @@ internal object PrototypeStrictPolicy {
           "$",
           "Unsupported capabilities: ${missing.sorted().joinToString(", ")}",
         )
+    }
+    SharePolicy.assetsError(spec, context, shareAssetIds)?.let {
+      return it
     }
     if (library && "prototype_custom_shaders_v1" in required(spec))
       return PrototypeSpecError(
@@ -72,11 +76,12 @@ internal object PrototypeStrictPolicy {
           }
       }
     }
+    val shares = SharePolicy.fields(context)
     val leaked =
-      (requestFields(context) + channelFields)
+      (requestFields(context) + channelFields + shares)
         .sortedBy { it.path }
         .firstOrNull { field ->
-          isSinkBinding(field, requests) && bindsSecure(field, scopes, secure)
+          (isSinkBinding(field, requests) || field in shares) && bindsSecure(field, scopes, secure)
         }
     if (leaked != null)
       return PrototypeSpecError(
@@ -131,6 +136,62 @@ internal object PrototypeStrictPolicy {
       }
     }
     return fields
+  }
+
+  private object SharePolicy {
+    fun assetsError(
+      spec: JsonObject,
+      context: PrototypeStateChecks.Context,
+      ids: Set<String>?,
+    ): PrototypeSpecError? {
+      if (ids == null) return null
+      for (use in PrototypePlatformUses.uses(spec, context)) {
+        if (use !is PrototypePlatformUses.Use.Call || use.action.text("call") != "share.open")
+          continue
+        PrototypeShare.argumentsError(
+            use.action["args"] as? JsonObject ?: JsonObject(emptyMap()),
+            "${use.path}.args",
+            ids,
+          )
+          ?.let {
+            return it
+          }
+      }
+      return null
+    }
+
+    fun fields(context: PrototypeStateChecks.Context): List<Field> {
+      val fields = mutableListOf<Field>()
+      for (action in context.actions) {
+        if (action.value.text("call") != "share.open" || action.value.text("type") != "platform")
+          continue
+        for ((name, raw) in (action.value["args"] as? JsonObject).orEmpty()) {
+          val at = PrototypeValidationPaths.keyPath("${action.path}.args", name)
+          bindingFields(raw, at, fields)
+        }
+      }
+      return fields
+    }
+
+    private fun bindingFields(raw: JsonElement, path: String, fields: MutableList<Field>) {
+      val form = raw as? JsonObject ?: return
+      form["value"]?.let { collect(it, "$path.value", fields) }
+      form.text("state")?.let { fields.add(Field(it, "$path.state", true)) }
+    }
+
+    private fun collect(value: JsonElement, path: String, fields: MutableList<Field>) {
+      when (value) {
+        is JsonObject ->
+          for ((key, child) in value) collect(
+            child,
+            PrototypeValidationPaths.keyPath(path, key),
+            fields,
+          )
+        is JsonArray ->
+          value.forEachIndexed { index, child -> collect(child, "$path[$index]", fields) }
+        is JsonPrimitive -> if (value.isString) fields.add(Field(value.content, path, false))
+      }
+    }
   }
 
   private fun isSinkBinding(field: Field, requests: List<String>): Boolean =
@@ -321,6 +382,7 @@ internal object PrototypeStrictPolicy {
     private fun scanFields(fields: JsonObject, field: String, routeAlias: Boolean) {
       val type = fields.text("type") ?: ""
       if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
+      if (type == "platform" && fields.text("call") == "share.open") need("platform_share")
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
         if (key == "repeat") {

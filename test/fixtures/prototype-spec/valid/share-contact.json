@@ -1,0 +1,33 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Share",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "share.open",
+        "args": {
+          "contact": {
+            "value": {
+              "name": "Ada",
+              "phone": "+1",
+              "email": "ada@example.com",
+              "org": "Engine",
+              "url": "https://example.com",
+              "note": "a,b;c\\d\ne"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

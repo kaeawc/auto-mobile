@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "secret",
+          "secure": true
+        },
+        {
+          "type": "button",
+          "label": "Share",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "share.open",
+              "args": {
+                "files": {
+                  "value": [
+                    {
+                      "asset": "a",
+                      "name": "{secret}",
+                      "mimeType": "text/plain"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "state": {
+      "secret": "password"
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].args.files.value[0].name",
+  "expectedMessage": "Secure value cannot be bound into an action payload",
+  "options": {
+    "library": true
+  }
+}

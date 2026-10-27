@@ -1,3 +1,4 @@
+import { prototypePlatformUses } from "./prototypePlatform";
 import { prototypeShaderUses } from "./prototypeShaders";
 import { isPrototypeMediaId } from "./prototypeMediaItems";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -56,6 +57,7 @@ export function collectPrototypeAssetReferences(spec: unknown): {
       addFont(record(span)?.style, fonts);
     }
   });
+  addShareImages(spec, images);
   return { images, fonts, shaders };
 }
 /** Saved-layout mirroring also preserves cached IDs found in opaque JSON for dynamic uses. */
@@ -76,5 +78,28 @@ export function collectPrototypeStrings(
   const { images, fonts, shaders } = collectPrototypeAssetReferences(value);
   for (const id of [...images, ...fonts, ...shaders]) {
     references.add(id);
+  }
+}
+
+function addShareImages(spec: unknown, images: Set<string>): void {
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind !== "call" || use.action.call !== "share.open") {
+      continue;
+    }
+    const args = record(use.action.args);
+    for (const name of ["images", "files"]) {
+      addShareEntries(record(args?.[name])?.value, images);
+    }
+  }
+}
+function addShareEntries(entries: unknown, images: Set<string>): void {
+  if (!Array.isArray(entries)) {
+    return;
+  }
+  for (const entry of entries) {
+    const id = typeof entry === "string" ? entry : record(entry)?.asset;
+    if (typeof id === "string") {
+      images.add(id);
+    }
   }
 }

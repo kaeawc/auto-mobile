@@ -74,7 +74,10 @@
     "MAX_PROTOTYPE_MEDIA_IMAGE_BYTES": 33554432,
     "MAX_PROTOTYPE_MEDIA_VIDEO_BYTES": 268435456,
     "MAX_PROTOTYPE_MEDIA_AUDIO_BYTES": 33554432,
-    "MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES": 65536
+    "MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES": 65536,
+    "MAX_PROTOTYPE_SHARE_TEXT_BYTES": 65536,
+    "MAX_PROTOTYPE_SHARE_IMAGES": 10,
+    "MAX_PROTOTYPE_SHARE_FILES": 4
   },
   "definitions": {
     "iconEffectTrigger": {
@@ -20332,6 +20335,65 @@
         },
         "hasText": {
           "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "share": {
+      "capability": "prototype_platform_share_v1",
+      "calls": {
+        "open": {
+          "args": {
+            "text": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 65536
+              }
+            },
+            "url": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 65536
+              }
+            },
+            "subject": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 65536
+              }
+            },
+            "images": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "files": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            },
+            "contact": {
+              "optional": true,
+              "value": {
+                "kind": "json",
+                "maxBytes": 786432
+              }
+            }
+          },
           "permissions": [],
           "background": [],
           "sensitive": true

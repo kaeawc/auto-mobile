@@ -56,7 +56,26 @@ internal object PrototypeBundleSpec {
         fonts,
       )
     }
+    addShareImages(spec, context, images)
     return PrototypeBundleReferences(images, fonts, spec, context)
+  }
+
+  private fun addShareImages(
+    spec: JsonObject,
+    context: PrototypeStateChecks.Context,
+    images: MutableSet<String>,
+  ) {
+    for (use in PrototypePlatformUses.uses(spec, context)) if (
+      use is PrototypePlatformUses.Use.Call && text(use.action["call"]) == "share.open"
+    ) {
+      val args = use.action["args"] as? JsonObject ?: continue
+      for (name in listOf("images", "files")) {
+        val entries = (args[name] as? JsonObject)?.get("value") as? JsonArray ?: continue
+        for (entry in entries) (text(entry) ?: text((entry as? JsonObject)?.get("asset")))?.let(
+          images::add,
+        )
+      }
+    }
   }
 
   // Reuse protocol's structural node traversal; opaque data/state/action bodies are not nodes.

@@ -626,7 +626,22 @@ before anything is shown, and \`clearStorage\` before anything is sent, on a dev
 
 `;
 
-export const GUIDE_REQUEST = `### Requests
+export const GUIDE_REQUEST = `### Sharing
+
+\`{type:"platform", call:"share.open", args:{text:{value:"Hi {name}"}}}\` requires
+\`requires.platform:["share"]\` and \`prototype_platform_share_v1\`. Current runtimes do not
+advertise it; the host refuses the spec before show. Arguments are value bindings: at least one
+of \`text|url|images|files|contact\`, plus optional \`subject\`. URLs use literal http(s) schemes; prototype deep links are unavailable. Images accept up to 10 uploaded IDs
+(or \`{asset:id}\` / \`{data:"/pointer"}\` holding an uploaded ID), files up to 4
+\`{asset,name,mimeType}\` entries. File names have no leading dot, separators or controls and
+fit 128 UTF-8 bytes; MIME types are type/subtype tokens. Contact fields are \`name\` (required),
+\`phone,email,org,url,note\`, serialized as vCard 3.0. Strings take ordinary placeholders and
+fit 65536 UTF-8 bytes. \`into\` receives \`{outcome:"shared"|"unknown",target?,items}\`;
+its text summary keeps 2048 Unicode scalars. \`statusKey,onSuccess,onError\` use platform-call
+semantics. Real system sheets, cancellation callbacks and queued fake outcomes are owed;
+\`platformMode\` and \`prototype simulate\` are not accepted yet.
+
+### Requests
 
 \`{type: "request", url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?}\`
 calls an HTTP endpoint from a tap and writes the answer into \`/data\`, so a prototype can load and

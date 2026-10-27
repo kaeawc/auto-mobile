@@ -1,3 +1,5 @@
+import { prototypeShareArgumentsError } from "./prototypeShare";
+import { prototypePlatformUses } from "./prototypePlatform";
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -13,6 +15,8 @@ export interface PrototypeStrictOptions {
    */
   requiredCapabilities?: (spec: unknown) => readonly string[];
   library?: boolean;
+  /** Complete uploaded asset inventory, when statically known. */
+  shareAssetIds?: readonly string[];
 }
 
 /** Host/device capability negotiation and the additional unprivileged import boundary. */
@@ -24,6 +28,10 @@ export function prototypeStrictPolicyError(
   const unsupported = unsupportedCapabilitiesError(spec, options);
   if (unsupported) {
     return unsupported;
+  }
+  const assets = shareAssetsError(spec, options.shareAssetIds);
+  if (assets) {
+    return assets;
   }
   const window = object(object(spec)?.window);
   if (options.library) {
@@ -68,6 +76,7 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     return undefined;
   }
   const { requests, fields } = libraryFields(spec, nodes);
+  const sharePaths = shareLibraryFields(spec, fields);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const inRequest = (path: string) =>
     requests.some(
@@ -81,7 +90,9 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   const sinkFields = fields.filter(
     (field) =>
       // mapBinding visits only the state key of request/data/emit/platform value bindings.
-      (field.key && field.path.endsWith(".state")) || inRequest(field.path),
+      (field.key && field.path.endsWith(".state")) ||
+      inRequest(field.path) ||
+      sharePaths.has(field.path),
   );
   // Reuse the key binder for text too: repeat substitution has the same string grammar.
   const instances = repeatKeyInstances(
@@ -196,4 +207,75 @@ function unsupportedCapabilitiesError(
     }
   }
   return undefined;
+}
+
+function shareAssetsError(
+  spec: unknown,
+  ids: readonly string[] | undefined,
+): PrototypeValidationError | undefined {
+  if (ids === undefined) {
+    return undefined;
+  }
+  const assets = new Set(ids);
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind !== "call" || use.action.call !== "share.open") {
+      continue;
+    }
+    const error = prototypeShareArgumentsError(
+      object(use.action.args) ?? {},
+      `${use.path}.args`,
+      assets,
+    );
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+function shareLibraryFields(spec: unknown, fields: LibraryField[]): Set<string> {
+  const paths = new Set<string>();
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind !== "call" || use.action.call !== "share.open") {
+      continue;
+    }
+    for (const [name, binding] of Object.entries(object(use.action.args) ?? {})) {
+      addShareBinding(binding, `${use.path}.args.${name}`, fields, paths);
+    }
+  }
+  return paths;
+}
+function addShareBinding(
+  binding: unknown,
+  path: string,
+  fields: LibraryField[],
+  paths: Set<string>,
+): void {
+  const form = object(binding);
+  if (form && Object.hasOwn(form, "value")) {
+    shareStrings(form.value, `${path}.value`, fields, paths);
+  }
+  if (typeof form?.state === "string") {
+    fields.push({ text: form.state, path: `${path}.state`, key: true });
+  }
+}
+function shareStrings(
+  value: unknown,
+  path: string,
+  fields: LibraryField[],
+  paths: Set<string>,
+): void {
+  if (typeof value === "string") {
+    fields.push({ text: value, path, key: false });
+    paths.add(path);
+  } else if (Array.isArray(value)) {
+    value.forEach((entry, index) => shareStrings(entry, `${path}[${index}]`, fields, paths));
+  } else {
+    for (const [key, entry] of Object.entries(object(value) ?? {})) {
+      const at = prototypeContractPatterns.pathKey.test(key)
+        ? `${path}.${key}`
+        : `${path}[${JSON.stringify(key)}]`;
+      shareStrings(entry, at, fields, paths);
+    }
+  }
 }

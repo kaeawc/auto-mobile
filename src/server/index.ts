@@ -351,6 +351,14 @@ function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities
   };
 }
 
+/** A daemon request is stateless, with no client connection to ask; only a direct server asks. */
+function deviceElicitationDispatch(
+  daemonMode: boolean,
+  options: McpServerOptions,
+): { ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions } {
+  return daemonMode ? {} : { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} };
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   ToolRegistry.setMutationRecording(
     createRecording(defaultDaemonContext, {
@@ -553,12 +561,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       prepare: prepareToolCallRequest,
       execute: installTasks(server, options, executeToolCall),
     },
-    {
-      // A daemon request is stateless, with no client connection to ask; only a direct server asks.
-      ...(daemonMode
-        ? {}
-        : { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} }),
-    },
+    deviceElicitationDispatch(daemonMode, options),
   );
   startupBenchmark.endPhase("serverHandlerRegistration");
 

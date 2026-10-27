@@ -117,6 +117,14 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // The ambiguous-device refusal is a tool RESULT the dispatcher inspects, not tool arguments.
+      if (
+        file === "ambiguousDeviceElicitation.ts" &&
+        receiver.type === "Identifier" &&
+        ["refusalResultSchema", "textBlockSchema", "refusalPayloadSchema"].includes(receiver.name)
+      ) {
+        return;
+      }
       if (!first || first.type === "SpreadElement" || !isClean(first)) {
         offenders.push(`${file}:${source.slice(0, node.start).split("\n").length}`);
       }

@@ -761,6 +761,42 @@ export function createDaemonMcpProxy(proxyConfig?: DaemonMcpProxyConfig): Daemon
   });
 }
 
+function proxyToolCallExecutor(
+  proxy: ReturnType<typeof createDaemonMcpProxy>,
+  options: ProxyMcpServerOptions,
+  advertisedToolOutputSchemas: ReadonlyMap<string, boolean>,
+) {
+  return async ({ name, args, progressToken, progress, extra }: ToolCall<McpToolCallExtra>) => {
+    const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
+
+    logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
+
+    // Echo the CLIENT's own progress token through the daemon round trip
+    // (issue #6205) — the direct server (#6118) already refuses to fabricate
+    // one, and the proxy must not either: relay a tick only when the client
+    // asked, tagged with that SAME token. The relay is fire-and-forget; the
+    // shared echo logs a failed send instead of rejecting.
+    const onProgress = progress
+      ? (tick: number, total?: number, message?: string): void => {
+          void progress(tick, total, message);
+        }
+      : undefined;
+
+    try {
+      return await callProxyTool(proxy, { name, args, progressToken, extra }, onProgress, options);
+    } catch (error) {
+      // The SDK suppresses responses for aborted requests. Do not turn a
+      // cancellation into a tool error result while that request unwinds.
+      extra.signal.throwIfAborted();
+      const brokerEnded = localBrokerSessionEndedResult(error, options.session);
+      if (brokerEnded) {
+        return brokerEnded;
+      }
+      return resolveCallToolErrorResult(error, name, hasOutputSchema);
+    }
+  };
+}
+
 export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   server: McpServer;
   proxy: DaemonMcpProxy;
@@ -914,40 +950,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     server,
     {
       progressFailureMessage: "[ProxyServer] Failed to relay progress notification",
-      execute: async ({ name, args, progressToken, progress, extra }) => {
-        const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
-
-        logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
-
-        // Echo the CLIENT's own progress token through the daemon round trip
-        // (issue #6205) — the direct server (#6118) already refuses to fabricate
-        // one, and the proxy must not either: relay a tick only when the client
-        // asked, tagged with that SAME token. The relay is fire-and-forget; the
-        // shared echo logs a failed send instead of rejecting.
-        const onProgress = progress
-          ? (tick: number, total?: number, message?: string): void => {
-              void progress(tick, total, message);
-            }
-          : undefined;
-
-        try {
-          return await callProxyTool(
-            proxy,
-            { name, args, progressToken, extra },
-            onProgress,
-            options,
-          );
-        } catch (error) {
-          // The SDK suppresses responses for aborted requests. Do not turn a
-          // cancellation into a tool error result while that request unwinds.
-          extra.signal.throwIfAborted();
-          const brokerEnded = localBrokerSessionEndedResult(error, options.session);
-          if (brokerEnded) {
-            return brokerEnded;
-          }
-          return resolveCallToolErrorResult(error, name, hasOutputSchema);
-        }
-      },
+      execute: proxyToolCallExecutor(proxy, options, advertisedToolOutputSchemas),
     },
     { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} },
   );

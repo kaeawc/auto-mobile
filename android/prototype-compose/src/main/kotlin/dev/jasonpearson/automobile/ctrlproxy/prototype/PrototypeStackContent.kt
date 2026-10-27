@@ -134,20 +134,26 @@ internal fun PrototypeStackContent(
   val reducedMotion = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
   val animation = resolveStackAnimation(source.stackTransition, change, motion, reducedMotion)
   val rtl = prototypeRtl()
-  AnimatedStackContent(
-    frame,
-    source,
-    motion,
-    reducedMotion,
-    preview,
-    runtime,
-    seek,
+  PrototypeStackSharedRoot(
+    animation.kind == StackTransitionKind.Zoom && change?.source != null,
     modifier,
-    animation,
-    rtl,
-    node.style.alignment,
-  ) { screen ->
-    StackScreen(screen, store, interact)
+  ) { stackModifier ->
+    AnimatedStackContent(
+      frame,
+      source,
+      motion,
+      reducedMotion,
+      preview,
+      runtime,
+      seek,
+      stackModifier,
+      animation,
+      rtl,
+      node.style.alignment,
+      change,
+    ) { screen ->
+      StackScreen(screen, store, interact)
+    }
   }
 }
 
@@ -180,6 +186,7 @@ private fun AnimatedStackContent(
   animation: StackAnimation,
   rtl: Boolean,
   alignment: Alignment,
+  change: PrototypeStackChange?,
   draw: @Composable (StackFrame) -> Unit,
 ) {
   // One keyed content tree owns screen state through ordinary navigation and back previews.
@@ -210,13 +217,7 @@ private fun AnimatedStackContent(
       val current = snapshot?.let { stackFrame(runtime, it, source.id) } ?: frame
       val target = backPreview?.let { stackFrame(runtime, it, source.id) } ?: current
       val kind =
-        resolveStackAnimation(
-            source.stackTransition,
-            (backPreview ?: snapshot)?.stackChange?.takeIf { it.id == source.id },
-            motion,
-            reducedMotion,
-          )
-          .kind
+        resolveStackSnapshotAnimation(source, backPreview ?: snapshot, motion, reducedMotion)
       inFlight = true
       try {
         settleStack(
@@ -238,7 +239,14 @@ private fun AnimatedStackContent(
     contentKey = { it.key },
     contentAlignment = alignment,
   ) {
-    draw(it)
+    PrototypeStackZoomScreen(
+      change.takeIf { kind == StackTransitionKind.Zoom },
+      it.key,
+      it.node,
+      this,
+    ) {
+      draw(it)
+    }
   }
 }
 
@@ -277,6 +285,10 @@ private suspend fun settleStack(
 ) {
   val animated = kind != StackTransitionKind.None
   suspend fun go(frame: StackFrame) {
+    // Attach and measure the selected source before AnimatedContent introduces the target.
+    if (kind == StackTransitionKind.Zoom && state.currentState != frame) {
+      withFrameNanos {}
+    }
     if (animated) state.animateTo(frame) else state.snapTo(frame)
   }
   if (!settle.previewing) return go(settle.current)
@@ -317,6 +329,7 @@ private fun stackTransform(
   val timing = tween<Float>(STACK_DURATION_MS, easing = LinearOutSlowInEasing)
   return when (kind) {
     StackTransitionKind.None -> EnterTransition.None togetherWith ExitTransition.None
+    StackTransitionKind.Zoom -> fadeIn(timing) togetherWith fadeOut(timing)
     StackTransitionKind.Fade ->
       if (fadeThrough) {
         fadeIn(

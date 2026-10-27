@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 
-private val LocalPrototypeSharedTransition = compositionLocalOf<SharedTransitionScope?> { null }
+internal val LocalPrototypeSharedTransition = compositionLocalOf<SharedTransitionScope?> { null }
 
 /**
  * Keys whose two nodes are shown at the same time; they cannot share bounds, so they are skipped.
@@ -59,7 +59,7 @@ internal fun PrototypeSharedRoot(root: PrototypeRenderNode, content: @Composable
   } else content()
 }
 
-private fun prototypeHasSharedKey(node: PrototypeNode): Boolean =
+internal fun prototypeHasSharedKey(node: PrototypeNode): Boolean =
   node.resolvedSharedKey != null || prototypeDescendants(node).any(::prototypeHasSharedKey)
 
 /** sharedBounds crossfades differing content (row/card), while sharing its position and size. */
@@ -68,6 +68,10 @@ internal fun Modifier.prototypeSharedBounds(
   node: PrototypeRenderNode,
   visibility: AnimatedVisibilityScope,
 ): Modifier {
+  val zoom = LocalPrototypeStackZoom.current
+  val zoomRoot = zoom?.destination == true && node.identity == zoom.rootIdentity
+  val zoomSource = zoom?.key != null && node.source?.resolvedSharedKey == zoom.key
+  if (zoomRoot || zoomSource) return prototypeStackZoomNode(node)
   val key = node.source?.resolvedSharedKey ?: return this
   val scope = LocalPrototypeSharedTransition.current ?: return this
   if (LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL) return this

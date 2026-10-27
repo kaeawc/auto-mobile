@@ -29,7 +29,7 @@ class PrototypeStackPatternsRenderTest {
 
   @Test fun fadeThrough() = exercise(PrototypeStackTransition.FADE_THROUGH)
 
-  @Test fun zoomFallback() = exercise(PrototypeStackTransition.ZOOM)
+  @Test fun zoom() = exercise(PrototypeStackTransition.ZOOM)
 
   private fun exercise(pattern: PrototypeStackTransition) {
     val seek = PrototypeBackSeek()

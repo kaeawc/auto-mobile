@@ -69,9 +69,11 @@ enum PrototypeStateValidator {
 
     // MARK: Traversal
 
-    private static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
+    static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
         nodes.append(node)
         actions += node.onTap ?? []
+        actions += node.onAppear ?? []
+        actions += node.onEndReached ?? []
         actions += node.onDismiss ?? []
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
@@ -88,9 +90,9 @@ enum PrototypeStateValidator {
         actions += node.dismiss?.onTap ?? []
         actions += node.action?.onTap ?? []
         actions += (node.menuItems ?? []).flatMap { $0.entry?.onTap ?? [] }
-        node.children?.forEach { collect($0, nodes: &nodes, actions: &actions) }
-        if let child = node.child { collect(child, nodes: &nodes, actions: &actions) }
-        node.screens?.values.forEach { collect($0, nodes: &nodes, actions: &actions) }
+        for entry in node.childEntries(path: node.nodePath) {
+            collect(entry.node, nodes: &nodes, actions: &actions)
+        }
     }
 
     // MARK: Binding rules

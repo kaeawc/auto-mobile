@@ -83,6 +83,7 @@ class CommandAdvertisementTest {
       "prototype_content_transition_v1",
       "prototype_icon_effects_v1",
       "prototype_stack_patterns_v1",
+      "prototype_zoom_transition_v1",
       "prototype_stack_transitions_v1",
       "prototype_reduced_motion_v1",
       "prototype_shared_element_v1",

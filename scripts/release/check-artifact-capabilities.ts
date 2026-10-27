@@ -18,7 +18,9 @@
  *       Kotlin/Swift sources at that ref via `git show`) under <version>. The
  *       release procedure runs this when it pins a new release.
  *
- * Pattern values and source are covered by prototype_stack_patterns_v1 in the host gate sources.
+ * Pattern values and source remain covered by prototype_stack_patterns_v1. The rendering-only
+ * prototype_zoom_transition_v1 promise is also scanned from host notes, so candidates must advertise
+ * native zoom (the iOS agent filters its runtime advertisement to iOS 18+).
  * Nothing is downloaded. A pinned version with no manifest entry fails too, so
  * a release cannot be pinned without recording its capabilities.
  */

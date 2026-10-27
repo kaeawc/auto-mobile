@@ -47,7 +47,7 @@ export interface SupersededSessionRowsHost {
   ): Promise<void>;
   readonly sessions: Pick<Map<string, Session>, "get" | "has">;
   /** UUIDs whose terminal release took the write-first order (no durable journal behind it). */
-  readonly volatileTerminalReleaseIntents: Pick<Map<string, string>, "has">;
+  readonly volatileTerminalReleaseIntents: Pick<Map<string, string>, "get">;
   readonly liveDaemonSessionIds: (() => ReadonlySet<string>) | undefined;
   readonly daemonSessionId: string | undefined;
   awaitInFlightOwnRowWrites(
@@ -306,7 +306,7 @@ export class SupersededSessionRows {
     }
     if (
       this.host.sessions.get(sessionId) === session &&
-      !this.host.volatileTerminalReleaseIntents.has(sessionId)
+      this.host.volatileTerminalReleaseIntents.get(sessionId) !== fence.releaseReason
     ) {
       // A durable release that has not committed yet may still decline: it writes its own row
       // after the commit, and a row written for it now would sit under a session that lives on.

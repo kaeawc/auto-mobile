@@ -774,6 +774,8 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
   test("one transient failure does not end the live session, and the rewrite is retried", async () => {
     await supersededReleaseWithFailingRewrite(1);
 
+    // The next tool call's activity write repairs the stale row itself while the rewrite is owed.
+    expect(await refresh()).toBe("refreshed");
     expect(manager.getSession(SESSION)).not.toBeNull();
     expect(manager.getSessionForDevice(DEVICE)).not.toBeNull();
     expect(releases).toEqual([]);
@@ -926,6 +928,7 @@ describe("a failed rewrite of a live row after overlapping writes (#11557)", () 
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(manager.getSession(SESSION)).not.toBeNull();
     expect(releases).toEqual([]);
+    expect(await refresh()).toBe("refreshed");
 
     // The database recovers: the next activity write rewrites the row it is still owed.
     store.failPlainUpserts = 0;

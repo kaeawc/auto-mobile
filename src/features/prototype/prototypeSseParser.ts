@@ -29,12 +29,19 @@ export class SseParser {
   constructor(private readonly handlers: SseParserHandlers) {}
 
   /**
-   * Characters buffered for the event being assembled: the data lines as they will join, plus the
-   * line still arriving (which includes its `field:` prefix). For size limits.
+   * Characters buffered for the event being assembled: the data lines as they will join, the event
+   * name and the retained id (both relayed with the event), plus the line still arriving (which
+   * includes its `field:` prefix). For size limits.
    */
   get pendingChars(): number {
     const joined = this.dataLines.reduce((sum, line) => sum + line.length, 0);
-    return this.buffer.length + joined + Math.max(0, this.dataLines.length - 1);
+    return (
+      this.buffer.length +
+      joined +
+      Math.max(0, this.dataLines.length - 1) +
+      this.eventName.length +
+      this.lastEventId.length
+    );
   }
 
   seedLastEventId(id: string): void {

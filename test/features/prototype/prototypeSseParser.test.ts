@@ -77,6 +77,12 @@ describe("SseParser", () => {
     expect(parse(["data: partial"]).events).toEqual([]);
   });
 
+  test("pendingChars includes the event name and the retained id", () => {
+    const parser = new SseParser({ onEvent: () => {} });
+    parser.push("event: abc\nid: 12345\n");
+    expect(parser.pendingChars).toBe(3 + 5);
+  });
+
   test("pendingChars counts the line and the data lines being assembled", () => {
     const parser = new SseParser({ onEvent: () => {} });
     parser.push("data: abcd\ndata: ef");

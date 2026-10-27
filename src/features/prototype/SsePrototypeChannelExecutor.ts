@@ -209,7 +209,11 @@ export class SsePrototypeChannelExecutor implements PrototypeChannelExecutor {
     }
     const parser = new SseParser({
       onEvent: (event) => {
-        if (Buffer.byteLength(event.data) > MAX_PROTOTYPE_CHANNEL_FRAME_BYTES) {
+        const eventBytes =
+          Buffer.byteLength(event.data) +
+          Buffer.byteLength(event.event ?? "") +
+          Buffer.byteLength(event.id ?? "");
+        if (eventBytes > MAX_PROTOTYPE_CHANNEL_FRAME_BYTES) {
           throw new PrototypeResponseTooLargeError();
         }
         sink.frame(event);

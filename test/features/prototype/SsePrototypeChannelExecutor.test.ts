@@ -208,6 +208,17 @@ describe("SsePrototypeChannelExecutor", () => {
     expect(b.sink.closes[0]?.error?.code).toBe("too_large");
   });
 
+  test("event name and id count toward the event limit", async () => {
+    const half = "x".repeat(MAX_PROTOTYPE_CHANNEL_FRAME_BYTES / 2);
+    const stream = new Stream();
+    const { sink, open } = setup(() => stream.response);
+    await open();
+    stream.write(`event: ${half}\nid: ${half}\ndata: ok\n\n`);
+    await settle();
+    expect(sink.frames).toEqual([]);
+    expect(sink.closes[0]?.error?.code).toBe("too_large");
+  });
+
   test("an event of exactly the limit is delivered", async () => {
     const stream = new Stream();
     const { sink, open } = setup(() => stream.response);

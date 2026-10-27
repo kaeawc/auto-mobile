@@ -4777,18 +4777,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -4843,14 +4831,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -4867,20 +4855,20 @@
         "hasDefault": true
       },
       {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "text",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -4905,18 +4893,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -4971,14 +4947,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -4991,6 +4967,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5009,18 +4997,6 @@
       {
         "name": "stateKey",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -5057,18 +5033,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -5123,14 +5087,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -5143,6 +5107,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5180,18 +5156,6 @@
         "name": "dismissOnSwipe",
         "type": "boolean",
         "nullable": false,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -5235,18 +5199,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -5313,14 +5265,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -5333,6 +5285,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5353,18 +5317,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "button": [
@@ -5383,18 +5335,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -5453,14 +5393,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -5473,6 +5413,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5497,18 +5449,6 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -5541,18 +5481,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -5619,14 +5547,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -5643,6 +5571,18 @@
         "hasDefault": true
       },
       {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "variant",
         "type": "string",
         "nullable": false,
@@ -5653,18 +5593,6 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "carousel": [
@@ -5683,18 +5611,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -5753,14 +5669,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -5773,6 +5689,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5805,18 +5733,6 @@
         "type": "double",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "chart": [
@@ -5835,18 +5751,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -5905,14 +5809,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -5925,6 +5829,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5957,18 +5873,6 @@
         "type": "double",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "checkbox": [
@@ -5987,18 +5891,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -6057,14 +5949,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -6077,6 +5969,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -6109,18 +6013,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "chip": [
@@ -6139,18 +6031,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -6209,14 +6089,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -6229,6 +6109,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -6255,18 +6147,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "column": [
@@ -6285,18 +6165,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -6367,14 +6235,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -6387,6 +6255,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -6407,18 +6287,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "datePicker": [
@@ -6437,18 +6305,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -6507,14 +6363,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -6527,6 +6383,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -6551,18 +6419,6 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -7415,28 +7271,6 @@
         "hasDefault": true
       }
     ],
-    "dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace": [
-      {
-        "name": "predictiveBack",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespacePredictiveBack",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "indication",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      }
-    ],
-    "dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespacePredictiveBack": [
-      {
-        "name": "style",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      }
-    ],
     "dev.jasonpearson.automobile.protocol.PrototypeAnimate": [
       {
         "name": "durationMs",
@@ -7845,54 +7679,6 @@
         "type": "object:PrototypeModeValue",
         "nullable": true,
         "hasDefault": true
-      }
-    ],
-    "dev.jasonpearson.automobile.protocol.PrototypeIosNamespace": [
-      {
-        "name": "buttonStyle",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "tab",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespaceTab",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "sheet",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespaceSheet",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "hover",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "navigationTitle",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      }
-    ],
-    "dev.jasonpearson.automobile.protocol.PrototypeIosNamespaceSheet": [
-      {
-        "name": "sizing",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      }
-    ],
-    "dev.jasonpearson.automobile.protocol.PrototypeIosNamespaceTab": [
-      {
-        "name": "role",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeItem": [
@@ -9573,18 +9359,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -9639,14 +9413,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -9659,6 +9433,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9703,18 +9489,6 @@
         "type": "polymorphic",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "divider": [
@@ -9733,18 +9507,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -9803,14 +9565,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -9827,21 +9589,21 @@
         "hasDefault": true
       },
       {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "orientation",
         "type": "string",
         "nullable": false,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -9865,18 +9627,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -9931,14 +9681,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -9951,6 +9701,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9982,18 +9744,6 @@
         "name": "dismissOnSwipe",
         "type": "boolean",
         "nullable": false,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -10063,18 +9813,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -10129,14 +9867,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -10149,6 +9887,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10173,18 +9923,6 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -10223,18 +9961,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -10289,14 +10015,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -10309,6 +10035,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10327,18 +10065,6 @@
       {
         "name": "maxLines",
         "type": "int",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -10371,18 +10097,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -10437,14 +10151,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -10457,6 +10171,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10477,18 +10203,6 @@
         "type": "object:PrototypeGridColumns",
         "nullable": false,
         "hasDefault": false
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "icon": [
@@ -10507,18 +10221,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -10589,14 +10291,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -10613,6 +10315,18 @@
         "hasDefault": true
       },
       {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "name",
         "type": "string",
         "nullable": false,
@@ -10621,18 +10335,6 @@
       {
         "name": "variant",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -10657,18 +10359,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -10723,14 +10413,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -10743,6 +10433,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10763,18 +10465,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "image": [
@@ -10793,18 +10483,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -10875,14 +10553,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -10895,6 +10573,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10919,18 +10609,6 @@
       {
         "name": "filter",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeImageFilter",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -10983,18 +10661,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -11049,14 +10715,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -11069,6 +10735,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11137,18 +10815,6 @@
         "type": "int",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "listItem": [
@@ -11167,18 +10833,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -11237,14 +10891,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -11257,6 +10911,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11295,18 +10961,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "menu": [
@@ -11329,18 +10983,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -11395,14 +11037,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -11419,6 +11061,18 @@
         "hasDefault": true
       },
       {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "openWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSheetCondition",
         "nullable": false,
@@ -11429,18 +11083,6 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "pager": [
@@ -11463,18 +11105,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -11529,14 +11159,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -11549,6 +11179,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11585,18 +11227,6 @@
       {
         "name": "indicator",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },
@@ -11701,18 +11331,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -11767,14 +11385,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -11787,6 +11405,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11805,18 +11435,6 @@
       {
         "name": "max",
         "type": "double",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -11869,18 +11487,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -11935,14 +11541,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -11955,6 +11561,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11985,18 +11603,6 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -12123,18 +11729,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -12201,14 +11795,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -12221,6 +11815,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -12247,18 +11853,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "scroll": [
@@ -12277,18 +11871,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -12347,14 +11929,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -12367,6 +11949,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -12417,18 +12011,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeFadeEdges",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "scrollTo": [
@@ -12467,18 +12049,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -12537,14 +12107,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -12557,6 +12127,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -12607,18 +12189,6 @@
         "type": "polymorphic",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "segmentedButton": [
@@ -12641,18 +12211,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -12707,14 +12265,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -12731,6 +12289,18 @@
         "hasDefault": true
       },
       {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "stateKey",
         "type": "string",
         "nullable": false,
@@ -12741,18 +12311,6 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "select": [
@@ -12775,18 +12333,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -12841,14 +12387,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -12861,6 +12407,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -12879,18 +12437,6 @@
       {
         "name": "label",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       }
@@ -12971,18 +12517,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -13037,14 +12571,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -13057,6 +12591,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -13107,18 +12653,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "snackbar": [
@@ -13137,18 +12671,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -13207,14 +12729,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -13227,6 +12749,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -13253,18 +12787,6 @@
         "type": "int",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "spacer": [
@@ -13283,18 +12805,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -13353,14 +12863,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -13377,14 +12887,14 @@
         "hasDefault": true
       },
       {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       }
@@ -13409,18 +12919,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -13475,14 +12973,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -13499,6 +12997,18 @@
         "hasDefault": true
       },
       {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "start",
         "type": "string",
         "nullable": false,
@@ -13509,18 +13019,6 @@
         "type": "map",
         "nullable": false,
         "hasDefault": false
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "startTimer": [
@@ -13583,18 +13081,6 @@
         "hasDefault": true
       },
       {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "onTap",
         "type": "list",
         "nullable": true,
@@ -13649,14 +13135,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -13669,6 +13155,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -13694,18 +13192,6 @@
         "name": "scrollable",
         "type": "boolean",
         "nullable": false,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
         "hasDefault": true
       },
       {
@@ -13737,18 +13223,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -13819,14 +13293,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -13839,6 +13313,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -13859,18 +13345,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "textField": [
@@ -13889,18 +13363,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -13959,14 +13421,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -13979,6 +13441,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -14091,18 +13565,6 @@
         "hasDefault": true
       },
       {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "errorWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
@@ -14131,18 +13593,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -14201,14 +13651,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -14221,6 +13671,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -14259,18 +13721,6 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "toggle": [
@@ -14297,18 +13747,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -14367,14 +13805,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -14387,6 +13825,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -14425,18 +13875,6 @@
         "type": "list",
         "nullable": true,
         "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "topAppBar": [
@@ -14455,18 +13893,6 @@
       {
         "name": "contentDescription",
         "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "semantics",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "onAppear",
-        "type": "list",
         "nullable": true,
         "hasDefault": true
       },
@@ -14525,14 +13951,14 @@
         "hasDefault": true
       },
       {
-        "name": "safeAreaPadding",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "name": "span",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "span",
-        "type": "int",
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
         "hasDefault": true
       },
@@ -14545,6 +13971,18 @@
       {
         "name": "scrollLinked",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -14569,18 +14007,6 @@
       {
         "name": "actions",
         "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "ios",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "android",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
         "nullable": true,
         "hasDefault": true
       },

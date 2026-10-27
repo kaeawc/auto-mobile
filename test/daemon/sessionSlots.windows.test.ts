@@ -59,9 +59,10 @@ test("forced release leaves an orphan rebind only until its pending write settle
   rig.timer.reset();
 });
 
-// A volatile journal keeps the write-first order, where the terminal row can land before the
-// final fence declines. A durable one writes the row after the commit (#11799).
-test("declined terminal commit agrees across fence lifting and live-row rewrite", async () => {
+// A volatile journal keeps the write-first order: once the terminal row landed the release has
+// won (#11799 W5), so a commit fence that turns false meanwhile changes nothing and the slot
+// state settles to the ended session without a live-row rewrite.
+test("a commit fence that turns false after the terminal row agrees across the settled slot", async () => {
   const persistence = new GatedPersistence();
   const rig = slotAgreementRig(persistence, undefined, undefined, undefined, false);
   const session = await rig.manager.createSession("id", "fake-id", "android");
@@ -73,20 +74,14 @@ test("declined terminal commit agrees across fence lifting and live-row rewrite"
   });
   const view = rig.manager.getLegacyLifecycleView();
   await drainUntil(() => view.terminalSnapshots.has("id"), { description: "terminal fence" });
-  const rewriteGate = Promise.withResolvers<void>();
-  persistence.upsertGate = rewriteGate.promise;
+  assertSlotAgreement(rig, ["id"], [session], "terminal-fence-raised");
   commit = false;
   releaseGate.resolve();
-  await drainUntil(() => view.releaseOps.get("id")?.commitDeclined === true, {
-    description: "declined commit",
-  });
-  assertSlotAgreement(rig, ["id"], [session], "declined-terminal");
-  // A newly raised fence is lifted synchronously on this path. Pre-existing fences stay held;
-  // the fake-view regression pins that separate mapping, including a fence without any op.
-  expect(rig.manager.isCurrentSession(session)).toBe(!view.terminalSnapshots.has("id"));
-  rewriteGate.resolve();
-  expect((await release).superseded).toBe(true);
-  assertSlotAgreement(rig, ["id"], [session], "declined-settled");
+  const result = await release;
+  expect(result.superseded).toBe(false);
+  expect(view.sessions.has("id")).toBe(false);
+  expect(view.releaseOps.get("id")?.commitDeclined).toBeUndefined();
+  assertSlotAgreement(rig, ["id"], [session], "won-settled");
   rig.timer.reset();
 });
 

@@ -856,12 +856,6 @@
         "name": "appear"
       }
     ],
-    "ios": {
-      "hover": "lift"
-    },
-    "android": {
-      "indication": "ripple"
-    },
     "press": {
       "scale": 0.9,
       "alpha": 0.8

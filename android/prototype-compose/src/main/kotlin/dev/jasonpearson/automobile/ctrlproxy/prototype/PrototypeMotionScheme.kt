@@ -53,6 +53,12 @@ internal fun PrototypeMotionTheme(content: @Composable () -> Unit) {
   )
 }
 
+/** Ripples follow the motion switch for the whole shared coordinate space. */
+@Composable
+internal fun PrototypeMotionSharedRoot(root: PrototypeRenderNode, content: @Composable () -> Unit) {
+  PrototypeMotionTheme { PrototypeSharedRoot(root, content) }
+}
+
 @Composable
 internal fun <T> prototypeExpressiveSpec(effects: Boolean = false): FiniteAnimationSpec<T> =
   if (!LocalPrototypeMotion.current) snap()

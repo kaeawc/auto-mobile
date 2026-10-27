@@ -189,6 +189,19 @@ export function appLayerGrant(
   };
 }
 
+/** Custom shaders are Android-only and stay behind a host opt-in. */
+function shaderRefusalFor(
+  target: { android?: unknown },
+  spec: unknown,
+  env: NodeJS.ProcessEnv | undefined,
+): PrototypeResult | undefined {
+  if (!target.android && prototypeShaderFields(spec).length) {
+    return { success: false, error: PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR };
+  }
+  const optIn = prototypeShaderOptInProblem(spec, env);
+  return optIn ? { success: false, error: optIn } : undefined;
+}
+
 /** Refuses spec-introduced features before a show or patch reaches the device. */
 export async function specCapabilityRefusal(
   target: {
@@ -200,12 +213,9 @@ export async function specCapabilityRefusal(
   iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
   env?: NodeJS.ProcessEnv,
 ): Promise<PrototypeResult | undefined> {
-  if (!target.android && prototypeShaderFields(spec).length) {
-    return { success: false, error: PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR };
-  }
-  const optIn = prototypeShaderOptInProblem(spec, env);
-  if (optIn) {
-    return { success: false, error: optIn };
+  const shaderRefusal = shaderRefusalFor(target, spec, env);
+  if (shaderRefusal) {
+    return shaderRefusal;
   }
   for (const gate of prototypeRequiredCapabilities(spec, target.android ? "android" : "ios")) {
     const supported = target.android

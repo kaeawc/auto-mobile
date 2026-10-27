@@ -45,6 +45,5 @@ export class SessionManagerCleanup {
     // dangling timer (issue #6085 item 2).
     this.host.stateRestore.stopAll();
     this.host.rowWriter.clearPendingNonTerminalReleases();
-    this.host.superseded.clearRowsUnderPendingRelease();
   }
 }

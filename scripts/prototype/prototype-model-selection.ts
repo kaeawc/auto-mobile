@@ -19,6 +19,8 @@ export interface ModelOptions {
   /** Field keys are `field` or `variant.field`; variant entries take precedence per language. */
   readonly fieldTypes?: TypeRefs;
   readonly fieldDocs?: Readonly<Record<string, string>>;
+  /** Fields the typed Kotlin models deliberately omit (validated by the contract, stripped before decode). */
+  readonly omitKotlinFields?: readonly string[];
   /** Kotlin non-null defaults for optional fields; Swift defaults are unsupported. */
   readonly fieldDefaults?: TypeRefs;
   readonly kotlinBase?: {

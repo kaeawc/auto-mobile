@@ -8,6 +8,7 @@ import {
 } from "../features/systemTray/systemTrayHelpers";
 import { defineDeviceTool } from "./defineTool";
 import { dragPathHandler, dragPathSchema } from "./dragPathTool";
+import { hoverAtHandler, hoverAtSchema } from "./hoverAtTool";
 import {
   createClipboardHandler,
   createKeyboardHandler,
@@ -310,9 +311,17 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   ToolRegistry.registerDeviceAware(
     "dragPath",
-    "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
+    "Drag a finger (or, with pointer, a stylus on Android 13+) along a polyline with segment timing, an initial hold and a release hold.",
     dragPathSchema,
     dragPathHandler,
+    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "hoverAt",
+    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1).",
+    hoverAtSchema,
+    hoverAtHandler,
     { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 

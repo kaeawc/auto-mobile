@@ -32,13 +32,23 @@ donors_require_yq() {
 }
 
 # Gradle home directories a job passes to the repository's Gradle actions, one
-# per line.
+# per line. A job whose body is a shared composite action (ci-*, #11872) passes
+# them from inside that action.
 gradle_homes() {
   yq -r "
     .jobs.\"$2\".steps[]
     | select(.uses == \"./.github/actions/gradle-task-run\" or .uses == \"./.github/actions/android-emulator\")
     | .with.\"gradle-home-directory\"
   " "$1"
+  local action
+  while IFS= read -r action; do
+    [[ -n "$action" && "$action" != null ]] || continue
+    yq -r "
+      .runs.steps[]
+      | select(.uses == \"./.github/actions/gradle-task-run\" or .uses == \"./.github/actions/android-emulator\")
+      | .with.\"gradle-home-directory\"
+    " "${action#./}/action.yml"
+  done < <(yq -r ".jobs.\"$2\".steps[] | select(.uses == \"./.github/actions/ci-*\") | .uses" "$1")
 }
 
 # "<borrower job> <donor job>" per line, in workflow order.

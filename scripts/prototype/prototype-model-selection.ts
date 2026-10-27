@@ -63,7 +63,13 @@ export const prototypeModelSelection = {
   },
   // Swift Action is a flat struct and Node a final class with different shapes; both stay hand-written.
   action: actionModelOptions,
-  node: nodeModelOptions,
+  node: {
+    ...nodeModelOptions,
+    kotlinBase: {
+      ...nodeModelOptions.kotlinBase,
+      fields: [...nodeModelOptions.kotlinBase.fields, "keyframes"],
+    },
+  },
   routeEntry: { languages: ["kotlin"] },
   route: { languages: ["kotlin"] },
   scrollEdge: {},
@@ -203,6 +209,7 @@ export const prototypeTypeRefs = {
   imageAsset: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   semantics: { swift: "PrototypeSemantics" },
   effect: { kotlin: "JsonObject" },
+  keyframes: { kotlin: "JsonObject" },
   colorToken: { kotlin: "String" },
   listRepeat: { kotlin: "PrototypeRepeat" },
 } as const satisfies TypeRefs;

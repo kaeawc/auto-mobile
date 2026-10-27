@@ -48,6 +48,7 @@ struct PrototypeContractValidator {
     var nodes = 0
     var images = 0
     var effects = PrototypeEffectUses()
+    var keyframeNodes = 0
     var referenceDepth: [String: Int] = [:]
 
     static func validateRequestBody(_ value: JSONValue, path: String) throws {
@@ -87,6 +88,7 @@ struct PrototypeContractValidator {
             try PrototypeLazyList.validateLimits(root: root, data: fields["data"]?.objectFields)
         }
         try validator.walk(value, rule: spec, path: "", depth: 0)
+        try PrototypeKeyframes.validate(nodes: validator.locatedNodes, spec: value.objectFields ?? [:])
         return validator
     }
 
@@ -176,6 +178,10 @@ struct PrototypeContractValidator {
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }
             if node["type"] == .string("image") { images += max(1, Self.imageUses(node["asset"])) }
             if images > (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid(path, "Image limit exceeded") }
+            if node["keyframes"] != nil { keyframeNodes += 1 }
+            if keyframeNodes > (limits["MAX_PROTOTYPE_KEYFRAME_NODES"] ?? 0) {
+                throw Self.invalid("\(path).keyframes", "Keyframe node limit exceeded")
+            }
             effects.add(PrototypeEffectUses(node: node))
             if effects.total > (limits["MAX_PROTOTYPE_EFFECTS"] ?? 0) {
                 throw Self.invalid(path, "Effect limit exceeded")

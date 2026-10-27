@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "keyframes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked": false
+    },
+    "root": {
+      "type": "icon",
+      "name": "favorite",
+      "keyframes": {
+        "trigger": {
+          "key": "liked"
+        },
+        "durationMs": 600,
+        "tracks": {
+          "scale": {
+            "points": [
+              [0, 1],
+              [1, 1]
+            ],
+            "curve": "bad"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.keyframes.tracks.scale.curve",
+  "expectedMessage": "Invalid enum value"
+}

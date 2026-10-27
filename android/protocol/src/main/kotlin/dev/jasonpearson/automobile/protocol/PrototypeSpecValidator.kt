@@ -45,6 +45,7 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_PAGER_DP: Int = limit("MAX_PROTOTYPE_PAGER_DP")
   val MAX_PROTOTYPE_DEPTH: Int = limit("MAX_PROTOTYPE_DEPTH")
   val MAX_PROTOTYPE_IMAGES: Int = limit("MAX_PROTOTYPE_IMAGES")
+  val MAX_PROTOTYPE_KEYFRAME_NODES: Int = limit("MAX_PROTOTYPE_KEYFRAME_NODES")
   val MAX_PROTOTYPE_EFFECTS: Int = limit("MAX_PROTOTYPE_EFFECTS")
   val MAX_PROTOTYPE_ANIMATED_EFFECTS: Int = limit("MAX_PROTOTYPE_ANIMATED_EFFECTS")
   val MAX_PROTOTYPE_SPEC_BYTES: Int = limit("MAX_PROTOTYPE_SPEC_BYTES")
@@ -171,6 +172,8 @@ object PrototypeSpecValidator {
     checked.actions.removeAll {
       it.value.text("type") !in stateWriteActionTypes && it.value["requireValid"] == null
     }
+    // A keyframes trigger names a declared state key, so a state write can change that verdict.
+    val keyframeKeys = PrototypeKeyframesRules.stateKeyTriggers(context)
     val serializer = MapSerializer(String.serializer(), PrototypeScalar.serializer())
     // An omitted state adds its field name and comma; a present state replaces only its value.
     // Compact serialization preserves all non-state bytes, including UTF-8 and escaped strings.
@@ -196,20 +199,30 @@ object PrototypeSpecValidator {
         try {
           val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
-          else
-            walk(stored, stateRule, "state", Context(), 0)
-              ?: PrototypeStorageValidation.error(
-                JsonObject(value + ("state" to stored)),
-                enforceBytes = false,
-              )
-              ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
-              ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
+          else storedStateError(stored, stateRule, value, checked, keyframeKeys)
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")
         }
       }
     }
   }
+
+  /** The verdict for a decoded state write against the spec it replaces the state of. */
+  private fun storedStateError(
+    stored: JsonElement,
+    stateRule: JsonObject,
+    value: JsonObject,
+    checked: Context,
+    keyframeKeys: List<Pair<String, String>>,
+  ): PrototypeSpecError? =
+    walk(stored, stateRule, "state", Context(), 0)
+      ?: PrototypeKeyframesRules.unknownTriggerKey(keyframeKeys, stored as? JsonObject)
+      ?: PrototypeStorageValidation.error(
+        JsonObject(value + ("state" to stored)),
+        enforceBytes = false,
+      )
+      ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
+      ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
 
   private val stateWriteActionTypes =
     setOf("setState", "toggle", "increment", "decrement", "request", "platform")

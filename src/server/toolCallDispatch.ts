@@ -3,6 +3,7 @@ import { ActionableError } from "../models";
 import type { CreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 import { logger } from "../utils/logger";
 import { withAmbiguousDeviceMrtr } from "./ambiguousDeviceMrtr";
+import { DeclineMemory } from "./elicitationPolicy";
 import {
   daemonDeviceChoiceRequestState,
   type DeviceChoiceRequestState,
@@ -192,6 +193,8 @@ export function installToolCallDispatcher(
     deviceChoiceRequestState?: DeviceChoiceRequestStateCodec;
   } = {},
 ): void {
+  // One memory per connection: the legacy server instance is one client's, so it outlives calls.
+  const declines = new DeclineMemory();
   const dispatchBackend = options.era === "modern" ? withAmbiguousDeviceMrtr(backend) : backend;
   const requestState =
     options.era === "modern"
@@ -206,11 +209,10 @@ export function installToolCallDispatcher(
         request,
         toolCallExtraFromContext(ctx, requestState),
         options.era !== "modern" && options.ambiguousDeviceElicitation
-          ? withAmbiguousDeviceElicitation(
-              backend,
-              deviceChoicePeerFor(server, ctx),
-              options.ambiguousDeviceElicitation,
-            )
+          ? withAmbiguousDeviceElicitation(backend, deviceChoicePeerFor(server, ctx), {
+              declines,
+              ...options.ambiguousDeviceElicitation,
+            })
           : dispatchBackend,
       )) as McpToolCallResult,
   );

@@ -12,6 +12,7 @@ import {
   defaultElicitationRecorder,
   type ElicitationRecorder,
 } from "./elicitationOutcome";
+import { elicitationEnabled } from "./elicitationPolicy";
 import { executeWithDeviceChoice } from "./ambiguousDeviceChoice";
 import { defaultTimer } from "../utils/SystemTimer";
 import type {
@@ -25,18 +26,26 @@ import type {
 export function withAmbiguousDeviceMrtr<Req extends ToolCallRequest, Result>(
   backend: ToolCallBackend<Req, McpToolCallExtra, Result>,
   recorder: ElicitationRecorder = defaultElicitationRecorder,
+  enabled: () => boolean = () => elicitationEnabled(),
 ): ToolCallBackend<Req, McpToolCallExtra, Result | InputRequiredResult> {
   return {
     ...backend,
     execute: async (call) => {
+      const switchedOff = !enabled();
       if (
         call.args.deviceId !== undefined ||
+        switchedOff ||
         !declaresFormElicitation(call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY])
       ) {
         const result = await backend.execute(call);
         const candidates = call.args.deviceId === undefined && ambiguousDeviceCandidates(result);
         if (candidates) {
-          recordNotOffered(recorder, call, candidates.length);
+          recordNotAsked(
+            recorder,
+            call,
+            candidates.length,
+            switchedOff ? "disabled" : "not_offered",
+          );
         }
         return result;
       }
@@ -89,16 +98,17 @@ export function withAmbiguousDeviceMrtr<Req extends ToolCallRequest, Result>(
   };
 }
 
-function recordNotOffered(
+function recordNotAsked(
   recorder: ElicitationRecorder,
   call: ToolCall<McpToolCallExtra>,
   candidateCount: number,
+  outcome: "disabled" | "not_offered",
 ): void {
   recorder.record({
     toolName: call.name,
     era: "modern",
     declared: classifyElicitationDeclaration(call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY]),
-    outcome: "not_offered",
+    outcome,
     candidateCount,
     atMs: defaultTimer.now(),
   });

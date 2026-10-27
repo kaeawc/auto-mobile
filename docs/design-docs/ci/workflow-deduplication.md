@@ -112,8 +112,8 @@ webrtc-integration-test                11      9       9     81%
 shared jobs: 16
 ```
 
-The four jobs this lane moved to composite actions on both workflows (\`android-device-webrtc\`,
-\`webrtc-integration-test\`, \`build-android-control-proxy\`, \`junit-runner-unit-tests\`) are caller-sized
+The four jobs this lane moved to composite actions on both workflows (`android-device-webrtc`,
+`webrtc-integration-test`, `build-android-control-proxy`, `junit-runner-unit-tests`) are caller-sized
 now: 9 to 20 lines, the rest being the job's own gating. The shared-percentage column no longer
 measures duplication for them, only that the caller wraps the same few lines.
 
@@ -122,19 +122,19 @@ measures duplication for them, only that the caller wraps the same few lines.
 Reading the real differences for slices 6 to 8 (not for the four desktop and IDE jobs, which are
 another lane's):
 
-| Job                                   | Why sharing a body would change behaviour                                                                                                                                                                                                              |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| \`detekt\`                            | The PR copy selects Android lint modules from the diff and runs \`detektMain detektTest :build-logic:test <selected lint tasks>\`; the merge copy always runs \`lintDebug\`. The two comments pin different reasons for the same config-cache setting. |
-| \`node-host-integration-tests\`       | The merge copy also runs a Windows leg, unsets a wall-clock variable there and uploads a netstat capture; the PR copy runs on Linux only (Windows runs inside the Node job).                                                                           |
-| \`kotlin-code-coverage\`              | A different job under the same id: the PR copy is "Run CtrlProxy Unit Tests", the merge copy is "Kotlin Code Coverage" with another task list and a 90-day coverage artifact.                                                                          |
-| \`build-playground-app\`              | Disabled on merge (\`if: \${{ false }}\`); the PR copy runs more tasks and borrows a Gradle home.                                                                                                                                                      |
-| \`bats-tests\`, \`installer-minimal\` | Different runners, gating, matrices and timeouts.                                                                                                                                                                                                      |
-| \`swift-code-coverage\`               | A macOS job on PRs and an Ubuntu job on merge: two jobs with one id.                                                                                                                                                                                   |
+| Job                               | Why sharing a body would change behaviour                                                                                                                                                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `detekt`                          | The PR copy selects Android lint modules from the diff and runs `detektMain detektTest :build-logic:test <selected lint tasks>`; the merge copy always runs `lintDebug`. The two comments pin different reasons for the same config-cache setting. |
+| `node-host-integration-tests`     | The merge copy also runs a Windows leg, unsets a wall-clock variable there and uploads a netstat capture; the PR copy runs on Linux only (Windows runs inside the Node job).                                                                       |
+| `kotlin-code-coverage`            | A different job under the same id: the PR copy is "Run CtrlProxy Unit Tests", the merge copy is "Kotlin Code Coverage" with another task list and a 90-day coverage artifact.                                                                      |
+| `build-playground-app`            | Disabled on merge (`if: ${{ false }}`); the PR copy runs more tasks and borrows a Gradle home.                                                                                                                                                     |
+| `bats-tests`, `installer-minimal` | Different runners, gating, matrices and timeouts.                                                                                                                                                                                                  |
+| `swift-code-coverage`             | A macOS job on PRs and an Ubuntu job on merge: two jobs with one id.                                                                                                                                                                               |
 
 Making these share a body would mean parameterizing away real differences, which risks changing what
 a required check runs. They stay as they are. What does help is the guard added in #15561: the
 sync-by-prose comments ("matching the PR-CI Detekt job") are the remaining risk, and
-\`test/bats/detekt-config-cache-disabled.bats\` already pins the one flag that matters.
+`test/bats/detekt-config-cache-disabled.bats` already pins the one flag that matters.
 
-Left for the owner's call: renaming one of the two \`kotlin-code-coverage\` and \`swift-code-coverage\`
+Left for the owner's call: renaming one of the two `kotlin-code-coverage` and `swift-code-coverage`
 jobs, so a shared id stops implying a shared body.

@@ -1,15 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../../src/models/ActionableError";
-import type {
-  PointerEnvironment,
-  PointerRequest,
-} from "../../../../src/features/action/pointer/PointerInjector";
 import {
-  AdbInputSourceRoute,
-  CtrlProxyA11yRoute,
-  InstrumentationRoute,
-  defaultPointerRoutes,
-} from "../../../../src/features/action/pointer/pointerRoutes";
+  invalidPointerFeatures,
+  type PointerEnvironment,
+  type PointerRequest,
+} from "../../../../src/features/action/pointer/PointerInjector";
+import { AdbInputSourceRoute } from "../../../../src/features/action/pointer/AdbInputSourceRoute";
+import { CtrlProxyA11yRoute } from "../../../../src/features/action/pointer/CtrlProxyA11yRoute";
+import { InstrumentationRoute } from "../../../../src/features/action/pointer/InstrumentationRoute";
+import { defaultPointerRoutes } from "../../../../src/features/action/pointer/pointerRoutes";
 import {
   derivePointerInput,
   pointerCapabilities,
@@ -71,21 +70,60 @@ describe("route support", () => {
       missingCapability: "stylus_input_v1",
     });
     expect(
-      route.supports({ toolType: "stylus", hover: true }, env({ caps: ["hover_input_v1"] })),
-    ).toEqual({ supported: true });
-    expect(route.supports({ toolType: "mouse", hover: true }, env())).toMatchObject({
-      supported: false,
-      missingCapability: "hover_input_v1",
-    });
-    expect(
       route.supports(
         { toolType: "stylus", variablePressure: true },
-        env({ caps: ["hover_input_v1"] }),
+        env({ caps: ["stylus_input_v1"] }),
       ),
-    ).toMatchObject({ supported: false, missingCapability: "stylus_input_v1" });
+    ).toEqual({ supported: true });
+    for (const toolType of ["stylus", "mouse"] as const) {
+      expect(route.supports({ toolType, hover: true }, env({ caps: ["hover_input_v1"] }))).toEqual({
+        supported: true,
+      });
+      expect(
+        route.supports({ toolType, hover: true }, env({ caps: ["stylus_input_v1"] })),
+      ).toMatchObject({ supported: false, missingCapability: "hover_input_v1" });
+    }
     expect(
       route.supports({ toolType: "finger" }, env({ caps: ["stylus_input_v1"] })).supported,
     ).toBe(false);
+    expect(
+      route.supports({ toolType: "stylus" }, env({ platform: "ios", caps: ["stylus_input_v1"] }))
+        .supported,
+    ).toBe(false);
+  });
+
+  test("no route takes anything on iOS", () => {
+    const ios = env({ platform: "ios", caps: ["stylus_input_v1", "hover_input_v1"] });
+    for (const features of [
+      { toolType: "finger" as const },
+      { toolType: "stylus" as const },
+      { toolType: "stylus" as const, hover: true },
+    ]) {
+      expect(routes().every((route) => !route.supports(features, ios).supported)).toBe(true);
+    }
+  });
+});
+
+describe("invalidPointerFeatures", () => {
+  test("rejects contradictory requests regardless of capabilities", () => {
+    for (const features of [
+      { toolType: "finger" as const, hover: true },
+      { toolType: "finger" as const, variablePressure: true },
+      { toolType: "stylus" as const, hover: true, variablePressure: true },
+      { toolType: "mouse" as const, hover: true, variablePressure: true },
+      { toolType: "mouse" as const },
+    ]) {
+      expect(invalidPointerFeatures(features)).toBeString();
+    }
+    for (const features of [
+      { toolType: "finger" as const },
+      { toolType: "stylus" as const },
+      { toolType: "stylus" as const, variablePressure: true },
+      { toolType: "stylus" as const, hover: true },
+      { toolType: "mouse" as const, hover: true },
+    ]) {
+      expect(invalidPointerFeatures(features)).toBeUndefined();
+    }
   });
 });
 
@@ -157,22 +195,77 @@ describe("selectPointerRoute", () => {
   });
 });
 
+describe("refusals", () => {
+  test("a contradictory request is refused as invalid, not blamed on a missing capability", () => {
+    for (const features of [
+      { toolType: "stylus" as const, hover: true, variablePressure: true },
+      { toolType: "finger" as const, hover: true },
+      { toolType: "mouse" as const },
+    ]) {
+      const choice = selectPointerRoute(features, env({ caps: [] }), routes());
+      expect(choice.selected).toBeNull();
+      if (choice.selected === null) {
+        expect(choice.missingCapabilities).toEqual([]);
+        expect(choice.refusal).toContain("not a valid pointer request");
+      }
+    }
+  });
+
+  test("an old device with no flags gets every reason and the missing capability", () => {
+    const choice = selectPointerRoute({ toolType: "stylus" }, env({ apiLevel: 29 }), routes());
+    expect(choice.selected).toBeNull();
+    if (choice.selected === null) {
+      expect(choice.missingCapabilities).toEqual(["stylus_input_v1"]);
+      expect(choice.refusal).toBe(
+        "stylus input cannot be injected on this device, and a finger touch is never substituted. " +
+          "ctrlproxy-a11y: accessibility dispatchGesture only produces a finger touch, not stylus; " +
+          "adb-input-source: adb input stylus needs Android API 31 or newer (this device reports API 29); " +
+          "instrumentation: the connected runner does not advertise stylus_input_v1. " +
+          "Use a device whose runner advertises stylus_input_v1.",
+      );
+    }
+  });
+
+  test("a refused request never reaches any route's inject", async () => {
+    const fakes = [new FakePointerInjector("ctrlproxy-a11y", { supported: false, reason: "no" })];
+    expect(() => requirePointerRoute({ toolType: "stylus" }, env(), fakes)).toThrow(
+      ActionableError,
+    );
+    expect(fakes[0].injected).toEqual([]);
+  });
+
+  test("an aborted signal stops the fake before it records", async () => {
+    const fake = new FakePointerInjector("instrumentation");
+    const controller = new AbortController();
+    controller.abort();
+    await expect(fake.inject(tap, controller.signal)).rejects.toThrow();
+    expect(fake.injected).toEqual([]);
+  });
+});
+
 describe("derivePointerInput", () => {
   test("is derived from the same route support, so it cannot disagree with dispatch", () => {
     expect(derivePointerInput(env({ apiLevel: 34 }), routes())).toEqual({
-      route: "adb-input-source",
       stylus: true,
       pressure: false,
       hover: false,
+      stylusRoute: "adb-input-source",
+      pressureRoute: null,
+      hoverRoute: null,
     });
     expect(
       derivePointerInput(env({ caps: ["stylus_input_v1", "hover_input_v1"] }), routes()),
-    ).toEqual({ route: "adb-input-source", stylus: true, pressure: true, hover: true });
-    expect(derivePointerInput(env({ apiLevel: 29 }), routes())).toEqual({
-      route: null,
+    ).toEqual({
+      stylus: true,
+      pressure: true,
+      hover: true,
+      stylusRoute: "adb-input-source",
+      pressureRoute: "instrumentation",
+      hoverRoute: "instrumentation",
+    });
+    expect(derivePointerInput(env({ apiLevel: 29 }), routes())).toMatchObject({
       stylus: false,
-      pressure: false,
-      hover: false,
+      stylusRoute: null,
     });
     expect(derivePointerInput(env({ platform: "ios" }), routes()).stylus).toBe(false);
   });

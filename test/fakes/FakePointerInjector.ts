@@ -27,7 +27,8 @@ export class FakePointerInjector implements PointerInjector {
     return typeof this.support === "function" ? this.support(features, environment) : this.support;
   }
 
-  async inject(request: PointerRequest): Promise<void> {
+  async inject(request: PointerRequest, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (this.failure) {
       throw this.failure;
     }

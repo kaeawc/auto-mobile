@@ -5,6 +5,7 @@ import {
 } from "../../observe/android/ctrlProxyProtocol/capabilities";
 import {
   describePointerFeatures,
+  invalidPointerFeatures,
   type PointerEnvironment,
   type PointerFeatures,
   type PointerInjector,
@@ -26,6 +27,14 @@ export function selectPointerRoute(
   environment: PointerEnvironment,
   injectors: readonly PointerInjector[],
 ): PointerRouteChoice {
+  const invalid = invalidPointerFeatures(features);
+  if (invalid) {
+    return {
+      selected: null,
+      missingCapabilities: [],
+      refusal: `${describePointerFeatures(features)} is not a valid pointer request: ${invalid}.`,
+    };
+  }
   const reasons: string[] = [];
   const missing = new Set<string>();
   for (const injector of injectors) {
@@ -41,7 +50,7 @@ export function selectPointerRoute(
   const missingCapabilities = [...missing];
   const hint =
     missingCapabilities.length > 0
-      ? ` Update CtrlProxy or use a device whose runner advertises ${missingCapabilities.join(" and ")}.`
+      ? ` Use a device whose runner advertises ${missingCapabilities.join(" and ")}.`
       : "";
   return {
     selected: null,
@@ -65,29 +74,36 @@ export function requirePointerRoute(
 
 /**
  * The host-side `pointerInput` summary, derived from the same route support the dispatcher uses so
- * it can never disagree with it. `route` is the one a stylus tap would take.
+ * it can never disagree with it. Each feature names the route that would carry it: a plain stylus
+ * stroke can take the shell while pressure and hover need instrumentation.
  */
 export interface PointerInputSummary {
-  route: PointerRouteId | null;
   stylus: boolean;
   pressure: boolean;
   hover: boolean;
+  stylusRoute: PointerRouteId | null;
+  pressureRoute: PointerRouteId | null;
+  hoverRoute: PointerRouteId | null;
 }
 
 export function derivePointerInput(
   environment: PointerEnvironment,
   injectors: readonly PointerInjector[],
 ): PointerInputSummary {
-  const pick = (features: PointerFeatures) => selectPointerRoute(features, environment, injectors);
-  const stylus = pick({ toolType: "stylus" });
+  const routeFor = (features: PointerFeatures): PointerRouteId | null =>
+    selectPointerRoute(features, environment, injectors).selected?.route ?? null;
+  const stylusRoute = routeFor({ toolType: "stylus" });
+  const pressureRoute = routeFor({ toolType: "stylus", variablePressure: true });
+  const hoverRoute = routeFor({ toolType: "stylus", hover: true });
   return {
-    route: stylus.selected?.route ?? null,
-    stylus: stylus.selected !== null,
-    pressure: pick({ toolType: "stylus", variablePressure: true }).selected !== null,
-    hover: pick({ toolType: "stylus", hover: true }).selected !== null,
+    stylus: stylusRoute !== null,
+    pressure: pressureRoute !== null,
+    hover: hoverRoute !== null,
+    stylusRoute,
+    pressureRoute,
+    hoverRoute,
   };
 }
-
 /** The pointer-related capability flags in a runner's advertised set. */
 export function pointerCapabilities(has: (capability: string) => boolean): Set<string> {
   return new Set(

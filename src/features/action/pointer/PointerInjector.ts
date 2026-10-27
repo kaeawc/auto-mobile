@@ -82,3 +82,25 @@ export function describePointerFeatures(features: PointerFeatures): string {
   }
   return parts.join(" ");
 }
+
+/**
+ * Why [features] can never be injected whatever the device, or undefined. Rejected once, before any
+ * route is asked, so a contradictory request is never blamed on a missing capability: a finger or a
+ * mouse has no pressure to vary, hover has no contact and so no pressure, a finger does not hover,
+ * and a mouse is only supported hovering.
+ */
+export function invalidPointerFeatures(features: PointerFeatures): string | undefined {
+  if (features.hover && features.toolType === "finger") {
+    return "a finger does not hover; hover comes from a stylus or a mouse";
+  }
+  if (features.hover && features.variablePressure) {
+    return "hover has no contact, so it has no pressure";
+  }
+  if (features.variablePressure && features.toolType !== "stylus") {
+    return `${features.toolType} input has no variable pressure; only a stylus does`;
+  }
+  if (features.toolType === "mouse" && !features.hover) {
+    return "mouse input is supported for hover only";
+  }
+  return undefined;
+}

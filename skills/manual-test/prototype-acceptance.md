@@ -108,7 +108,7 @@ transport reached the host.
 - `text` `{status}` and `text` `{data:/items__meta/error/message}`;
 - buttons: **Load** `[request GET http://localhost:8787/items, into /data/items, statusKey status]`;
   **Add** `[request POST http://localhost:8787/items, body {state:name}-wrapped as {"name": ...},
-into /data/added, statusKey status, onSuccess [appendData /data/items/items {data:/added}]]`;
+  into /data/added, statusKey status, onSuccess [appendData /data/items/items {data:/added}]]`;
   **Fail** `[request GET http://localhost:8787/fail, into /data/failed, statusKey status]`.
 
 Run the whole table once with `via: "host"` (the default) and once with `via: "device"` on every

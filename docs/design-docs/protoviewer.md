@@ -242,7 +242,7 @@ Bundle limits (shared TS/Kotlin/Swift transport contract):
 - Each image is at most `MAX_PROTOTYPE_ASSET_BYTES = 4,194,304` bytes; each font is at most
   `MAX_PROTOTYPE_FONT_ASSET_BYTES = 2,097,152` bytes, from the asset contract.
 - `BUNDLE_MAX_EXPANDED_BYTES = MAX_PROTOTYPE_ASSET_TOTAL_BYTES + BUNDLE_MAX_SPEC_BYTES +
-BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
+  BUNDLE_MAX_MANIFEST_BYTES = 17,891,328`; `BUNDLE_MAX_COMPRESSED_BYTES` is the same value and
   caps the entire archive file, including headers.
 - `BUNDLE_MAX_RATIO = 100`: actual total inflated bytes / total compressed entry data bytes;
   the known compressed-data total supplies a hard output budget during inflation. Header sizes
@@ -394,12 +394,6 @@ The shared request-policy and storage work is tracked in #13622.
   full import, sets `source: mcp` itself, removes the inbox file after every attempt, and atomically
   publishes `results/<request>.json` using the same result shapes as Android. Rejections are
   reported in that file rather than an alert. Open reports `opened` only after the viewer loads.
-  An `imported` or `opened` result also carries `screen`, the active window scene's native pixel size
-  as `"WxH"`. The iPhone Duo moves the foreground app between its cover and inner panels, and
-  `simctl openurl` cannot choose or report one, so the host maps `screen` (either orientation) onto the
-  simulator display inventory (`SimulatorDisplays.ts`) and returns `viewer.display` `{key, role}`. It
-  is absent on a single-screen device, from an older app, and when the size matches no panel or more
-  than one. Android answers have no `screen`.
   Host polling treats a missing result as pending until the timer deadline; finally it removes
   results and leftover inbox files even after cancellation, with an independent cleanup timeout.
   An absent app, unresolved container, unusable inbox, or nonzero `openurl` exit keeps the template
@@ -412,19 +406,6 @@ The shared request-policy and storage work is tracked in #13622.
   unchanged. `pin` and `icon` describe CtrlProxy launcher shortcuts, which ProtoViewer has not, so
   a save with either keeps the platform save path. The output gains `viewer` `{app, libraryId, label}`
   and a warning that the entry is imported.
-- iPhone Duo: the inner panel is regular width and the cover panel compact (section 3.4), so ProtoViewer's
-  own chrome follows the fold. iOS platform posture state stays absent for now: `UIHingeInteraction`
-  (iOS 27.1+, `UIHinge.status` closed, partially open, fully open) is the public signal, but it exists
-  only on the newest runtime, needs a view in the hierarchy, and cannot tell tabletop from book without
-  the hinge axis, so the runner's `setPosture` remains the way to drive a posture and the app never
-  reads one. Panel swap re-lays out through the existing window-size sync (the prototype's model and the
-  library selection live above the window, so a swap remounts nothing) and the render watchdog is
-  cancelled at first render, so it cannot trip on a later swap. Host routing: ProtoViewer opens on
-  whichever panel is in front when the URL is handled and cannot choose one, so a `display` given to
-  `save` or `open` is not applied; the result's `warning` says so when the reported `viewer.display`
-  differs from the request or no panel was reported. Needs device verification (`needs-device-verify`):
-  fold and unfold with a prototype open keeps state with no error screen, and a `grid` with
-  `minWidth: 170` shows more columns on the inner panel.
 - `prototype open` (new action) launches a library id (`viewer.libraryId`) through the same
   activity with action `….mcp.OPEN` on Android or the iOS simulator URL route, and returns the same warning.
 - Not in the first release: MCP `export` and `import` actions, a `listSaved` merge, live attach.

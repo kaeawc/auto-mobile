@@ -400,15 +400,15 @@ Daemon protocol:
 - `daemon/sessionRequestStatus`: `{requestId, livenessOwnerToken}`.
 - `daemon/abandonSessionRequest`: `{requestId, livenessOwnerToken}`.
 - `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken, reason?,
-replyBudgetMs?}`. A client release omits `reason` and ends `released` only after
+  replyBudgetMs?}`. A client release omits `reason` and ends `released` only after
   cleanup settles; the reply waits at most 30,000 ms after `beginRelease` commits
   durable `releasing`/`resetting` ownership, else returns `cleanup_pending`
   (#13798). A proxy whose execution owner died sends `reason:
-"session_owner_exited"`: the daemon commits the terminal
+  "session_owner_exited"`: the daemon commits the terminal
   `failed`/`session_owner_exited` receipt, answers `cleanup_pending`, and finishes
   drain and destruction as tracked release work (#12791).
 - Reconnect registration: `{sessionId, clientName, sessionBroker: {requestId,
-livenessOwnerToken}}`.
+  livenessOwnerToken}}`.
 
 The token plus the complete request configuration define operation identity. After
 an ambiguous reply, query the same identity. Replay returns the durable receipt

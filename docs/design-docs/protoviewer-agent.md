@@ -39,7 +39,7 @@ paths and both kinds of model prototyped (2026-10-22).
 - Bundle format and the strict zip reader in TypeScript, Kotlin and Swift (#14867), and the Swift
   `PrototypeSpecStrictValidator` with the shared corpus (#14866, closing #13620).
 - Library-mode rules in all three validators: `library: true` rejects privileged windows, `via:
-"host"` requests and secure (password) values bound into requests, data writes, `emit` context,
+  "host"` requests and secure (password) values bound into requests, data writes, `emit` context,
   `platform` arguments or `storage` (`via: "host"` and privileged windows: #14944, #14866; secure bindings: #14970, #15011).
 - Still open under the epic: MCP routing of `prototype save` and `open` (#13621), the rest of the
   shared hardening (#13622) and the release (#13623). The ProtoViewer apps are not yet exercised by

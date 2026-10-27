@@ -48,7 +48,7 @@ final class PrototypeAdaptiveTests: XCTestCase {
         "root":{"type":"adaptive","kind":"listDetail","selectionKey":"selected","list":{"type":"text","text":"List"},"detail":{"type":"text","text":"Detail"}}}
         """#.utf8))
         var session = PrototypeSession()
-        try session.show(spec)
+        session.show(spec)
         let events = session.choose(key: "selected", value: "row", then: [])
         XCTAssertEqual(session.state["selected"], .string("row"))
         XCTAssertEqual(events.last?.name, "change")

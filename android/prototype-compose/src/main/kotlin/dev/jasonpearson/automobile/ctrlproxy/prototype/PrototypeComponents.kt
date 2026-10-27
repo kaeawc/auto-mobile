@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -20,6 +21,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -27,11 +29,13 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -96,9 +100,15 @@ internal fun RenderPrototypeToggle(
     horizontalArrangement = Arrangement.spacedBy(12.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    if (!isSwitch) Checkbox(node.checked, onCheckedChange = null, enabled = node.enabled)
+    if (!isSwitch)
+      PrototypeInstantControl(node.checked to node.enabled) {
+        Checkbox(node.checked, onCheckedChange = null, enabled = node.enabled)
+      }
     if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
-    if (isSwitch) Switch(node.checked, onCheckedChange = null, enabled = node.enabled)
+    if (isSwitch)
+      PrototypeInstantControl(node.checked to node.enabled) {
+        Switch(node.checked, onCheckedChange = null, enabled = node.enabled)
+      }
   }
 }
 
@@ -215,6 +225,7 @@ internal fun prototypeSliderSteps(min: Double, max: Double, step: Double?): Int 
  * and set-progress action; merging them into the node's own semantics keeps one accessibility node
  * whose value observe reads from the range info.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun RenderPrototypeSlider(
   node: PrototypeRenderNode,
@@ -239,6 +250,8 @@ internal fun RenderPrototypeSlider(
     },
   ) {
     if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
+    val interactions = remember { MutableInteractionSource() }
+    val restingInteractions = remember { MutableInteractionSource() }
     Slider(
       node.sliderValue.toFloat(),
       change,
@@ -246,6 +259,14 @@ internal fun RenderPrototypeSlider(
       valueRange = range,
       enabled = node.enabled,
       steps = steps,
+      interactionSource = interactions,
+      thumb = {
+        SliderDefaults.Thumb(
+          interactionSource =
+            if (LocalPrototypeMotion.current) interactions else restingInteractions,
+          enabled = node.enabled,
+        )
+      },
     )
   }
 }

@@ -108,6 +108,8 @@ const capabilities = z
   .strict();
 /** Keep-booted cleaning cannot revert everything, so every Nth release erases instead (#15017). */
 export const DEFAULT_IOS_KEEP_BOOTED_MAX_USES = 10;
+/** Minimal cleaning reverts less than keep-booted, so retire the simulator sooner (#14682). */
+export const DEFAULT_IOS_MINIMAL_MAX_USES = 5;
 const iosReuse = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("off") }).strict(),
   z
@@ -122,6 +124,17 @@ const iosReuse = z.discriminatedUnion("mode", [
       mode: z.literal("keep-booted"),
       maxUses: cap.positive().default(DEFAULT_IOS_KEEP_BOOTED_MAX_USES),
       fallback: z.enum(["erase", "destroy"]).default("erase"),
+    })
+    .strict(),
+  /**
+   * Keeps the simulator Booted and runs a fixed short reset (uninstall session apps, keychain and
+   * privacy reset, appearance/content size/pasteboard revert) with no baseline diff and no erase
+   * fallback: a failed step destroys the simulator instead (#14682).
+   */
+  z
+    .object({
+      mode: z.literal("minimal"),
+      maxUses: cap.positive().default(DEFAULT_IOS_MINIMAL_MAX_USES),
     })
     .strict(),
 ]);
@@ -194,7 +207,8 @@ const hostConfig = z
   .refine(
     (config) => !config.reuseCleanDevices || !config.reuse || config.reuse.ios.mode === "erase",
     {
-      message: "reuseCleanDevices: true selects iOS erase; remove it to select keep-booted or off",
+      message:
+        "reuseCleanDevices: true selects iOS erase; remove it to select minimal, keep-booted or off",
     },
   )
   .refine(
@@ -233,4 +247,15 @@ export async function readSessionBrokerHostConfig(path: string): Promise<Session
   } catch (error) {
     throw toActionableError(error, `Cannot load session broker host configuration at ${path}`);
   }
+}
+
+/**
+ * Whether a booted Android emulator should skip the quick-boot snapshot save at exit (#15477):
+ * only when the host config is read and configures no warm reuse, so released emulators are
+ * destroyed. Snapshot and keep-booted resets, and an unread config, keep the default.
+ */
+export function discardsAndroidSnapshotOnExit(
+  config: SessionBrokerHostConfig | undefined,
+): boolean {
+  return config !== undefined && config.androidResetMode === undefined;
 }

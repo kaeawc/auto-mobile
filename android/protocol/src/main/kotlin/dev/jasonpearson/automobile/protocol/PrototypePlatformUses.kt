@@ -16,7 +16,7 @@ internal object PrototypePlatformUses {
 
     class Call(path: String, val action: JsonObject) : Use(path)
 
-    class Read(path: String, val pointer: String) : Use(path)
+    class Read(path: String, val pointer: String, val condition: JsonObject? = null) : Use(path)
 
     class Event(path: String, val inHandler: Boolean) : Use(path)
   }
@@ -66,7 +66,7 @@ internal object PrototypePlatformUses {
       found.add(Use.Call(path, value))
     }
     if (value["type"] == null) {
-      value.text("platform")?.let { found.add(Use.Read("$path.platform", it)) }
+      value.text("platform")?.let { found.add(Use.Read("$path.platform", it, value)) }
       if (value.text("event") != null) found.add(Use.Event("$path.event", inHandler))
     }
     for (key in value.keys.sorted()) {

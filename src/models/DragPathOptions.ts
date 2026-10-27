@@ -1,4 +1,5 @@
 import type { HierarchyLayer } from "./HierarchyLayer";
+import type { PointerOption } from "./PointerOption";
 
 /** One vertex of a drag path. */
 export interface DragPathPoint {
@@ -6,6 +7,10 @@ export interface DragPathPoint {
   y: number;
   /** Milliseconds spent moving from the previous point to this one (ignored on the first point). */
   durationMs?: number;
+  /** Stylus pressure 0..1 at this point; needs `pointer`. */
+  pressure?: number;
+  /** Stylus tilt in radians at this point; needs `pointer`. */
+  tilt?: number;
 }
 
 /** Drag a single finger along a polyline, optionally holding at the start and at the end. */
@@ -20,4 +25,6 @@ export interface DragPathOptions {
   display?: string;
   snapshotId?: string;
   layer?: HierarchyLayer;
+  /** Draw with a stylus instead of a finger (Android 13+, `stylus_input_v1`); never falls back to a finger. */
+  pointer?: PointerOption;
 }

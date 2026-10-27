@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "id": "one"
+              }
+            ],
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "box",
+              "children": [
+                {
+                  "type": "text",
+                  "text": "Hero",
+                  "sharedKey": "hero",
+                  "visibleWhen": {
+                    "key": "open",
+                    "equals": true
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].children[0].children[0].sharedKey",
+  "expectedMessage": "sharedKey is not allowed inside repeat templates"
+}

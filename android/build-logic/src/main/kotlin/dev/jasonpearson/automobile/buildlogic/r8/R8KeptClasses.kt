@@ -161,7 +161,15 @@ object R8KeptClasses {
         else -> name
       }
     for (tag in
-      listOf("application", "activity", "activity-alias", "service", "receiver", "provider")) {
+      listOf(
+        "application",
+        "activity",
+        "activity-alias",
+        "service",
+        "receiver",
+        "provider",
+        "instrumentation",
+      )) {
       val elements = document.getElementsByTagName(tag)
       for (index in 0 until elements.length) {
         val element = elements.item(index) as Element

@@ -114,25 +114,28 @@ internal object PrototypeSpecInput {
   private fun nodeVocabularyErrors(value: JsonElement, context: Context): PrototypeSpecError? =
     platformErrors(value, context)
       ?: PrototypeTimerRules.error(context)
+      ?: PrototypeScrollMotion.error(context)
       ?: motionErrors(context)
       ?: choreographyErrors(context)
       ?: shimmerErrors(context)
+      ?: PrototypeStringsRules.semanticError(value, context)
       ?: chartErrors(value, context)
       ?: linkifyErrors(value, context)
       ?: chatScrollErrors(context)
+      ?: PrototypeTooltipRules.tooltipErrors(value, context)
 
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
-      walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
-        ?: gridSpanErrors(context)
+      structuralError(value, context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
         ?: nodeVocabularyErrors(value, context)
         ?: swipeActionsErrors(context)
+        ?: PrototypeBarScrollRules.error(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)
@@ -140,13 +143,25 @@ internal object PrototypeSpecInput {
     return try {
       PrototypeSpecValidation.Success(
         json.decodeFromJsonElement<PrototypeSpec>(
-          normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+          stripPlatformNamespaces(
+            normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+          ),
         ),
       )
     } catch (_: SerializationException) {
       PrototypeSpecValidation.Failure(fail("", "Internal model/contract mismatch"))
     }
   }
+
+  private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
+    PrototypeLazyListRules.limitError(value)
+      ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+      ?: PrototypeRouteRules.error(value.jsonObject, context)
+      ?: PrototypeSharedElementRules.error(context)
+      ?: gridSpanErrors(context)
+      ?: PrototypeDerivedRules.error(value, context)
+      ?: PrototypeContainerRules.pagerStateKeyErrors(context)
+      ?: PrototypeLazyListRules.error(context)
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
   // accepts only integer lexical tokens, so normalize validated integer fields structurally.
@@ -171,6 +186,8 @@ internal object PrototypeSpecInput {
           },
         )
       }
+      "map",
+      "record",
       "screenMap" ->
         JsonObject(
           (value as JsonObject).mapValues { (_, child) ->

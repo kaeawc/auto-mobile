@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "z",
+      "screens": {
+        "z": {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "last",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        "a": {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "first",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"a\"].sharedKey",
+  "expectedMessage": "sharedKey \"first\" must be used by exactly two nodes"
+}

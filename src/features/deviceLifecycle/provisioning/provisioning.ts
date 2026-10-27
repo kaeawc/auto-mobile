@@ -198,12 +198,14 @@ export function parseProvisionDeviceArgs(
   // progress token).
   deleteInternalToolParams(publicInput);
   delete publicInput.rollbackOnRetryableReadiness;
+  delete publicInput.discardSnapshotOnExit;
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,
     ...(input.rollbackOnRetryableReadiness === false
       ? { rollbackOnRetryableReadiness: false }
       : {}),
+    ...(input.discardSnapshotOnExit === true ? { discardSnapshotOnExit: true } : {}),
     boot: parsed.boot ?? true,
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,

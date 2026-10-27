@@ -61,6 +61,7 @@ class PrototypeAnchorLayerTest {
       CompositionLocalProvider(
         LocalPrototypeWindowGeometry provides geometry,
         LocalPrototypeMotion provides true,
+        LocalPrototypeMotionProfile provides PrototypeMotionProfile.FULL,
       ) {
         PrototypeWindowContent(
           PrototypeRequest(

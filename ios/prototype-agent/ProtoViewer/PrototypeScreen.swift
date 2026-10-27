@@ -9,8 +9,9 @@ struct PrototypeScreen: View {
     /// MCP `open` reports success on the first render and failure on any load error or watchdog expiry.
     let onLoaded: @MainActor () -> Void
     let onLoadFailed: @MainActor () -> Void
+    /// Closes the prototype: pops the phone stack, or empties the detail pane at regular width.
+    let onClose: @MainActor () -> Void
     @State private var showsSettings = false
-    @Environment(\.dismiss) private var dismiss
     @State private var revision = 0
     @State private var rendererActive = false
     @State private var pending: Action?
@@ -20,12 +21,17 @@ struct PrototypeScreen: View {
     @State private var confirmsReset = false
     @State private var watchdog = PrototypeRenderWatchdog(clock: SystemPrototypeClock())
 
+    private let registry: PrototypePlatformRegistry
     private let network: PrototypeNetworkConfiguration
 
     init(
         store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch,
-        onLoaded: @escaping @MainActor () -> Void = {}, onLoadFailed: @escaping @MainActor () -> Void = {}
+        registry: PrototypePlatformRegistry = .empty,
+        onLoaded: @escaping @MainActor () -> Void = {}, onLoadFailed: @escaping @MainActor () -> Void = {},
+        onClose: @escaping @MainActor () -> Void
     ) {
+        self.onClose = onClose
+        self.registry = registry
         self.onLoaded = onLoaded
         self.onLoadFailed = onLoadFailed
         self.store = store
@@ -66,7 +72,7 @@ struct PrototypeScreen: View {
                     Button("Settings", systemImage: "gearshape") { showsSettings = true }
                     Button("Relaunch", systemImage: "arrow.clockwise") { relaunch(.relaunch) }
                     Button("Reset", systemImage: "arrow.counterclockwise", role: .destructive) { confirmsReset = true }
-                    Button("Close", systemImage: "xmark") { dismiss() }
+                    Button("Close", systemImage: "xmark") { onClose() }
                 } label: {
                     Label("Prototype actions", systemImage: "ellipsis.circle")
                 }
@@ -92,7 +98,8 @@ struct PrototypeScreen: View {
             } else if let content, let storage {
                 AutoMobilePrototypeView(
                     spec: content.spec, assets: content.assets, storage: .directory(storage), network: network,
-                    onDismiss: { _ in dismiss() },
+                    registry: registry,
+                    onDismiss: { _ in onClose() },
                     onLoadError: {
                         watchdog.cancel()
                         error = $0

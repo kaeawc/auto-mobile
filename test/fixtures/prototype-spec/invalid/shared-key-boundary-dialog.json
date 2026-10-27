@@ -1,0 +1,49 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Hero",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "sharedKey": "hero"
+        },
+        {
+          "type": "dialog",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "title": "Detail",
+          "child": {
+            "type": "text",
+            "text": "Hero",
+            "visibleWhen": {
+              "key": "open",
+              "equals": false
+            },
+            "sharedKey": "hero"
+          },
+          "confirm": {
+            "label": "OK"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].child.sharedKey",
+  "expectedMessage": "shared pair cannot cross a dialog or bottomSheet boundary"
+}

@@ -135,3 +135,47 @@ describe("pseudo-locale spec", () => {
     expect(emitting.onTap[0].payload).toEqual({ title: "stable-id" });
   });
 });
+
+test("strings values and semantics are localized with keys and nested translation bindings intact", () => {
+  const strings = {
+    default: { title: "Hello {name}", items: { one: "{#} item", other: "{#} items" } },
+    "pt-BR": { label: "Hi" },
+  };
+  const spec = {
+    strings,
+    root: {
+      type: "text",
+      text: "{t:items|{data:/n}}",
+      semantics: { label: "Hello", hint: "Tap {name}" },
+      contentDescription: "Unchanged",
+    },
+  };
+  const out = pseudoLocalizeSpec(spec);
+  expect(out.strings.default.title).toBe(pseudoLocalizeText(strings.default.title));
+  expect(out.strings.default.items.one).toBe(pseudoLocalizeText("{#} item"));
+  expect(out.strings.default.items.other).toBe(pseudoLocalizeText("{#} items"));
+  expect(out.strings["pt-BR"].label).toBe(pseudoLocalizeText("Hi"));
+  expect(out.root.text).toBe(spec.root.text);
+  expect(pseudoLocalizeText("Count {t:items|{data:/n}} now")).toContain("{t:items|{data:/n}}");
+  expect(out.root.semantics).toEqual({
+    label: pseudoLocalizeText("Hello"),
+    hint: pseudoLocalizeText("Tap {name}"),
+  });
+  expect(out.root.contentDescription).toBe("Unchanged");
+  expect(spec.strings).toEqual(strings);
+  expect(pseudoLocalizeText("{data:/n} {#} {name}")).toContain("{data:/n} {#} {name}");
+});
+
+test("pseudo-locale translates error captions while preserving condition operands", () => {
+  const field = {
+    type: "textField",
+    stateKey: "value",
+    supportingText: "Help",
+    errorText: "Bad value",
+    errorWhen: { key: "value", contains: "Bad" },
+  };
+  const localized = pseudoLocalizeSpec(field);
+  expect(localized.errorText).toBe(pseudoLocalizeText("Bad value"));
+  expect(localized.supportingText).toBe(pseudoLocalizeText("Help"));
+  expect(localized.errorWhen).toEqual(field.errorWhen);
+});

@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "feedback",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["haptics"]
+    },
+    "root": {
+      "type": "text",
+      "text": "{platform:/haptics/last}"
+    }
+  },
+  "expectedPath": "root.text"
+}

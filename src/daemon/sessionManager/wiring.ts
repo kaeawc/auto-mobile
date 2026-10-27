@@ -197,15 +197,12 @@ export class SessionManagerWiring {
         this.restoreHealth.revokeSupersededIdentityReplacement(...args),
       abandonSupersededRelease: (...args) => this.releaseCommit.abandonSupersededRelease(...args),
       releaseHeartbeatTimeoutMs: (...args) => this.releaseCommit.releaseHeartbeatTimeoutMs(...args),
+      fenceTerminalRelease: (...args) => this.releasePersistence.fenceTerminalRelease(...args),
       persistTerminalReleaseWithinDeadline: (...args) =>
         this.releaseCommit.persistTerminalReleaseWithinDeadline(...args),
-      abandonReleaseSupersededAfterPersist: (...args) =>
-        this.releaseCommit.abandonReleaseSupersededAfterPersist(...args),
       commitReleaseRemoval: (...args) => this.releaseCommit.commitReleaseRemoval(...args),
       commitReplacedDeviceTeardown: (...args) =>
         this.releaseCommit.commitReplacedDeviceTeardown(...args),
-      restoreNonTerminalRowOverSupersededReleaseLater: (...args) =>
-        this.supersededRows.restoreNonTerminalRowOverSupersededReleaseLater(...args),
       completeReleasePersistence: (...args) =>
         this.releaseCommit.completeReleasePersistence(...args),
       recordFinalizedSessionRelease: (...args) =>
@@ -291,6 +288,7 @@ export class SessionManagerWiring {
       deferRebindOverrides: (...args) => this.rebinding.deferRebindOverrides(...args),
       releaseWritePrecondition: (...args) =>
         this.releasePersistence.releaseWritePrecondition(...args),
+      recordTerminalReleaseIntent: (...args) => this.releaseWrite.recordTerminalIntent(...args),
       issueReleaseRow: (...args) => this.releasePersistence.issueReleaseRow(...args),
       releaseRowFallback: (...args) => this.releasePersistence.releaseRowFallback(...args),
       trackLateReleaseWrite: (...args) => this.releasePersistence.trackLateReleaseWrite(...args),
@@ -328,7 +326,6 @@ export class SessionManagerWiring {
         this.persistedAdmission.isReissuablePersistedSession(...args),
       recoverPersistedRow: (...args) => this.facade.recoverPersistedRow(...args),
       readPersistedSession: (...args) => this.persistedAdmission.readPersistedSession(...args),
-      unlessBeingReplaced: (...args) => this.persistedAdmission.unlessBeingReplaced(...args),
       terminalReleaseFromPersisted: (...args) =>
         this.persistedAdmission.terminalReleaseFromPersisted(...args),
       recoveredRowOwner: (...args) => this.facade.recoveredRowOwner(...args),
@@ -373,15 +370,9 @@ export class SessionManagerWiring {
       retryRefusedRowWrite: (...args) => this.supersededRows.retryRefusedRowWrite(...args),
       retryNonTerminalRowAfterRelease: (...args) =>
         this.supersededRows.retryNonTerminalRowAfterRelease(...args),
-      reassertSupersededLiveRow: (...args) =>
-        this.supersededRows.reassertSupersededLiveRow(...args),
-      restoreNonTerminalRowOverSupersededRelease: (...args) =>
-        this.supersededRows.restoreNonTerminalRowOverSupersededRelease(...args),
       retryTerminalRowAfterRelease: (...args) =>
         this.supersededRows.retryTerminalRowAfterRelease(...args),
       waitOutRecreationOf: (...args) => this.supersededRows.waitOutRecreationOf(...args),
-      replaceSupersededReleaseRow: (...args) =>
-        this.supersededRows.replaceSupersededReleaseRow(...args),
       getLegacyLifecycleView: (...args) => this.facade.getLegacyLifecycleView(...args),
       isAdmittedForAutomation: (...args) => this.facade.isAdmittedForAutomation(...args),
       guardedRowRewriteOptions: (...args) => this.supersededRows.guardedRowRewriteOptions(...args),

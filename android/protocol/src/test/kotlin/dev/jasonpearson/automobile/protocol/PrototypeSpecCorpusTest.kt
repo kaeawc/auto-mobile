@@ -101,6 +101,22 @@ class PrototypeSpecCorpusTest {
         fixture.getValue("expectedPath").jsonPrimitive.content,
         (result as PrototypeSpecValidation.Failure).error.path,
       )
+      val messageCase =
+        listOf(
+            "list-",
+            "request-append-to-",
+            "node-list",
+            "listRepeat",
+            "action-request-append",
+            "lazy_list",
+          )
+          .any(file.name::contains)
+      if (messageCase && fixture.containsKey("expectedMessage")) {
+        assertEquals(
+          fixture.getValue("expectedMessage").jsonPrimitive.content,
+          result.error.message,
+        )
+      }
     }
   }
 
@@ -192,8 +208,15 @@ class PrototypeSpecCorpusTest {
       assertEquals(type in gestureTypes, "onLongPress" in fields, type)
       assertEquals(type in gestureTypes, "onDoubleTap" in fields, type)
     }
+    // Platform namespaces are validated by the contract, then stripped before the typed decode
+    // (#15257): no renderer reads them yet, so the models deliberately omit them.
+    val stripped = setOf("ios", "android")
     for ((type, variant) in variants) {
-      assertEquals(variant.jsonObject.getValue("fields").jsonObject.keys, models[type], type)
+      assertEquals(
+        variant.jsonObject.getValue("fields").jsonObject.keys - stripped,
+        models[type],
+        type,
+      )
     }
   }
 
@@ -238,6 +261,32 @@ class PrototypeSpecCorpusTest {
       else -> Unit
     }
   }
+
+  @TestFactory
+  fun routeDiagnostics(): List<DynamicTest> =
+    invalid
+      .filter {
+        it.name.startsWith("routes-") && invalidJson.getValue(it)["expectedMessage"] != null
+      }
+      .map { file ->
+        DynamicTest.dynamicTest("route diagnostic ${file.name}") {
+          val fixture = invalidJson.getValue(file)
+          assertEquals(
+            PrototypeSpecValidation.Failure(
+              PrototypeSpecError(
+                fixture.getValue("expectedPath").jsonPrimitive.content,
+                fixture.getValue("expectedMessage").jsonPrimitive.content,
+              ),
+            ),
+            PrototypeSpecValidator.validate(
+              invalidSpec.getValue(file),
+              ((fixture["options"] as? JsonObject)?.get("supportedCapabilities") as? JsonArray)
+                ?.map { it.jsonPrimitive.content }
+                ?.toSet(),
+            ),
+          )
+        }
+      }
 
   companion object {
     @BeforeAll @JvmStatic fun loadFixtures() = PrototypeSpecFixtures.loadFixtures()

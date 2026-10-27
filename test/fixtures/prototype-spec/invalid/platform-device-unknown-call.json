@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "device.refresh"
+        }
+      ]
+    },
+    "requires": {
+      "platform": ["device"]
+    }
+  },
+  "expectedPath": "root.onTap[0].call",
+  "expectedMessage": "Unknown platform call"
+}

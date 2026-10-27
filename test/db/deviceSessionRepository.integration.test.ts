@@ -130,7 +130,6 @@ describe("DeviceSessionRepository", () => {
       const before = await repo.getSession(record.sessionUuid);
       const write = repo.upsertActiveSession(record, 1_000, {
         rewriteOverSupersededRelease: {
-          supersededReasons: [],
           livePeerDaemonSessionIds: [],
           ownDaemonSessionId: "daemon-1",
           unlessReleased: true,

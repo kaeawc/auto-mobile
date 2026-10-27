@@ -1,0 +1,13 @@
+{
+  "id": "routes-review",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "listItem",
+    "headline": "{route.x}",
+    "supporting": "{route.x}"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "data": {
+      "count": 2
+    },
+    "root": {
+      "semantics": {
+        "heading": true,
+        "label": "{t:title}",
+        "hint": "{t:hint}",
+        "traits": ["selected"],
+        "zzzUnknown": true
+      },
+      "type": "text",
+      "text": "{t:items|{data:/count}}"
+    }
+  },
+  "expectedPath": "root.semantics.zzzUnknown"
+}

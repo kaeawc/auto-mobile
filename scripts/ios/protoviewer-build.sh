@@ -34,6 +34,8 @@ while IFS= read -r -d '' file; do
   swift_sources+=("${file}")
 done < <(find "${sources_root}/AutoMobilePrototypeAgentCore" \
   "${sources_root}/AutoMobilePrototypeAgent" "${viewer_root}" -name '*.swift' -print0 | sort -z)
+# The effect presets are compiled to a metallib and embedded as bytes (#15130).
+swift_sources+=("$("${repo_root}/scripts/ios/prototype-effects-metallib.sh" "${out_dir}/effects")")
 slices=()
 for arch in "${archs[@]}"; do
   case "${arch}" in

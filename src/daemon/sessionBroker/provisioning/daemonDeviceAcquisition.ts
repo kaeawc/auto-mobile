@@ -71,6 +71,8 @@ export interface DaemonBrokerDeviceAcquisitionOptions {
   invokeTool?: BindingToolInvoker;
   /** The host device tooling behind the reconciler's ports; tests inject fakes. */
   tooling?: DaemonBindingTooling;
+  /** True when released Android emulators are destroyed, not reused warm (#15477). */
+  discardAndroidSnapshotOnExit?: () => boolean;
 }
 
 /** Each part defaults to the host's real tooling. */
@@ -189,6 +191,7 @@ export function createDaemonBrokerDeviceAcquisition(
             androidConfigReader,
             timer: options.timer,
             releaseSession: (sessionUuid) => options.sessions.releaseSession(sessionUuid),
+            discardAndroidSnapshotOnExit: options.discardAndroidSnapshotOnExit,
           }),
         // The verified delete workflow run as the daemon (#11178): a journaled delete of an idle or
         // abandoned binding's device has no execution session for the tool-level ownership check.

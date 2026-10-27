@@ -4,6 +4,7 @@ import {
   SessionManager,
 } from "../../src/daemon/sessionManager";
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -155,6 +156,9 @@ describe("terminal release waits for its own row statement settlement (#12547)",
   });
 
   test("an older release refuses a different incarnation's unsettled own write (#12515)", async () => {
+    // A volatile intent keeps the write-first order: the release wins with its row statement still
+    // unsettled (#11799 W5), and the fence it leaves is lifted for a different incarnation.
+    manager.attachTerminalReleaseJournal(new NoopTerminalReleaseJournal());
     const original = manager.getSession(SESSION)!;
     const gate = Promise.withResolvers<void>();
     store.park = gate.promise;
@@ -168,9 +172,11 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     const snapshot = manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(SESSION)!;
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS, settleMicrotasks);
-    await expect(release).resolves.toEqual({ superseded: true });
+    await expect(release).resolves.toEqual({ superseded: false, deviceId: DEVICE });
+    expect(manager.getSession(SESSION)).toBeNull();
     store.park = undefined;
-    await manager.releaseSession(SESSION, "plan-auto-release");
+    const lift = Reflect.get(manager, "liftTerminalFence") as (uuid: string) => void;
+    lift.call(manager, SESSION);
     const replacement = await manager.createSession(SESSION, DEVICE, "android", {
       timeoutMs: 60_000,
     });

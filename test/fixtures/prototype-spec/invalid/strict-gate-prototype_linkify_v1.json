@@ -1,95 +1,45 @@
 {
   "spec": {
-    "id": "linkify-timeline",
+    "id": "a",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
-    "state": {
-      "profileHandle": ""
-    },
-    "data": {
-      "posts": [
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": "1"
+          }
+        ],
+        "as": "item"
+      },
+      "children": [
         {
-          "id": "p1",
-          "body": "Hello @ana, see #launch https://example.com"
+          "type": "text",
+          "text": "@ana",
+          "linkify": {
+            "kinds": ["mention"],
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "x",
+                "context": {
+                  "id": {
+                    "item": "id"
+                  }
+                }
+              }
+            ]
+          }
         }
       ]
-    },
-    "root": {
-      "type": "stack",
-      "id": "nav",
-      "start": "home",
-      "screens": {
-        "home": {
-          "type": "column",
-          "children": [
-            {
-              "type": "text",
-              "id": "post",
-              "text": "Hello @ana, see #launch https://example.com",
-              "linkify": {
-                "kinds": ["mention", "hashtag", "url"],
-                "style": {
-                  "color": "primary",
-                  "fontWeight": 600
-                },
-                "onTap": [
-                  {
-                    "type": "setState",
-                    "key": "profileHandle",
-                    "value": {
-                      "match": "text"
-                    }
-                  },
-                  {
-                    "type": "emit",
-                    "name": "link_tapped",
-                    "context": {
-                      "kind": {
-                        "match": "kind"
-                      },
-                      "text": {
-                        "match": "text"
-                      }
-                    }
-                  },
-                  {
-                    "type": "push",
-                    "stack": "nav",
-                    "screen": "profile"
-                  }
-                ]
-              }
-            },
-            {
-              "type": "text",
-              "text": "{data:/posts/0/body}",
-              "linkify": {
-                "kinds": ["mention"],
-                "onTap": [
-                  {
-                    "type": "setData",
-                    "path": "/data/posts/0/id",
-                    "value": {
-                      "match": "text"
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "profile": {
-          "type": "text",
-          "text": "Profile {profileHandle}"
-        }
-      }
     }
   },
   "options": {
-    "supportedCapabilities": ["prototype_data_model_v1", "prototype_stack_v1"]
+    "supportedCapabilities": ["prototype_emit_context_v1"]
   },
   "expectedPath": "$"
 }

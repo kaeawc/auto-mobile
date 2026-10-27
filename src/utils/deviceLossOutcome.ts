@@ -124,3 +124,31 @@ export function enrichDeviceLossOutcome(
     },
   };
 }
+
+/**
+ * Add live continuity evidence without replacing the incident's recovery assessment. Only a
+ * session that has already moved onto another serial is evidence of continuity: a session still
+ * on the lost serial, or one an incident judged released, keeps the outcome as it was.
+ */
+export function enrichDeviceLossOutcomeFromSession(
+  outcome: DeviceLossOutcome,
+  session: { assignedDevice: string } | null | undefined,
+): DeviceLossOutcome {
+  if (
+    !session ||
+    session.assignedDevice === outcome.deviceId ||
+    outcome.sessionState === "released"
+  ) {
+    return outcome;
+  }
+  return {
+    ...outcome,
+    sessionState:
+      outcome.sessionState === undefined || outcome.sessionState === "recovering"
+        ? "active"
+        : outcome.sessionState,
+    retry: { sameSession: true, requiresNewSession: false },
+    replacementDeviceId: outcome.replacementDeviceId ?? session.assignedDevice,
+    recovery: outcome.recovery ?? { status: "recovered", attempts: 0 },
+  };
+}

@@ -10,6 +10,7 @@ import {
   type PrototypeLinkifyKind,
   type PrototypeLinkifyMatch,
 } from "../../../src/features/prototype/prototypeLinkify";
+import { bindNodeFields, type Raw } from "../../../src/features/prototype/prototypeTemplate";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const cases = JSON.parse(
@@ -110,5 +111,48 @@ describe("linkify validation and gate", () => {
     expect(prototypeLinkifyUnsupportedMessage(["root.linkify", "x"], "ios")).toBe(
       "The connected iOS prototype agent does not advertise prototype_linkify_v1, so it cannot linkify the text at root.linkify (and 1 more). Nothing was shown. Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version, or use static spans instead.",
     );
+  });
+});
+
+describe("repeat-bound linkify actions", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "../../fixtures/prototype-spec/valid/linkify-repeat-rows.json"),
+      "utf8",
+    ),
+  );
+  test("row binding preserves matches and opaque JSON until the tap", () => {
+    expect(validatePrototypeSpec(fixture).success).toBe(true);
+    const template = fixture.root.children[0];
+    for (const [index, row] of fixture.root.repeat.items.entries()) {
+      const bound = bindNodeFields(template, "root.children[0]", {
+        binding: { alias: "post", index: true },
+        values: row,
+        index,
+      });
+      const actions = (bound.linkify as Raw).onTap as Raw[];
+      expect(actions[0]).toEqual({
+        type: "setState",
+        key: `handle_${row.id}`,
+        value: { match: "text" },
+      });
+      expect(actions[2]?.value).toBe(row.count);
+      expect(actions[3]?.context).toEqual({
+        id: { value: row.id },
+        index: { value: index },
+        match: { match: "kind" },
+        liked: { state: `liked_${row.id}` },
+        literal: template.linkify.onTap[3].context.literal,
+      });
+      expect(actions[3]?.payload).toEqual(template.linkify.onTap[3].payload);
+      expect(actions[4]?.value).toEqual({ value: row.count });
+      const tapped = bindPrototypeLinkifyActions(actions, {
+        kind: "mention",
+        text: row.body,
+      }) as Raw[];
+      expect(tapped[0]?.value).toBe(row.body);
+      expect((tapped[3]?.context as Raw).match).toEqual({ value: "mention" });
+    }
+    expect(template.linkify.onTap[0].key).toBe("handle_{post.id}");
   });
 });

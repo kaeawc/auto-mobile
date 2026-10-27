@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "scroll-outside",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "scroll",
+      "onStartReached": [
+        {
+          "type": "emit",
+          "name": "{route.x}"
+        }
+      ],
+      "child": {
+        "type": "text",
+        "text": "x"
+      }
+    }
+  },
+  "expectedPath": "root.onStartReached[0].name",
+  "expectedMessage": "Route placeholder outside a screen"
+}

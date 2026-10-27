@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "feed",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "items": [],
+      "page": {}
+    },
+    "root": {
+      "type": "button",
+      "label": "Load",
+      "onTap": [
+        {
+          "type": "request",
+          "url": "http://localhost/feed",
+          "append": {
+            "from": "/items",
+            "to": "bad"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].append.to",
+  "expectedMessage": "request into is /data/<RFC 6901 pointer> and addresses a member of data"
+}

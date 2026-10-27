@@ -104,7 +104,7 @@ final class PrototypeStackTransitionsTests: XCTestCase {
     }
 
     func testValuesDecodeOnStacksAndActions() throws {
-        for transition in PrototypeStackTransition.allCases {
+        for transition in PrototypeStackTransition.allCases where transition != .zoom {
             let actions =
                 #", "onTap":[{"type":"push","stack":"nav","screen":"home","transition":"\#(transition.rawValue)"},{"type":"replace","stack":"nav","screen":"home","transition":"\#(transition.rawValue)"}]"#
             let data = spec(#", "transition":"\#(transition.rawValue)""#, actions: actions)
@@ -115,13 +115,17 @@ final class PrototypeStackTransitionsTests: XCTestCase {
             XCTAssertEqual(decoded.root.screens?["home"]?.onTap?.last?.transition, transition)
             XCTAssertEqual(
                 try PrototypeBundleCapabilities.required(data),
-                ["prototype_stack_transitions_v1", "prototype_stack_v1"]
+                (
+                    ["sharedAxisX", "sharedAxisY", "fadeThrough"]
+                        .contains(transition.rawValue) ? ["prototype_stack_patterns_v1"] : []
+                ) +
+                    ["prototype_stack_transitions_v1", "prototype_stack_v1"]
             )
         }
     }
 
     func testInvalidEnumsObjectsAndPopOverridesAreRejected() {
-        for bad in [#""scale""#, #""sharedAxisX""#, #"{"type":"fade"}"#, "null"] {
+        for bad in [#""scale""#, #""futurePattern""#, #"{"type":"fade"}"#, "null"] {
             XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: spec(",\"transition\":\(bad)")))
             for type in ["push", "replace"] {
                 let actions = #", "onTap":[{"type":"\#(type)","stack":"nav","screen":"home","transition":\#(bad)}]"#
@@ -165,14 +169,19 @@ final class PrototypeStackTransitionsTests: XCTestCase {
         let overrides: [PrototypeStackTransition?] = [nil] + PrototypeStackTransition.allCases.map(Optional.some)
         for declared in PrototypeStackTransition.allCases {
             for override in overrides {
-                for specMotion in [nil, "none", "platform"] as [String?] {
+                for specMotion in [nil, "none", "standard", "reduced"] as [String?] {
                     for reduced in [false, true] {
                         for direction in [PrototypeStackChange.Direction.push, .pop, .replace, .reset] {
                             let chosen = override ?? declared
                             let expected: PrototypeStackAnimation = specMotion == "none" || chosen == .none ||
                                 direction == .reset
-                                ? .none : reduced || chosen == .fade || (chosen == .platform && direction == .replace) ?
-                                .fade : .slide
+                                ? .none : reduced || specMotion == "reduced" || chosen == .fade ||
+                                ((chosen == .platform || chosen == .zoom) && direction == .replace) ?
+                                .fade : [
+                                    .sharedAxisX: .sharedAxisX,
+                                    .sharedAxisY: .sharedAxisY,
+                                    .fadeThrough: .fadeThrough,
+                                ][chosen] ?? .slide
                             XCTAssertEqual(PrototypeStackNavigation.animation(
                                 declared: declared, perAction: override, specMotion: specMotion,
                                 reduceMotion: reduced, direction: direction

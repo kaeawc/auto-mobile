@@ -64,6 +64,16 @@ Other refusals you may meet, and what to do:
 | `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                              |
 | `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                  |
 
+### Choosing a device when a call is ambiguous
+
+If your MCP client declares the elicitation capability (form mode) and connects
+over stdio, an `ambiguous_device_target` refusal first becomes a question: the
+client shows the candidate devices and the call continues on the one you pick.
+If you decline or cancel, do not answer within about 20 seconds, or your client
+does not declare elicitation, you get the `ambiguous_device_target` refusal
+above, unchanged. Unattended agents are never held open. Pass `deviceId` on the
+call to skip the question.
+
 When a refusal carries `retryAfterMs`, wait that long before retrying.
 Refusals do not count as session use and do not extend the session's idle window.
 
@@ -138,9 +148,24 @@ the windows with the variables in
   same UUID for 180 seconds; other sessions cannot take that device meanwhile
   (a start naming it is refused with a retry hint). If the window passes without
   a resume the session ends with `session_ownership_lost`.
-- **Device killed or lost.** The session ends with `session_ownership_lost`;
-  while a kill is running, calls get `session_terminal_release_in_progress`
-  (`retryable: false`). Acquire the device again under a new session.
+- **Device killed or lost.** An explicit kill ends the session with
+  `session_ownership_lost`; while it runs, calls get
+  `session_terminal_release_in_progress` (`retryable: false`). Acquire again
+  under a new session. With session continuity enabled, a connection loss can
+  instead return `device_lost` while the session is retained. Its `deviceId`
+  names the lost serial; `replacementDeviceId`, when present, names the live
+  replacement. `retry.sameSession: true` and `requiresNewSession: false` mean
+  retry using the same `sessionUuid`. `recovery.status: "pending"` means recovery
+  is still settling, even if a replacement serial is already known; wait and
+  retry. `"recovered"` means recovery completed, and `recovery.attempts` counts
+  recorded attempts (zero when only live-session evidence is available). An
+  exhausted or unattempted recovery retains its reported status; follow
+  `sessionState` and `retry` to decide whether to reacquire. Without a retained
+  session or incident, no retry guidance is inferred. Verify continuity using
+  the [binding metadata and liveness notification](environment-variables.md#session-heartbeat-timeout). The generation counter is valid only within one daemon
+  lifetime and restarts at zero after a daemon restart. `session_device_rebound`
+  is sent at `info` level, so a client that raised its log level above `info`
+  will not see it; read `session-info` instead.
 - **Plan labels.** A multi-device plan runs its extra labels on derived
   `<base>:<label>` sessions that live only as long as the plan run and end with
   the base session. The next plan run mints them again; do not create

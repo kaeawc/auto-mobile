@@ -89,6 +89,18 @@ the stdio proxy has no telemetry sink and logs only. The `ElicitationRecorder` i
 (`ambiguousDeviceElicitation.recorder` for the legacy path, an argument to `withAmbiguousDeviceMrtr`),
 so tests assert records with a fake.
 
+### Real-client conformance
+
+`test/server/claudeCodeElicitation.integration.test.ts` drives a real Claude Code (at least 2.1.311, named by
+`AUTOMOBILE_CLAUDE_BIN`; skipped without one, and a `claude` on PATH is never spawned) with a loopback stand-in for the
+Anthropic API against a stdio stub built on the production dispatcher. It runs in the advisory nightly
+job `claude-code-elicitation-conformance` against a pinned binary and never touches a device. Measured
+against 2.1.311: headless `-p` declares `elicitation: {form, url}` on `initialize` and answers the
+legacy question with `cancel`, so the call ends with the typed refusal. A stub that serves the
+modern era over stdio but does not answer `server/discover` is treated as a legacy peer: capabilities
+arrive on `initialize`, no request envelope is sent, and the modern wrapper records `not_offered`. The test
+branches on the envelope so it also covers Claude Code taking the 2026-07-28 path when it does.
+
 ### MRTR limits (modern era)
 
 - A modern tool call that runs as a task returns its task handle immediately. Inside the task's

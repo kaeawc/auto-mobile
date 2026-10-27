@@ -47,7 +47,7 @@
           "visibleWhen": {
             "all": [
               {
-                "platform": "/device/sizeClass",
+                "platform": "/device/widthClass",
                 "equals": "regular"
               },
               {
@@ -85,5 +85,6 @@
   "options": {
     "supportedCapabilities": ["prototype_platform_v1"]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_device_v1"
 }

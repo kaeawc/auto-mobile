@@ -13,7 +13,14 @@ public enum PrototypeSpecStrictValidator {
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
             try PrototypeRoutes.validate(fields, context: context)
+            try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
+            try PrototypeLazyList.validate(root: root, data: modelData, state: state)
+            try PrototypeLazyList.validateAppend(actions: context.actions, data: modelData)
+            try PrototypeDerivedValidator.validate(derive: fields["derive"], root: root, data: modelData)
+            try PrototypeScrollMotion.validate(root, data: modelData)
+            try PrototypeSharedElementPlan.validate(context.locatedNodes)
             try PrototypeStrictSemantics.layout(context)
+            try PrototypeStrictSemantics.pagerStateKeys(context)
             var repeats = PrototypeStrictRepeats(data: modelData)
             try repeats.templates(root.objectFields ?? [:], path: "root")
             try PrototypeLimits.guardRepeatPathCells(root, data: modelData)
@@ -22,6 +29,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeStrictSemantics.storage(fields, context: context)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
             try PrototypeRequestValidator.validate(root, state: state)
+            try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
                 handlers: fields["platform"],
@@ -43,6 +51,7 @@ public enum PrototypeSpecStrictValidator {
             let resolved = PrototypeDataResolver.resolveRoot(root, data: modelData)
             try PrototypeLimits.guardTree(resolved)
             let expanded = PrototypeRepeat.expand(resolved)
+            try PrototypeBarScroll.validate(expanded)
             try PrototypePagerOptions.validate(expanded)
             try PrototypeSwipe.validate(expanded)
             try PrototypeCarousel.validate(expanded)
@@ -55,6 +64,12 @@ public enum PrototypeSpecStrictValidator {
                 throw PrototypeContractValidator.invalid(
                     "$",
                     "Unsupported capabilities: \(PrototypeContractValidator.sorted(missing).joined(separator: ", "))"
+                )
+            }
+            if library, PrototypeCustomShaders.uses(fields) {
+                throw PrototypeContractValidator.invalid(
+                    "$",
+                    "ProtoViewer bundles refuse custom AGSL shaders"
                 )
             }
             if library, let window = fields["window"]?.objectFields {
@@ -127,7 +142,7 @@ public enum PrototypeSpecStrictValidator {
                     }
                 }
                 append(action.value["body"], path: "\(action.path).body", request: true)
-            case "setData", "appendData":
+            case "setData", "appendData", "prependData":
                 append(action.value["value"], path: "\(action.path).value")
             case "emit", "platform":
                 let name = action.value["type"] == .string("emit") ? "context" : "args"

@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "backdrop": {
+        "material": "ultraThin",
+        "blur": 0,
+        "tint": "scrim"
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_backdrop_v1"
+}

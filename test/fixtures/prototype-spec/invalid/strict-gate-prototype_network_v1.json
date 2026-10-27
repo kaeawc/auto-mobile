@@ -1,121 +1,98 @@
 {
   "spec": {
-    "id": "request-actions",
+    "id": "feed",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
+    "data": {
+      "feed": {
+        "items": [
+          {
+            "id": 1,
+            "title": "One"
+          },
+          {
+            "id": 2,
+            "title": "Two"
+          }
+        ]
+      },
+      "page": {
+        "next": "p2"
+      }
+    },
     "state": {
-      "query": "cats",
-      "draft": "hello",
-      "feedStatus": "idle",
-      "postStatus": "idle",
-      "loaded": false
+      "refreshing": false,
+      "feedStatus": "idle"
     },
     "root": {
-      "type": "column",
+      "type": "list",
+      "repeat": {
+        "items": {
+          "path": "/feed/items"
+        },
+        "as": "post",
+        "key": "id"
+      },
       "children": [
         {
           "type": "text",
-          "text": "Loading",
-          "visibleWhen": {
-            "key": "feedStatus",
-            "equals": "loading"
-          }
-        },
-        {
-          "type": "text",
-          "text": "Could not load the feed",
-          "visibleWhen": {
-            "key": "feedStatus",
-            "equals": "error"
-          }
-        },
-        {
-          "type": "button",
-          "label": "Load feed",
-          "onTap": [
-            {
-              "type": "request",
-              "method": "GET",
-              "url": "http://localhost:8080/feed",
-              "headers": {
-                "Accept": "application/json",
-                "X-Title": {
-                  "data": "/title"
-                }
-              },
-              "query": {
-                "q": {
-                  "state": "query"
-                },
-                "limit": {
-                  "value": "20"
-                }
-              },
-              "into": "/data/feed",
-              "statusKey": "feedStatus",
-              "via": "host",
-              "timeoutMs": 5000,
-              "onSuccess": [
-                {
-                  "type": "setState",
-                  "key": "loaded",
-                  "value": true
-                },
-                {
-                  "type": "request",
-                  "url": "https://example.com/seen",
-                  "method": "POST",
-                  "body": {
-                    "value": {
-                      "seen": true
-                    }
-                  }
-                }
-              ],
-              "onError": [
-                {
-                  "type": "emit",
-                  "name": "feed_failed"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "button",
-          "label": "Send draft",
-          "onTap": [
-            {
-              "type": "request",
-              "method": "POST",
-              "url": "http://localhost:8080/items/{postStatus}",
-              "body": {
-                "state": "draft"
-              },
-              "into": "/data/created",
-              "statusKey": "postStatus",
-              "via": "device",
-              "onError": [
-                {
-                  "type": "setState",
-                  "key": "loaded",
-                  "value": false
-                }
-              ]
-            }
-          ]
+          "text": "{index}: {post.title}"
         }
-      ]
-    },
-    "data": {
-      "title": "Feed"
+      ],
+      "id": "feed-list",
+      "header": {
+        "type": "text",
+        "text": "Feed"
+      },
+      "footer": {
+        "type": "text",
+        "text": "End"
+      },
+      "spacing": 8,
+      "contentPadding": 12,
+      "endThreshold": 2,
+      "maxItems": 100,
+      "onEndReached": [
+        {
+          "type": "request",
+          "url": "http://localhost:8080/feed?after={data:/page/next}",
+          "into": "/data/page",
+          "append": {
+            "from": "/items",
+            "to": "/data/feed/items"
+          },
+          "statusKey": "feedStatus"
+        }
+      ],
+      "refresh": {
+        "stateKey": "refreshing",
+        "onRefresh": [
+          {
+            "type": "request",
+            "url": "http://localhost:8080/feed",
+            "into": "/data/feed",
+            "onSuccess": [
+              {
+                "type": "setState",
+                "key": "refreshing",
+                "value": false
+              }
+            ]
+          }
+        ]
+      }
     }
   },
   "options": {
-    "supportedCapabilities": ["prototype_data_model_v1", "prototype_network_device_v1"]
+    "supportedCapabilities": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1",
+      "prototype_refresh_v1"
+    ]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_network_v1"
 }

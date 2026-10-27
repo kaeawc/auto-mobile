@@ -292,6 +292,11 @@ internal object PrototypeBindableFields {
       field(condition, "notEquals", path, operandKind)?.let {
         return it
       }
+      for (operand in listOf("contains", "startsWith")) {
+        field(condition, operand, path, operandKind)?.let {
+          return it
+        }
+      }
       condition(condition["not"], "$path.not")?.let {
         return it
       }
@@ -318,7 +323,8 @@ internal object PrototypeBindableFields {
         "increment",
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
         "setData",
-        "appendData" ->
+        "appendData",
+        "prependData" ->
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
@@ -377,6 +383,11 @@ internal object PrototypeBindableFields {
       field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
         return it
       }
+      (action["append"] as? JsonObject)?.let { append ->
+        field(append, "to", "$path.append", PrototypeBindableKind.REQUEST_INTO)?.let {
+          return it
+        }
+      }
       field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
@@ -424,7 +435,15 @@ internal object PrototypeBindableFields {
     }
 
     fun actions(data: JsonObject, path: String): T? {
-      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
+      for (field in
+        listOf(
+          "onTap",
+          "onLongPress",
+          "onDoubleTap",
+          "onEndReached",
+          "onStartReached",
+          "onAppear",
+        )) {
         for ((action, actionPath) in objects(data, field, path)) {
           action(action, actionPath)?.let {
             return it
@@ -438,10 +457,6 @@ internal object PrototypeBindableFields {
       Components(this).node(node, path)?.let {
         return it
       }
-      if ((node["type"] as? JsonPrimitive)?.content == "scroll")
-        actionLists(node, listOf("onStartReached"), path)?.let {
-          return it
-        }
       for ((name, raw) in (node["routes"] as? JsonObject).orEmpty().toSortedMap()) {
         actionLists(raw.jsonObject, listOf("onEnter", "onBack"), memberPath("$path.routes", name))
           ?.let {
@@ -586,7 +601,20 @@ internal object PrototypeBindableFields {
       return null
     }
 
+    private fun semanticsParts(node: JsonObject, path: String): T? {
+      val semantics = node["semantics"] as? JsonObject ?: return null
+      for (key in listOf("label", "hint")) {
+        visitor.field(semantics, key, "$path.semantics", PrototypeBindableKind.TEXT)?.let {
+          return it
+        }
+      }
+      return null
+    }
+
     fun node(node: JsonObject, path: String): T? {
+      semanticsParts(node, path)?.let {
+        return it
+      }
       if ((node["type"] as? JsonPrimitive)?.content == "text") {
         textParts(node, path)?.let {
           return it
@@ -599,6 +627,8 @@ internal object PrototypeBindableFields {
           visitor.field(entry, "message", entryPath, PrototypeBindableKind.TEXT)
         }
         ?: visitor.condition(node["visibleWhen"], "$path.visibleWhen")
+        ?: visitor.condition(node["errorWhen"], "$path.errorWhen")
+        ?: visitor.field(node, "errorText", path, PrototypeBindableKind.TEXT)
         ?: objects(node, "styleWhen", path).firstNotNullOfOrNull { (entry, entryPath) ->
           visitor.condition(entry["when"], "$entryPath.when")
         }
@@ -622,6 +652,7 @@ internal object PrototypeRepeatValidator {
     val alias: String,
     val items: List<JsonObject>,
     val pathBound: Boolean = false,
+    val derivedNames: Set<String> = emptySet(),
   )
 
   fun validate(
@@ -661,6 +692,13 @@ internal object PrototypeRepeatValidator {
     path: String,
   ): List<Pair<JsonObject, Int?>> {
     val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") }
+    if (
+      scope != null &&
+        checkedKeys(value).any { key ->
+          PrototypeRepeatTemplate.fieldReferences(key, scope.alias).any { it in scope.derivedNames }
+        }
+    )
+      return emptyList()
     if (scope == null || checkedKeys(value).none { hasPlaceholder(it, scope.alias) }) {
       return listOf(value to null)
     }

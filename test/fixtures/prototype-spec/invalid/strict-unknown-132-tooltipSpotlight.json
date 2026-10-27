@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "anchor": {
+        "type": "element",
+        "selector": {
+          "text": "{route.x}",
+          "testTag": "buy"
+        },
+        "alignment": "cover"
+      },
+      "type": "tooltip",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "text": "Element hint",
+      "caret": "bottom",
+      "spotlight": {
+        "zzzUnknown": true
+      }
+    }
+  },
+  "expectedPath": "root.spotlight.zzzUnknown"
+}

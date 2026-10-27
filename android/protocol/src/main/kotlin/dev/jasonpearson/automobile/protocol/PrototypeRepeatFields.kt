@@ -39,6 +39,12 @@ internal object PrototypeRepeatFields {
     path: String,
     scope: Scope,
   ): PrototypeSpecError? {
+    if (
+      segments.filterIsInstance<PrototypeRepeatSegment.Field>().any {
+        it.name in scope.derivedNames
+      }
+    )
+      return null
     val empty =
       scope.items.withIndex().indexOfFirst { (index, item) ->
         PrototypeRepeatTokens.bind(segments, scope.alias, item, index).isEmpty()
@@ -60,6 +66,12 @@ internal object PrototypeRepeatFields {
     if (segments.all { it is PrototypeRepeatSegment.Literal }) {
       return if (pattern.matches(key)) null else fail(path, "Invalid key value")
     }
+    if (
+      segments.filterIsInstance<PrototypeRepeatSegment.Field>().any {
+        it.name in scope.derivedNames
+      }
+    )
+      return null
     for ((index, item) in scope.items.withIndex()) {
       val bound = PrototypeRepeatTokens.bind(segments, scope.alias, item, index)
       val invalidRepeatPart =

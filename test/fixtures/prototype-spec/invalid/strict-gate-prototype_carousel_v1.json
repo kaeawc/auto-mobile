@@ -38,5 +38,6 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_carousel_v1"
 }

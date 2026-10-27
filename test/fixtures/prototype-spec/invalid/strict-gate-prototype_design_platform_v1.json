@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "design",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Save",
+      "testTag": "save"
+    },
+    "theme": {
+      "design": "platform"
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_design_platform_v1"
+}

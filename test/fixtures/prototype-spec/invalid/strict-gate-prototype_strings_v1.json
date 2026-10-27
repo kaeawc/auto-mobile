@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{t:items|{data:/count}}",
+      "semantics": {
+        "heading": true,
+        "label": "{t:title}",
+        "hint": "{t:hint}",
+        "traits": ["selected"]
+      }
+    },
+    "strings": {
+      "default": {
+        "title": "Cart",
+        "hint": "Your cart",
+        "items": {
+          "one": "{#} item",
+          "other": "{#} items"
+        }
+      },
+      "fr": {
+        "title": "Panier"
+      }
+    },
+    "data": {
+      "count": 2
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1", "prototype_semantics_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_strings_v1"
+}

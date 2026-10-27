@@ -82,6 +82,48 @@ class PrototypeTimerControllerTest {
   }
 
   @Test
+  fun `onAppear timer is inspected without activity and cancelled on preserving show and dismiss`() =
+    runTest {
+      val controller = controller()
+      val appear =
+        spec.copy(
+          root =
+            PrototypeTextNode(
+              text = "Splash",
+              onAppear =
+                listOf(
+                  PrototypeStartTimerAction(
+                    "splash",
+                    100,
+                    100,
+                    actions = listOf(PrototypeEmitAction("tick")),
+                  ),
+                ),
+            ),
+        )
+      controller.show("show", appear)
+      val runtime = checkNotNull(controller.activeRuntime)
+      val armed = idle.tasks.size
+      assertEquals("splash", runtime.timerReports().single().id)
+      controller.inspect("status")
+      assertEquals("splash", statuses.last().single().timers.single().id)
+      advanceTimeBy(100)
+      runCurrent()
+      assertEquals(armed, idle.tasks.size)
+      idle.advance(500)
+      assertFalse(runtime.current.active)
+      assertTrue(runtime.timerReports().isEmpty())
+      controller.show("again", appear)
+      controller.show("preserve", appear)
+      assertTrue(checkNotNull(controller.activeRuntime).timerReports().isEmpty())
+      controller.show("reset", appear, reset = true)
+      val reset = checkNotNull(controller.activeRuntime)
+      assertEquals("splash", reset.timerReports().single().id)
+      controller.dismiss("dismiss", "panel", false)
+      assertTrue(reset.timerReports().isEmpty())
+    }
+
+  @Test
   fun `dismiss and replacing show cancel timers without handover`() = runTest {
     val controller = controller()
     val first = controller.start()

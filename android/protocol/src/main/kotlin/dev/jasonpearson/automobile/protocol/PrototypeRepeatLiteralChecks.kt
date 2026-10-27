@@ -35,7 +35,11 @@ internal object PrototypeRepeatLiteralChecks {
         text != null &&
         !stateKeyPattern.matches(
           PrototypeRepeatTemplate.segments(text, "route").joinToString("") {
-            if (it is PrototypeRepeatSegment.Literal) it.text else "r"
+            when (it) {
+              is PrototypeRepeatSegment.Literal -> it.text
+              is PrototypeRepeatSegment.Field -> "r"
+              PrototypeRepeatSegment.Index -> "{index}"
+            }
           },
         )
     )

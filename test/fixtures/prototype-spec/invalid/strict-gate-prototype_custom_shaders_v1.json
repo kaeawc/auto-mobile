@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "shader",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Custom effect",
+      "style": {
+        "shader": {
+          "asset": "effect",
+          "uniforms": {
+            "u0": 1000000,
+            "u1": -1000000,
+            "u2": 1000000,
+            "u3": -1000000,
+            "u4": 1000000,
+            "u5": -1000000,
+            "u6": 1000000,
+            "u7": -1000000,
+            "u8": 1000000,
+            "u9": -1000000,
+            "u10": 1000000,
+            "u11": -1000000,
+            "u12": 1000000,
+            "u13": -1000000,
+            "u14": 1000000,
+            "u15": -1000000
+          }
+        }
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_custom_shaders_v1"
+}

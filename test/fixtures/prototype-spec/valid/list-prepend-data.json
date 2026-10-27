@@ -1,0 +1,40 @@
+{
+  "id": "prepend",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "rows": [
+      {
+        "id": 1
+      }
+    ]
+  },
+  "root": {
+    "type": "list",
+    "repeat": {
+      "items": {
+        "path": "/rows"
+      },
+      "as": "row",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{row.id}",
+        "onTap": [
+          {
+            "type": "prependData",
+            "path": "/data/rows",
+            "value": {
+              "item": "id"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import { parsePrototypeBackdrop } from "../../prototype/prototypeBackdrop";
 import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import { prototypePatchReplyFields } from "../../prototype/prototypePatchWire";
 import { logger } from "../../../utils/logger";
@@ -10,7 +11,7 @@ import {
 import { imeCommitUnitFields, type ImeCommitActionResult } from "./CtrlProxyText";
 import { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { prototypeSavedReplyFields } from "./CtrlProxyPrototypes";
-import { PrototypeResult } from "./ctrlProxyProtocol";
+import { PrototypeDegradedEffect, PrototypeResult } from "./ctrlProxyProtocol";
 import {
   AccessibilityNode,
   A11ySwipeResult,
@@ -378,6 +379,7 @@ export class AndroidInboundResponseHandlers {
           : {}),
         ...prototypePatchReplyFields(message),
         ...prototypeSavedReplyFields(message),
+        ...prototypeDegradedEffectsField(message.degradedEffects),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
         ...(parsePrototypeStacks(message.stacks)
           ? { stacks: parsePrototypeStacks(message.stacks) }
@@ -385,6 +387,7 @@ export class AndroidInboundResponseHandlers {
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
           : {}),
+        ...parsePrototypeBackdrop(message.backdrop),
         ...(Number.isSafeInteger(message.cleared) && message.cleared! >= 0
           ? { cleared: message.cleared }
           : {}),
@@ -564,4 +567,22 @@ export class AndroidInboundResponseHandlers {
     | "remove_preference_result"
     | "clear_preferences_result"
   >;
+}
+
+/** `degradedEffects` (prototype_effects_v1) entries that are well formed; absent when none are. */
+function prototypeDegradedEffectsField(value: unknown): {
+  degradedEffects?: PrototypeDegradedEffect[];
+} {
+  if (!Array.isArray(value)) {
+    return {};
+  }
+  const entries = value.filter(
+    (entry): entry is PrototypeDegradedEffect =>
+      typeof entry === "object" &&
+      entry !== null &&
+      typeof (entry as PrototypeDegradedEffect).path === "string" &&
+      typeof (entry as PrototypeDegradedEffect).type === "string" &&
+      typeof (entry as PrototypeDegradedEffect).reason === "string",
+  );
+  return entries.length > 0 ? { degradedEffects: entries } : {};
 }

@@ -53,7 +53,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -142,6 +147,8 @@ private fun prototypeAnnotatedText(
   }
 }
 
+internal val LocalPrototypeShaderSession = compositionLocalOf<PrototypeShaderSession?> { null }
+
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
 @Composable
 @InternalAutoMobilePrototypeApi
@@ -155,7 +162,9 @@ fun PrototypeRuntimeContent(
   val imageVersion = images?.version?.collectAsState()?.value
   val resolver = LocalContext.current.contentResolver
   val durationScale by rememberAnimatorDurationScale(resolver)
-  val motion = prototypeMotionEnabled(snapshot.spec.motion, durationScale)
+  val transitionScale by rememberTransitionAnimationScale(resolver)
+  val profile = prototypeMotionProfile(snapshot.spec.motion, durationScale, transitionScale)
+  val motion = profile != PrototypeMotionProfile.OFF
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -172,14 +181,19 @@ fun PrototypeRuntimeContent(
       val scrollStores = remember { PrototypeStackScrollStores() }
       scrollStores.retain(snapshot.stacks.mapValues { it.value.path })
       CompositionLocalProvider(
+        LocalPrototypeListEndTriggers provides runtime.listEndTriggers,
         LocalPrototypeStackScrollStores provides scrollStores,
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeScrollRequests provides snapshot.scrollRequests,
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
+        LocalPrototypeShaderSession provides runtime.shaderSession,
         LocalPrototypeMotion provides motion,
+        LocalPrototypeScrollReduced provides (snapshot.spec.motion == "reduced"),
+        LocalPrototypeMotionProfile provides profile,
         LocalPrototypeMotionActivity provides runtime.motionActivity,
+        LocalPrototypeEffectHealth provides runtime.effectHealth,
         LocalPrototypeStackRuntime provides runtime,
         LocalPrototypeStackSnapshot provides snapshot,
         LocalPrototypeSwipeCoordinator provides
@@ -189,7 +203,12 @@ fun PrototypeRuntimeContent(
         val traceEnabled = traceSink.isEnabled()
         if (traceEnabled) traceSink.begin(PrototypeTrace.COMPOSE)
         ObservePrototypeDevice(send)
-        PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
+        PrototypeSpecContent(
+          runtime.renderModel(snapshot).root,
+          snapshot.spec.theme,
+          deadTaps = snapshot.spec.window.deadTaps == true,
+          interact = send,
+        )
         if (traceEnabled) traceSink.end()
       }
     }
@@ -202,58 +221,81 @@ fun PrototypeRuntimeContent(
 fun PrototypeSpecContent(
   root: PrototypeRenderNode,
   theme: PrototypeSpecTheme? = null,
+  deadTaps: Boolean = false,
   interact: (PrototypeInteraction) -> Unit = {},
 ) {
   PrototypeTheme(root, theme) {
-    val anchorLocals = remember { PrototypeAnchorLocals() }
-    val menuLayers = remember { PrototypeMenuLayers() }
-    val menuParents = remember(root) { prototypeMenuParents(root) }
-    CompositionLocalProvider(
-      LocalPrototypeAnchorLocals provides anchorLocals,
-      LocalPrototypeGestureTaps provides remember { PrototypeGestureTaps() },
-      LocalPrototypeMenuLayers provides menuLayers,
-      LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
-      LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
-      LocalPrototypeTargetFocus provides remember { mutableMapOf() },
-      LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
-      LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
-    ) {
-      Box(
-        Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
-          .semantics { testTagsAsResourceId = true },
+    PrototypeSharedRoot(root) {
+      val gestureTaps = remember { PrototypeGestureTaps() }
+      val density = LocalDensity.current.density
+      val currentInteract = rememberUpdatedState(interact)
+      val scrollOffsets = remember { PrototypeScrollOffsets() }
+      scrollOffsets.targets = remember(root) { prototypeScrollTargets(root) }
+      val anchorLocals = remember { PrototypeAnchorLocals() }
+      val menuLayers = remember { PrototypeMenuLayers() }
+      val menuParents = remember(root) { prototypeMenuParents(root) }
+      CompositionLocalProvider(
+        LocalPrototypeListEndTriggers provides
+          (LocalPrototypeListEndTriggers.current
+            ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
+        LocalPrototypeScrollOffsets provides scrollOffsets,
+        LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
+        LocalPrototypeAnchorLocals provides anchorLocals,
+        LocalPrototypeShaderSession provides
+          (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
+        LocalPrototypeGestureTaps provides gestureTaps,
+        LocalPrototypeMenuLayers provides menuLayers,
+        LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
+        LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
+        LocalPrototypeTargetFocus provides remember { mutableMapOf() },
+        LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+        LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
       ) {
-        val modals = prototypeModalLayers(root)
-        PrototypeModalPage(modals) {
-          RenderPrototypeNode(root, interact, windowRoot = true)
-          PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
-        }
-        modals.forEach { node ->
-          key(node.identity) {
-            if (node.role == "menu") {
-              val parent = menuParents[node.identity]
-              RenderPrototypeMenu(
-                node,
-                prototypeNodeModifier(node, interact),
-                parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+        PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
+        Box(
+          Modifier.then(
+              if (deadTaps)
+                Modifier.prototypeDeadTapObserver(gestureTaps, density) {
+                  currentInteract.value(it)
+                }
+              else Modifier,
+            )
+            .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+            .semantics { testTagsAsResourceId = true },
+        ) {
+          val modals = prototypeModalLayers(root)
+          PrototypeModalPage(modals) {
+            RenderPrototypeNode(root, interact, windowRoot = true)
+            PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
+          }
+          modals.forEach { node ->
+            key(node.identity) {
+              if (node.role == "menu") {
+                val parent = menuParents[node.identity]
+                RenderPrototypeMenu(
+                  node,
+                  Modifier.prototypeShader(node).then(prototypeNodeModifier(node, interact)),
+                  parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                  interact,
+                )
+              } else RenderPrototypeModal(node, interact)
+              PrototypeAnchorLayer(
+                remember(node) { layeredPrototypeAnchorsIn(node.children) },
                 interact,
               )
-            } else RenderPrototypeModal(node, interact)
-            PrototypeAnchorLayer(
-              remember(node) { layeredPrototypeAnchorsIn(node.children) },
-              interact,
-            )
+            }
           }
-        }
-        val expanded = menuLayers.expandedSelect
-        val select = expanded?.let { identity ->
-          visiblePrototypeSelect(root, identity)?.takeIf {
-            // A newly opened modal closes a dropdown on the page behind it.
-            modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
-              modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+          val expanded = menuLayers.expandedSelect
+          val select = expanded?.let { identity ->
+            visiblePrototypeSelect(root, identity)?.takeIf {
+              // A newly opened modal closes a dropdown on the page behind it.
+              modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
+                modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+            }
           }
+          if (select != null) RenderPrototypeSelectOptions(select, interact)
+          else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
         }
-        if (select != null) RenderPrototypeSelectOptions(select, interact)
-        else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
       }
     }
   }
@@ -390,7 +432,7 @@ private fun RenderPrototypeModal(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val boundsModifier = Modifier.prototypeTargetBounds(node)
-  val modifier = boundsModifier.then(prototypeNodeModifier(node, interact))
+  val modifier = boundsModifier.prototypeShader(node).then(prototypeNodeModifier(node, interact))
   when (node.role) {
     "dialog" ->
       RenderPrototypeDialog(node, modifier, interact) {
@@ -458,7 +500,12 @@ internal fun RenderPrototypeNode(
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalPrototypeMotion.current && node.source?.visibleWhen != null) {
     // A stack transition controls navigation only; its own visibility uses the defaults.
-    val visibilityTransition = node.source.transition?.type.takeUnless { node.role == "stack" }
+    val visibilityTransition =
+      prototypeVisibilityTransition(
+        node.source.transition?.type.takeUnless { node.role == "stack" },
+        LocalPrototypeMotionProfile.current,
+        shared = node.source.sharedKey != null,
+      )
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
@@ -471,17 +518,18 @@ internal fun RenderPrototypeNode(
         none = visibilityTransition == "none",
         enterDelayMs = node.enterDelayMs,
       ) {
-        RenderPrototypeNodeContent(
+        RenderPrototypeNodeContentWithViewport(
           node,
           interact,
-          Modifier.prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
+          Modifier.prototypeSharedBounds(node, this)
+            .prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
           weightAxis,
           windowRoot,
         )
       }
     }
   } else if (node.visible) {
-    RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
+    RenderPrototypeNodeContentWithViewport(node, interact, parentModifier, weightAxis, windowRoot)
   }
 }
 
@@ -491,6 +539,15 @@ private fun usesPlainVisibility(node: PrototypeRenderNode): Boolean {
     node.source?.visibleWhen != null &&
     (type == "fade" || type == "none")
 }
+
+/** The node's visibility transition under the current motion profile. */
+@Composable
+private fun nodeVisibilityTransition(node: PrototypeRenderNode): String? =
+  prototypeVisibilityTransition(
+    node.source?.transition?.type,
+    LocalPrototypeMotionProfile.current,
+    shared = node.source?.sharedKey != null,
+  )
 
 @Composable
 private fun RenderPrototypeVisibility(
@@ -508,9 +565,10 @@ private fun RenderPrototypeVisibility(
       m,
       axis,
       root ->
-      RenderPrototypeNodeContent(n, currentInteract, m, axis, root)
+      RenderPrototypeNodeContentWithViewport(n, currentInteract, m, axis, root)
     }
   }
+  val visibilityTransition = nodeVisibilityTransition(node)
   val history = remember { RetainedVisibilityHistory() }
   if (node.identity in LocalPrototypeRetainedSubtrees.current) {
     PrototypeRetainedVisibility(
@@ -533,20 +591,21 @@ private fun RenderPrototypeVisibility(
         modifier = parentModifier,
         enter =
           prototypeEnterTransition(
-            node.source?.transition?.type,
+            visibilityTransition,
             prototypeRtl(),
             node.enterDelayMs,
           ),
-        exit = prototypeExitTransition(node.source?.transition?.type, prototypeRtl()),
+        exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
       ) {
         ReportPrototypeMotion { transition.isRunning }
         ProvideAnchorFade(
-          none = node.source?.transition?.type == "none",
+          none = visibilityTransition == "none",
           enterDelayMs = node.enterDelayMs,
         ) {
           content(
             node,
-            Modifier.prototypeBlurReplace(this, node.source?.transition?.type, node.enterDelayMs),
+            Modifier.prototypeSharedBounds(node, this)
+              .prototypeBlurReplace(this, visibilityTransition, node.enterDelayMs),
             weightAxis,
             windowRoot,
           )
@@ -556,6 +615,43 @@ private fun RenderPrototypeVisibility(
       content(node, parentModifier, weightAxis, windowRoot)
     }
   }
+}
+
+@Composable
+private fun RenderPrototypeNodeContentWithViewport(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
+  weightAxis: PrototypeWeightAxis? = null,
+  windowRoot: Boolean = false,
+) {
+  val repeated =
+    when (val source = node.source) {
+      is PrototypeBoxNode -> source.repeat != null
+      is PrototypeRowNode -> source.repeat != null
+      is PrototypeColumnNode -> source.repeat != null
+      is PrototypeGridNode -> source.repeat != null
+      else -> false
+    }
+  val ownViewport =
+    node.role in listOf("pager", "carousel") ||
+      (repeated && LocalPrototypeScrollViewport.current == null)
+  if (ownViewport) {
+    val parentViewport = LocalPrototypeScrollViewport.current
+    val viewport =
+      remember(node.identity, parentViewport) {
+        PrototypeScrollViewport(node.identity, parentViewport)
+      }
+    CompositionLocalProvider(LocalPrototypeScrollViewport provides viewport) {
+      RenderPrototypeNodeContent(
+        node,
+        interact,
+        parentModifier.onGloballyPositioned { viewport.bounds = it.boundsInRoot() },
+        weightAxis,
+        windowRoot,
+      )
+    }
+  } else RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
 }
 
 @Composable
@@ -570,7 +666,7 @@ private fun RenderPrototypeNodeContent(
     // The row keeps its own layout modifier; the foreground renders as an ordinary node.
     val plain = remember(node) { node.copy(source = prototypeWithoutSwipe(node.source)) }
     PrototypeSwipeRow(node, swipe, interact, parentModifier) {
-      RenderPrototypeNodeContent(plain, interact, Modifier, weightAxis, windowRoot)
+      RenderPrototypeNodeContentWithViewport(plain, interact, Modifier, weightAxis, windowRoot)
     }
     return
   }
@@ -598,6 +694,7 @@ private fun RenderPrototypeNodeContent(
     (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
       .prototypeScrollAnchor(node.identity)
       .then(boundsModifier)
+      .prototypeShader(node)
       .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
       .then(focusModifier)
   // Inline layout containers with repeat or a direct visibleWhen child animate and clip their size.
@@ -606,6 +703,7 @@ private fun RenderPrototypeNodeContent(
   // Others neither spring for text/style/image-load changes nor clip children with motion.
   val animatesSize =
     LocalPrototypeMotion.current &&
+      LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL &&
       (node.role == "box" ||
         node.role == "row" ||
         node.role == "column" ||
@@ -776,33 +874,44 @@ private fun RenderPrototypeNodeContent(
     "image" -> PrototypeImageContent(node, modifier)
     "scroll" -> {
       val scroll = key(LocalPrototypeShowEpoch.current) { rememberStackScrollState(node.identity) }
+      RegisterPrototypeScroll(node.identity, scroll)
+      val motionViewport = remember { PrototypeScrollViewport() }
       val source = node.source as? PrototypeScrollNode
       val refresh = source?.refresh?.takeIf { source.axis != "horizontal" }
       // A vertical scroll may be a chat list (#14232); reverse anchors it at its end.
       val chat = source?.takeIf { it.axis != "horizontal" }
       val reverse = chat?.reverse == true
       val anchors = remember { PrototypeScrollAnchors() }
-      val viewport = Modifier.onGloballyPositioned { anchors.viewport = it }
+      val viewport = Modifier.onGloballyPositioned {
+        anchors.viewport = it
+        motionViewport.bounds = it.boundsInRoot()
+      }
+      val scrollModifier = modifier.prototypeBarScroll(node)
       val scrolling =
         if (source?.axis == "horizontal")
-          modifier
+          scrollModifier
+            .then(viewport)
             .boundedScrollViewport(vertical = false)
             .prototypeFadeEdges(scroll, true, source.fadeEdges)
             .horizontalScroll(scroll)
         else if (refresh != null)
-          viewport
+          scrollModifier
+            .then(viewport)
             .boundedScrollViewport(vertical = true)
             .prototypeFadeEdges(scroll, false, source.fadeEdges, reverse)
             .verticalScroll(scroll, reverseScrolling = reverse)
         else
-          modifier
+          scrollModifier
             .then(viewport)
             .boundedScrollViewport(vertical = true)
             .prototypeFadeEdges(scroll, false, source?.fadeEdges, reverse)
             .verticalScroll(scroll, reverseScrolling = reverse)
       if (chat != null) PrototypeChatScrollEffects(chat, scroll, anchors, interact)
       val content: @Composable BoxScope.() -> Unit = {
-        CompositionLocalProvider(LocalPrototypeScrollAnchors provides chat?.let { anchors }) {
+        CompositionLocalProvider(
+          LocalPrototypeScrollViewport provides motionViewport,
+          LocalPrototypeScrollAnchors provides chat?.let { anchors },
+        ) {
           node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
         }
       }
@@ -829,6 +938,8 @@ private fun RenderPrototypeNodeContent(
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
+    "list" ->
+      RenderPrototypeLazyList(node, modifier, interact) { RenderPrototypeNode(it, interact) }
     "chart" -> RenderPrototypeChart(node, modifier)
     "timePicker" ->
       PrototypeCheckedControl(node, parentModifier) {
@@ -964,7 +1075,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -981,7 +1092,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1003,7 +1114,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1020,7 +1131,7 @@ private fun RenderPrototypeTextField(
           onValueChange = onValueChange,
           modifier = fieldModifier,
           enabled = node.enabled,
-          isError = node.errorMessage != null,
+          isError = node.isError,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -1065,6 +1176,9 @@ internal fun RenderPrototypeEditableField(
     }
   }
   var fieldModifier = modifier.focusRequester(focus)
+  node.errorMessage?.let { message ->
+    fieldModifier = fieldModifier.semantics { error(message) }
+  }
   if (node.enabled && actions.isNotEmpty())
     fieldModifier = fieldModifier.semantics {
       onClick {
@@ -1099,7 +1213,9 @@ private fun RenderPrototypePager(
       (source.peek?.end ?: 0.0) > 0.0 ||
       source.pageSize is PrototypePagerPageSize.Dp
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
-  val animate = LocalPrototypeMotion.current
+  val animate =
+    LocalPrototypeMotion.current &&
+      LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL
   ReportPrototypeMotion { pager.isScrollInProgress }
   // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
   // The offset check matters then: past the halfway point currentPage already reads the target.
@@ -1184,6 +1300,34 @@ private fun RenderPrototypePager(
   }
 }
 
+private data class PrototypeNavigationScroll(val minimized: Boolean, val modifier: Modifier)
+
+@Composable
+private fun prototypeNavigationScroll(
+  node: PrototypeRenderNode,
+  modifier: Modifier,
+): PrototypeNavigationScroll? {
+  val source = node.source
+  val behavior =
+    when (source) {
+      is PrototypeTabBarNode -> source.onScroll
+      is PrototypeBottomNavNode -> source.onScroll
+      else -> null
+    }
+  val binding = LocalPrototypeBarScroll.current.bars[node.identity]
+  val fraction =
+    binding?.fraction(LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL) ?: 0f
+  if (behavior == "hide" && fraction >= 1f) return null
+  val minimized = behavior == "minimize" && fraction > 0f
+  val barModifier =
+    when {
+      behavior == "hide" -> modifier.prototypeBarSlide(fraction)
+      minimized && source is PrototypeBottomNavNode -> modifier.height(56.dp)
+      else -> modifier
+    }
+  return PrototypeNavigationScroll(minimized, barModifier)
+}
+
 @Composable
 private fun RenderPrototypeNavigation(
   node: PrototypeRenderNode,
@@ -1207,40 +1351,48 @@ private fun RenderPrototypeNavigation(
     }
     else -> return
   }
+  val scroll = prototypeNavigationScroll(node, modifier) ?: return
   val select: (Int) -> Unit = { index ->
     interact(PrototypeInteraction.Select(pager, key, index, source.onTap.orEmpty()))
   }
   if (source is PrototypeBottomNavNode)
-    NavigationBar(modifier) {
+    NavigationBar(scroll.modifier) {
       items.forEachIndexed { index, item ->
         NavigationBarItem(
           node.selection == index,
           { select(index) },
           icon = { PrototypeNavigationIcon(item) },
-          label = { Text(item.label) },
+          label = if (scroll.minimized) null else ({ Text(item.label) }),
+          modifier = Modifier.semantics { if (scroll.minimized) contentDescription = item.label },
         )
       }
     }
   else if (source is PrototypeTabBarNode && source.scrollable)
-    ScrollableTabRow(node.selection, modifier) {
+    ScrollableTabRow(node.selection, scroll.modifier) {
       items.forEachIndexed { index, item ->
-        PrototypeNavigationTab(item, node.selection == index) { select(index) }
+        PrototypeNavigationTab(item, node.selection == index, scroll.minimized) { select(index) }
       }
     }
   else
-    TabRow(node.selection, modifier) {
+    TabRow(node.selection, scroll.modifier) {
       items.forEachIndexed { index, item ->
-        PrototypeNavigationTab(item, node.selection == index) { select(index) }
+        PrototypeNavigationTab(item, node.selection == index, scroll.minimized) { select(index) }
       }
     }
 }
 
 @Composable
-private fun PrototypeNavigationTab(item: PrototypeItem, selected: Boolean, select: () -> Unit) {
+private fun PrototypeNavigationTab(
+  item: PrototypeItem,
+  selected: Boolean,
+  minimized: Boolean,
+  select: () -> Unit,
+) {
   Tab(
     selected,
     select,
-    text = { Text(item.label) },
+    modifier = Modifier.semantics { if (minimized) contentDescription = item.label },
+    text = if (minimized) null else ({ Text(item.label) }),
     icon = { if (item.icon != null || item.image != null) PrototypeNavigationIcon(item) },
   )
 }
@@ -1336,7 +1488,8 @@ private fun prototypeNodeModifier(
   val actions = node.source?.onTap.orEmpty()
   val tappable = prototypeNodeTappable(node)
   val handleVisual =
-    (node.role == "icon" || node.role == "image") &&
+    node.semantics == null &&
+      (node.role == "icon" || node.role == "image") &&
       node.identity in LocalPrototypeHandleVisuals.current
   val presses = remember { MutableInteractionSource() }
   var modifier: Modifier = if (node.enabled) Modifier else Modifier.semantics { disabled() }
@@ -1347,7 +1500,7 @@ private fun prototypeNodeModifier(
     modifier = modifier.prototypeAnchor(anchor, currentPrototypeWindowGeometry(), windowRoot)
   }
   // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
-  modifier = modifier.prototypeStyleTransform(node)
+  modifier = modifier.prototypeStyleTransform(node).prototypeScrollMotion(node)
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
   val pressScale = style.pressScale
   if (tappable && pressScale != null) {
@@ -1374,6 +1527,14 @@ private fun prototypeNodeModifier(
         modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
     }
   modifier = modifier.prototypeShadows(style.shadows, shape, inner = false)
+  // Effects (#15129): paint over the content undistorted, then the distorting layer around the
+  // background and content. Both sit outside the clip and keep to the node's bounds themselves.
+  val effects = rememberPrototypeEffectPlan(node)
+  val effectElapsed = rememberPrototypeEffectElapsed(effects, node.identity)
+  modifier =
+    modifier
+      .prototypeEffectOverlay(effects, shape, effectElapsed)
+      .prototypeEffectLayer(effects, effectElapsed)
   if (style.cornerRadius != null || style.cornerStyle != null) modifier = modifier.clip(shape)
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(prototypeAnimatedColor(node, it), shape)
@@ -1381,6 +1542,7 @@ private fun prototypeNodeModifier(
   style.gradient?.let {
     modifier = modifier.background(prototypeGradientBrush(it, prototypePalette()), shape)
   }
+  modifier = modifier.prototypeEffectUnderlay(effects, shape)
   // Post-content modifiers nest in reverse painting order: shimmer, border, then inner shadows.
   modifier = modifier.prototypeShadows(style.shadows, shape, inner = true)
   style.border?.let {
@@ -1415,23 +1577,39 @@ private fun prototypeNodeModifier(
           )
           .semantics {
             if (longPress != null) {
-              onLongClick(label = null) {
+              onLongClick(label = PROTOTYPE_LONG_PRESS_ACTION_LABEL) {
                 interact(PrototypeInteraction.Tap(longPress))
                 true
               }
             }
+            if (doubleTap != null) {
+              customActions =
+                listOf(prototypeDoubleTapAction { interact(PrototypeInteraction.Tap(doubleTap)) })
+            }
           }
       } else if (longPress != null || doubleTap != null) {
-        modifier.combinedClickable(
-          enabled = node.enabled,
-          interactionSource = presses,
-          indication = LocalIndication.current,
-          onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
-          onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
-          onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
-        )
+        modifier
+          .combinedClickable(
+            onClickLabel = node.semantics?.hint,
+            enabled = node.enabled,
+            interactionSource = presses,
+            indication = LocalIndication.current,
+            onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
+            onLongClickLabel = longPress?.let { PROTOTYPE_LONG_PRESS_ACTION_LABEL },
+            onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
+            onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
+          )
+          // combinedClickable exposes the long click to TalkBack but not the double click, whose
+          // gesture TalkBack's own double tap replaces (#15123).
+          .semantics {
+            if (doubleTap != null) {
+              customActions =
+                listOf(prototypeDoubleTapAction { interact(PrototypeInteraction.Tap(doubleTap)) })
+            }
+          }
       } else {
         modifier.clickable(
+          onClickLabel = node.semantics?.hint,
           enabled = node.enabled,
           interactionSource = presses,
           indication = LocalIndication.current,
@@ -1485,6 +1663,7 @@ private fun prototypeNodeModifier(
       // PrototypeRole.
       description?.let { contentDescription = it }
       state?.let { stateDescription = it }
+      applyPrototypeAuthoredSemantics(node, state)
       node.testTag?.let { testTag = it }
     }
   }
@@ -1537,6 +1716,7 @@ private val SEMANTICS_FREE_CONTAINERS =
     "grid",
     "carousel",
     "scroll",
+    "list",
     "pager",
     "stack",
     "spacer",
@@ -1561,7 +1741,8 @@ internal fun isSemanticsFreeContainer(
   description: String?,
   state: String?,
 ): Boolean =
-  node.role in SEMANTICS_FREE_CONTAINERS &&
+  node.semantics == null &&
+    node.role in SEMANTICS_FREE_CONTAINERS &&
     !tappable &&
     node.text.isEmpty() &&
     node.testTag == null &&
@@ -1570,7 +1751,8 @@ internal fun isSemanticsFreeContainer(
 
 /** Icon names describe the drawing, not an authored accessibility label. */
 internal fun isDecorativePrototypeVisual(node: PrototypeRenderNode, tappable: Boolean): Boolean =
-  (node.role == "icon" || node.role == "image") &&
+  node.semantics == null &&
+    (node.role == "icon" || node.role == "image") &&
     !tappable &&
     node.testTag == null &&
     node.contentDescription.isNullOrEmpty()
@@ -1583,7 +1765,8 @@ private val MERGEABLE_TAP_CONTAINERS =
 /** Preserve exact text selectors and every independently targetable descendant. */
 internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {
   if (
-    !tappable ||
+    node.semantics != null ||
+      !tappable ||
       node.role !in MERGEABLE_TAP_CONTAINERS ||
       node.text.isNotEmpty() ||
       !node.contentDescription.isNullOrEmpty()
@@ -1592,7 +1775,8 @@ internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolea
   var label: String? = null
   fun visit(child: PrototypeRenderNode): Boolean {
     if (
-      child.testTag != null ||
+      child.semantics != null ||
+        child.testTag != null ||
         child.spans?.any { it.onTap != null } == true ||
         !child.contentDescription.isNullOrEmpty() ||
         prototypeNodeTappable(child) ||
@@ -1809,13 +1993,35 @@ internal fun PrototypeErrorCaption(node: PrototypeRenderNode) {
 @Composable
 private fun PrototypeCheckedControl(
   node: PrototypeRenderNode,
-  parentModifier: Modifier,
+  modifier: Modifier,
   content: @Composable () -> Unit,
 ) {
   if (node.errorMessage == null) content()
   else
-    Column(parentModifier) {
+    Column(modifier) {
       content()
       PrototypeErrorCaption(node)
     }
+}
+
+/** Shared by ordinary nodes and the search bar's inner editable field. */
+internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
+  node: PrototypeRenderNode,
+  state: String? = null,
+) {
+  node.semantics?.let { authored ->
+    if (authored.heading == true) heading()
+    authored.liveRegion?.let {
+      liveRegion = if (it == "assertive") LiveRegionMode.Assertive else LiveRegionMode.Polite
+    }
+    if (authored.group == true) isTraversalGroup = true
+    if ("button" in authored.traits.orEmpty()) role = Role.Button
+    if ("image" in authored.traits.orEmpty()) role = Role.Image
+    if ("selected" in authored.traits.orEmpty()) selected = true
+    authored.label?.let { contentDescription = it }
+    authored.hint?.let {
+      if (!node.source?.onTap.isNullOrEmpty()) onClick(label = it, action = null)
+      else stateDescription = listOfNotNull(state, it).joinToString(", ")
+    }
+  }
 }

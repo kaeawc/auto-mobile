@@ -63,5 +63,6 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_menus_v1"
 }

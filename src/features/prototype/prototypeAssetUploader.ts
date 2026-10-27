@@ -1,10 +1,14 @@
-import { isAbsolute } from "node:path";
+import { PROTOTYPE_SHADER_MIME_TYPE } from "./prototypeShaderSource";
+import { prototypeShadersEnabled, PROTOTYPE_SHADERS_OPT_IN_ERROR } from "./prototypeShaders";
+import { boundedPrototypeError } from "./prototypeErrors";
+import { extname, isAbsolute } from "node:path";
 import * as nodeFs from "node:fs/promises";
 import type { PrototypeAssetResult } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeAssetRequestOptions } from "../observe/android/CtrlProxyPrototypes";
 import {
   type PrototypeAssetUpload,
   MAX_PROTOTYPE_ASSET_BYTES,
+  MAX_PROTOTYPE_SHADER_ASSET_BYTES,
   MAX_PROTOTYPE_ASSET_COUNT,
   MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
   detectFontMimeType,
@@ -91,6 +95,7 @@ function validateFileBytes(id: string, bytes: Buffer): PrototypeAssetUpload | st
 async function readFileSource(
   source: { id: string; path: string },
   reader: PrototypeAssetFileReader,
+  env: NodeJS.ProcessEnv,
 ): Promise<PrototypeAssetUpload | string> {
   if (!isAbsolute(source.path)) {
     return "path must be absolute; the daemon does not resolve relative paths";
@@ -100,10 +105,24 @@ async function readFileSource(
     if (!stat.isFile()) {
       return "path is not a regular file";
     }
-    if (stat.size > MAX_PROTOTYPE_ASSET_BYTES) {
-      return `file is ${stat.size} bytes; the limit is ${MAX_PROTOTYPE_ASSET_BYTES}`;
+    const shader = extname(source.path).toLowerCase() === ".agsl";
+    if (shader && !prototypeShadersEnabled(env)) {
+      return PROTOTYPE_SHADERS_OPT_IN_ERROR;
     }
-    return validateFileBytes(source.id, await reader.readFile(source.path));
+    const limit = shader ? MAX_PROTOTYPE_SHADER_ASSET_BYTES : MAX_PROTOTYPE_ASSET_BYTES;
+    if (stat.size > limit) {
+      return `file is ${stat.size} bytes; the limit is ${limit}`;
+    }
+    const bytes = await reader.readFile(source.path);
+    if (shader) {
+      const asset: PrototypeAssetUpload = {
+        id: source.id,
+        mimeType: PROTOTYPE_SHADER_MIME_TYPE,
+        bytes,
+      };
+      return prototypeAssetUploadProblem(asset) ?? asset;
+    }
+    return validateFileBytes(source.id, bytes);
   } catch (error) {
     logger.warn(`[prototype] Cannot read asset file ${source.path}: ${errorMessage(error)}`, error);
     return `cannot read file: ${errorMessage(error)}`;
@@ -143,10 +162,11 @@ async function readSource(
   source: PrototypeAssetSource,
   reader: PrototypeAssetFileReader,
   readObservation: PrototypeObservationScreenshotReader | undefined,
+  env: NodeJS.ProcessEnv,
 ): Promise<PrototypeAssetUpload | string> {
   const { id, path, observation } = source;
   if (path !== undefined && observation === undefined) {
-    return readFileSource({ id, path }, reader);
+    return readFileSource({ id, path }, reader, env);
   }
   if (observation !== undefined && path === undefined) {
     return readObservationSource({ id, observation }, readObservation);
@@ -162,9 +182,12 @@ export async function preparePrototypeAssets(
   sources: readonly PrototypeAssetSource[],
   reader: PrototypeAssetFileReader = nodePrototypeAssetFileReader,
   readObservation?: PrototypeObservationScreenshotReader,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<Prepared> {
   const fail = (message: string): Prepared => ({
-    error: `${message} No assets were uploaded and the prototype was not changed.`,
+    error: boundedPrototypeError(
+      `${message} No assets were uploaded and the prototype was not changed.`,
+    ),
   });
   if (sources.length > MAX_PROTOTYPE_ASSET_COUNT) {
     return fail(
@@ -179,7 +202,7 @@ export async function preparePrototypeAssets(
       return fail(`Prototype asset id '${source.id}' appears more than once.`);
     }
     seen.add(source.id);
-    const read = await readSource(source, reader, readObservation);
+    const read = await readSource(source, reader, readObservation, env);
     if (typeof read === "string") {
       return fail(`Prototype asset '${source.id}' (${describeSource(source)}): ${read}.`);
     }
@@ -214,14 +237,22 @@ const OUTCOME_AFTER_STOP = {
 export async function uploadPrototypeAssets(
   client: PrototypeAssetPutClient,
   assets: readonly PrototypeAssetUpload[],
-  options: { signal?: AbortSignal; action: "show" | "resend" | "save" },
+  options: { signal?: AbortSignal; action: "show" | "resend" | "save"; env?: NodeJS.ProcessEnv },
 ): Promise<PrototypeAssetUploadOutcome> {
   const uploaded: UploadedPrototypeAsset[] = [];
   const stop = (reason: string): PrototypeAssetUploadOutcome => ({
     success: false,
     uploaded,
-    error: `${reason} ${describeUploaded(uploaded)} ${OUTCOME_AFTER_STOP[options.action]}`,
+    error: boundedPrototypeError(
+      `${reason} ${describeUploaded(uploaded)} ${OUTCOME_AFTER_STOP[options.action]}`,
+    ),
   });
+  if (
+    assets.some((asset) => asset.mimeType === PROTOTYPE_SHADER_MIME_TYPE) &&
+    !prototypeShadersEnabled(options.env)
+  ) {
+    return stop(PROTOTYPE_SHADERS_OPT_IN_ERROR);
+  }
   for (const asset of assets) {
     if (options.signal?.aborted) {
       return stop(`Prototype asset upload was cancelled before '${asset.id}'.`);

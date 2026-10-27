@@ -2,6 +2,7 @@ import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { prototypeContractPatterns } from "../../features/prototype/prototypeContractPatterns";
 import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import {
@@ -32,6 +33,7 @@ import {
 } from "../../features/prototype/prototypeAccessibilityLint";
 import { MAX_PROTOTYPE_PLACEHOLDER_FINDINGS } from "../../features/prototype/prototypePlaceholderLint";
 import {
+  MAX_PROTOTYPE_LIST_ITEMS,
   MAX_PROTOTYPE_SPEC_BYTES,
   prototypeSpecSchema,
   type PrototypeData,
@@ -209,7 +211,7 @@ const assetsInput = z
           .min(1)
           .optional()
           .describe(
-            "Absolute path of a PNG, JPEG or WebP image, or a TTF/OTF font (up to 2 MiB), the daemon can read",
+            "Absolute path the daemon can read: PNG/JPEG/WebP, a TTF/OTF font (2 MiB), or Android-only AGSL .agsl source (16 KiB; AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 required)",
           ),
         observation: z
           .string()
@@ -245,17 +247,44 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "clearStorage",
           "simulate",
           "screenMap",
+          "testSessionBegin",
+          "testSessionEnd",
+          "testSessionReport",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; host-only: screenMap",
         },
       ),
+      goal: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe(
+          "testSessionBegin only: screen label such as checkout/done; reaching it completes the session",
+        ),
+      cohort: z
+        .string()
+        .min(1)
+        .max(64)
+        .optional()
+        .describe(
+          "testSessionBegin only: free label echoed in the report; no cross-session aggregation",
+        ),
+      testSessionId: z
+        .string()
+        .min(1)
+        .max(64)
+        .optional()
+        .describe("testSessionReport: stored session id, instead of the latest session for id"),
       spec: specInput
         .optional()
         .describe(
-          'style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. {data: pointer, empty: true|false} conditions (missing, [], {} or "" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child\'s total delay at most 600 ms), require prototype_choreography_v1. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.',
+          'style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Full prototype spec: id, window, optional theme (design material|platform, default platform; explicit platform requires prototype_design_platform_v1; mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. window.backdrop {material ultraThin|thin|regular|thick|glass, blur? 0-150 dp, tint? one hex or role} blurs what is behind the window and needs prototype_backdrop_v1 (refused without it); lastResult.backdrop is blur or fallback (a tonal fill where blur is unavailable). show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. State-key contains/startsWith/lengthGt/lengthLt conditions and textField errorWhen/errorText require prototype_string_conditions_v1. errorWhen forces error styling without changing checks-based validity. {data: pointer, empty: true|false} conditions (missing, [], {} or "" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child\'s total delay at most 600 ms), require prototype_choreography_v1. list {repeat:{items:{path},as,key},children:[row],header?,footer?,axis?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?} is a lazy scrolling collection requiring prototype_lazy_list_v1 and prototype_data_model_v1. Its row template counts once, supports up to ' +
+            MAX_PROTOTYPE_LIST_ITEMS +
+            ' keyed data rows, and refresh needs a vertical list. prependData {path,value} inserts one row at the start and requires prototype_lazy_list_v1; maxItems trims from the end. request.append {from,to} extends an existing data array from a response array; maxItems trims oldest rows atomically. String tables and {t:key|count} require prototype_strings_v1; show locale overrides device locales only for strings. Node semantics {heading,liveRegion,group,label,hint,traits} requires prototype_semantics_v1. motion: "reduced" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1 and visibleWhen on the same node, exactly two non-nested nodes per key, at most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.',
         ),
       ops: withJsonSchemaOverride(
         z.array(z.record(z.string(), z.unknown())).min(1).max(MAX_PROTOTYPE_PATCH_OPS),
@@ -308,11 +337,19 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "show only: true (default) replaces other prototypes; false adds this prototype as another window (max 4 on screen; a fifth is refused listing the ones shown). A same-id show replaces only that prototype when false. Needs an Android device advertising prototype_multi_surface_v1; iOS shows one prototype at a time.",
         ),
+      locale: z
+        .string()
+        .max(35)
+        .regex(prototypeContractPatterns.localeTag)
+        .optional()
+        .describe(
+          "show only: locale override for strings (prototype_strings_v1). Each show states it afresh; omitted uses the device preferred locales and re-resolves live. Forwarded only when spec has strings; missing translations return strings.fallback platformNotes.",
+        ),
       pseudoLocale: z
         .boolean()
         .optional()
         .describe(
-          "show only: true sends a pseudo-localized copy of the spec: every text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
+          "show only: true sends a pseudo-localized copy of the spec: every string-table value/plural form, semantics label/hint, text, label, placeholder, headline, title and span is accented and padded by about 40%, wrapped in [ ], with {bindings} and {t:key|count} references left intact, so truncation and clipping show without a translation. The authored spec, status and patch base are unchanged; patch ops apply to the device copy. Each show states it afresh.",
         ),
       reset: z
         .boolean()
@@ -420,6 +457,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "display",
     "reset",
     "replaceOthers",
+    "locale",
     "pseudoLocale",
     "appearance",
     "eventName",
@@ -435,6 +473,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "autoConfirm",
     "restartLauncher",
     "removeIcon",
+    "goal",
+    "cohort",
+    "testSessionId",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -445,6 +486,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       "appearance",
       "assets",
       "replaceOthers",
+      "locale",
       "pseudoLocale",
     ],
     patch: ["id", "ops", "baseRevision"],
@@ -455,6 +497,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     clearStorage: ["id"],
     simulate: ["id", "advanceTimeMs"],
     dismiss: ["id", "all"],
+    testSessionBegin: ["id", "goal", "cohort"],
+    testSessionEnd: ["id"],
+    testSessionReport: ["id", "testSessionId"],
     status: [],
     inspect: [],
     screenMap: ["spec", "specPath"],
@@ -469,6 +514,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       });
     }
   }
+  validateTestSessionInput(value, ctx);
   validatePrototypeSavedInput(value, ctx);
   if (value.action === "patch") {
     (["id", "ops"] as const)
@@ -492,6 +538,25 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     });
   }
 });
+
+function validateTestSessionInput(
+  value: { action: string; id?: string; testSessionId?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (
+    ((value.action === "testSessionBegin" || value.action === "testSessionEnd") &&
+      value.id === undefined) ||
+    (value.action === "testSessionReport" &&
+      value.id === undefined &&
+      value.testSessionId === undefined)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["id"],
+      message: "Test sessions require id (testSessionReport also accepts testSessionId)",
+    });
+  }
+}
 
 /** save and open may wait on ProtoViewer; the daemon budgets at most the awaitEvent maximum. */
 function validateProtoViewerTimeout(
@@ -544,6 +609,9 @@ export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
   "inspect",
   "listSaved",
   "screenMap",
+  "testSessionBegin",
+  "testSessionEnd",
+  "testSessionReport",
 ];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
@@ -602,12 +670,19 @@ const lastResultSchema = z.object({
     .describe(
       "show of a fullscreen window: the host chrome the device draws. none: no dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill. bar: the host dismiss bar across the top, which is what a device that does not advertise prototype_window_chrome_v1 always draws, whatever the spec default. Absent for sheet and floating windows, on dismiss and on a failed show",
     ),
+  backdrop: z
+    .enum(["blur", "fallback"])
+    .optional()
+    .describe(
+      "show of a spec with window.backdrop: blur when the device blurred what is behind the window, fallback when it drew the tonal fill instead (blur unsupported or disabled). Absent without window.backdrop, on dismiss and on a failed show",
+    ),
   appearance: appearanceSchema
     .optional()
     .describe(
       "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
     ),
   storage: prototypeStorageOutputField,
+  shaderFailures: z.record(z.string(), z.string()).optional(),
   timers: z
     .array(
       z.object({
@@ -702,6 +777,23 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("screenMap only: the spec's screens and the actions that move between them"),
   mermaid: z.string().optional().describe("screenMap only: the same map as a Mermaid flowchart"),
+  testSession: z
+    .object({
+      id: z.string(),
+      status: z.enum(["active", "ended"]),
+      prototypeId: z.string(),
+      deviceId: z.string(),
+      cohort: z.string().optional(),
+      goal: z.string().optional(),
+      startedAt: z.number(),
+      endedAt: z.number().optional(),
+      eventCount: z.number().int().nonnegative(),
+      droppedCount: z.number().int().nonnegative(),
+      deadTaps: z.enum(["enabled", "off"]),
+    })
+    .optional(),
+  report: z.json().optional(),
+  markdown: z.string().optional(),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
   viewer: z
     .object({
@@ -761,7 +853,9 @@ export const prototypeOutputSchema = z.object({
         .array(z.string())
         .max(64)
         .optional()
-        .describe("/data paths a newer device write (setData, appendData, removeData) touched"),
+        .describe(
+          "/data paths a newer device write (setData, appendData, prependData, removeData) touched",
+        ),
     })
     .strict()
     .optional()
@@ -812,7 +906,7 @@ export const prototypeOutputSchema = z.object({
   platformNotes: z
     .array(
       z.object({
-        platform: z.literal("ios"),
+        platform: z.enum(["android", "ios", "all"]),
         construct: z.enum([
           "stack",
           "carousel",
@@ -827,6 +921,9 @@ export const prototypeOutputSchema = z.object({
           "searchBar",
           "searchBar.icons",
           "rich-text-links",
+          "strings.fallback",
+          "design.fallback",
+          "platformNamespace",
           "menu",
           "select",
         ]),
@@ -839,7 +936,7 @@ export const prototypeOutputSchema = z.object({
     )
     .optional()
     .describe(
-      "Successful show on iOS only: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+      "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
     ),
   accessibilityFindings: z
     .array(
@@ -855,7 +952,7 @@ export const prototypeOutputSchema = z.object({
     .max(MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS)
     .optional()
     .describe(
-      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA), small-touch-target (authored size under 48dp) or transition-without-visible-when (a node transition with no visibleWhen, which never runs); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
+      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA), small-touch-target (authored size under 48dp), missing-translation, unknown-translation-key, empty-heading or transition-without-visible-when (a node transition with no visibleWhen, which never runs); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
     ),
   accessibilityFindingsTotal: z
     .number()

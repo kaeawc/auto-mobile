@@ -2,6 +2,29 @@
 import XCTest
 
 final class PrototypeRoutesTests: XCTestCase {
+    func testActionDecoderPreservesRoutesAndIntegrationFields() throws {
+        let raw = #"""
+        [{"type":"setStack","stack":"nav","path":[{"screen":"detail","params":{"id":1}}]},
+         {"type":"push","stack":"nav","screen":"detail","params":{"id":2}},
+         {"type":"pop","stack":"nav","force":true},
+         {"type":"scrollTo","scroll":"feed","to":{"key":"row"},"animated":false},
+         {"type":"platform","call":"device.info","args":{"key":{"value":"id"}}},
+         {"type":"request","url":"https://example.com","append":{"from":"/items","to":"/data/items"}}]
+        """#
+        let actions = try JSONDecoder().decode([PrototypeAction].self, from: Data(raw.utf8))
+        XCTAssertEqual(actions[0].stackPath?.first?.screen, "detail")
+        XCTAssertEqual(actions[0].stackPath?.first?.params?["id"], .number(1))
+        XCTAssertEqual(actions[1].params?["id"], .number(2))
+        XCTAssertEqual(actions[2].force, true)
+        XCTAssertEqual(actions[3].scroll, "feed")
+        XCTAssertEqual(actions[3].to, .object(["key": .string("row")]))
+        XCTAssertEqual(actions[3].animated, false)
+        XCTAssertEqual(actions[4].call, "device.info")
+        XCTAssertEqual(actions[4].args?["key"], .object(["value": .string("id")]))
+        XCTAssertEqual(actions[5].append?.from, "/items")
+        XCTAssertEqual(actions[5].append?.to, "/data/items")
+    }
+
     private struct Invalid: Decodable {
         let spec: JSONValue
         let expectedPath: String

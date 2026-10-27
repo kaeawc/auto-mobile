@@ -63,6 +63,7 @@ export interface AccessibilityNode {
   "tooltip-text"?: string | null;
   "pane-title"?: string | null;
   "live-region"?: string | null;
+  heading?: string | null;
   "collection-info"?: string | null;
   "collection-item-info"?: string | null;
   "range-info"?: string | null;

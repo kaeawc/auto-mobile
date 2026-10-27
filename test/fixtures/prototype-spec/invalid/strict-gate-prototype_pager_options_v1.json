@@ -111,5 +111,6 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_pager_options_v1"
 }

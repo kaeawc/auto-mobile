@@ -1,0 +1,225 @@
+{
+  "spec": {
+    "id": "routes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["stack:nav"]
+    },
+    "root": {
+      "id": "nav",
+      "type": "stack",
+      "start": "home",
+      "routes": {
+        "home": {
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "home"
+            }
+          ]
+        },
+        "detail": {
+          "params": {
+            "p0": "string",
+            "p1": "string",
+            "p2": "string",
+            "p3": "string",
+            "p4": "string",
+            "p5": "string",
+            "p6": "string",
+            "p7": "string",
+            "p8": "string",
+            "p9": "string",
+            "p10": "string",
+            "p11": "string",
+            "p12": "string",
+            "p13": "string",
+            "p14": "string",
+            "pxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": "string"
+          },
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "entered"
+            }
+          ],
+          "onBack": [
+            {
+              "type": "pop",
+              "stack": "nav",
+              "force": true
+            }
+          ]
+        }
+      },
+      "screens": {
+        "home": {
+          "onTap": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "detail",
+              "params": {
+                "p0": "v",
+                "p1": "v",
+                "p2": "v",
+                "p3": "v",
+                "p4": "v",
+                "p5": "v",
+                "p6": "v",
+                "p7": "v",
+                "p8": "v",
+                "p9": "v",
+                "p10": "v",
+                "p11": "v",
+                "p12": "v",
+                "p13": "v",
+                "p14": "v",
+                "pxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": "v"
+              }
+            },
+            {
+              "type": "replace",
+              "stack": "nav",
+              "screen": "home"
+            },
+            {
+              "type": "setStack",
+              "stack": "nav",
+              "path": [
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "detail",
+                  "params": {
+                    "p0": "v",
+                    "p1": "v",
+                    "p2": "v",
+                    "p3": "v",
+                    "p4": "v",
+                    "p5": "v",
+                    "p6": "v",
+                    "p7": "v",
+                    "p8": "v",
+                    "p9": "v",
+                    "p10": "v",
+                    "p11": "v",
+                    "p12": "v",
+                    "p13": "v",
+                    "p14": "v",
+                    "pxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": "v"
+                  }
+                }
+              ],
+              "zzzUnknown": true
+            }
+          ],
+          "type": "button",
+          "label": "Open"
+        },
+        "detail": {
+          "type": "text",
+          "text": "{route.pxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"home\"].onTap[2].zzzUnknown"
+}

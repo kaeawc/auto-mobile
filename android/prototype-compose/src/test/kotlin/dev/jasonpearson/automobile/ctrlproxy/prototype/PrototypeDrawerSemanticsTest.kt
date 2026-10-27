@@ -62,7 +62,8 @@ class PrototypeDrawerSemanticsTest {
       CompositionLocalProvider(
         LocalPrototypeFillsWindow provides true,
         LocalPrototypeMotion provides motion,
-        LocalPrototypeReducedMotion provides reduced,
+        LocalPrototypeMotionProfile provides
+          (if (reduced) PrototypeMotionProfile.REDUCED else PrototypeMotionProfile.FULL),
         LocalPrototypeMotionActivity provides activity,
         LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
       ) {

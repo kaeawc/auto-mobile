@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "string-conditions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": "hello"
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "key": "value",
+        "lengthGt": -1
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.lengthGt",
+  "expectedMessage": "Invalid number value"
+}

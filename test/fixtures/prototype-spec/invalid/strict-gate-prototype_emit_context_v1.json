@@ -70,5 +70,6 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_emit_context_v1"
 }

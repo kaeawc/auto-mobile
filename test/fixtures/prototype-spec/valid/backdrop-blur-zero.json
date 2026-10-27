@@ -1,0 +1,16 @@
+{
+  "id": "strict",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "backdrop": {
+      "material": "ultraThin",
+      "blur": 0,
+      "tint": "scrim"
+    }
+  },
+  "root": {
+    "type": "spacer"
+  }
+}

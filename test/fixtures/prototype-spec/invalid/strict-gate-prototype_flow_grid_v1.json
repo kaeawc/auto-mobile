@@ -27,5 +27,6 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_flow_grid_v1"
 }

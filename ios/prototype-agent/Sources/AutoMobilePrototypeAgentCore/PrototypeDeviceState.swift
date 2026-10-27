@@ -30,7 +30,7 @@ struct PrototypeDeviceState {
         }
         return ["device": .object([
             "os": .string("ios"), "osVersion": .string(String(systemVersion.prefix(64))),
-            "idiom": .string(idiom.value), "sizeClass": .string(horizontalSizeClass.rawValue),
+            "idiom": .string(idiom.value), "widthClass": .string(horizontalSizeClass.rawValue),
             "windowWidth": points(windowWidth), "windowHeight": points(windowHeight), "pointer": .bool(pointer),
         ])]
     }
@@ -69,7 +69,7 @@ final class PrototypeDeviceStateStore {
         let old = snapshot["device"]?.objectFields
         let device = next["device"]?.objectFields ?? [:]
         snapshot = next
-        guard let old, ["sizeClass", "idiom"].contains(where: { old[$0] != device[$0] }) else { return true }
+        guard let old, ["widthClass", "idiom"].contains(where: { old[$0] != device[$0] }) else { return true }
         generation += 1
         let scheduled = generation
         handle?.cancel()

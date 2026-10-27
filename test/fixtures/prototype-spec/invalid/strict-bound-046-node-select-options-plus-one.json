@@ -1,0 +1,153 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "choice": "{route.x}"
+    },
+    "root": {
+      "type": "select",
+      "stateKey": "choice",
+      "options": [
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        },
+        {
+          "value": "{route.x}",
+          "label": "Option"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.options"
+}

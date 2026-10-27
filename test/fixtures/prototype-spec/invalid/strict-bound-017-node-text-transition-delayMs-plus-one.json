@@ -1,0 +1,119 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "stagger": {
+        "ms": 60,
+        "order": "center"
+      },
+      "type": "column",
+      "children": [
+        {
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": {
+            "type": "blurReplace",
+            "delayMs": 601
+          },
+          "type": "text",
+          "text": "Header"
+        },
+        {
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": {
+            "type": "fade",
+            "delayMs": 120
+          },
+          "type": "text",
+          "text": "Row 1"
+        },
+        {
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": "blurReplace",
+          "type": "text",
+          "text": "Row 2"
+        },
+        {
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "transition": {
+            "type": "slideStart"
+          },
+          "type": "text",
+          "text": "Row 3"
+        },
+        {
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "stagger": {
+            "ms": 0
+          },
+          "type": "box",
+          "children": [
+            {
+              "visibleWhen": {
+                "key": "show",
+                "equals": true
+              },
+              "type": "text",
+              "text": "Row 4"
+            }
+          ]
+        },
+        {
+          "repeat": {
+            "items": [
+              {
+                "n": "a"
+              },
+              {
+                "n": "b"
+              },
+              {
+                "n": "c"
+              }
+            ],
+            "as": "item"
+          },
+          "stagger": {
+            "ms": 40,
+            "order": "reverse"
+          },
+          "type": "row",
+          "children": [
+            {
+              "visibleWhen": {
+                "key": "show",
+                "equals": true
+              },
+              "type": "text",
+              "text": "Row 5"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].transition.delayMs"
+}

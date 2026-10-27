@@ -238,6 +238,18 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
       expect(bodies).toEqual([{ spec, appearance: "dark" }, { spec }]);
     });
 
+    test("a reported backdrop outcome is kept when blur or fallback and dropped otherwise (#15126)", async () => {
+      const replies = [{ backdrop: "blur" }, { backdrop: "fallback" }, { backdrop: "frosted" }];
+      const agent = fakeAgent(["show_prototype"], [], () => ({
+        success: true,
+        ...replies.shift(),
+      }));
+      const transport = new IosPrototypeTransport(agent);
+      expect<unknown>((await transport.show(spec)).backdrop).toBe("blur");
+      expect<unknown>((await transport.show(spec)).backdrop).toBe("fallback");
+      expect(await transport.show(spec)).not.toHaveProperty("backdrop");
+    });
+
     test("an agent without the capability refuses appearance before sending anything", async () => {
       const { agent, bodies } = recording(["show_prototype"]);
       const transport = new IosPrototypeTransport(agent);

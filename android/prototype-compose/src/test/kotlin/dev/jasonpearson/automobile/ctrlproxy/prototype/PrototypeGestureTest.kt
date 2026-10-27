@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -80,6 +81,54 @@ class PrototypeGestureTest {
     compose.runOnIdle { assertTrue(interactions.isEmpty()) }
     compose.onNodeWithTag("hold").performTouchInput { longClick() }
     compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(hold)), interactions) }
+  }
+
+  private fun config(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().config
+
+  @Test
+  fun `gesture lists are named accessibility actions that run the same list`() {
+    render()
+    for (tag in listOf("row", "hold")) {
+      val longClick = config(tag)[SemanticsActions.OnLongClick]
+      assertEquals(PROTOTYPE_LONG_PRESS_ACTION_LABEL, longClick.label)
+    }
+    for (tag in listOf("row", "double")) {
+      val labels = config(tag).getOrNull(SemanticsActions.CustomActions).orEmpty().map { it.label }
+      assertEquals(listOf(PROTOTYPE_DOUBLE_TAP_ACTION_LABEL), labels)
+    }
+    compose.onNodeWithTag("row").performSemanticsAction(SemanticsActions.OnLongClick)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(hold)), interactions) }
+    for (tag in listOf("double", "row")) {
+      compose.runOnIdle {
+        assertTrue(config(tag)[SemanticsActions.CustomActions].single().action())
+      }
+    }
+    compose.runOnIdle {
+      assertEquals(
+        listOf(
+          PrototypeInteraction.Tap(hold),
+          PrototypeInteraction.Tap(double),
+          PrototypeInteraction.Tap(double),
+        ),
+        interactions,
+      )
+    }
+  }
+
+  @Test
+  fun `a node without a gesture list gets no gesture action and a tap does not duplicate one`() {
+    render()
+    assertNull(config("tap").getOrNull(SemanticsActions.OnLongClick))
+    assertNull(config("tap").getOrNull(SemanticsActions.CustomActions))
+    assertNull(config("double").getOrNull(SemanticsActions.OnLongClick))
+    assertNull(config("hold").getOrNull(SemanticsActions.CustomActions))
+    // One long-click action on the node that also has onTap, not a second custom copy.
+    assertEquals(
+      0,
+      config("row").getOrNull(SemanticsActions.CustomActions).orEmpty().count {
+        it.label == PROTOTYPE_LONG_PRESS_ACTION_LABEL
+      },
+    )
   }
 
   @Test

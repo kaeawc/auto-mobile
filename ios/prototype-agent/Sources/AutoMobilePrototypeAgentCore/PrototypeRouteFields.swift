@@ -66,7 +66,7 @@ enum PrototypeRouteFields {
             field(value, "data", path, pointer: true)
             field(value, "key", path)
             keys(value, "valid", path)
-            for key in ["equals", "notEquals"] { field(value, key, path) }
+            for key in ["equals", "notEquals", "contains", "startsWith"] { field(value, key, path) }
             object(value, "not", path) { $0.condition($1, $2) }
             for key in ["all", "any"] { list(value, key, path) { $0.condition($1, $2) } }
         }
@@ -103,7 +103,7 @@ enum PrototypeRouteFields {
                     )
                 }
                 keys(value, "requireValid", path)
-            case "setData", "appendData", "removeData":
+            case "setData", "appendData", "prependData", "removeData":
                 field(value, "path", path, pointer: true)
                 if type != "removeData", let raw = value["value"] { binding(raw, "\(path).value") }
             case "request", "platform":
@@ -120,6 +120,9 @@ enum PrototypeRouteFields {
                     }
                 }
                 field(value, "into", path, pointer: true)
+                if type == "request" {
+                    object(value, "append", path) { $0.field($1, "to", $2, pointer: true) }
+                }
                 field(value, "statusKey", path)
                 for key in ["onSuccess", "onError"] { list(value, key, path) { $0.action($1, $2) } }
             case "startTimer": list(value, "actions", path) { $0.action($1, $2) }
@@ -128,12 +131,18 @@ enum PrototypeRouteFields {
         }
 
         mutating func actions(_ value: Fields, _ path: String) {
-            for key in ["onTap", "onLongPress", "onDoubleTap"] { list(value, key, path) { $0.action($1, $2) } }
+            for key in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onStartReached", "onAppear"] {
+                list(value, key, path) { $0.action($1, $2) }
+            }
         }
 
         mutating func part(_ value: Fields, _ path: String) { field(value, "label", path); actions(value, path) }
         mutating func node(_ value: Fields, _ path: String) {
             let type = value["type"]?.stringValue ?? ""
+            object(value, "semantics", path) { walker, semantics, at in
+                walker.field(semantics, "label", at)
+                walker.field(semantics, "hint", at)
+            }
             switch type {
             case "text":
                 field(value, "text", path)
@@ -167,6 +176,8 @@ enum PrototypeRouteFields {
             case "snackbar": field(value, "text", path); object(value, "action", path) { $0.part($1, $2) }
             default: break
             }
+            field(value, "errorText", path)
+            object(value, "errorWhen", path) { $0.condition($1, $2) }
             object(value, "enabledWhen", path) { $0.condition($1, $2) }
             list(value, "checks", path) { $0.field($1, "message", $2) }
             object(value, "visibleWhen", path) { $0.condition($1, $2) }
@@ -184,7 +195,6 @@ enum PrototypeRouteFields {
             for key in ["trailing", "openWhen", "refresh"] {
                 object(value, key, path) { $0.field($1, key == "openWhen" ? "key" : "stateKey", $2) }
             }
-            if type == "scroll" { list(value, "onStartReached", path) { $0.action($1, $2) } }
             if type == "stack" {
                 let routes = value["routes"]?.objectFields ?? [:]
                 for name in PrototypeContractValidator.sorted(routes.keys) {

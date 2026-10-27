@@ -39,7 +39,8 @@ describe("prototypeThemeModeFields", () => {
       (name) =>
         name.endsWith(".json") &&
         !name.startsWith("theme-modes-") &&
-        name !== "tooltip-drawer-start.json",
+        name !== "tooltip-drawer-start.json" &&
+        !name.endsWith("-imageFilter-saturation-boundary.json"),
     );
     expect(older.length).toBeGreaterThan(20);
     for (const name of older) {

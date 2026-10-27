@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "feed",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "feed": {
+        "items": [
+          {
+            "id": 1,
+            "title": "One"
+          },
+          {
+            "id": 2,
+            "title": "Two"
+          }
+        ]
+      },
+      "page": {
+        "next": "p2"
+      }
+    },
+    "state": {
+      "refreshing": false,
+      "feedStatus": "idle"
+    },
+    "root": {
+      "type": "list",
+      "repeat": {
+        "items": {
+          "path": "/feed/items"
+        },
+        "as": "post",
+        "key": "id"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{post.title}"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_lazy_list_v1"
+}

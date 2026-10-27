@@ -125,5 +125,6 @@
       "prototype_data_model_v1"
     ]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_text_field_actions_v1"
 }

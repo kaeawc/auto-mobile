@@ -109,5 +109,6 @@
   "options": {
     "supportedCapabilities": ["prototype_data_model_v1"]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_loading_states_v1"
 }

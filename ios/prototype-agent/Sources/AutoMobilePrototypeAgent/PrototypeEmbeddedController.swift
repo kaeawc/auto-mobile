@@ -14,6 +14,8 @@
         init(
             spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption,
             network: PrototypeNetworkConfiguration,
+            options: PrototypeEmbeddedOptions = PrototypeEmbeddedOptions(),
+            registry: PrototypePlatformRegistry = .empty,
             onEvent: @escaping @MainActor (PrototypeEvent) -> Void,
             onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void,
             onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void
@@ -23,7 +25,16 @@
             self.onLoadError = onLoadError
             let loaded: (spec: PrototypeSpec, bytes: Int)?
             do {
-                loaded = try PrototypeEmbeddedSpec.load(data: spec)
+                if let locale = options.locale, locale.utf16.count > 35 || !PrototypeContractValidator.matches(
+                    "localeTag",
+                    locale
+                ) {
+                    throw PrototypeLoadError.invalidSpec(path: "locale", message: "Invalid locale tag")
+                }
+                loaded = try PrototypeEmbeddedSpec.load(
+                    data: spec,
+                    supported: AutoMobilePrototypeCapabilities.supported + registry.capabilities
+                )
                 loadError = nil
             } catch let error as PrototypeLoadError {
                 loaded = nil
@@ -33,7 +44,11 @@
                 loadError = .invalidSpec(path: "$", message: error.localizedDescription)
             }
             // Invalid/unsupported specs never initialize persistence, start requests, or show a partial tree.
-            let model = PrototypeModel(mode: .standalone, storage: loaded == nil ? nil : storage.coordinator())
+            let model = PrototypeModel(
+                mode: .standalone,
+                storage: loaded == nil ? nil : storage.coordinator(),
+                registry: registry
+            )
             super.init(model: model, contentEnabled: loaded != nil)
             guard let loaded else { return }
             let driver = network.driver()
@@ -53,7 +68,8 @@
                 }
             }
             model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
-            model.show(loaded.spec, specBytes: loaded.bytes)
+            model.setDeviceLocales(SystemPrototypeLocaleProvider().preferredLanguages)
+            model.show(loaded.spec, locale: options.locale, specBytes: loaded.bytes)
         }
 
         override func viewDidLayoutSubviews() {

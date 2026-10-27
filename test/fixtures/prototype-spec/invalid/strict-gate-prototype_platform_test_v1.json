@@ -60,5 +60,6 @@
   "options": {
     "supportedCapabilities": ["prototype_data_model_v1", "prototype_platform_v1"]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_test_v1"
 }

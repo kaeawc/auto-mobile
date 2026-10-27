@@ -9,10 +9,50 @@
     @Observable
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
+        var design: PrototypeDesign { spec?.theme?.design ?? .platform }
         private(set) var spec: PrototypeSpec?
+        /// The shown prototype's `window.backdrop` as it is drawn now (`blur` or the tonal `fallback`).
+        var backdropPlan: PrototypeBackdropPlan? {
+            guard let backdrop = spec?.window.backdrop else { return nil }
+            return PrototypeBackdropPlan.resolve(
+                backdrop,
+                osMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                reduceTransparency: UIAccessibility.isReduceTransparencyEnabled
+            )
+        }
+
         /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
-        private(set) var showRevision = 0
+        @ObservationIgnored private var listAnchors = PrototypeStackListAnchorStore()
+        private(set) var showRevision = 0 { didSet { scrollOffsets = [:] } }
         /// Transient presentation only; never written to or reported as spec state.
+        var scrollOffsets: [ObjectIdentifier: Double] = [:]
+        func scrollOffset(for target: PrototypeNode) -> Double {
+            guard let root = spec?.root, let source = target.scrollLinked?.source else { return 0 }
+            func locate(_ node: PrototypeNode, scope: PrototypeNode) -> PrototypeNode? {
+                if node === target { return scope }
+                if let screens = node.screens {
+                    for screen in screens.values {
+                        if let found = locate(screen, scope: screen) { return found }
+                    }
+                }
+                if let child = node.child, let found = locate(child, scope: scope) { return found }
+                for child in node.children ?? [] {
+                    if let found = locate(child, scope: scope) { return found }
+                }
+                return nil
+            }
+            let scope = locate(root, scope: root) ?? root
+            func find(_ node: PrototypeNode) -> PrototypeNode? {
+                if node.type == "scroll", node.id == source { return node }
+                if let child = node.child, let found = find(child) { return found }
+                for child in node.children ?? [] {
+                    if let found = find(child) { return found }
+                }
+                return nil
+            }
+            return find(scope).flatMap { scrollOffsets[ObjectIdentifier($0)] } ?? 0
+        }
+
         var expandedSelect: PrototypeNode?
         @ObservationIgnored private var nodeFocusAnchors: [ObjectIdentifier: PrototypeOverlayFocusAnchor] = [:]
 
@@ -24,11 +64,13 @@
             return anchor
         }
 
+        var barScrollStates: [ObjectIdentifier: PrototypeBarScrollState] = [:]
         var menuBounds: [ObjectIdentifier: CGRect] = [:]
         private(set) var state: [String: JSONValue] = [:]
         /// Which swipe-actions row is open; opening one closes the others. Presentation only.
         private(set) var swipe = PrototypeSwipeCoordinator()
         private(set) var shownErrors: Set<String> = []
+        private(set) var scrollRequests: [String: PrototypeScrollRequest] = [:]
         private(set) var pages: [String: Int] = [:]
         struct StackDrag {
             let target: String
@@ -57,9 +99,11 @@
             // Only show, dismissal and a device data write (#12519, which rebuilds the drawn tree)
             // change structure; state transitions must not invalidate readers of an unchanged
             // (non-Equatable) spec merely by copying the session back.
+            if replacingSpec { barScrollStates.removeAll() }
             if replacingSpec || session.isShown != next.isShown || session.structureRevision != next.structureRevision {
                 spec = next.spec
             }
+            listAnchors.retain(entryIDs: next.isShown ? Set(next.stackEntries.values.flatMap { $0.map(\.id) }) : [])
             session = next
             if let selected = expandedSelect {
                 let root = next.spec?.root
@@ -74,6 +118,7 @@
             escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
             if state != next.state { state = next.state }
             if shownErrors != next.shownErrors { shownErrors = next.shownErrors }
+            if scrollRequests != next.scrollRequests { scrollRequests = next.scrollRequests }
             if pages != next.pages { pages = next.pages }
             if let drag = stackDrag, next.stackChanges[drag.target]?.revision != drag.revision { stackDrag = nil }
             if stackChanges != next.stackChanges { stackChanges = next.stackChanges }
@@ -140,6 +185,33 @@
 
         @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
         @ObservationIgnored var onEmbeddedEvent: (@MainActor (PrototypeEvent) -> Void)?
+        /// Modules registered by the owning runtime; the device seam remains built in.
+        @ObservationIgnored let platformRegistry: PrototypePlatformRegistry
+        @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
+            let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
+            driver.onComplete = { [weak self] id, result, duration in
+                self?.apply(activity: false) { $0.completePlatformCall(id, result, durationMs: duration) }
+            }
+            driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
+            driver.onEvent = { [weak self] event in
+                self?.apply(activity: false) { session in
+                    do { return try session.deliverPlatformEvent(event.event, data: event.data) }
+                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                }
+            }
+            return driver
+        }()
+
+        private func updatePlatformState(_ snapshot: [String: JSONValue]) {
+            var combined = snapshot
+            combined.merge(deviceState.snapshot) { _, device in device }
+            apply(activity: false) { session in
+                do { try session.setPlatformState(combined) }
+                catch { NSLog("Prototype platform state failed: %@", String(describing: error)) }
+                return []
+            }
+        }
+
         /// Runs the `request` actions the session starts and cancels (#12529).
         @ObservationIgnored var requestDriver: PrototypeRequestDriver?
         @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
@@ -171,11 +243,7 @@
         func updateDeviceState(_ state: PrototypeDeviceState) {
             lastDeviceState = state
             guard deviceState.update(state) else { return }
-            apply(activity: false) { session in
-                do { try session.setPlatformState(deviceState.snapshot) }
-                catch { NSLog("Prototype platform state failed: %@", String(describing: error)) }
-                return []
-            }
+            updatePlatformState(platformRegistry.snapshot)
         }
 
         func pauseTimers() { timers.pause() }
@@ -220,8 +288,10 @@
         init(
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
-            storage: PrototypeStorageCoordinator? = nil
+            storage: PrototypeStorageCoordinator? = nil,
+            registry: PrototypePlatformRegistry = .empty
         ) {
+            platformRegistry = registry
             self.clock = clock
             self.mode = mode
             self.storage = storage
@@ -266,30 +336,53 @@
             apply(activity: false) { $0.setDeviceDark(dark) }
         }
 
+        func setDeviceLocales(_ locales: [String]) {
+            var next = session
+            next.setDeviceLocales(locales)
+            publish(next, replacingSpec: next.structureRevision != session.structureRevision)
+        }
+
         func show(
             _ spec: PrototypeSpec,
             reset: Bool = false,
             appearance: PrototypeAppearanceOverride = .device,
+            locale: String? = nil,
             specBytes: Int? = nil
         ) {
             // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
             // them on a same-geometry re-show would leave the prototype passing every touch through.
             syncDeviceState?()
+            deadTapRevision += 1
+            deadTapTracker.cancel()
             var next = session
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
             let seeded: PrototypeSpec
-            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(deviceState.snapshot) }
-            catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
+                platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
+            ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             next.show(
-                seeded, reset: reset, appearance: appearance, specBytes: specBytes,
+                seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state
             )
             // A show that replaces another prototype cancels that one's requests.
+            let platformCommands = next.takePlatformCommands()
+            let lifecycleEvents = next.takePlatformLifecycleEvents()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
+            listAnchors = PrototypeStackListAnchorStore()
             publish(next, replacingSpec: true)
+            let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+            for var event in lifecycleEvents {
+                event.wireTimestamp = timestamp
+                onEmbeddedEvent?(event)
+                onEvent?(event.wireObject(timestamp: timestamp))
+            }
+            platformDriver.perform(platformCommands)
+            // Keep consuming the module stream for the model lifetime: cancelling an AsyncStream
+            // iterator terminates it. Hidden sessions drop events; the next show seeds fresh state.
+            platformDriver.subscribe()
             deviceState.reset()
             if let lastDeviceState { updateDeviceState(lastDeviceState) }
             timers.perform(timerCommands)
@@ -300,6 +393,7 @@
             // An accepted show, including a same-id replace, is activity.
             if mode.expiresWhenIdle { idleTimer.arm() }
             onVisibilityChange?(true)
+            apply(activity: false) { _ in [] }
         }
 
         /// `patch_prototype` (#11675): the session edits the shown prototype in place and its `change` event is
@@ -339,6 +433,33 @@
             return session.missingAssets(available: Set(assets.keys))
         }
 
+        @ObservationIgnored private var deadTapTracker = PrototypeDeadTapTracker()
+        @ObservationIgnored private(set) var deadTapRevision = 0
+        @ObservationIgnored private var deadTapPoint = CGPoint.zero
+
+        func beginDeadTap(at point: CGPoint, inside: Bool) {
+            deadTapRevision += 1
+            deadTapTracker.cancel()
+            guard inside, spec?.window.deadTaps == true else { return }
+            deadTapPoint = point
+            deadTapTracker.begin(x: Double(point.x), y: Double(point.y))
+        }
+
+        func moveDeadTap(to point: CGPoint) {
+            deadTapPoint = point
+            deadTapTracker.move(x: Double(point.x), y: Double(point.y))
+        }
+
+        func consumeDeadTap() {
+            deadTapTracker.consume()
+        }
+
+        func finishDeadTap(revision: Int) {
+            guard revision == deadTapRevision, deadTapTracker.finish() else { return }
+            let point = deadTapPoint
+            apply { $0.deadTap(x: Double(point.x), y: Double(point.y)) }
+        }
+
         // MARK: Interactions
 
         /// Reading stacks registers the SwiftUI dependency; the pop policy itself stays in core.
@@ -373,12 +494,11 @@
         }
 
         func shownError(_ node: PrototypeNode) -> String? {
-            // Read the observed fields; the session itself is observation-ignored.
-            for key in node.checkedKeys where shownErrors.contains(key) {
-                let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
-                if let message = result.firstFailingMessage { return message }
-            }
-            return nil
+            fieldError(node).message
+        }
+
+        func fieldError(_ node: PrototypeNode) -> PrototypeFieldError {
+            PrototypeFieldError.shown(node, state: state, shown: shownErrors)
         }
 
         func blur(_ node: PrototypeNode) {
@@ -396,7 +516,34 @@
             swipe.closed(ObjectIdentifier(node))
         }
 
+        func savedListAnchor(entryID: Int?, node: PrototypeNode, keys: [String]) -> String? {
+            guard let entryID else { return nil }
+            return listAnchors.read(entryID: entryID, listPath: node.nodePath, newKeys: keys)
+        }
+
+        func saveListAnchor(entryID: Int?, node: PrototypeNode, key: String?) {
+            guard let entryID else { return }
+            listAnchors.save(entryID: entryID, listPath: node.nodePath, key: key)
+        }
+
+        func listVisible(_ node: PrototypeNode, appearedKey: String? = nil, disappearedKey: String? = nil) {
+            apply(activity: false) { $0.listVisible(node, appearedKey: appearedKey, disappearedKey: disappearedKey) }
+        }
+
+        func scrollEdges(_ node: PrototypeNode, atEnd: Bool?, reachedStart: Bool) {
+            guard atEnd != nil || reachedStart else { return }
+            apply(activity: false) { session in
+                var events: [PrototypeEvent] = []
+                if let key = node.atEndKey, let atEnd {
+                    events += session.setStates([(key, .bool(atEnd))])
+                }
+                if reachedStart { events += session.run(node.onStartReached ?? []) }
+                return events
+            }
+        }
+
         func run(_ actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.run(actions) }
         }
 
@@ -419,32 +566,39 @@
         }
 
         func toggle(_ key: String, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.toggle(key: key, then: actions) }
         }
 
         func select(index: Int, pager: String?, key: String?, then actions: [PrototypeAction] = []) {
+            consumeDeadTap()
             apply { $0.select(index: index, pager: pager, key: key, then: actions) }
         }
 
         /// A tap on a node's own target or one of its parts; see `PrototypeSession.activate`.
         func activate(_ target: PrototypeTapTarget) {
+            consumeDeadTap()
             apply { $0.activate(target) ?? [] }
         }
 
         func choose(key: String, value: String, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.choose(key: key, value: value, then: actions) }
         }
 
         func slide(key: String, value: Double, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.slide(key: key, value: value, then: actions) }
         }
 
         func setTime(hourKey: String, minuteKey: String, hour: Int, minute: Int, then actions: [PrototypeAction]) {
+            consumeDeadTap()
             apply { $0.setTime(hourKey: hourKey, minuteKey: minuteKey, hour: hour, minute: minute, then: actions) }
         }
 
         /// The dialog scrim: closes the dialog without running any button's actions.
         func closeModal(_ node: PrototypeNode) {
+            consumeDeadTap()
             apply { $0.closeModal(node) }
         }
 
@@ -475,6 +629,7 @@
             // `transition` adds the `appearance_changed` a state or page change caused.
             var next = session
             let events = next.transition(transition)
+            let platformCommands = next.takePlatformCommands()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
             publish(next)
@@ -498,6 +653,7 @@
                 onVisibilityChange?(false)
             }
             timers.perform(timerCommands)
+            platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)
         }
 
@@ -521,6 +677,8 @@
             if !timerSnapshots.isEmpty { status["timers"] = timerSnapshots.map(\.wireObject) }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
+            if let platform = session.spec?
+                .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
             if let id = spec?.id, let storage {
                 storage.flush()
@@ -538,6 +696,7 @@
 
         /// Typing goes through `change`, so every edit both updates state and emits `change`.
         func change(key: String, value: String) {
+            consumeDeadTap()
             apply { $0.change(key: key, value: .string(value)) }
         }
     }

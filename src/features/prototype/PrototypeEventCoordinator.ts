@@ -1,3 +1,4 @@
+import type { PrototypeTestSessionRecorder } from "./testSession/PrototypeTestSessionRecorder";
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeScope, PrototypeStatusStore } from "./PrototypeStatusStore";
 import {
@@ -52,6 +53,11 @@ export class PrototypeEventCoordinator {
     private readonly telemetry?: PrototypeEventTelemetry,
     /** Ends in-flight host-proxied requests (#12527) when their prototype ends. */
     private readonly requests?: PrototypeRequestCancellation,
+    private readonly recorder?: Pick<
+      PrototypeTestSessionRecorder,
+      "recordEvent" | "endForDismiss"
+    > &
+      Partial<Pick<PrototypeTestSessionRecorder, "endSessionRecordings" | "endDeviceRecordings">>,
   ) {}
 
   /** Subscribe before show dispatch so a push during the request cannot be lost. */
@@ -156,25 +162,35 @@ export class PrototypeEventCoordinator {
   }
 
   releaseSession(sessionUuid: string): void {
+    this.recorder?.endSessionRecordings?.(sessionUuid);
     // The store forgets every scope on each device the session touched, so release exactly
     // those devices here: status and event state must never disagree about a co-tenant.
     const devices = new Set(this.store.clearSession(sessionUuid));
+    for (const deviceId of devices) {
+      this.recorder?.endDeviceRecordings?.(deviceId);
+    }
     for (const entry of this.entries.values()) {
       if (entry.scope.sessionUuid === sessionUuid || devices.has(entry.scope.deviceId)) {
-        this.remove(entry);
+        this.remove(entry, "released");
       }
     }
     this.pruneSources();
   }
 
   releaseDevice(deviceId: string): void {
+    this.recorder?.endDeviceRecordings?.(deviceId);
     this.store.clearDevice(deviceId);
-    this.dismiss(deviceId);
+    for (const entry of this.entries.values()) {
+      if (entry.scope.deviceId === deviceId) {
+        this.remove(entry, "released");
+      }
+    }
+    this.pruneSources();
   }
 
   dispose(): void {
     for (const entry of this.entries.values()) {
-      this.remove(entry);
+      this.remove(entry, "released");
     }
     this.pruneSources();
   }
@@ -227,6 +243,11 @@ export class PrototypeEventCoordinator {
     // advances its sequence for that one, so it is not recorded, counted or handed to a waiter.
     if (!entry || entry.terminal || !entry.buffer.push(event)) {
       return;
+    }
+    try {
+      this.recorder?.recordEvent(entry.scope, event);
+    } catch (error) {
+      logger.warn("Prototype test event recording failed", error);
     }
     this.store.recordEvent(entry.scope, event);
     if (event.kind === "dismissed") {
@@ -333,7 +354,12 @@ export class PrototypeEventCoordinator {
     }
   }
 
-  private remove(entry: Entry): void {
+  private remove(entry: Entry, reason: "dismissed" | "released" = "dismissed"): void {
+    try {
+      this.recorder?.endForDismiss(entry.scope, entry.id, reason);
+    } catch (error) {
+      logger.warn("Prototype test session cleanup failed", error);
+    }
     entry.buffer.clear();
     entry.shown = false;
     entry.terminal = true;

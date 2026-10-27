@@ -1,55 +1,23 @@
 {
   "spec": {
-    "id": "text-fields",
+    "id": "literal-route-label",
     "window": {
       "placement": {
         "type": "fullscreen"
-      },
-      "opacity": 100
+      }
     },
     "state": {
-      "name": "Ada",
-      "quantity": "12",
-      "password": "secret",
-      "notes": "Hello"
+      "draft": ""
     },
     "root": {
-      "type": "column",
-      "children": [
-        {
-          "type": "textField",
-          "stateKey": "name",
-          "placeholder": "Name",
-          "label": "Name",
-          "variant": "outlined",
-          "supportingText": "Your full name",
-          "keyboardType": "text"
-        },
-        {
-          "type": "textField",
-          "stateKey": "quantity",
-          "variant": "filled",
-          "keyboardType": "number",
-          "maxLength": 10000
-        },
-        {
-          "type": "textField",
-          "stateKey": "password",
-          "keyboardType": "password",
-          "secure": true
-        },
-        {
-          "type": "textField",
-          "stateKey": "notes",
-          "multiline": true,
-          "minLines": 2,
-          "maxLines": 5
-        }
-      ]
+      "type": "textField",
+      "stateKey": "draft",
+      "label": "{route.literal}"
     }
   },
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_text_field_options_v1"
 }

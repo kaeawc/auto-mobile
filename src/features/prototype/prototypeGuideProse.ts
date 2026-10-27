@@ -1,6 +1,19 @@
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
-import { MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
-export const GUIDE_GESTURES = `## Gestures
+import {
+  MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
+  MAX_PROTOTYPE_LIST_ITEMS,
+  MAX_PROTOTYPE_SPEC_BYTES,
+} from "./prototypeSpec";
+export const GUIDE_GESTURES = `## Platform namespaces
+
+Prefer portable node/window fields, then portable theme tokens, then \`theme.design\` when
+available, and finally a platform namespace as the last resort. Every namespace field has a
+\`why\` explaining its lack of portable meaning.
+Optional \`ios\` and \`android\` objects may appear on any node, \`window\` or \`theme\`.
+The other platform’s block is ignored with a \`platformNotes\` entry. Own-platform blocks
+require \`prototype_platform_namespace_v1\`; current renderers do not implement these fields.
+
+## Gestures
 
 \`onLongPress\` and \`onDoubleTap\` run their action lists exactly like \`onTap\`, with no new
 event kind. A node with either list is interactive even without \`onTap\`. All three may coexist;
@@ -12,6 +25,9 @@ Use \`tapOn\` with \`action: "longPress"|"doubleTap"\` and \`layer: "prototype"\
 by coordinate gesture; no new MCP tool is needed. Long-press uses the platform default threshold
 (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s); the double-tap window is
 the system's. The host refuses unsupported agents before sending a show.
+Each declared list is also a named accessibility action on both platforms, so TalkBack and
+VoiceOver users reach it without the touch gesture: \`Long press\` and \`Double tap\` (fixed English
+names). A single \`onTap\` is the default activation and adds none.
 
 ### Swipe actions
 
@@ -28,7 +44,7 @@ fling) runs the swiped side's first entry and closes the row. Only one row is op
 tap on an open row closes it instead of running its \`onTap\`. Revealed buttons get the test tag
 \`<rowTestTag>.swipe.<index>\`, counting \`start\` entries first and then \`end\`; they exist only while
 the row is open. Every entry is also an accessibility action (TalkBack custom action, VoiceOver
-action) on the row, so assistive technology can run it without swiping. Reduced motion or spec
+action) on the row, so assistive technology can run it without swiping. The reduced profile snaps row settling; spec
 \`motion: "none"\` snaps instead of animating. Put swipeActions on repeated rows; a row inside a
 horizontal \`pager\` or a \`carousel\` is refused because their drag would compete.
 
@@ -54,6 +70,28 @@ the scroll whose \`id\` is \`scroll\` (exactly one); \`{key}\` scrolls to that r
 row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`iconButton\`, with
 \`safeAreaPadding {edges: ["bottom"], types: ["ime", "systemBars"]}\`. Rows off screen are absent from
 \`observe\`; \`swipeOn lookFor\` still finds them.
+`;
+
+export const GUIDE_TEMPLATES = `## Starter templates
+
+The repository ships eight validated multi-screen specs, each a \`stack\` with a \`testTag\` on every
+interactive node. In a checkout, show one with \`specPath\` (an absolute path) from
+\`test/fixtures/prototype-spec/valid/\`, or copy its shape when writing a spec:
+
+- \`template-onboarding.json\`: welcome, sign-up form with \`checks\`, a button gated by
+  \`enabledWhen {valid}\`, \`emit\` with \`requireValid\`, done.
+- \`template-feed-detail.json\`: a \`repeat\` over \`{path: "/posts"}\` inside a refreshable \`scroll\`; a
+  tap stores the row in state and \`push\`es the detail screen.
+- \`template-tabbed-home.json\`: a \`pager\` driven by a \`bottomNav {pager}\`, plus a pushed screen.
+- \`template-checkout.json\`: quantity stepper, form with \`select\` and \`datePicker\`, and a
+  \`bottomSheet\` confirmation.
+- \`template-settings.json\`: \`listItem\` switches, \`radioGroup\`, \`slider\`, \`dialog\`, \`snackbar\` and
+  a \`storage\` block.
+- \`template-search.json\`: docked \`searchBar\` whose child lists \`/results\` and shows an empty
+  state with \`{data, empty: true}\`.
+- \`template-chat.json\`: reversed \`scroll\` with \`stickToEnd\`, quick-reply chips that
+  \`appendData\`, and a composer that \`emit\`s \`message_sent\` with the draft as context (Android only).
+- \`template-dashboard.json\`: \`chart\` line, bar and ring over \`/data\`, and a \`startTimer\` clock.
 `;
 
 /**
@@ -94,7 +132,8 @@ Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optiona
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
-Transitions honour \`motion: "none"\`, animator scale 0 and system reduced motion. A stack's
+Transitions snap under \`motion: "none"\` or Android animator/transition scale 0, and fade under
+\`motion: "reduced"\` or iOS Reduce Motion. A stack's
 \`transition\` accepts only those four values and no longer animates the stack's own visibility
 (earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
 are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
@@ -134,6 +173,8 @@ All these options require \`prototype_text_field_options_v1\`. A device without 
 is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
 app with \`launchApp prototype: true\`, or drop the textField options.
 
+\`textField.errorWhen\` accepts any condition and forces error styling immediately, independently of checks/validateOn. Optional nonempty \`errorText\` (max 256 UTF-16 units) requires errorWhen. Caption precedence while forced: errorText, currently shown check message, supportingText, then no caption. Both options require \`prototype_string_conditions_v1\`. They do not affect change-event validity, \`{valid}\` or \`requireValid\`, which remain checks-only. Fields without checks do not track validation blur.
+
 A \`textField\` may also declare \`trailingIcon: {icon, label, onTap?}\` (a built-in icon, its
 nonempty accessible \`label\` and optional 1-32 \`onTap\` actions, for example a clear button that
 \`setState\`s the field's key to an empty string; without \`onTap\` it is decoration),
@@ -169,12 +210,14 @@ are reported in \`platformNotes\`.
 
 ## Loading, empty and error states
 
+State-key \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders always bind as text (a numeric item renders as its text), and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string state values fail all four. They are valid only with \`key\`, wherever a condition is accepted, and require \`prototype_string_conditions_v1\`.
+
 (needs \`prototype_loading_states_v1\`) \`{data: "/feed", empty: true}\` holds when the value is
 missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
-it cannot be combined with \`equals\`, \`notEquals\`, \`gt\` or \`lt\`, and it applies to data
+it cannot be combined with another comparison, and it applies to data
 conditions only. Style \`shimmer: true\` on a \`box\`, \`row\`, \`column\` or \`card\` sweeps an
-animated highlight over its background and reads "Loading" to accessibility; it is static under
-\`motion: "none"\` or animator scale 0. The canonical trio uses a request's \`statusKey\`:
+animated highlight over its background and reads "Loading" to accessibility; it stays at its rest pose under
+\`motion: "reduced"\`, iOS Reduce Motion, \`motion: "none"\` or Android animator/transition scale 0. The canonical trio uses a request's \`statusKey\`:
 
 - **Loading:** a column with \`visibleWhen: {key: "feedStatus", equals: "loading"}\` that repeats a
   few literal placeholder rows styled \`{shimmer: true, height: {dp: 56}, background:
@@ -196,6 +239,46 @@ bounded params. Shader source is never accepted. Any effect may loop with \`anim
 {periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
 across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
 
+## Scroll-driven motion
+
+(needs \`prototype_scroll_motion_v1\`) A node under a scroll, pager, carousel or repeat takes
+\`scrollTransition: {axis: "horizontal" | "vertical", edge: {scale?, alpha?, rotation?}}\`.
+It interpolates from the edge values to identity at the viewport centre. Any node can take
+\`scrollLinked: {source: "feed", range: [0, 160], alpha: [1, 0], offsetY: [0, -40]}\`:
+\`source\` names a scroll in the same screen; the input endpoints increase, and each output
+is a two-number range. Outputs are \`alpha\`, \`scale\`, \`offsetX\`, \`offsetY\` and \`blur\`.
+They interpolate linearly and clamp outside the input range. At most 16 bindings are allowed
+across the expanded tree; each field counts once per instance. These effects change drawing,
+not layout, hit targets or observed bounds. \`motion: "reduced"\` keeps alpha only;
+\`motion: "none"\` keeps all scroll-driven outputs. Android blur requires Android 12 or later.
+
+## Style effects
+
+(needs \`prototype_effects_v1\`; no connected device advertises it yet, so the host refuses a spec
+with \`style.effects\` until a renderer ships) \`style.effects\` is 1 to 4 paint-only looks drawn in
+order inside the node's own bounds: \`noise\`, \`gradientMesh\`, \`shimmer\`, \`glow\`,
+\`vignette\`, \`blur\`, \`pixelate\`, \`chromaticAberration\`, \`wave\` and \`ripple\`, each with typed,
+bounded params. Shader source is never accepted. Any effect may loop with \`animate:
+{periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
+across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
+
+## Motion profiles and shared elements
+
+\`motion\` is \`standard\` (default), \`reduced\` or \`none\`. Explicit \`motion: "reduced"\`
+requires \`prototype_reduced_motion_v1\`. iOS Reduce Motion selects the reduced profile;
+Android animator scale or transition scale 0 selects off. Spec \`none\` or system off wins over
+reduced. Reduced replaces spatial animation (slides, scale, container size, presses, swipe-row
+settling, pager scrolling and shared morphs) with a crossfade or snap with fade. Shimmer and
+other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
+Off makes every change instant.
+
+\`sharedKey\` requires \`prototype_shared_element_v1\` and \`visibleWhen\` on the same node.
+Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each key labels exactly two nodes, at most 16 distinct
+keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
+inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
+not visible together. Full motion morphs the pair's bounds between different content; reduced
+uses ordinary visibility fades and off swaps instantly.
+
 ## Motion v2
 
 (needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default
@@ -206,7 +289,8 @@ node's centre without moving siblings. \`transition\` also takes \`slideStart\` 
 (slide in from that edge, mirrored right to left: drawers) and \`scale\`. An \`image\` with
 \`zoomable: {maxScale}\` (1-8) pinches, pans when zoomed and toggles 1x/2x on a double tap, with
 accessibility zoom actions; it cannot also have \`onDoubleTap\`. Everything snaps under
-\`motion: "none"\` or animator scale 0. The iOS agent does not support it yet (#14684).
+\`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial changes
+snap or crossfade; color and alpha still animate. The iOS agent does not support Motion v2 yet (#14684).
 
 ## Choreography
 
@@ -217,14 +301,45 @@ before the enter starts) besides the plain names, and \`blurReplace\`: a blur-an
 enter one after another in layout order, each \`ms\` apart, including the children a \`repeat\` makes.
 A child's own \`transition.delayMs\` adds to its stagger wait, and no child may wait more than 600 ms
 in all (a literal \`repeat\` is counted; a data-bound one is clamped on the device). Delays are zero
-under \`motion: "none"\` or animator scale 0. Delays apply to enters only. The iOS agent does not
+under \`motion: "none"\` or Android animator/transition scale 0. In the reduced profile spatial
+transitions become fades. Delays apply to enters only. The iOS agent does not
 support it yet.
+
+## Lazy lists
+
+\`list {repeat:{items:{path},as,key},children:[row],axis?,header?,footer?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?}\`
+is a lazy scrolling collection (needs \`prototype_lazy_list_v1\` and \`prototype_data_model_v1\`).
+The path resolves to at most ${MAX_PROTOTYPE_LIST_ITEMS} objects; \`key\` is required, projected and unique. Empty arrays
+are valid. Axis defaults to vertical; spacing/padding are nonnegative dp. One row template and
+optional header/footer each count once toward node/image limits, while per-item binding and text
+budgets still apply. Header/footer are ordinary nodes outside the row scope. Never nest lists,
+put a list in a repeat, or put a same-axis scroll above/below a list. Rows cannot nest repeats/pagers.
+Only composed rows are in \`observe\`; use \`swipeOn\` to reach more. Row keys preserve identity.
+\`onEndReached\` fires for nonempty rows within \`endThreshold\` of the end (1–50, default 3), once
+per \`(rowCount,lastRowKey)\` signature; empty/no-change pages never refire. Signature state survives
+recomposition and resets on show. \`endThreshold\` needs \`onEndReached\`. Vertical \`refresh\` uses
+scroll.refresh semantics and a declared boolean key (also needs \`prototype_refresh_v1\`).
+\`maxItems\` (1–${MAX_PROTOTYPE_LIST_ITEMS}) requires initial data to fit; appending trims oldest rows atomically before
+final data limits. The smallest cap among lists sharing the exact data path wins.
+\`request.append:{from,to}\` (same lazy-list capability) extracts a response array from an object
+member at \`from\`, extends the existing \`/data/...\` array \`to\`, and writes the remaining response
+to optional \`into\`. These paths must not overlap. Any failure rolls back all writes and returns
+\`invalid_response\`. Extend events precede into/meta/status/request/onSuccess events; change
+payloads are \`{op:"append"|"extend"|"prepend",value,maxItems?,revision}\`. \`prependData {path,value}\` resolves one row and sends writer op \`prepend\` with \`value:[row]\`;
+it requires the lazy-list, data-actions and data-model capabilities. It uses the smallest matching
+list cap and trims from the end, keeping the first maxItems rows. A missing event value means the
+page exceeded the byte budget and the host stops tracking the spec.
+Renderers keep the first visible row key and offset across writes, even at the top; new rows sit
+above it. Headers/footers are not anchors; a trimmed key uses the renderer default. Each stack
+entry restores its list key/offset after push/pop; a missing key falls back to the nearest surviving
+index or top. Prepend, anchoring and per-stack-entry list scroll restore are not device-verified
+until the acceptance run; benchmark qualification remains unverified.
 
 ## Charts
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
 \`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
-entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most 500 items as
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most ${MAX_PROTOTYPE_DATA_ARRAY_ITEMS} items as
 for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
 \`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
 \`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`
@@ -309,6 +424,16 @@ explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successf
 show and subsequent host-local status report the effective value as \`lastResult.chrome\`;
 it is absent for sheet/floating windows, dismiss, failed show and adopted prototypes.
 
+## Frosted backdrop
+
+\`window.backdrop\` is \`{material, blur?, tint?}\` and blurs what is behind the window on any
+placement (not the prototype's own content). \`material\` is one of \`ultraThin\`, \`thin\`,
+\`regular\`, \`thick\` or \`glass\` (Liquid Glass, iOS 26+ only). \`blur\` is an optional whole radius in
+dp (points on iOS), 0-150. \`tint\` is one hex or role colour, not a light/dark pair. The host refuses
+the show on a device without \`prototype_backdrop_v1\`. Where the platform cannot blur, the device
+draws a tonal fill (\`tint\` at 85% alpha, else the \`surfaceContainer\` role at 85%) and \`lastResult.backdrop\` is
+\`fallback\`; otherwise it is \`blur\`.
+
 
 ## Tooltip and drawer
 
@@ -349,14 +474,22 @@ A \`carousel\` (\`prototype_carousel_v1\`) is a horizontally scrolling row of it
 (at least one), that snaps to items and may declare \`repeat\` like \`row\`. \`itemWidth\` (dp, > 0)
 is required. \`variant\` is \`multiBrowse\` (default; items change width as they scroll, Android
 Material), \`hero\` (centered large item) or \`uncontained\` (fixed-width items). \`itemSpacing\`
-is dp >= 0. iOS draws every variant as fixed-width snapping items. A pager may also declare
+is dp >= 0. iOS draws every variant as fixed-width snapping items.
+A pager's optional \`stateKey\` binds a declared nonnegative integer number key both ways
+(requires \`prototype_pager_state_key_v1\`). Swipes write the key and emit \`page_changed\`
+and \`change\`; state writes and patches move the pager, clamped to its page range, animated
+unless \`motion: "none"\`. Initial/replacing-show state wins over retained pages. Use the
+same key on a tabBar/bottomNav for simple shared selection, and read it in \`styleWhen\`
+on a row of dot boxes outside the pager. Two pagers cannot share a key; binding inside
+repeat templates is refused. \`setPage\` writes the same selection.
+A pager may also declare
 \`indicator: "dots"\` (default \`none\`): page dots below the pages, with the current page filled;
 they need the same capability. A carousel has no page index, event or \`setPage\` target; use a
 \`pager\` when the page matters.
 
 A \`box\`, \`row\`, \`column\`, \`flow\`, \`grid\` or \`carousel\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
 are instantiated once per item, in order, as siblings inside the same container (the container
-itself is not repeated). A list is a \`column\` with \`repeat\` whose single child is the row template.
+itself is not repeated). For eagerly composed rows use a \`column\` with \`repeat\`; for lazy rows use the \`list\` node.
 
 \`\`\`json
 {
@@ -388,6 +521,8 @@ Grammar:
   (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
   Anything else, including a \`{key}\` state placeholder and other braces, is left untouched. A show or patch lists a placeholder
   in such a field as \`placeholderFindings\` (for example \`chip.label\` or \`badge.text\`).
+  (\`equals\`/\`notEquals\`/\`contains\`/\`startsWith\` strings, including inside \`errorWhen\`) and \`textField.errorText\`, \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
+  Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
   \`openWhen.key\`, condition \`key\`s and the \`key\` of \`setState\`, \`toggle\`, \`increment\` and
   \`decrement\`, so \`"key": "liked_{item.id}"\` gives each row its own state. Every bound key must
@@ -451,6 +586,7 @@ written:
 - \`{type: "setData", path, value}\` creates or replaces an object member, or replaces an existing
   array element. A missing parent is an error.
 - \`{type: "appendData", path, value}\` appends to the existing array at \`path\`.
+- \`{type: "prependData", path, value}\` inserts one row at the start; list maxItems trims from the end.
 - \`{type: "removeData", path}\` removes an existing member or element; later elements shift down.
 
 \`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
@@ -461,7 +597,7 @@ finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{in
 \`{alias.field}\`, is rejected.
 
 The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
-rejects an \`appendData\` whose target resolves in the spec's own \`data\` to something other than an
+rejects an \`appendData\` or \`prependData\` whose target resolves in the spec's own \`data\` to something other than an
 array. A target that only exists after earlier writes is checked by the device. A write that would
 leave \`data\` over \`MAX_PROTOTYPE_DATA_WRITE_BYTES\` (or over a depth or array limit), or whose
 target is missing or not an array, changes nothing.
@@ -651,10 +787,10 @@ are rejected; a missing text path renders empty.
   placeholders are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
   During state interpolation, a replacement that would exceed the per-call substitution limit stays
   as written, and later placeholders may still substitute.
-- A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
+- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`valid\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
   one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
-  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false). \`equals\`/\`notEquals\` operands are
-  literals; repeat placeholders there are rejected. \`bottomSheet.openWhen\` remains boolean state.
+  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false), or \`empty\` (data only). \`equals\`/\`notEquals\` operands are
+  literals; repeat placeholders there are rejected. Key forms also accept \`contains\`, \`startsWith\`, \`lengthGt\` or \`lengthLt\` (see string conditions). \`bottomSheet.openWhen\` remains boolean state.
 
 The host validates data and repeat paths; the device resolves bindings once per show before
 repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused
@@ -713,6 +849,13 @@ Layered style.shadows (1-3 strict {color,radius,spread?,offset?,inner?}, radius 
 Rendering order: transform, press scale, size, alpha, drop shadows (shadows/elevation before the clip), clip (cornerRadius + cornerStyle), background, gradient, shimmer, border (color or gradient), inner shadows.
 
 ## Light and dark mode
+
+Theme design: \`theme.design\` accepts \`material\` or \`platform\` (default). Explicit platform
+requires \`prototype_design_platform_v1\`; omission silently keeps today's drawing on older renderers.
+Android platform look is Material. On iOS button, slider, datePicker and timePicker already use
+native controls; layout/content nodes are neutral and other nodes retain Material drawing.
+Explicit platform requests report \`design.fallback\` notes for those nodes (first 20 paths, plus
+\`total\` beyond); omitted design and material do not. See the contract's \`designCoverage\` table.
 
 A shown prototype has exactly one resolved mode, light or dark. Roles, per-mode values and the
 scheme all read that one mode, on Android and on iOS.
@@ -858,12 +1001,16 @@ Authoring choices:
   no node. Every text, tagged node and tappable node stays targetable. Give a \`testTag\` only to
   nodes you will look up. Every accessibility node is work whenever \`observe\` or a screen reader
   reads the tree.
+- **Reserved \`testTag\` prefix.** A \`testTag\` cannot start with \`automobile-\`: the host's own dismiss
+  controls use \`automobile-prototype-dismiss\`, and a spec that takes one is rejected with the node's path.
+  \`tapOn\` keeps its point off those controls, or fails naming one that covers the whole target.
 - **Long lists.** A \`scroll\` node builds all of its children up front on both platforms, so a
   long list inside \`scroll\` pays for every row when it is shown. *Being changed on Android
   (#12139).* \`repeat\` expands to real nodes that count against the node limit.
 - **\`motion: "none"\`.** It removes the visibility animations, size animations and press springs
   (changes become instant) and a hidden \`visibleWhen\` node is simply absent, so it is the right
-  choice for automated checks. Motion is also off when the system animation scale is 0.
+  choice for automated checks. Motion is also off when Android animator or transition scale is 0. The reduced profile
+  keeps fades and color/alpha animation while removing spatial movement and ambient loops.
 - **Window format.** On Android an opaque fullscreen prototype is still composited as a
   translucent layer, whatever the spec says. *Being changed (#12140).*
 - **Accessibility events.** The Android accessibility service resolves an event's window type once
@@ -892,7 +1039,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
 | \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |
-| \`Expanded node limit exceeded\` | Fewer items or a smaller template; the limit counts every instance. |
+| \`Expanded node limit exceeded\` | Fewer items or a smaller template; ordinary repeats count every instance; lazy list templates count once. |
 | \`maxRuns requires everyMs\` | Supply everyMs or remove maxRuns. |
 | \`Too many distinct timer ids\` | Use at most eight distinct startTimer ids, including nested actions and components. |
 | a \`stateKey\` rejected | The key must be initialised in \`state\` with the type the node binds (string, boolean, number). |
@@ -1031,11 +1178,57 @@ known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\
 those requests. A saved prototype launched with no host connected gets no reverse either.
 On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are refused as
 \`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
+
+
+## Value formatters (#14227)
+
+Use top-level \`derive: {priceText: {of: {data: "/price"}, format: {currency: {code: "USD"}}}}\`
+and read \`{derived:priceText}\` in text node text, contentDescription, rich-text spans,
+button/FAB labels, topAppBar title, badge text, dialog title/text, and snackbar text.
+Other text-kind fields (request url/headers/body, check messages, and
+select/segmented/menu/searchBar labels) validate unknown names but show tokens literally on devices.
+There are at most 32 names (state-key syntax); unknown reads fail validation.
+\`of\` chooses exactly one data pointer, state key or literal \`{value: number|string}\`.
+Inside a repeat, \`repeat.derive\` supports at most 8 names, with \`of: {item: "field"}\`
+or a literal value; the resulting strings bind as \`{item.priceText}\` using your alias.
+Names cannot collide with original row fields; derived fields cannot reference each other.
+Host validation checks field references; device-dependent key and emit-name value checks wait for the renderer.
+
+\`format\` has exactly one key with an object: \`number {minFraction?,maxFraction?,grouping?}\`,
+\`compact {style?:short|long}\`, \`currency {code:USD}\`, \`percent {minFraction?,maxFraction?}\`,
+\`date {style?:short|medium|long}\`, \`time {style?:short|medium|long}\`, or
+\`relative {style?:narrow|short|long}\`. Fraction digits are integers 0..20;
+min cannot exceed max. Grouping true/default respects locale minimum grouping digits;
+false disables grouping entirely. Compact, currency, and percent respect locale minimum grouping digits.
+Compact defaults short, date medium,
+time short, relative long. Currency codes are three uppercase letters and use CLDR minor units.
+Number kinds require finite numbers; percent inputs are ratios (0.256 means 25.6%).
+Date/time/relative accept integer epoch milliseconds, YYYY-MM-DD (midnight UTC),
+or ISO date-times with seconds and Z or an explicit +hh:mm offset; fractional seconds work.
+Invalid or missing inputs display empty text. Optional entry \`locale\` (BCP 47, <=35 characters)
+and \`timeZone\` (IANA id, <=128) override device defaults.
+
+Relative time uses an injected clock snapshot, truncates toward zero, and picks the largest
+elapsed unit: seconds, minutes (60 s), hours (60 min), days (24 h), months (30 d), years (365 d).
+Under one second uses localized now. Exact English fixtures normalize U+202F/U+00A0 to spaces;
+foreign currency symbols, narrow relative text, now wording and non-English CLDR data can vary
+by engine and use structural comparisons. Set locale, zone and clock for deterministic previews.
+Both derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
+\`dateTime\`, \`duration\`, \`plural\`, and \`fileSize\` are unsupported follow-ups.
 `;
 
 export const GUIDE_TIMERS = `### Timers
 
-Both timer actions require \`prototype_timers_v1\`. Start a timer from any action list:
+Timer actions and \`onAppear\` require \`prototype_timers_v1\`.
+The root and nodes declaring \`visibleWhen\` may set \`onAppear\` to 1..32 ordinary actions.
+They run on first show if visible, and on each hidden-to-visible edge; visible-to-visible
+and a same-id show without reset do not run them again. Repeat placeholders bind as in onTap.
+Each list is atomic, validates like a tap, and emits change for a net state change, without
+restarting idle TTL. A handler runs at most once per interaction, bounded by the action-depth limit.
+For a splash, put \`onAppear:[{type:"startTimer",id:"splash",afterMs:2000,
+actions:[{type:"setState",key:"loading",value:false}]}]\` on the root and use
+\`visibleWhen:{key:"loading",equals:false}\` on content. Hiding a node does not cancel its timer.
+Start a timer from any action list:
 \`{type:"startTimer",id:"tick",afterMs:100,everyMs:1000,maxRuns:10,actions:[{type:"emit",name:"tick"}]}\`.
 \`afterMs\` is required; it and optional \`everyMs\` are integers 100..3600000 ms.
 \`maxRuns\` is 1..10000 total fires, including the first, and requires \`everyMs\`.
@@ -1060,4 +1253,48 @@ an error and fired=10000, keeping pending timers for the next call. Real schedul
 Inspect reports \`timers:[{id,nextFireInMs,runs}]\`, ordered by remaining time then start order;
 remaining time is nonnegative and frozen while paused. A capable device yields an empty array
 when no timers are live.
+`;
+
+export const GUIDE_STRINGS_SEMANTICS = `## Strings and semantics
+
+Top-level \`strings\` requires \`prototype_strings_v1\`: \`{default: {title: "Cart", items: {one: "{#} item", other: "{#} items"}}, fr: {title: "Panier"}}\`.
+Use \`{t:title}\` or \`{t:items|2}\` in display text, spans, semantics.label or semantics.hint.
+Counts are non-negative integer literals (1–9 digits) or \`{data:/pointer}\`; state-key counts are unsupported.
+Pipeline: data substitution, then translation, then state binding. Translation values may contain state bindings; translated text is never scanned again for translations. \`{#}\` inserts the decimal count in a plural form. Invalid runtime counts use other.
+show \`locale\` (locale tag, max 35 characters) overrides device preferred locales for that show; omitted follows device locales, which re-resolve live.
+Each requested locale tries its full tag then shorter prefixes, deduplicated, then default. Tags match case-insensitively with underscores normalized to hyphens. Lookup is per key; the supplying table language decides plurals (default uses the first requested language, else en).
+Integer plural groups: ja/zh/ko/vi/th/id/ms/lo/km/my use other; fr/pt/hi/bn/fa/gu/kn/am use one for 0–1; ru/uk/be and pl use one/few/many; cs/sk use one/few/other; ar uses zero/one/two/few/many/other; remaining languages use one at 1, other otherwise. Missing forms use other; million-multiple Romance many is outside v1.
+Limits: 16 tables, 512 keys per table, 2048 characters per nonempty value; default and every plural other form are required. Keys use letters/underscore followed by letters/digits/underscore/dot/hyphen, at most 64 characters. Values cannot contain translation, data or platform placeholders.
+With an explicit locale, \`platformNotes\` construct \`strings.fallback\` (platform all) lists up to 20 referenced keys reaching default. Advisory lint reports missing-translation and unknown-translation-key.
+Pseudo-localisation transforms each table value and plural form while preserving keys, tags, category names and bindings; strings is opaque to node walking. Node translation placeholders stay intact; semantics label and hint are display text.
+
+Every node accepts \`semantics {heading?,liveRegion?: "polite"|"assertive",group?,label?,hint?,traits?: ["button"|"image"|"selected"]}\`, requiring \`prototype_semantics_v1\`. At least one field is required; traits are unique (1–3). Label/hint are nonempty and accept translations, data and state bindings. Label conflicts with contentDescription.
+Heading enables screen-reader navigation; empty-heading lint flags headings without text/label. Group contains child traversal. Android maps heading/liveRegion/traversal group, label to contentDescription, hint to onClickLabel for tap actions else stateDescription, and traits to Role.Button/Role.Image/selected. iOS maps header/button/image/selected traits, contain grouping, label/hint, and live-region change announcements (not initial render; assertive has high speech priority).
+Android observe exposes heading as the string "true" and live-region as polite/assertive; iOS snapshots currently expose no SwiftUI traits. Logical RTL swipe sides are outside this capability.
+`;
+
+export const GUIDE_TEST_SESSIONS = `## User-testing sessions
+
+Call \`prototype {action:"testSessionBegin", id, goal?, cohort?}\` after showing a prototype.
+The host records accepted events without consuming \`awaitEvent\`. A goal is a screen label
+such as \`checkout/done\`; reaching it marks completion. Cohort is a free label, with no
+cross-session aggregation. \`testSessionEnd {id}\` stops recording and returns JSON plus
+Markdown. Dismissal or session release also ends recording. \`testSessionReport {id}\`
+reads the latest session for this scope, or pass \`testSessionId\` for a stored one.
+Only one session may be active per device and prototype.
+
+Reports include screen visits, time, abandonment, validation failures and pager changes.
+Labels use the deepest stack's top screen as \`stack/screen\` (ties use the lowest stack id),
+or \`(root)\`. Text values, payloads, context and state snapshots are never stored;
+non-secure changes retain only keys, string lengths or value types and validity.
+Secure fields are excluded. Up to 5,000 sanitized events are retained per session; extra
+events are counted as dropped and the report is marked truncated. The newest 50 ended
+sessions are kept per device/prototype.
+
+To record dead taps, show with \`window.deadTaps: true\` on a device advertising
+\`prototype_dead_tap_v1\`; an older agent is refused. Dead taps are single-pointer taps
+inside the prototype window that no interactive node handled, excluding drags, scrolling
+and app taps outside the window. Their payload has only screen ids and coordinates,
+rounded to one decimal in window-local dp (points on iOS). Reports include counts,
+up to 200 points per screen and a 48-unit grid. There is no screenshot overlay yet.
 `;

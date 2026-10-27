@@ -1,95 +1,53 @@
 {
   "spec": {
-    "id": "linkify-timeline",
+    "id": "bars",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
     "state": {
-      "profileHandle": ""
-    },
-    "data": {
-      "posts": [
-        {
-          "id": "p1",
-          "body": "Hello @ana, see #launch https://example.com"
-        }
-      ]
+      "tab": 0
     },
     "root": {
       "type": "stack",
-      "id": "nav",
-      "start": "home",
+      "id": "routes",
+      "start": "one",
       "screens": {
-        "home": {
+        "one": {
           "type": "column",
           "children": [
             {
-              "type": "text",
-              "id": "post",
-              "text": "Hello @ana, see #launch https://example.com",
-              "linkify": {
-                "kinds": ["mention", "hashtag", "url"],
-                "style": {
-                  "color": "primary",
-                  "fontWeight": 600
-                },
-                "onTap": [
-                  {
-                    "type": "setState",
-                    "key": "profileHandle",
-                    "value": {
-                      "match": "text"
-                    }
-                  },
-                  {
-                    "type": "emit",
-                    "name": "link_tapped",
-                    "context": {
-                      "kind": {
-                        "match": "kind"
-                      },
-                      "text": {
-                        "match": "text"
-                      }
-                    }
-                  },
-                  {
-                    "type": "push",
-                    "stack": "nav",
-                    "screen": "profile"
-                  }
-                ]
-              }
+              "type": "topAppBar",
+              "title": "Feed",
+              "variant": "large",
+              "onScroll": "exitUntilCollapsed",
+              "scroll": "feed"
             },
             {
-              "type": "text",
-              "text": "{data:/posts/0/body}",
-              "linkify": {
-                "kinds": ["mention"],
-                "onTap": [
-                  {
-                    "type": "setData",
-                    "path": "/data/posts/0/id",
-                    "value": {
-                      "match": "text"
-                    }
-                  }
-                ]
+              "type": "scroll",
+              "id": "feed",
+              "child": {
+                "type": "text",
+                "text": "Feed"
               }
             }
           ]
         },
-        "profile": {
-          "type": "text",
-          "text": "Profile {profileHandle}"
+        "two": {
+          "type": "scroll",
+          "id": "feed",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
         }
       }
     }
   },
   "options": {
-    "supportedCapabilities": ["prototype_data_model_v1", "prototype_linkify_v1"]
+    "supportedCapabilities": ["prototype_bar_scroll_v1"]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_stack_v1"
 }

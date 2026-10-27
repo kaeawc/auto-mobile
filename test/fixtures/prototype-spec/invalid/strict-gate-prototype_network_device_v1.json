@@ -117,5 +117,6 @@
   "options": {
     "supportedCapabilities": ["prototype_data_model_v1", "prototype_network_v1"]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_network_device_v1"
 }

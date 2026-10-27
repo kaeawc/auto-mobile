@@ -1,0 +1,36 @@
+{
+  "id": "feed",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "feed": {
+      "items": []
+    },
+    "page": {
+      "next": "p2"
+    }
+  },
+  "state": {
+    "refreshing": false,
+    "feedStatus": "idle"
+  },
+  "root": {
+    "type": "list",
+    "repeat": {
+      "items": {
+        "path": "/feed/items"
+      },
+      "as": "post",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{post.title}"
+      }
+    ]
+  }
+}

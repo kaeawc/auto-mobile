@@ -146,6 +146,11 @@ struct PrototypeContractValidator {
                 (limits["MAX_PROTOTYPE_IMAGES"] ?? 0) { throw Self.invalid("\(path).image", "Image limit exceeded") }
         }
         if name == "node" {
+            if let fields = value.objectFields, fields["onAppear"] != nil,
+               path != "root", fields["visibleWhen"] == nil
+            {
+                throw Self.invalid("\(path).onAppear", "onAppear requires visibleWhen or the root")
+            }
             guard let node = value.objectFields else { throw Self.invalid(path, "Expected object") }
             locatedNodes.append(.init(value: node, path: path))
             nodes += 1

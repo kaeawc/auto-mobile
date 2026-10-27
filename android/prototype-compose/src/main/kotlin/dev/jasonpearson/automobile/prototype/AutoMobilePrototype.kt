@@ -371,6 +371,7 @@ private class EmbeddedOwner(
     // Seed before publishing the session, so its first rendered frame is already localized.
     runtime.updateLocales(config.locales())
     config.environment.host?.onRuntime?.invoke(runtime)
+    runtime.shown()
     session =
       EmbeddedSession(
         runtime,

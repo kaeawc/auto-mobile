@@ -4829,6 +4829,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "bottomNav": [
@@ -4925,6 +4931,12 @@
       {
         "name": "stateKey",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -5042,6 +5054,12 @@
         "name": "dismissOnSwipe",
         "type": "boolean",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -5173,6 +5191,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "button": [
@@ -5275,6 +5299,12 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -5389,6 +5419,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "carousel": [
@@ -5497,6 +5533,12 @@
       {
         "name": "itemSpacing",
         "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -5609,6 +5651,12 @@
         "type": "double",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "checkbox": [
@@ -5719,6 +5767,12 @@
         "type": "enum",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "chip": [
@@ -5821,6 +5875,12 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -5933,6 +5993,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "datePicker": [
@@ -6035,6 +6101,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -8899,6 +8971,12 @@
         "type": "polymorphic",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "divider": [
@@ -8984,6 +9062,12 @@
         "name": "orientation",
         "type": "string",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -9239,6 +9323,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "floating": [
@@ -9351,6 +9441,12 @@
         "type": "int",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "fullscreen": [
@@ -9457,6 +9553,12 @@
         "type": "object:PrototypeRepeat",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "icon": [
@@ -9561,6 +9663,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "iconButton": [
@@ -9657,6 +9765,12 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -9773,6 +9887,12 @@
       {
         "name": "zoomable",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeZoomable",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -10059,6 +10179,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "menu": [
@@ -10151,6 +10277,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "pager": [
@@ -10265,6 +10397,12 @@
       {
         "name": "indicator",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -10425,6 +10563,12 @@
         "type": "double",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "push": [
@@ -10561,6 +10705,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -10781,6 +10931,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSwipeActions",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "scroll": [
@@ -10909,6 +11065,12 @@
         "type": "polymorphic",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "scrollTo": [
@@ -11057,6 +11219,12 @@
         "type": "polymorphic",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "segmentedButton": [
@@ -11149,6 +11317,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "select": [
@@ -11245,6 +11419,12 @@
       {
         "name": "label",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -11431,6 +11611,12 @@
         "type": "enum",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "snackbar": [
@@ -11535,6 +11721,12 @@
         "type": "int",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "spacer": [
@@ -11613,6 +11805,12 @@
       {
         "name": "span",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -11707,6 +11905,12 @@
         "type": "map",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "startTimer": [
@@ -11851,6 +12055,12 @@
         "type": "boolean",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "text": [
@@ -11959,6 +12169,12 @@
       {
         "name": "linkify",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -12161,6 +12377,12 @@
         "type": "enum",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "timePicker": [
@@ -12275,6 +12497,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -12496,6 +12724,12 @@
       },
       {
         "name": "actions",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
         "type": "list",
         "nullable": true,
         "hasDefault": true

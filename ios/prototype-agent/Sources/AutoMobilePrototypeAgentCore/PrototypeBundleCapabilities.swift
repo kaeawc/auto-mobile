@@ -108,6 +108,7 @@ enum PrototypeBundleCapabilities {
             scanSlots(item, names: &names)
         }; return }
         guard let fields = value.objectFields else { return }
+        if fields["onAppear"] != nil { names.insert("prototype_timers_v1") }
         let type = fields["type"]?.stringValue
         if type == "startTimer" || type == "cancelTimer" { names.insert("prototype_timers_v1") }
         if type == "request" {

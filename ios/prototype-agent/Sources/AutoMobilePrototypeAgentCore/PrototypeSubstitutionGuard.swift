@@ -263,7 +263,7 @@ private struct PrototypeSubstitutionGuard {
     )
         throws
     {
-        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap", "onEndReached"] {
+        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
             guard case let .array(entries)? = fields[name] else { continue }
             for (index, entry) in entries.enumerated() {
                 guard case let .object(action) = entry else { continue }

@@ -96,6 +96,21 @@ All decided (2026-10-09); the remaining item is simulator verification. `inspect
 keyboard from keyboard-frame notifications (simulator check still owed); `window.layer: "app"` is
 ignored silently so one spec runs on both platforms.
 
+## Appearance actions and timers
+
+`onAppear` requires `prototype_timers_v1`. The root and nodes with `visibleWhen` accept
+1..32 tap-union actions; other placements fail at `<path>.onAppear`. The session runs visible
+handlers on first/reset show and hidden-to-visible edges, including ancestor visibility and
+active pager/stack children. Visible-to-visible changes and state-preserving same-id shows do
+not fire. Repeat instances bind handlers as taps and use separate paths. Each list validates
+atomically and emits tap-style change events without restarting idle TTL. Cascades use the
+existing action-depth bound and refuse a second execution of a handler within one interaction.
+
+Appearance-started timers use the shared timer ledger: pause while the prototype is hidden,
+cancel on dismissal, TTL expiry or replacing show, and survive hiding their originating node.
+`advance_prototype_clock` drives them without waiting; status/inspect include their
+`{id,nextFireInMs,runs}` entries.
+
 ## Expiry
 
 iOS prototypes expire like Android session prototypes
@@ -104,7 +119,7 @@ iOS prototypes expire like Android session prototypes
 - **Idle TTL.** 300,000 ms (`PrototypeIdleTimer`, settable locally via
   `PrototypeModel.idleTtlMilliseconds`; no wire field). An accepted `show_prototype` (including a
   same-id replace) and user interaction (taps, edits, an actually-changed pager page) restart it.
-  Initial pager reports, a snackbar's own `durationMs` close, `hide_for_capture` and
+  Initial pager reports, `onAppear`, authored timer fires, a snackbar's own `durationMs` close, `hide_for_capture` and
   `get_prototype_status` do not. A hidden prototype still expires.
 - **Disconnect.** The prototype belongs to the host session, not a socket. `PrototypeClientTracker`
   counts authenticated connections; when the last closes, the prototype is dismissed and uploaded

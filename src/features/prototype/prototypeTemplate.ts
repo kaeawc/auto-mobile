@@ -368,7 +368,14 @@ function mapPlatformAction(action: Raw, path: string, visit: FieldVisitor): void
 }
 
 function mapActions(data: Raw, path: string, visit: FieldVisitor): void {
-  for (const field of ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onStartReached"]) {
+  for (const field of [
+    "onTap",
+    "onLongPress",
+    "onDoubleTap",
+    "onEndReached",
+    "onStartReached",
+    "onAppear",
+  ]) {
     mapList(data, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   }
 }

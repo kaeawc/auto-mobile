@@ -31,6 +31,7 @@ enum PrototypeStrictCapabilities {
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }
+            if fields["onAppear"] != nil { need("timers") }
             let type = fields["type"]?.stringValue ?? ""
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [

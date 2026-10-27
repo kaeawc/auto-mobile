@@ -391,7 +391,7 @@ extension PrototypeRepeat {
         throws
     {
         guard case let .object(fields) = node else { return }
-        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached"] {
+        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
             try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
         }
         if let linkify = fields["linkify"]?.objectFields {
@@ -618,7 +618,7 @@ struct PrototypeRepeatInstance {
 
     /// A part's actions; its label was already mapped by `bindTextFields`.
     private func bindPartFields(_ part: inout [String: JSONValue]) {
-        for key in ["onTap", "onLongPress", "onDoubleTap"] {
+        for key in ["onTap", "onLongPress", "onDoubleTap", "onAppear"] {
             if case let .array(actions)? = part[key] { part[key] = .array(actions.map(bindAction)) }
         }
     }

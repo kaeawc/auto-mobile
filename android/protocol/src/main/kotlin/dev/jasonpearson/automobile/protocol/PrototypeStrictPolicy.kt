@@ -207,6 +207,7 @@ internal object PrototypeStrictPolicy {
       "enabledWhen" to "checks",
       "valid" to "checks",
       "requireValid" to "checks",
+      "onAppear" to "timers",
       "onLongPress" to "gestures",
       "onDoubleTap" to "gestures",
       "swipeActions" to "swipe_actions",

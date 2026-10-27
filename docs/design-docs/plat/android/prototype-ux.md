@@ -2855,6 +2855,15 @@ write that would leave a list's array with a non-object row, a missing, non-scal
 
 ### Timers
 
+`onAppear` requires `prototype_timers_v1`: 1..32 ordinary actions on the root or a node
+with `visibleWhen`, rejected at `<path>.onAppear` elsewhere. First show and reset show run
+initially visible handlers; later hidden-to-visible edges run them again. A state-preserving
+same-id show seeds visibility without firing, and visible-to-visible updates do nothing.
+Effective visibility includes ancestors and the active pager/stack child. Repeat instances bind
+handlers like taps and keep separate path identities. Each handler is one validated atomic
+interaction with tap change-event rules and no idle-TTL activity. Cascades stop at the action-depth
+limit; a handler cannot run twice within an interaction. Node hiding does not cancel its timers.
+
 `startTimer {id, afterMs, everyMs?, maxRuns?, actions}` and `cancelTimer {id}` require
 `prototype_timers_v1`. IDs are literal strings of 1..64 characters and never repeat-bound.
 Delays are integers 100..3600000 ms; maxRuns is 1..10000 total fires including the first and

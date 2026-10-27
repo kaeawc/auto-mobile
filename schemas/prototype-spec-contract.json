@@ -2612,6 +2612,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -2828,6 +2840,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -3037,6 +3061,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -3220,6 +3256,18 @@
                 "min": 1
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -3424,6 +3472,18 @@
               },
               "optional": false
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -3622,6 +3682,18 @@
                 "name": "pagerDp"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -3833,6 +3905,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -4038,6 +4122,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "filter": {
               "rule": {
                 "kind": "ref",
@@ -4242,6 +4338,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -4398,6 +4506,18 @@
                 "name": "safeAreaPadding"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -4694,6 +4814,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "errorWhen": {
               "rule": {
                 "kind": "ref",
@@ -4906,6 +5038,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -5101,6 +5245,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -5284,6 +5440,18 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -5487,6 +5655,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -5668,6 +5848,18 @@
                 "min": 1
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -5865,6 +6057,18 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -6082,6 +6286,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -6264,6 +6480,18 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -6467,6 +6695,18 @@
               },
               "optional": false
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -6644,6 +6884,18 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -6829,6 +7081,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -7004,6 +7268,18 @@
                 "unique": false
               },
               "optional": false
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -7195,6 +7471,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -7359,6 +7647,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -7521,6 +7821,18 @@
                 "kind": "string"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -7698,6 +8010,18 @@
                 "integer": false
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -7903,6 +8227,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -8079,6 +8415,18 @@
                 "min": 1
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -8265,6 +8613,18 @@
                 "max": 600000
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -8467,6 +8827,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -8655,6 +9027,18 @@
                 "name": "condition"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -8863,6 +9247,18 @@
                 "name": "node"
               },
               "optional": false
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "fadeEdges": {
               "rule": {
@@ -9090,6 +9486,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -9278,6 +9686,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -9460,6 +9880,18 @@
                 "kind": "boundKey"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -9664,6 +10096,18 @@
                 "kind": "boolean"
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -9888,6 +10332,18 @@
               },
               "optional": true
             },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
             "semantics": {
               "rule": {
                 "kind": "ref",
@@ -10018,6 +10474,18 @@
                 "min": 1
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {
@@ -10216,6 +10684,18 @@
                 "integer": false
               },
               "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
             },
             "semantics": {
               "rule": {

@@ -69,6 +69,13 @@ internal object PrototypeStructuralWalk {
     if (rule.text("name") == "condition") return visitCondition(value, target, path, context, depth)
     if (rule.text("name") == "action") return visitAction(value, target, path, context, depth)
     if (rule.text("name") != "node") return walk(value, target, path, context, depth)
+    if (
+      value is JsonObject &&
+        value["onAppear"] != null &&
+        path != "root" &&
+        value["visibleWhen"] == null
+    )
+      return fail("$path.onAppear", "onAppear requires visibleWhen or the root")
     val node = value as? JsonObject ?: return fail(path, "Expected object")
     context.nodes.add(Located(node, path))
     if (context.nodes.size > MAX_PROTOTYPE_NODES) return fail(path, "Node limit exceeded")

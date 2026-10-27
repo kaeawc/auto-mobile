@@ -20570,6 +20570,14 @@
                       },
                       "additionalProperties": false
                     },
+                    "onAppear": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
                     "span": {
                       "type": "integer",
                       "minimum": 1
@@ -21963,6 +21971,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22078,6 +22089,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22147,6 +22161,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22210,6 +22227,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -22291,6 +22311,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22364,6 +22387,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -22500,6 +22526,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22609,6 +22638,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22672,6 +22704,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -22721,6 +22756,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -22974,6 +23012,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23054,6 +23095,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23119,6 +23163,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -23186,6 +23233,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23249,6 +23299,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -23332,6 +23385,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23408,6 +23464,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -23522,6 +23581,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23597,6 +23659,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23660,6 +23725,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -23728,6 +23796,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23787,6 +23858,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -23851,6 +23925,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -23925,6 +24002,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -23994,6 +24074,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24048,6 +24131,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24101,6 +24187,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -24161,6 +24250,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -24263,6 +24355,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24357,6 +24452,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24446,6 +24544,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24511,6 +24612,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -24608,6 +24712,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24672,6 +24779,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -24741,6 +24851,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -24802,6 +24915,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -24939,6 +25055,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -25043,6 +25162,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -25144,6 +25266,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -25199,6 +25324,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
@@ -25282,6 +25410,9 @@
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
                     },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
                     },
@@ -25346,6 +25477,9 @@
                   "properties": {
                     "semantics": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "span": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"

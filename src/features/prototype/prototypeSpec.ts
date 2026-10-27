@@ -178,6 +178,7 @@ const checksShape = {
 };
 export const commonNodeShape = {
   semantics: prototypeSemanticsSchema.optional(),
+  onAppear: z.array(actionSchema).min(1).max(32).optional(),
   span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),

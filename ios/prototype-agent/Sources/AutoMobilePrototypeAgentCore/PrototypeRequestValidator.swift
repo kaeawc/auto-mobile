@@ -13,6 +13,7 @@ enum PrototypeRequestValidator {
         "onSubmit",
         "onRefresh",
         "onEndReached",
+        "onAppear",
     ]
     private static let methods = Set(PrototypeRequestMethod.allCases.map(\.rawValue))
     private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index", "platform", "event"]

@@ -28,6 +28,9 @@ export const actionModelOptions = {
     "request.body": {
       kotlin: "EmitContextBinding",
     },
+    "request.append": {
+      kotlin: "PrototypeRequestAppend",
+    },
     "scrollTo.to": {
       kotlin: "JsonElement",
     },
@@ -83,6 +86,18 @@ export const nodeModelOptions = {
     },
     "progress.variant": {
       kotlin: '"linear"',
+    },
+    "list.axis": {
+      kotlin: '"vertical"',
+    },
+    "list.endThreshold": {
+      kotlin: "3",
+    },
+    "drawer.dismissOnSwipe": {
+      kotlin: "true",
+    },
+    "tooltip.caret": {
+      kotlin: '"auto"',
     },
     "scroll.axis": {
       kotlin: '"vertical"',
@@ -146,6 +161,8 @@ export const nodeModelOptions = {
       "id",
       "testTag",
       "contentDescription",
+      "semantics",
+      "onAppear",
       "onTap",
       "onLongPress",
       "onDoubleTap",

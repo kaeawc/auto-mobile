@@ -1,5 +1,4 @@
 import type {
-  ClientCapabilities,
   ElicitRequestFormParams,
   ElicitResult,
   McpServer,
@@ -43,8 +42,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Form-mode elicitation is declared as `elicitation.form`, or by a bare `elicitation: {}` (the
  * pre-mode spelling). A URL-only declaration cannot show a device list.
  */
-export function declaresFormElicitation(capabilities: ClientCapabilities | undefined): boolean {
-  const elicitation: unknown = capabilities?.elicitation;
+export function declaresFormElicitation(capabilities: unknown): boolean {
+  const elicitation = isRecord(capabilities) ? capabilities.elicitation : undefined;
   if (!isRecord(elicitation)) {
     return false;
   }
@@ -53,8 +52,8 @@ export function declaresFormElicitation(capabilities: ClientCapabilities | undef
 
 /**
  * The connection's peer. Capabilities are read per connection (the server instance is one
- * client's) and nothing is remembered. A 2026-07-28 request carries an envelope and has no push
- * channel, so it never elicits.
+ * client's) and nothing is remembered. A 2026-07-28 request uses MRTR instead of this push
+ * channel.
  */
 export function deviceChoicePeerFor(server: McpServer, ctx: ServerContext): DeviceChoicePeer {
   return {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { canonicalInputEntries } from "./inputCanonical";
 import {
   TREE_INPUT_HASH_ALGORITHM,
   Clock,
@@ -12,7 +13,6 @@ import {
   LANE_TIER,
   attestationId,
   canonicalizePayload,
-  compareCodeUnits,
 } from "./attestationSchema";
 
 export const LANE_INPUT_PATHS: Record<AttestationLane, readonly string[]> = {
@@ -59,8 +59,7 @@ export class TreeEntriesInputHasher implements InputHasher {
     if (entries.length === 0) {
       throw new Error("empty input entries");
     }
-    const content = [...entries]
-      .sort((a, b) => compareCodeUnits(a.path, b.path))
+    const content = canonicalInputEntries(entries)
       .map(({ path, id, mode }) => `${JSON.stringify([path, id, mode])}\n`)
       .join("");
     return {

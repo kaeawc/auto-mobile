@@ -37,7 +37,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceClaims } from "../fakes/FakeDeviceClaims";
 import { SeededRandom } from "../fakes/SeededRandom";
-import { StoreDeviceClaimMirror } from "../../src/daemon/deviceClaims";
+import { StoreDeviceClaimMirror, type DeviceClaim } from "../../src/daemon/deviceClaims";
 import { createExecResult } from "../../src/utils/execResult";
 
 const SELF_PID = 100;
@@ -863,6 +863,32 @@ describe("the host-wide claims mirror (#11811 b)", () => {
     expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
   });
 
+  test("a daemon whose claim another took over never writes it back over the new owner's row", async () => {
+    const files = new FakeOwnershipFiles();
+    const store = new FakeDeviceClaims();
+    const peer = mirroredDaemon(files, store, PEER_PID);
+    const self = mirroredDaemon(files, store, SELF_PID);
+    store.failWrites = 1;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await peer.ownership.claim(DEVICE)).toBe(true);
+      await peer.mirror.idle();
+      // Its table write failed and is waiting to be retried when the claim is taken over.
+      files.alive.delete(PEER_PID);
+      expect(await self.ownership.claim(DEVICE)).toBe(true);
+      await self.mirror.idle();
+      files.alive.add(PEER_PID);
+
+      peer.mirror.reconcile(store);
+      await peer.mirror.idle();
+
+      expect(await tableOwner(store)).toBe(fileOwner(files));
+      expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("a busy table never changes the claim's outcome", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -914,4 +940,175 @@ describe("the host-wide claims mirror (#11811 b)", () => {
       }
     },
   );
+});
+
+describe("reading the host-wide claims table (#11811 c)", () => {
+  const DEVICE = "emulator-5554";
+  const TABLE_SOCKET = "/sockets/table.sock";
+
+  function readingDaemon(verdict: "same" | "different" | "unknown" = "same") {
+    const files = new FakeOwnershipFiles();
+    const store = new FakeDeviceClaims();
+    const probe = new FakeOwnerProbe();
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1 + DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS);
+    const ownership = new ForwardLeaseForeignDeviceOwnership(
+      SELF_PID,
+      files,
+      probe,
+      () => undefined,
+      timer,
+    );
+    const mirror = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: () => store,
+      timer,
+      generationOf: () => undefined,
+      generationVerdict: () => verdict,
+    });
+    ownership.attachClaimMirror(mirror);
+    const row = (overrides: Partial<DeviceClaim> = {}): DeviceClaim => ({
+      platform: "android",
+      deviceId: DEVICE,
+      kind: "allocation",
+      pid: FOREIGN_PID,
+      ownerToken: "peer-token",
+      claimedAtMs: 1,
+      updatedAtMs: 1,
+      ...overrides,
+    });
+    const ownerOf = async () => {
+      await ownership.refresh([DEVICE]);
+      return ownership.foreignOwnerPid(DEVICE);
+    };
+    return { files, store, probe, ownership, mirror, row, ownerOf };
+  }
+
+  test("a live foreign owner only the table names is the device's owner", async () => {
+    const d = readingDaemon();
+    await d.store.upsert(d.row());
+    expect(await d.ownerOf()).toBe(FOREIGN_PID);
+  });
+
+  test("a gone owner, this daemon's own row and a reused PID name nobody", async () => {
+    const gone = readingDaemon();
+    await gone.store.upsert(gone.row());
+    gone.files.alive.delete(FOREIGN_PID);
+    expect(await gone.ownerOf()).toBeUndefined();
+
+    const own = readingDaemon();
+    await own.store.upsert(own.row({ pid: SELF_PID }));
+    expect(await own.ownerOf()).toBeUndefined();
+
+    const reused = readingDaemon("different");
+    await reused.store.upsert(reused.row({ processGenerationToken: "boot-1:start-9" }));
+    expect(await reused.ownerOf()).toBeUndefined();
+  });
+
+  test("the owner is asked over the control socket the row records", async () => {
+    const d = readingDaemon();
+    await d.store.upsert(d.row({ metadata: metadata(TABLE_SOCKET) }));
+    d.probe.reports.set(TABLE_SOCKET, status(FOREIGN_PID, "peer-session"));
+    expect(await d.ownerOf()).toBe(FOREIGN_PID);
+    d.probe.reports.set(TABLE_SOCKET, status(FOREIGN_PID, null));
+    expect(await d.ownerOf()).toBeUndefined();
+    d.probe.reports.set(TABLE_SOCKET, { kind: "unreachable", detail: "ECONNREFUSED" });
+    expect(await d.ownerOf()).toBeUndefined();
+  });
+
+  test("an owner a claim file names wins over the table's", async () => {
+    const d = readingDaemon();
+    d.files.alive.add(7);
+    d.files.files.set(d.files.claimPath(DEVICE), { pid: 7, token: "file-token" });
+    await d.store.upsert(d.row());
+    expect(await d.ownerOf()).toBe(7);
+  });
+
+  test("an owner a file names is not asked a second time through the table", async () => {
+    const d = readingDaemon();
+    const queries: string[] = [];
+    const query = d.probe.query.bind(d.probe);
+    d.probe.query = async (socketPath: string) => {
+      queries.push(socketPath);
+      return query(socketPath);
+    };
+    d.files.files.set(d.files.claimPath(DEVICE), {
+      pid: FOREIGN_PID,
+      token: "file-token",
+      metadata: metadata(TABLE_SOCKET),
+    });
+    d.probe.reports.set(TABLE_SOCKET, status(FOREIGN_PID, "peer-session"));
+    await d.store.upsert(d.row({ metadata: metadata(TABLE_SOCKET) }));
+    expect(await d.ownerOf()).toBe(FOREIGN_PID);
+    expect(queries).toEqual([TABLE_SOCKET]);
+  });
+
+  test("an idle lease holder is not asked to give up its lease while a busy table owner remains", async () => {
+    const d = readingDaemon();
+    const LEASE_SOCKET = "/sockets/lease.sock";
+    d.files.alive.add(9);
+    d.files.files.set(d.files.leasePath(DEVICE), {
+      pid: 9,
+      token: "lease-token",
+      metadata: metadata(LEASE_SOCKET),
+    });
+    d.probe.reports.set(LEASE_SOCKET, status(9, null));
+    const asked: string[] = [];
+    Object.assign(d.probe, {
+      requestRelinquish: async (socketPath: string) => {
+        asked.push(socketPath);
+        return { kind: "relinquish", result: { released: true, reason: "idle" } };
+      },
+    });
+    // A busy owner in the table keeps the device owned, so asking the idle lease holder is moot.
+    await d.store.upsert(d.row({ metadata: metadata(TABLE_SOCKET) }));
+    d.probe.reports.set(TABLE_SOCKET, status(FOREIGN_PID, "peer-session"));
+    expect(await d.ownerOf()).toBe(9);
+    await d.ownership.relinquishIdleLease?.(DEVICE);
+    expect(asked).toEqual([]);
+  });
+
+  test("a table that cannot be read leaves the files to decide", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const d = readingDaemon();
+      d.store.get = async () => {
+        throw new Error("SQLITE_BUSY");
+      };
+      d.files.files.set(d.files.claimPath(DEVICE), { pid: FOREIGN_PID, token: "file-token" });
+      expect(await d.ownerOf()).toBe(FOREIGN_PID);
+      d.files.files.clear();
+      expect(await d.ownerOf()).toBeUndefined();
+      expect(await d.ownership.claim(DEVICE)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a claim is refused, and its file given back, while a live foreign owner holds the table row", async () => {
+    const d = readingDaemon();
+    await d.store.upsert(d.row());
+    expect(await d.ownership.claim(DEVICE)).toBe(false);
+    expect(d.files.files.has(d.files.claimPath(DEVICE))).toBe(false);
+    await d.mirror.idle();
+    expect((await d.store.get("android", DEVICE))?.pid).toBe(FOREIGN_PID);
+  });
+
+  test("a claim goes through when the table's owner is gone", async () => {
+    const d = readingDaemon();
+    await d.store.upsert(d.row());
+    d.files.alive.delete(FOREIGN_PID);
+    expect(await d.ownership.claim(DEVICE)).toBe(true);
+    await d.mirror.idle();
+    expect((await d.store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+  });
+
+  test("a claim already ours is not refused because the table is behind", async () => {
+    const d = readingDaemon();
+    expect(await d.ownership.claim(DEVICE)).toBe(true);
+    await d.mirror.idle();
+    // A foreign row lands over ours (a delayed write); the file still names this daemon.
+    await d.store.upsert(d.row({ updatedAtMs: Date.now() + 1_000_000 }));
+    expect(await d.ownership.claim(DEVICE)).toBe(true);
+  });
 });

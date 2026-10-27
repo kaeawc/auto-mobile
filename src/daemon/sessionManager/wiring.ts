@@ -203,8 +203,6 @@ export class SessionManagerWiring {
       commitReleaseRemoval: (...args) => this.releaseCommit.commitReleaseRemoval(...args),
       commitReplacedDeviceTeardown: (...args) =>
         this.releaseCommit.commitReplacedDeviceTeardown(...args),
-      restoreNonTerminalRowOverSupersededReleaseLater: (...args) =>
-        this.supersededRows.restoreNonTerminalRowOverSupersededReleaseLater(...args),
       completeReleasePersistence: (...args) =>
         this.releaseCommit.completeReleasePersistence(...args),
       recordFinalizedSessionRelease: (...args) =>
@@ -328,7 +326,6 @@ export class SessionManagerWiring {
         this.persistedAdmission.isReissuablePersistedSession(...args),
       recoverPersistedRow: (...args) => this.facade.recoverPersistedRow(...args),
       readPersistedSession: (...args) => this.persistedAdmission.readPersistedSession(...args),
-      unlessBeingReplaced: (...args) => this.persistedAdmission.unlessBeingReplaced(...args),
       terminalReleaseFromPersisted: (...args) =>
         this.persistedAdmission.terminalReleaseFromPersisted(...args),
       recoveredRowOwner: (...args) => this.facade.recoveredRowOwner(...args),
@@ -373,15 +370,9 @@ export class SessionManagerWiring {
       retryRefusedRowWrite: (...args) => this.supersededRows.retryRefusedRowWrite(...args),
       retryNonTerminalRowAfterRelease: (...args) =>
         this.supersededRows.retryNonTerminalRowAfterRelease(...args),
-      reassertSupersededLiveRow: (...args) =>
-        this.supersededRows.reassertSupersededLiveRow(...args),
-      restoreNonTerminalRowOverSupersededRelease: (...args) =>
-        this.supersededRows.restoreNonTerminalRowOverSupersededRelease(...args),
       retryTerminalRowAfterRelease: (...args) =>
         this.supersededRows.retryTerminalRowAfterRelease(...args),
       waitOutRecreationOf: (...args) => this.supersededRows.waitOutRecreationOf(...args),
-      replaceSupersededReleaseRow: (...args) =>
-        this.supersededRows.replaceSupersededReleaseRow(...args),
       getLegacyLifecycleView: (...args) => this.facade.getLegacyLifecycleView(...args),
       isAdmittedForAutomation: (...args) => this.facade.isAdmittedForAutomation(...args),
       guardedRowRewriteOptions: (...args) => this.supersededRows.guardedRowRewriteOptions(...args),

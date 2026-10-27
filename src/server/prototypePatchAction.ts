@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -193,11 +194,13 @@ async function finishPatch(
   }
   deps.retire(result);
   const output = successfulPatchOutput(fields.revision, committed, args.id);
-  const warning = [output.warning, ...prototypeTimerWarnings(applied.spec)]
+  const degraded = prototypeDegradedEffectsOutput(result.degradedEffects);
+  const warning = [output.warning, degraded.warning, ...prototypeTimerWarnings(applied.spec)]
     .filter(Boolean)
     .join(" ");
   return {
     ...output,
+    ...degraded,
     ...(warning ? { warning } : {}),
     ...prototypeAccessibilityOutput(applied.spec),
     ...prototypePlaceholderOutput(applied.spec),

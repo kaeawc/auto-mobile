@@ -61,4 +61,6 @@
   <string name="licenses_error">Unable to read the open-source licenses.</string>
   <!-- Library row that opens the project security policy. -->
   <string name="security_policy">Security policy</string>
+  <!-- Viewer overlay summarizing reduced effects; %1$d is the unsupported count and %2$d the count frozen over the frame budget. -->
+  <string name="effects_degraded">Effects reduced: %1$s unsupported, %2$s over frame budget</string>
 </resources>

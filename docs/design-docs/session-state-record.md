@@ -654,6 +654,21 @@ is deleted. The release-driven rewrite chain (`reassertSupersededLiveRow` and th
 machinery) is now unreachable from a release; it stays until the next slice, whose tests drive it
 directly, and the rebind/activity overlap repair keeps using it.
 
+W5b: the release-driven half of that chain is deleted: `restoreNonTerminalRowOverSupersededRelease`
+and its `Later` form, `replaceSupersededReleaseRow`, the ledger's row-under-pending-release record,
+and the three call sites that reasserted a live row when a late terminal write landed
+(`trackLateReleaseWrite`), when a non-terminal commit settled, or after a fence's row was
+rewritten. What remains is the rebind/activity overlap repair (`oweSupersededRowReassert(session,
+[])`, its retries, drain and activity hook). The superseded-reason plumbing that the overlap repair
+still carries (`remember`, `expectReassert`'s reasons, the statement guard's `supersededReasons`)
+was always empty from production callers, and W5c removes it: the ledger no longer remembers reasons
+(`remember`, `isOwedFor`, `isBeingRewritten`, the owed entry's reasons), `reassertSupersededLiveRow`
+takes only the session, and the live-row rewrite's statement guard refuses every terminal row. What
+stays is the release write's `supersededReasons`, which carries only a terminal upgrade's own earlier
+reasons (`predecessors`). W5c also closes the gap the W5b review found: a finishing rewrite restores
+a terminal fence's row only for a volatile release (whose row was written first) or one that has
+committed, never for a durable release that has not committed and may still decline.
+
 ## 7. Risks
 
 - Concurrency core: orderings that exist only as comments (a non-terminal release must

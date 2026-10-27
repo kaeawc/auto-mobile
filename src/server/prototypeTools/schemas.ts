@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";

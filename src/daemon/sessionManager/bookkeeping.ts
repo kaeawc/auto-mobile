@@ -112,7 +112,6 @@ export class SessionBookkeeping {
       }
     } finally {
       this.host.rowWriter.clearPendingNonTerminalReleases();
-      this.host.superseded.clearRowsUnderPendingRelease();
     }
   }
 

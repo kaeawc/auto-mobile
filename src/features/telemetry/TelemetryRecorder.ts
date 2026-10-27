@@ -30,6 +30,7 @@ export type TelemetryCategory =
   | "layout"
   | "performance"
   | "toolcall"
+  | "elicitation"
   | "prototype";
 
 export interface TelemetryEvent {
@@ -503,6 +504,26 @@ export class TelemetryRecorder {
     this.pushToSocket({
       category: "toolcall",
       timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
+  }
+
+  /** Push-only: how an ambiguous-device question ended, by declared capability and era (#15588). */
+  recordElicitationEvent(event: {
+    toolName: string;
+    era: string;
+    declared: string;
+    outcome: string;
+    candidateCount: number;
+    atMs: number;
+    latencyMs?: number;
+  }): void {
+    const { deviceId, sessionId } = this.snapshotContext();
+    this.pushToSocket({
+      category: "elicitation",
+      timestamp: event.atMs,
       deviceId,
       sessionId,
       data: event,

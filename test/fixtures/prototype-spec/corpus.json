@@ -70,6 +70,9 @@
     "pager-indicator-dots.json",
     "pager-options.json",
     "platform-call.json",
+    "platform-feedback-bound-effect.json",
+    "platform-feedback-handler.json",
+    "platform-feedback-haptics-sound.json",
     "platform-handler.json",
     "platform-reads.json",
     "platform-repeat.json",
@@ -607,6 +610,19 @@
     "platform-device-unknown-state.json",
     "platform-duplicate-permission.json",
     "platform-event-outside-handler.json",
+    "platform-feedback-asset-sound.json",
+    "platform-feedback-missing-effect.json",
+    "platform-feedback-missing-sound.json",
+    "platform-feedback-read-state.json",
+    "platform-feedback-undeclared-haptics.json",
+    "platform-feedback-undeclared-sound.json",
+    "platform-feedback-unknown-arg.json",
+    "platform-feedback-unknown-call.json",
+    "platform-feedback-unknown-effect.json",
+    "platform-feedback-unknown-sound.json",
+    "platform-feedback-volume-fractional.json",
+    "platform-feedback-volume-negative.json",
+    "platform-feedback-volume-over.json",
     "platform-handlers-missing-on.json",
     "platform-into-array-element.json",
     "platform-into-platform.json",
@@ -830,6 +846,8 @@
     "strict-gate-prototype_network_v1.json",
     "strict-gate-prototype_pager_options_v1.json",
     "strict-gate-prototype_platform_device_v1.json",
+    "strict-gate-prototype_platform_haptics_v1.json",
+    "strict-gate-prototype_platform_sound_v1.json",
     "strict-gate-prototype_platform_test_v1.json",
     "strict-gate-prototype_platform_v1.json",
     "strict-gate-prototype_reduced_motion_v1.json",
@@ -1313,6 +1331,16 @@
     "platform-call.json": [
       "prototype_data_model_v1",
       "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-feedback-bound-effect.json": [
+      "prototype_platform_haptics_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-feedback-handler.json": ["prototype_platform_haptics_v1", "prototype_platform_v1"],
+    "platform-feedback-haptics-sound.json": [
+      "prototype_platform_haptics_v1",
+      "prototype_platform_sound_v1",
       "prototype_platform_v1"
     ],
     "platform-handler.json": [

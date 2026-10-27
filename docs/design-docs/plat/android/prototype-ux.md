@@ -1381,6 +1381,18 @@ table, so a module is added by adding its entry. The placeholder module `test` (
 `test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
 vocabulary testable before any real module exists; no production runtime advertises it.
 
+**Haptics and sound (#14329, contract only).** The `haptics` module has one call,
+`haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
+`success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`
+(capability `prototype_platform_haptics_v1`). The `sound` module has `sound.play` with `sound`
+one of `click`, `send`, `receive` or `shutter` and an optional `volume`, a whole number 0-100
+(`prototype_platform_sound_v1`). Both lists are closed: a literal `{asset: ...}` sound is refused
+until the audio asset type (#14254) lands. Neither module has events or `/platform` state, needs a
+runtime permission (`VIBRATE` is a normal permission) or touches personal data. The validators,
+gates and shared corpus (`platform-feedback-*` fixtures) are in; the Android and iOS runtimes, the
+`feedbackLog` ring that `inspect` returns, and the device acceptance checks follow in their own
+slices, so no renderer advertises either capability yet.
+
 | Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `call`                 | Required: `"<module>.<op>"` naming a call in `platformModules`, else `Unknown platform call` at `.call`. Its module must be listed in `requires.platform`, its permissions in `requires.permissions` and its background names in `requires.background`; each error is at `.call`.                                                                                                         |

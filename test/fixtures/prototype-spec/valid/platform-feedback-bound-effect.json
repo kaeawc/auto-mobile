@@ -1,0 +1,29 @@
+{
+  "id": "feedback",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["haptics"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "haptics.perform",
+        "args": {
+          "effect": {
+            "state": "k"
+          }
+        }
+      }
+    ]
+  },
+  "state": {
+    "k": "click"
+  }
+}

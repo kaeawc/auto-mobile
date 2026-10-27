@@ -17,6 +17,26 @@ const platformCall = {
   ...label,
   onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
 };
+const hapticsCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "haptics.perform",
+      args: { effect: { value: "click" } },
+    },
+  ],
+};
+const soundCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "sound.play",
+      args: { sound: { value: "send" }, volume: { value: 80 } },
+    },
+  ],
+};
 const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
@@ -129,6 +149,8 @@ const fixtures: Record<string, Node> = {
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
+  prototype_platform_haptics_v1: hapticsCall,
+  prototype_platform_sound_v1: soundCall,
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.

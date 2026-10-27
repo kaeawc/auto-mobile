@@ -1084,12 +1084,18 @@ semantics cleared. A dragged sheet follows the
 pointer directly and springs to the selected detent on release. Reduced motion
 uses fades without translation, scaling or detent springs. Off motion snaps and
 keeps the settled rendering unchanged. Window and modal transitions and detent
-settles participate in the motion-active signal.
+settles participate in the motion-active signal, following the conventions of
+#15114 (see Motion-active signal): the surface reports itself through
+`ReportPrototypeMotion` while an exit or settle runs, so `observe` never captures it mid-flight.
 
 `repeat.stagger` is an integer 0–100 ms per instance, in item order. Only template
 children with `visibleWhen` receive it. It adds to container stagger and transition
 delay through the existing enter-delay machinery, with each total capped at
-600 ms; exits are not delayed. iOS accepts the structural contract but does not
+600 ms; exits are not delayed.
+
+Test-budget note: the repository's 100 ms per-test unit budget is measured only from bun's JUnit
+reporter (`scripts/test-ts.sh`, `scripts/validate-bun-test-timings.sh`). It does not cover Gradle or
+Robolectric tests, so the Compose and host tests for this feature are not held to it. iOS accepts the structural contract but does not
 advertise this capability, so host preflight refuses either authored field.
 
 ### Motion profiles (#15115, `prototype_reduced_motion_v1`)

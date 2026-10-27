@@ -44,26 +44,26 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## 👆 Interact
 
-| Tool                          | What it does                                                                                                  |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units                  |
-| 👆 <code>tapOn</code>         | Tap an element by text, id, or test tag                                                                       |
-| 🤏 <code>tapAny</code>        | Tap any clickable element; scope with container or scrollableContainer                                        |
-| 👉 <code>swipeOn</code>       | Swipe/scroll on screen or elements                                                                            |
-| ↔️ <code>swipeAt</code>       | Swipe between two screen points                                                                               |
-| 🫳 <code>dragAndDrop</code>   | Drag and drop element                                                                                         |
-| 〰️ <code>dragPath</code>      | Drag a finger along a timed path                                                                              |
-| 🖱️ <code>hoverAt</code>       | Hover a stylus or mouse over a path with no contact (Android)                                                 |
-| 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                                 |
-| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                                           |
-| ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                                             |
-| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV; stops `focused`, `max_steps` or `stuck`                         |
-| 🎛️ <code>setUIState</code>    | Set multiple form fields by desired state                                                                     |
-| 📝 <code>selectAllText</code> | Select all text in focused input                                                                              |
-| 🔘 <code>pressButton</code>   | Press a device or navigation button                                                                           |
-| ⌨️ <code>keyboard</code>      | Open, close, detect, or switch the keyboard / IME                                                             |
-| 📋 <code>clipboard</code>     | Clipboard operations (copy/paste/clear/get)                                                                   |
-| 🗣️ <code>siri</code>          | iOS: activate Siri with a phrase (e.g. an App Shortcut), returns the observation; Android returns unsupported |
+| Tool                          | What it does                                                                                                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code>         | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units                                                                                        |
+| 👆 <code>tapOn</code>         | Tap an element by text, id, or test tag                                                                                                                                             |
+| 🤏 <code>tapAny</code>        | Tap any clickable element; scope with container or scrollableContainer                                                                                                              |
+| 👉 <code>swipeOn</code>       | Swipe/scroll on screen or elements                                                                                                                                                  |
+| ↔️ <code>swipeAt</code>       | Swipe between two screen points                                                                                                                                                     |
+| 🫳 <code>dragAndDrop</code>   | Drag and drop element                                                                                                                                                               |
+| 〰️ <code>dragPath</code>      | Drag a finger along a timed path                                                                                                                                                    |
+| 🖱️ <code>hoverAt</code>       | Hover a stylus or mouse over a path with no contact (Android)                                                                                                                       |
+| 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                                                                                                       |
+| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                                                                                                                 |
+| ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                                                                                                                   |
+| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV; stops `focused`, `max_steps` or `stuck`                                                                                               |
+| 🎛️ <code>setUIState</code>    | Set multiple form fields by desired state                                                                                                                                           |
+| 📝 <code>selectAllText</code> | Select all text in focused input                                                                                                                                                    |
+| 🔘 <code>pressButton</code>   | Press a device or navigation button                                                                                                                                                 |
+| ⌨️ <code>keyboard</code>      | Open, close, detect, or switch the keyboard / IME                                                                                                                                   |
+| 📋 <code>clipboard</code>     | Clipboard operations (copy/paste/clear/get)                                                                                                                                         |
+| 🗣️ <code>siri</code>          | iOS: activate Siri with a phrase (off by default: setToolEnabled; needs the siriAndAppIntents service) (e.g. an App Shortcut), returns the observation; Android returns unsupported |
 
 ## 📦 Apps, files & data
 

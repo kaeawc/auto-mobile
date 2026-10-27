@@ -38110,7 +38110,8 @@
           "description": "What the user would say to Siri, e.g. an App Shortcut phrase \"Show my orders in Playground\"",
           "type": "string",
           "minLength": 1,
-          "maxLength": 500
+          "maxLength": 500,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
         },
         "platform": {
           "type": "string",

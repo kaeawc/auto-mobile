@@ -3,6 +3,7 @@ import { DefaultDeviceServicePreflight } from "../utils/deviceServicePreflight";
 import {
   ActivateSiri,
   SIRI_PHRASE_MAX_LENGTH,
+  SIRI_PHRASE_PATTERN,
   type ActivateSiriResult,
 } from "../features/action/ActivateSiri";
 import type { BootedDevice } from "../models";
@@ -15,8 +16,10 @@ import { PLAN_RELEVANT } from "./toolRegistryTypes";
 const siriInput = z.object({
   phrase: z
     .string()
+    .trim()
     .min(1)
     .max(SIRI_PHRASE_MAX_LENGTH)
+    .regex(SIRI_PHRASE_PATTERN, "siri phrase cannot contain control characters")
     .describe(
       'What the user would say to Siri, e.g. an App Shortcut phrase "Show my orders in Playground"',
     ),
@@ -52,7 +55,7 @@ export function createSiriHandler(deps: SiriToolDependencies = {}) {
     const status = statusOf(result);
     const response = createStructuredToolResponse({
       message: result.success
-        ? `Activated Siri with "${result.phrase}"`
+        ? `Sent "${result.phrase}" to Siri. The runner cannot confirm Siri is enabled: if nothing happened, enable Siri in the simulator Settings.`
         : (result.error ?? "Siri activation failed"),
       ...result,
       status,

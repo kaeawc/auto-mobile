@@ -16,6 +16,8 @@ import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInter
 /** Upper bound on the runner's Siri activation; the answer UI settles after it returns. */
 export const SIRI_REQUEST_TIMEOUT_MS = 10_000;
 export const SIRI_PHRASE_MAX_LENGTH = 500;
+/** Printable text only: NUL, newlines and other control characters never reach Siri. */
+export const SIRI_PHRASE_PATTERN = /^[^\u0000-\u001f\u007f]+$/;
 
 export const SIRI_ANDROID_UNSUPPORTED =
   "siri is iOS only: it drives XCUIDevice.siriService. Android App Actions are not supported yet.";
@@ -58,11 +60,15 @@ export class ActivateSiri extends BaseVisualChange {
     if (this.device.platform !== "ios") {
       return { success: false, unsupported: true, phrase: text, error: SIRI_ANDROID_UNSUPPORTED };
     }
-    if (text.length === 0 || text.length > SIRI_PHRASE_MAX_LENGTH) {
+    if (
+      text.length === 0 ||
+      text.length > SIRI_PHRASE_MAX_LENGTH ||
+      !SIRI_PHRASE_PATTERN.test(text)
+    ) {
       return {
         success: false,
         phrase: text,
-        error: `siri phrase must be 1 to ${SIRI_PHRASE_MAX_LENGTH} characters.`,
+        error: `siri phrase must be 1 to ${SIRI_PHRASE_MAX_LENGTH} printable characters (no control characters).`,
       };
     }
     await this.servicePreflight.assertEnabled(this.device, "siri", signal);

@@ -402,22 +402,8 @@ export class StatelessMcpHttpEndpoint<
     );
   }
 
-  /** The SDK owns modern protocol serving; this endpoint still owns request lifetime. */
-  private async handleModern(
-    req: Req,
-    res: Res,
-    parsedBody: unknown,
-    scope: StatelessMcpRequestScope,
-    headerSessionKey: string | undefined,
-    sendJsonRpcError: (message: string, error?: unknown) => void,
-  ): Promise<void> {
-    const bus = this.getModernBus();
-    const slot = this.openListenSlot(parsedBody, res);
-    if (!slot) {
-      return;
-    }
-    const controller = new AbortController();
-    const handler = (this.deps.modern?.createHandler ?? createMcpHandler)(
+  private createModernHandler(bus: ServerEventBus): Pick<McpHttpHandler, "fetch" | "close"> {
+    return (this.deps.modern?.createHandler ?? createMcpHandler)(
       (ctx) => {
         const current = this.modernScope.getStore();
         const { req: scopedReq, scope: scopedScope } = current ?? {};
@@ -434,6 +420,31 @@ export class StatelessMcpHttpEndpoint<
       },
       { legacy: "reject", responseMode: "sse", keepAliveMs: 0, bus },
     );
+  }
+
+  /** The SDK owns modern protocol serving; this endpoint still owns request lifetime. */
+  private async handleModern(
+    req: Req,
+    res: Res,
+    parsedBody: unknown,
+    scope: StatelessMcpRequestScope,
+    headerSessionKey: string | undefined,
+    sendJsonRpcError: (message: string, error?: unknown) => void,
+  ): Promise<void> {
+    const bus = this.getModernBus();
+    const slot = this.openListenSlot(parsedBody, res);
+    if (!slot) {
+      return;
+    }
+    const controller = new AbortController();
+    let handler: ReturnType<typeof this.createModernHandler>;
+    try {
+      handler = this.createModernHandler(bus);
+    } catch (error) {
+      // The slot was reserved before the handler existed; nothing else would release it.
+      slot.release();
+      throw error;
+    }
     const request = this.track(scope, headerSessionKey, parsedBody, handler, {
       close: async () => {
         controller.abort();

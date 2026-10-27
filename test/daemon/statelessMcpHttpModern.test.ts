@@ -505,6 +505,21 @@ describe("opt-in modern HTTP routing", () => {
     await again;
   });
 
+  test("a handler factory failure releases the reserved listen slot", async () => {
+    const h = harness("1", true);
+    h.createHandler.mockImplementationOnce(() => {
+      throw new Error("factory failed");
+    });
+    await expect(
+      h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error),
+    ).rejects.toThrow("factory failed");
+    const second = h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
+    await h.fetched;
+    expect(h.createHandler).toHaveBeenCalledTimes(2);
+    await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+    await second;
+  });
+
   test("a separate keyed cancellation POST reaches the modern in-flight index", async () => {
     const h = harness("true", true);
     const pending = h.endpoint.handle(h.request("key"), new FakeResponse(), listenBody, h.error);

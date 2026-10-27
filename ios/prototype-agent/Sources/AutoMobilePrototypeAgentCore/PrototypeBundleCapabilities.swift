@@ -7,6 +7,7 @@ enum PrototypeBundleCapabilities {
         let value = try PrototypeBundleJSON(data, code: .specInvalidJSON, path: "spec.json").value
         guard let spec = value.objectFields else { return [] }
         var names = Set<String>()
+        if spec["motion"] == .string("expressive") { names.insert(PrototypeMotionV3.capability) }
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
         if spec["strings"] != nil { need("strings") }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
@@ -42,6 +43,7 @@ enum PrototypeBundleCapabilities {
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
             if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["sharedKey"] != nil { need("shared_element") }
+            if PrototypeMotionV3.required(node) { names.insert(PrototypeMotionV3.capability) }
             if PrototypeMediaItems.usedBy(node) { names.insert(PrototypeMediaItems.capability) }
             if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""

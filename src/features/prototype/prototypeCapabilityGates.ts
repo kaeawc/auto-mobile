@@ -133,6 +133,8 @@ import {
   prototypeChoreographyFields,
   prototypeChoreographyUnsupportedMessage,
 } from "./prototypeChoreography";
+import { prototypeMotionV3Fields, prototypeMotionV3UnsupportedMessage } from "./prototypeMotionV3";
+import { PROTOTYPE_MOTION_V3_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeMotionV2Fields, prototypeMotionV2UnsupportedMessage } from "./prototypeMotionV2";
 import { prototypeLazyListFields, prototypeLazyListUnsupportedMessage } from "./prototypeLazyList";
 import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
@@ -214,6 +216,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: (spec) => (record(record(spec)?.theme)?.design === "platform" ? ["theme.design"] : []),
     unsupportedMessage: (_fields, platform) =>
       `The connected ${platform} renderer does not advertise ${PROTOTYPE_DESIGN_PLATFORM_CAPABILITY}. Update the renderer or use theme.design: "material". Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_MOTION_V3_CAPABILITY,
+    fields: prototypeMotionV3Fields,
+    unsupportedMessage: prototypeMotionV3UnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,

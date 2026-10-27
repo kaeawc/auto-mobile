@@ -722,6 +722,7 @@ final class PrototypeAgent: NSObject {
         let heldByOthers = captureHold.isHiding
         let ticket = captureHold.hide(deadlineMs: deadlineMs)
         let wasVisible = window?.isHidden == false || heldByOthers
+        model.iconMotionActivity.capturing = true
         window?.isHidden = true
         CATransaction.flush()
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(deadlineMs)) { [weak self] in
@@ -739,6 +740,7 @@ final class PrototypeAgent: NSObject {
     }
 
     private func showAfterCapture() {
+        model.iconMotionActivity.capturing = false
         window?.isHidden = model.spec == nil
         updateAccessibility(session: model.session)
     }

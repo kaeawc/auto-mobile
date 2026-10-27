@@ -15,6 +15,9 @@ internal fun PrototypeEffectIcon(
   node: PrototypeRenderNode,
   modifier: Modifier,
   tint: Color,
+  glyph: @Composable (ImageVector, Modifier) -> Unit = { image, glyphModifier ->
+    Icon(image, contentDescription = null, modifier = glyphModifier, tint = tint)
+  },
 ) {
   val type = (node.source as? PrototypeIconNode)?.effect?.type
   val crossfade =
@@ -23,8 +26,8 @@ internal fun PrototypeEffectIcon(
       (type == "replace" ||
         (type == "drawOn" && LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL))
   if (crossfade) {
-    Crossfade(icon, modifier, animationSpec = tween(600), label = "prototypeIconReplace") { glyph ->
-      Icon(glyph, contentDescription = null, tint = tint)
+    Crossfade(icon, animationSpec = tween(600), label = "prototypeIconReplace") { image ->
+      glyph(image, modifier)
     }
-  } else Icon(icon, contentDescription = null, modifier = modifier, tint = tint)
+  } else glyph(icon, modifier)
 }

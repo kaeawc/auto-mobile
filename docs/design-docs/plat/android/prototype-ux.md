@@ -720,6 +720,14 @@ Successful shows report Android approximations and iOS version fallbacks in
 `platformNotes` at the icon's `.effect` path; when discovery has no OS version,
 notes describe the conditional fallback explicitly.
 
+The iOS `hide_for_capture` hold removes repeated symbol modifiers, returning icons to
+rest until the last capture token releases or expires. Restoring restarts native
+repeats. Local `PrototypeIconMotionActivity` tracks mounted repeated effects and
+masks activity during capture; finite native repeats remain conservatively active
+until unmounted because SF Symbols provides no completion callback. iOS has no
+shared motion-active wire signal or shimmer reporter yet; this local signal is
+not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
+
 Android currently uses a self-contained Compose animation with 600 ms cycles;
 this should move onto the #15249 keyframes engine when it is available.
 

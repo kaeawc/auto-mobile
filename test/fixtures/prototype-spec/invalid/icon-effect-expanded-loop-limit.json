@@ -15,6 +15,7 @@
     "root": {
       "type": "column",
       "repeat": {
+        "as": "item",
         "items": [{}, {}, {}, {}, {}, {}, {}, {}, {}]
       },
       "children": [
@@ -29,6 +30,6 @@
       ]
     }
   },
-  "expectedPath": "root.repeat.as",
-  "expectedMessage": "Required property"
+  "expectedPath": "root.repeat",
+  "expectedMessage": "Expanded animated effect limit exceeded"
 }

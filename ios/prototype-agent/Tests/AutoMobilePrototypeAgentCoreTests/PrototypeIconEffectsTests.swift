@@ -13,7 +13,7 @@ final class PrototypeIconEffectsTests: XCTestCase {
     }
 
     func testSharedFixturesValidateAndDecode() throws {
-        for name in ["icon-effects", "icon-effects-repeat"] {
+        for name in ["icon-effects", "icon-effects-repeat", "icon-effects-integer-spellings"] {
             let input = try Data(
                 contentsOf: PrototypeSpecFixtures.directory
                     .appendingPathComponent("valid/\(name).json")
@@ -33,6 +33,31 @@ final class PrototypeIconEffectsTests: XCTestCase {
             let invalid = try PrototypeSpecFixtures.invalid(name)
             XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(invalid.spec)))
         }
+    }
+
+    func testExpandedFixtureReachesLoopCap() throws {
+        let fixture = try PrototypeSpecFixtures.invalid("icon-effect-expanded-loop-limit")
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(fixture.spec))) {
+            XCTAssertEqual(
+                $0 as? PrototypeLoadError,
+                .invalidSpec(path: fixture.expectedPath, message: "Expanded animated effect limit exceeded")
+            )
+        }
+    }
+
+    @MainActor
+    func testCaptureMasksLocalLoopActivity() {
+        let activity = PrototypeIconMotionActivity()
+        activity.begin()
+        activity.begin()
+        XCTAssertTrue(activity.motionActive)
+        activity.capturing = true
+        XCTAssertFalse(activity.motionActive)
+        activity.end()
+        activity.capturing = false
+        XCTAssertTrue(activity.motionActive)
+        activity.end()
+        XCTAssertFalse(activity.motionActive)
     }
 
     func testEveryTypeAtEveryVersionTier() {

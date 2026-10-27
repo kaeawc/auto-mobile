@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import type { PrototypeSpec } from "../../../src/features/prototype/prototypeSpec";
 import { prototypeSpecSchema } from "../../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypeIconEffectFields } from "../../../src/features/prototype/prototypeIconEffects";
@@ -10,7 +11,7 @@ const spec = (effect: unknown) => ({
   state: { flag: false },
   root: { type: "icon", name: "home", effect },
 });
-for (const name of ["icon-effects", "icon-effects-repeat"]) {
+for (const name of ["icon-effects", "icon-effects-repeat", "icon-effects-integer-spellings"]) {
   test(`shared fixture ${name} accepts both contract and tool schema`, () => {
     const value = JSON.parse(
       readFileSync(`test/fixtures/prototype-spec/valid/${name}.json`, "utf8"),
@@ -72,4 +73,43 @@ test("icon loops charge the animated budget without consuming static style-effec
     },
   };
   expect(validatePrototypeSpec(value).success).toBe(true);
+});
+
+test("expanded repeated icons fail at the loop budget", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      "test/fixtures/prototype-spec/invalid/icon-effect-expanded-loop-limit.json",
+      "utf8",
+    ),
+  );
+  expect(validatePrototypeSpec(fixture.spec)).toEqual({
+    success: false,
+    error: { path: fixture.expectedPath, message: fixture.expectedMessage },
+  });
+});
+
+test("icon effect notes aggregate identical fallbacks and cap paths", () => {
+  const value: PrototypeSpec = {
+    id: "notes",
+    window: { placement: { type: "fullscreen" }, opacity: 1 },
+    root: {
+      type: "row",
+      children: Array.from({ length: 23 }, () => ({
+        type: "icon",
+        name: "home",
+        effect: { type: "rotate" },
+      })),
+    },
+  };
+  for (const platform of ["ios", "android"] as const) {
+    const notes = prototypePlatformNotes(value, platform, () => true, 17).filter(
+      (n) => n.construct === "icon.effect",
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0].paths).toEqual(
+      Array.from({ length: 20 }, (_, i) => `root.children[${i}].effect`),
+    );
+    expect(notes[0].total).toBe(23);
+    expect(notes[0].effect).toBe(platform === "ios" ? "ignored" : "substituted");
+  }
 });

@@ -20,13 +20,13 @@ const fallbacks: Readonly<Record<string, { minimum: number; fallback: string }>>
   drawOn: { minimum: 26, fallback: "replace" },
 };
 
-/** Notes stay path-specific even when the same effect is used at many sites. */
+/** Aggregate each distinct fallback in tree order, using the shared path cap. */
 export function prototypeIconEffectNotes(
   spec: unknown,
   platform: "android" | "ios",
   osMajor?: number,
 ): PrototypePlatformNote[] {
-  const notes: PrototypePlatformNote[] = [];
+  const notes = new Map<string, PrototypePlatformNote>();
   walkPrototypeNodes(spec, (node, path) => {
     const type = record(node.effect)?.type;
     if (node.type !== "icon" || typeof type !== "string") return;
@@ -39,13 +39,20 @@ export function prototypeIconEffectNotes(
         : osMajor === undefined
           ? `On iOS below ${fallback.minimum}, ${type} falls back to ${fallback.fallback}; the connected OS version is unknown.`
           : `On iOS ${osMajor}, ${type} falls back to ${fallback.fallback} (native ${type} needs iOS ${fallback.minimum}).`;
-    notes.push({
+    const existing = notes.get(detail);
+    if (existing) {
+      const count = (existing.total ?? existing.paths.length) + 1;
+      if (existing.paths.length < 20) existing.paths.push(`${path}.effect`);
+      else existing.total = count;
+      return;
+    }
+    notes.set(detail, {
       platform,
       construct: "icon.effect",
-      effect: "substituted",
+      effect: platform === "ios" && fallback.fallback === "none" ? "ignored" : "substituted",
       paths: [`${path}.effect`],
       detail,
     });
   });
-  return notes;
+  return [...notes.values()];
 }

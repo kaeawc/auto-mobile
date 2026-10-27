@@ -877,3 +877,11 @@ name changes. Reduced/off profiles rest; reduced replace uses a plain crossfade.
 The host reports fallback notes with node paths, using the discovered OS version
 when available. The shared validator charges repeated effects against the eight
 animated-effect budget, including expanded list instances.
+
+The iOS `hide_for_capture` hold removes repeated symbol modifiers, returning icons to
+rest until the last capture token releases or expires. Restoring restarts native
+repeats. Local `PrototypeIconMotionActivity` tracks mounted repeated effects and
+masks activity during capture; finite native repeats remain conservatively active
+until unmounted because SF Symbols provides no completion callback. iOS has no
+shared motion-active wire signal or shimmer reporter yet; this local signal is
+not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.

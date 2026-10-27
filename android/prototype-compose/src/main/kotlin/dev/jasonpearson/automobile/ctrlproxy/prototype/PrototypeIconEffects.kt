@@ -74,7 +74,7 @@ private data class IconMotionPlan(
 
   fun frame(type: String, phase: Float, scale: Float): PrototypeIconFrame {
     if (!enabled || captured) return PrototypeIconFrame()
-    if (!full) return PrototypeIconFrame(alpha = phase)
+    if (!full) return PrototypeIconFrame()
     if (scaleTrigger) return PrototypeIconFrame(scale = scale)
     return prototypeIconFrame(type, phase)
   }

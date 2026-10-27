@@ -4,6 +4,7 @@
 
     /// Keep native symbol APIs here; the version/fallback decision lives in the pure core table.
     struct PrototypeIconEffectView<Content: View>: View {
+        let activity: PrototypeIconMotionActivity
         let effect: IconEffect
         let value: JSONValue?
         let name: String
@@ -11,6 +12,7 @@
         @ViewBuilder let content: () -> Content
         @State private var tick = 0
         @State private var scaleActive = false
+        @State private var reportingLoop = false
 
         private var kind: PrototypeIconEffectKind? {
             PrototypeIconEffectKind(rawValue: effect.type)?.resolved(
@@ -23,11 +25,27 @@
             return repeatSpec.count.map { .repeat($0) } ?? .repeating
         }
 
+        private var restingForCapture: Bool { effect.repeat != nil && activity.capturing }
+
+        private var reportsLoop: Bool {
+            profile == .full && !restingForCapture && effect.repeat != nil && kind != nil
+        }
+
+        private func reportLoop(_ active: Bool) {
+            guard active != reportingLoop else { return }
+            reportingLoop = active
+            if active { activity.begin() } else { activity.end() }
+        }
+
         var body: some View {
             rendered
+                .transaction { if restingForCapture { $0.disablesAnimations = true } }
+                .onChange(of: reportsLoop, initial: true) { _, active in reportLoop(active) }
+                .onDisappear { reportLoop(false) }
                 .onAppear { if effect.trigger == nil { tick += 1 } }
                 .onChange(of: value) { _, _ in tick += 1 }
-                .task(id: "\(tick):\(profile):\(effect.type)") {
+                .task(id: "\(tick):\(profile):\(effect.type):\(restingForCapture)") {
+                    guard !restingForCapture else { scaleActive = false; return }
                     guard tick > 0, profile == .full, kind == .scale, effect.trigger == nil else { return }
                     var left = effect.repeat?.count ?? (effect.repeat == nil ? 1 : Int.max)
                     do {
@@ -43,7 +61,7 @@
         }
 
         @ViewBuilder private var rendered: some View {
-            if profile == .off { content() }
+            if profile == .off || restingForCapture { content() }
             else if profile == .reduced {
                 if effect.type == "replace" {
                     content().id(name).transition(.opacity).animation(.easeInOut(duration: 0.25), value: name)

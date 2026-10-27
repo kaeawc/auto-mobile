@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -41,6 +42,33 @@ class PrototypeIconEffectsTest {
         file.name,
       )
     }
+  }
+
+  @Test
+  fun `integer spellings decode repeat counts`() {
+    val result =
+      PrototypeSpecValidator.validate(
+        fixtureDirectory().resolve("valid/icon-effects-integer-spellings.json").readText(),
+      ) as PrototypeSpecValidation.Success
+    val children = (result.spec.root as PrototypeRowNode).children
+    assertEquals(listOf(5, 10), children.map { (it as PrototypeIconNode).effect?.repeat?.count })
+    for (spelling in listOf("5.0", "1e1")) {
+      assertNotNull(Json.decodeFromString<PrototypeIconEffectRepeat>(spelling).count)
+    }
+  }
+
+  @Test
+  fun `expanded fixture reaches loop cap`() {
+    val fixture =
+      Json.parseToJsonElement(
+          fixtureDirectory().resolve("invalid/icon-effect-expanded-loop-limit.json").readText(),
+        )
+        .jsonObject
+    val result =
+      PrototypeSpecValidator.validate(fixture.getValue("spec").toString())
+        as PrototypeSpecValidation.Failure
+    assertEquals(fixture.getValue("expectedPath").jsonPrimitive.content, result.error.path)
+    assertEquals("Expanded animated effect limit exceeded", result.error.message)
   }
 
   companion object {

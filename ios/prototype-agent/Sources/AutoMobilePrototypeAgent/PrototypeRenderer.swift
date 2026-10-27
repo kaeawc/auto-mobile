@@ -517,22 +517,14 @@
                 let value = effect.trigger?.key.flatMap { model.state[$0] }
                     ?? effect.trigger?.data.flatMap { PrototypeDataPointer.resolve(model.spec?.data, pointer: $0) }
                 PrototypeIconEffectView(
+                    activity: model.iconMotionActivity,
                     effect: effect,
                     value: value,
                     name: node.name ?? "",
                     profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile
                 ) {
-                    effectIconImage
+                    plainIconView
                 }
-            } else { plainIconView }
-        }
-
-        @ViewBuilder private var effectIconImage: some View {
-            if let symbol = prototypeSymbol(node.name, variant: node.variant) {
-                Image(systemName: symbol)
-                    .font(.system(size: style?.textSize ?? 24))
-                    .foregroundColor(palette.color(style?.color) ?? contentColor)
-                    .accessibilityHidden(accessibilityLabelOverride == nil)
             } else { plainIconView }
         }
 

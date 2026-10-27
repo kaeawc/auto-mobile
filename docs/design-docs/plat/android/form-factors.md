@@ -58,6 +58,19 @@ The DHU is a host desktop app; the phone's Android Auto app streams the car UI a
 
 ## Android Automotive OS: investigate
 
+### CtrlProxy setup for the foreground user (#14918)
+
+An automotive image usually has a headless system user, so the driver is a secondary user (often 10).
+`pm grant` and `pm path` default to user 0, `pm list packages` to all users, and `dumpsys accessibility`
+dumps every user's state in id order (so an untargeted read sees user 0's empty one); `settings` already
+follows the current user on Android 10+. When the booted device's `formFactor` is `automotive`,
+`resolveSetupUser` (`src/ctrlProxy/setupUser.ts`) reads `am get-current-user` and CtrlProxy's install
+check, enabled-services read, enable, disable, rebind writes and the local-network grant target that user,
+and the rebind health check reads that user's `User state[` block. A device that is not automotive issues
+no extra command and the exact commands it always did. An unreadable user is an `ActionableError` naming
+the user problem. Unverified on an AAOS emulator (#14916); the gate relies on the AVD's form factor, so a
+physical head unit is not covered.
+
 An AAOS image is a normal Android build with a car SystemUI; app windows are in the accessibility tree. Same three questions as TV (service enables, `observe` returns a hierarchy, multi-display behaviour for cluster/passenger screens; see `docs/design-docs/plat/android/windowing.md`).
 
 ## Device selection change

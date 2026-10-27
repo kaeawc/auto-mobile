@@ -33,7 +33,7 @@ export interface SessionReleasePersistenceHost {
   dropReleaseRetry(snapshot: SessionReleaseSnapshot): void;
   readSessionRow(sessionId: string): Promise<DeviceSession | undefined>;
   readonly sessions: Pick<Map<string, Session>, "get" | "has">;
-  readonly superseded: Pick<SupersededRowReasserts, "remembered" | "predecessors" | "noteRefused">;
+  readonly superseded: Pick<SupersededRowReasserts, "predecessors" | "noteRefused">;
   readonly daemonSessionId: string | undefined;
   retryRefusedRowWrite<T>(
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
@@ -114,8 +114,6 @@ export class SessionReleasePersistence {
     // ORCHESTRATOR-CHOSEN: the terminal guard applies only when a generation was captured;
     // strict always would refuse legitimate writes for sessions with no captured generation.
     const expectedRowGeneration = this.releaseRowGenerations.get(snapshot);
-    const held = this.host.sessions.get(snapshot.sessionId);
-    const supersededReasons = held ? this.host.superseded.remembered(held) : undefined;
     return {
       ...(expectedRowGeneration === undefined ? {} : { expectedRowGeneration }),
       ...(!snapshot.terminal && snapshot.releaseReason !== "daemon-shutdown"
@@ -125,12 +123,10 @@ export class SessionReleasePersistence {
         livePeerDaemonSessionIds: [],
         ownDaemonSessionId: this.host.daemonSessionId,
         reportRefusal: true,
-        // A committed release may replace our known superseded release; its own reason must
-        // never become another superseded row eligible for a later live rewrite.
-        supersededReasons:
-          snapshot.terminal && !supersededReasons?.has(snapshot.releaseReason)
-            ? [...(supersededReasons ?? []), ...this.host.superseded.predecessors(snapshot)]
-            : [],
+        // A committed terminal upgrade may replace the earlier reasons of this same release.
+        supersededReasons: snapshot.terminal
+          ? [...this.host.superseded.predecessors(snapshot)]
+          : [],
       },
     };
   }
@@ -147,7 +143,6 @@ export class SessionReleasePersistence {
       snapshot.sessionId,
       {
         ...guard,
-        supersededReasons: guard.supersededReasons ?? [],
         expectedRowGeneration: precondition.expectedRowGeneration,
       },
       (next) =>
@@ -211,7 +206,6 @@ export class SessionReleasePersistence {
         snapshot.sessionId,
         {
           ...guard,
-          supersededReasons: guard.supersededReasons ?? [],
           expectedRowGeneration: precondition.expectedRowGeneration,
         },
         (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),

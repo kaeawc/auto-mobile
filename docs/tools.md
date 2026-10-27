@@ -203,9 +203,10 @@ Hover enter, move and exit over `points` with no contact (Android only; the reas
 | `mouse`            | `ACTION_HOVER_*` with `TOOL_TYPE_MOUSE` and `SOURCE_MOUSE`; no distance; desktop-style UI |
 
 It needs the `hover_input_v1` runner capability. A device or runner without it, and iOS, are refused before
-anything is sent with the missing capability named, and a hover is never turned into a touch. No runner
-advertises the capability yet (the instrumentation injection route is #13097), so today the tool reports that
-refusal; the semantics above are the documented intent and still need on-device confirmation (#13082).
+anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
+advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
+are the documented intent and still need on-device confirmation (#13082).
 
 ### prototype
 

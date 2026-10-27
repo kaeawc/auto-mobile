@@ -7,6 +7,7 @@ import type {
 } from "../../../src/features/action/pointer/PointerInjector";
 import type { BootedDevice } from "../../../src/models";
 import { hoverAtSchema } from "../../../src/server/hoverAtTool";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakePointerInjector } from "../../fakes/FakePointerInjector";
@@ -96,17 +97,28 @@ describe("HoverAt routing and refusal", () => {
     expect(dispatched).toEqual([]);
   });
 
-  test("the default routes have no hover transport, so a stock host refuses", async () => {
-    const timer = new FakeTimer();
-    const hover = new HoverAt(android, new FakeAdbExecutor(), {
-      timer,
+  test("the default route hovers through am instrument and reports the instrumentation's result", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "am instrument",
+      createExecResult(
+        "INSTRUMENTATION_RESULT: success=true\nINSTRUMENTATION_RESULT: injected=3\nINSTRUMENTATION_CODE: -1",
+        "",
+      ),
+    );
+    const hover = new HoverAt(android, adb, {
+      timer: new FakeTimer(),
       readPointerEnvironment: async () => environment(["hover_input_v1"]),
     });
     hover.window = new FakeWindow();
     hover.observeScreen = observeWith(observation(100, 200));
     const result = await hover.execute({ points: [{ x: 1, y: 1 }] });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("No hover transport");
+    expect(result).toMatchObject({ success: true, route: "instrumentation" });
+    expect(
+      adb
+        .getExecutedCommands()
+        .some((command) => command.includes("am instrument -w -r --no-restart -e request")),
+    ).toBe(true);
   });
 
   test("iOS is refused before the environment is even read", async () => {

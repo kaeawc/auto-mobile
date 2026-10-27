@@ -167,6 +167,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     style: { shimmer: true },
     children: [{ type: "spacer" }],
   }),
+  prototype_window_motion_v1: fixture({
+    type: "column",
+    id: "label",
+    repeat: { items: [{ label: "A" }], as: "item", stagger: 50 },
+    children: [{ type: "text", text: "A" }],
+  }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
   prototype_reduced_motion_v1: { minimalSpec: { ...base, motion: "reduced" }, ops: [] },
@@ -306,6 +312,42 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       root: {
         ...base.root,
         children: [{ ...label, text: "{platform:/device/os}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_haptics_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["haptics"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "haptics.perform", args: { effect: { value: "tick" } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_sound_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["sound"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "sound.play", args: { sound: { value: "click" } } }],
+          },
+        ],
       },
     },
     ops: [],
@@ -672,3 +714,21 @@ test("Android shader asset repair retains the injected opt-in environment", asyn
   expect(proxy.getPrototypeAssetHistory()).toHaveLength(2);
   expect(proxy.getPrototypeHistory()).toHaveLength(2);
 });
+
+test.each(["android", "ios"] as const)(
+  "%s refuses every authored window transition without window motion capability",
+  async (platform) => {
+    const device: BootedDevice = { platform, deviceId: `window-${platform}`, name: "Fake" };
+    for (const transition of ["auto", "none", "fade", "slide", "scale"]) {
+      const result = await show(device, { ...base, window: { ...base.window, transition } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("prototype_window_motion_v1");
+    }
+    expect(proxy.getPrototypeHistory()).toEqual([]);
+    expect(agent.requests).toEqual([]);
+    advertise("prototype_window_motion_v1");
+    expect(
+      (await show(device, { ...base, window: { ...base.window, transition: "scale" } })).success,
+    ).toBe(true);
+  },
+);

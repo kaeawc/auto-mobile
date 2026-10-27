@@ -7581,6 +7581,38 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeFeedbackEntry": [
+      {
+        "name": "timeMs",
+        "type": "long",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "effect",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sound",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "nodeId",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "suppressed",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeGradientStop": [
       {
         "name": "color",
@@ -8513,6 +8545,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "feedbackLog",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStorageBlock": [
@@ -9027,6 +9065,12 @@
       {
         "name": "backdrop",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeBackdrop",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }

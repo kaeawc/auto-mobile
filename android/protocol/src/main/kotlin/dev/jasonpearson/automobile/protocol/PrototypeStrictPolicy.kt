@@ -341,6 +341,7 @@ internal object PrototypeStrictPolicy {
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
       if (repeatSpec?.containsKey("derive") == true) need("format")
+      if (repeatSpec?.get("stagger") != null) need("window_motion")
       if (repeatSpec?.get("items") is JsonObject || repeatSpec?.get("key") != null)
         need("data_model")
     }
@@ -401,6 +402,7 @@ internal object PrototypeEnvelopeFeatures {
       if ("ios" in block || "android" in block) add("platform_namespace")
     }
     if (spec.text("motion") == "reduced") add("reduced_motion")
+    if ((spec["window"] as? JsonObject)?.get("transition") != null) add("window_motion")
     if ((spec["window"] as? JsonObject)?.get("backdrop") != null) add("backdrop")
     if ((spec["theme"] as? JsonObject)?.text("design") == "platform") add("design_platform")
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject

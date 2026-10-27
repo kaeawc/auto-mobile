@@ -1056,6 +1056,50 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Window and modal motion
+
+Android `prototype_window_motion_v1` gates authored `window.transition` and
+`repeat.stagger`. Window transitions are `auto` (default), `none`, `fade`, `slide`,
+or `scale`. Auto slides a sheet from its placement edge, fades and scales a
+floating surface from 0.92 to 1, and fades fullscreen content. Exit mirrors enter.
+Same-id shows update the existing window when motion is off or the incoming
+transition is `none`, preserving focus and keyboard attachment. With full or
+reduced motion and an animated transition, replacement attaches a new window
+while the outgoing window exits; focus transfers to the new window. Changes to
+display, layer or surface id also require a new window regardless of motion.
+Root Compose content animates for 300 ms; removal is scheduled through the host
+settle timer at 400 ms, independent of animation frames. Exiting windows become
+non-touchable immediately. Outgoing windows retain their hierarchy motion metadata
+and shared image/font assets until detach; service teardown drains these exits
+immediately. Dismissal events and sequence allocation retain their
+existing timing at exit start. Agent shows animate; device-persistence boot
+restoration does not. Idle TTL, last-client disconnect and service teardown remove
+windows immediately to keep teardown bounded.
+
+Bottom sheets slide from the bottom, dialogs and menus fade and scale, and
+snackbars fade and slide. Scrims fade with their surfaces. Panels remain composed
+through exit, including when removed from the authored tree; a patch reopening a
+panel cancels its exit and re-enters. `SheetDismiss` and modal button actions commit
+at exit start, so runtime state and emitted action events change immediately;
+retained visual content finishes exiting afterward with input disabled and its
+semantics cleared. A dragged sheet follows the
+pointer directly and springs to the selected detent on release. Reduced motion
+uses fades without translation, scaling or detent springs. Off motion snaps and
+keeps the settled rendering unchanged. Window and modal transitions and detent
+settles participate in the motion-active signal, following the conventions of
+#15114 (see Motion-active signal): the surface reports itself through
+`ReportPrototypeMotion` while an exit or settle runs, so `observe` never captures it mid-flight.
+
+`repeat.stagger` is an integer 0–100 ms per instance, in item order. Only template
+children with `visibleWhen` receive it. It adds to container stagger and transition
+delay through the existing enter-delay machinery, with each total capped at
+600 ms; exits are not delayed.
+
+Test-budget note: the repository's 100 ms per-test unit budget is measured only from bun's JUnit
+reporter (`scripts/test-ts.sh`, `scripts/validate-bun-test-timings.sh`). It does not cover Gradle or
+Robolectric tests, so the Compose and host tests for this feature are not held to it. iOS accepts the structural contract but does not
+advertise this capability, so host preflight refuses either authored field.
+
 ### Motion profiles (#15115, `prototype_reduced_motion_v1`)
 
 Motion runs in one of three profiles, decided identically on both platforms from the spec's
@@ -1639,6 +1683,41 @@ a literal `{value}` argument must satisfy), the permissions and background names
 table, so a module is added by adding its entry. The placeholder module `test` (`test.echo`,
 `test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
 vocabulary testable before any real module exists; no production runtime advertises it.
+
+**Haptics and sound (#14329).** The `haptics` module has one call,
+`haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
+`success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`
+(capability `prototype_platform_haptics_v1`). The `sound` module has `sound.play` with `sound`
+one of `click`, `send`, `receive` or `shutter` and an optional `volume`, a whole number 0-100
+(`prototype_platform_sound_v1`). Both lists are closed: a literal `{asset: ...}` sound is refused
+until the audio asset type (#14254) lands. Neither module has events or `/platform` state, needs a
+runtime permission (`VIBRATE` is a normal permission, declared by CtrlProxy) or touches personal
+data. CtrlProxy and the iOS prototype agent register both modules and advertise the capabilities;
+the embedded Compose renderer leaves modules to the app.
+
+- **Android haptics** use the `Vibrator`: from API 29 `VibrationEffect.createPredefined` (click and
+  impactMedium click; tick, selection and impactLight tick; heavyClick, impactHeavy, longPress and
+  warning heavy click; doubleClick and success double click), `error` a two-pulse waveform; below
+  API 29 a tuned one-shot or waveform. There is no tapped `View` to call
+  `performHapticFeedback(CONFIRM/REJECT)` on, so success, warning and error use these fallbacks.
+  Touch feedback off in system settings, or a device without a vibrator, is reported
+  (`suppressed` / `unavailable`). The `shutter` cue is `MediaActionSound`, `click` is the system
+  click sound effect, and `send` / `receive` are short system tones; no audio is bundled, and the
+  ringer (silent or vibrate) and the touch-sounds setting suppress them.
+- **iOS haptics** use `UIImpactFeedbackGenerator`, `UISelectionFeedbackGenerator` and
+  `UINotificationFeedbackGenerator` (doubleClick is two impacts 80 ms apart). The Simulator does
+  not render haptics but the call still succeeds and is logged; "System Haptics" off and the silent
+  switch are not detectable, so nothing is reported suppressed. Sounds are `AudioServices` system
+  sounds (click 1104, send 1001, receive 1007, shutter 1108); `volume` is ignored and the host's
+  `AVAudioSession` is never touched.
+- **`feedbackLog`.** Each shown prototype keeps its last 64 calls, oldest first, and `prototype
+  inspect` (and `status`) returns them as `feedbackLog: [{effect | sound, nodeId?, timeMs,
+  suppressed?}]`. `nodeId` is the one node whose tap, long-press or double-tap action made the
+  call, absent for a platform handler or when several nodes author the same call; `timeMs` is the
+  device clock. Failed calls are not logged; a show or dismissal clears the log.
+- **Device acceptance** is still open (`needs-device-verify`): an Android emulator tap appearing in
+  `feedbackLog` and in `dumpsys vibrator_manager`, an iOS Simulator `feedbackLog` entry, and the
+  feel on a physical device.
 
 | Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

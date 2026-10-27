@@ -28,6 +28,10 @@ internal class PrototypePlatformDispatcher(
     val action: PrototypePlatformAction,
     val startedAt: Long,
     val eventContext: JsonObject?,
+    /** The node whose action made the call, when one node owns it (the feedback log's `nodeId`). */
+    val nodeId: String? = null,
+    /** The resolved arguments, kept so the feedback log can name the effect or sound. */
+    val args: JsonObject? = null,
   ) {
     lateinit var job: Job
   }
@@ -65,8 +69,9 @@ internal class PrototypePlatformDispatcher(
     args: JsonObject?,
     invalid: String? = null,
     eventContext: JsonObject? = null,
+    nodeId: String? = null,
   ) {
-    val call = Pending(newId(), action, clock(), eventContext)
+    val call = Pending(newId(), action, clock(), eventContext, nodeId, args)
     if (closed) return
     val refusal = refusal(action, args, invalid)
     if (refusal != null) {

@@ -8935,6 +8935,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "edge",
         "type": "string",
         "nullable": false,
@@ -12073,6 +12079,12 @@
       {
         "name": "span",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },

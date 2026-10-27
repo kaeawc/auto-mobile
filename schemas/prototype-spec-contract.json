@@ -10165,6 +10165,12 @@
               },
               "optional": true
             },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -10359,6 +10365,12 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             },

@@ -29,7 +29,7 @@ internal fun RenderPrototypeDrawer(
 ) {
   val source = node.source as? PrototypeDrawerNode ?: return
   val motion = LocalPrototypeMotion.current
-  val reduced = LocalPrototypeReducedMotion.current
+  val reduced = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
   val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
   val state = remember(node.identity) { MutableTransitionState(false) }
   state.targetState = node.sheetOpen

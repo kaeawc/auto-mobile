@@ -1011,7 +1011,7 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing, swipeActions
         case refresh, header, footer, spacing, contentPadding, onEndReached, endThreshold, maxItems
         case listRepeat = "repeat"
-        case refresh, reverse, stickToEnd, atEndKey, onStartReached
+        case reverse, stickToEnd, atEndKey, onStartReached
         case repeatKey = "_repeatKey"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              linkify,

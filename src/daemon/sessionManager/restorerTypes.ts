@@ -14,6 +14,7 @@ import type {
 } from "../../utils/KeepScreenAwakeManager";
 import type { IosAppNetworkRuleRestorer } from "../iosAppNetworkLease";
 import type { IosAppNetworkRuleSessionState } from "../sessionDeviceStateRestore";
+import type { SessionDeviceReboundEmitter } from "../sessionDeviceReboundBroadcast";
 
 /**
  * Narrow seam for restoring keep-awake state on session release. Production uses
@@ -101,6 +102,7 @@ export interface DeviceStateRestorerFactories {
  * optional and defaults to the production wiring (#11796).
  */
 export interface SessionManagerOptions {
+  sessionDeviceReboundEmitter?: SessionDeviceReboundEmitter;
   /**
    * Resolve per write: closeDatabase() -> resetDbWriteBarrier() makes the next track()
    * use a fresh barrier, not a pinned drained instance (#2912, #3154, #2885).

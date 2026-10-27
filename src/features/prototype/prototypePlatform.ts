@@ -49,12 +49,27 @@ export interface PrototypePlatformCall {
   /** Calls and events touching personal data, for the threat model (#14293). */
   sensitive: boolean;
 }
+/** One key of a module's read-only `/platform/<module>` state (#15245). */
+export interface PrototypePlatformStateEntry {
+  /** The platforms that report the key; elsewhere it is absent and compares as missing. */
+  platforms: string[];
+  /** The contract rule the reported value satisfies. */
+  value: Rule;
+  /** Ascending lower bounds of the second and later size classes, in dp (Android) or points. */
+  breakpoints?: number[];
+}
 export interface PrototypePlatformModule {
   capability: string;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   calls: Record<string, PrototypePlatformCall>;
-  events: Record<string, { sensitive: boolean }>;
+  /** `debounceMs` coalesces bursts of the event into one delivery. */
+  events: Record<string, { sensitive: boolean; debounceMs?: number }>;
+  /**
+   * The keys `/platform/<module>/<key>` can read. A module without this table (the placeholder
+   * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
+   */
+  state?: Record<string, PrototypePlatformStateEntry>;
 }
 
 /** The shared `platformModules` table: each module's calls, events and capability. */
@@ -103,6 +118,14 @@ export function prototypePlatformEventModule(event: unknown): string | undefined
   const name = qualified(event);
   const owner = name && module(name.module);
   return name && owner && Object.hasOwn(owner.events, name.member) ? name.module : undefined;
+}
+
+/** The state key a `/platform` pointer reads when it is exactly `/<module>/<key>`, else undefined. */
+export function prototypePlatformPointerKey(pointer: string): string | undefined {
+  const tokens = pointer.slice(1).split("/");
+  return tokens.length === 2 && tokens[1]
+    ? tokens[1].replaceAll("~1", "/").replaceAll("~0", "~")
+    : undefined;
 }
 
 /** The module a `/platform` pointer reads: its first segment. */
@@ -326,6 +349,24 @@ function strings(value: unknown): Set<string> {
   return new Set(Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : []);
 }
 
+function readError(
+  use: { path: string; pointer: string },
+  declared: Set<string>,
+): PrototypePlatformError | undefined {
+  const name = prototypePlatformPointerModule(use.pointer);
+  if (!module(name)) {
+    return { path: use.path, message: `Unknown platform module ${name}` };
+  }
+  if (!declared.has(name)) {
+    return notDeclared(use.path, name);
+  }
+  const state = module(name)?.state;
+  const key = prototypePlatformPointerKey(use.pointer);
+  return state && (key === undefined || !Object.hasOwn(state, key))
+    ? { path: use.path, message: `Unknown platform state ${use.pointer}` }
+    : undefined;
+}
+
 function useError(
   use: PrototypePlatformUse,
   context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
@@ -341,13 +382,8 @@ function useError(
     }
     case "call":
       return callError(use.action, use.path, context, check);
-    case "read": {
-      const name = prototypePlatformPointerModule(use.pointer);
-      if (!module(name)) {
-        return { path: use.path, message: `Unknown platform module ${name}` };
-      }
-      return context.declared.has(name) ? undefined : notDeclared(use.path, name);
-    }
+    case "read":
+      return readError(use, context.declared);
     case "event":
       return use.inHandler
         ? undefined

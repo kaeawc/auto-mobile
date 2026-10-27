@@ -4,7 +4,7 @@ import Foundation
 /// handlers, the `platform` action and `{platform}` / `{event}` reads. The host validator
 /// (`prototypePlatform.ts` and the contract walk) is authoritative; this repeats its rules so a
 /// spec that skipped it still fails the show at the host's path. Running the calls is the module
-/// registry's job (#14296); no agent advertises `prototype_platform_v1` yet.
+/// registry's job; the device module supplies read-only state.
 enum PrototypePlatformValidator {
     /// A literal `{value}` argument's rule, from the contract's `platformModules` table.
     enum Rule: Equatable {
@@ -27,27 +27,39 @@ enum PrototypePlatformValidator {
         let capability: String
         let calls: [String: Call]
         let events: Set<String>
+        var state: Set<String>?
     }
 
     /// The contract's `platformModules`; `PrototypePlatformTests` keeps the two equal. `test` is a
     /// placeholder module no production runtime advertises.
-    static let modules: [String: Module] = [
-        "test": Module(
-            capability: "prototype_platform_test_v1",
-            calls: [
-                "echo": Call(
-                    args: [
-                        "message": Argument(optional: false, rule: .json(maxBytes: 1024)),
-                        "delayMs": Argument(optional: true, rule: .integer(min: 0, max: 60000)),
-                    ],
-                    permissions: [],
-                    background: []
-                ),
-                "protected": Call(args: [:], permissions: ["camera"], background: ["audio"]),
-            ],
-            events: ["tick"]
-        ),
-    ]
+    static let modules: [String: Module] = PrototypeContractValidator.platformModules
+        .mapValues { raw in
+            let fields = raw.objectFields ?? [:]
+            let calls = (fields["calls"]?.objectFields ?? [:]).mapValues { raw in
+                let call = raw.objectFields ?? [:]
+                let args = (call["args"]?.objectFields ?? [:]).mapValues { raw in
+                    let arg = raw.objectFields ?? [:]
+                    let rule = arg["value"]?.objectFields ?? [:]
+                    return Argument(
+                        optional: arg["optional"] == .bool(true),
+                        rule: rule["kind"] == .string("json")
+                            ? .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
+                            : .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+                    )
+                }
+                func strings(_ key: String) -> [String] {
+                    guard case let .array(values)? = call[key] else { return [] }
+                    return values.compactMap(\.stringValue)
+                }
+                return Call(args: args, permissions: strings("permissions"), background: strings("background"))
+            }
+            return Module(
+                capability: fields["capability"]?.stringValue ?? "",
+                calls: calls,
+                events: Set((fields["events"]?.objectFields ?? [:]).keys),
+                state: fields["state"]?.objectFields.map { Set($0.keys) }
+            )
+        }
 
     static let permissionNames: Set<String> = [
         "camera", "microphone", "location", "locationBackground", "notifications", "photos",
@@ -192,6 +204,7 @@ enum PrototypePlatformValidator {
             }
             guard let owner = eventModule(event) else { throw fail(path, "Unknown platform event") }
             guard declared.modules.contains(owner) else { throw notDeclared(path, owner) }
+            try PrototypeRequestValidator.validateList(actions, path: path, depth: 1, state: state)
             try scan(.array(actions), path: path, inHandler: true, declared: declared, state: state)
         }
     }
@@ -261,6 +274,12 @@ enum PrototypePlatformValidator {
         let name = PrototypeDataPointer.tokens(pointer).first ?? ""
         guard modules[name] != nil else { throw fail(path, "Unknown platform module \(name)") }
         guard declared.modules.contains(name) else { throw notDeclared(path, name) }
+        if let state = modules[name]?.state {
+            let tokens = PrototypeDataPointer.tokens(pointer)
+            guard tokens.count == 2, state.contains(tokens[1]) else {
+                throw fail(path, "Unknown platform state \(pointer)")
+            }
+        }
     }
 
     // MARK: call
@@ -327,7 +346,7 @@ enum PrototypePlatformValidator {
         return fields
     }
 
-    private static func check(_ literal: JSONValue, _ rule: Rule, path: String) throws {
+    static func check(_ literal: JSONValue, _ rule: Rule, path: String) throws {
         switch rule {
         case let .json(maxBytes):
             let encoder = JSONEncoder()

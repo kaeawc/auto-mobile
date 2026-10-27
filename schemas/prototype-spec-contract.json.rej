@@ -1,0 +1,546 @@
+@@ -13534,6 +13548,545 @@
+     "stackTransition": {
+       "kind": "enum",
+       "values": ["platform", "slide", "fade", "none"]
++    },
++    "effectAnimate": {
++      "kind": "object",
++      "fields": {
++        "periodMs": {
++          "rule": {
++            "kind": "number",
++            "integer": true,
++            "min": 400,
++            "max": 20000
++          },
++          "optional": false
++        }
++      }
++    },
++    "effectCenter": {
++      "kind": "object",
++      "fields": {
++        "x": {
++          "rule": {
++            "kind": "number",
++            "integer": false,
++            "min": 0,
++            "max": 1
++          },
++          "optional": false
++        },
++        "y": {
++          "rule": {
++            "kind": "number",
++            "integer": false,
++            "min": 0,
++            "max": 1
++          },
++          "optional": false
++        }
++      }
++    },
++    "effect": {
++      "kind": "tagged",
++      "variants": {
++        "noise": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["noise"]
++              },
++              "optional": false
++            },
++            "amount": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            },
++            "grain": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0.5,
++                "max": 8
++              },
++              "optional": true
++            },
++            "seed": {
++              "rule": {
++                "kind": "number",
++                "integer": true,
++                "min": 0,
++                "max": 65535
++              },
++              "optional": true
++            },
++            "monochrome": {
++              "rule": {
++                "kind": "boolean"
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "gradientMesh": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["gradientMesh"]
++              },
++              "optional": false
++            },
++            "colors": {
++              "rule": {
++                "kind": "array",
++                "item": {
++                  "kind": "ref",
++                  "name": "colorValue"
++                },
++                "min": 4,
++                "max": 4
++              },
++              "optional": false
++            },
++            "softness": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "shimmer": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["shimmer"]
++              },
++              "optional": false
++            },
++            "color": {
++              "rule": {
++                "kind": "ref",
++                "name": "colorValue"
++              },
++              "optional": true
++            },
++            "angle": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": -360,
++                "max": 360
++              },
++              "optional": true
++            },
++            "width": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0.05,
++                "max": 1
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "glow": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["glow"]
++              },
++              "optional": false
++            },
++            "color": {
++              "rule": {
++                "kind": "ref",
++                "name": "colorValue"
++              },
++              "optional": false
++            },
++            "radius": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 48
++              },
++              "optional": true
++            },
++            "intensity": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "vignette": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["vignette"]
++              },
++              "optional": false
++            },
++            "color": {
++              "rule": {
++                "kind": "ref",
++                "name": "colorValue"
++              },
++              "optional": true
++            },
++            "intensity": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            },
++            "radius": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "blur": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["blur"]
++              },
++              "optional": false
++            },
++            "radius": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 25
++              },
++              "optional": false
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "pixelate": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["pixelate"]
++              },
++              "optional": false
++            },
++            "cell": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 1,
++                "max": 64
++              },
++              "optional": false
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "chromaticAberration": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["chromaticAberration"]
++              },
++              "optional": false
++            },
++            "offset": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 8
++              },
++              "optional": true
++            },
++            "angle": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": -360,
++                "max": 360
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "wave": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["wave"]
++              },
++              "optional": false
++            },
++            "amplitude": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 16
++              },
++              "optional": true
++            },
++            "wavelength": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 8,
++                "max": 400
++              },
++              "optional": true
++            },
++            "angle": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": -360,
++                "max": 360
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        },
++        "ripple": {
++          "kind": "object",
++          "fields": {
++            "type": {
++              "rule": {
++                "kind": "enum",
++                "values": ["ripple"]
++              },
++              "optional": false
++            },
++            "amplitude": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 16
++              },
++              "optional": true
++            },
++            "wavelength": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 8,
++                "max": 400
++              },
++              "optional": true
++            },
++            "center": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectCenter"
++              },
++              "optional": true
++            },
++            "animate": {
++              "rule": {
++                "kind": "ref",
++                "name": "effectAnimate"
++              },
++              "optional": true
++            },
++            "phase": {
++              "rule": {
++                "kind": "number",
++                "integer": false,
++                "min": 0,
++                "max": 1
++              },
++              "optional": true
++            }
++          }
++        }
++      }
+     }
+   },
+   "eventKinds": [

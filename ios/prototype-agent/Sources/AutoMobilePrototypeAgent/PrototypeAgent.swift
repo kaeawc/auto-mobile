@@ -39,9 +39,32 @@ final class PassthroughWindow: UIWindow {
     weak var model: PrototypeModel?
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let model, model.spec != nil,
-              model.hitRects.contains(point) else { return nil }
+        guard let model, model.spec != nil else { return nil }
+        if nativePresentationRegion()?.contains(point) == true { return super.hitTest(point, with: event) }
+        guard model.hitRects.contains(point) else { return nil }
         return super.hitTest(point, with: event)
+    }
+
+    /// The area a native presentation from the root controller claims (#15463), computed at hit
+    /// time so it follows detent changes and dismissal without observation. Not yet device-verified.
+    private func nativePresentationRegion() -> CGRect? {
+        guard let presented = rootViewController?.presentedViewController, !presented.isBeingDismissed else {
+            return nil
+        }
+        var interaction = PrototypeNativePresentationHitRegion.Interaction.modal
+        if let sheet = presented.sheetPresentationController {
+            let detents = sheet.detents.map(\.identifier)
+            interaction = PrototypeNativePresentationHitRegion.interaction(
+                selectedDetentIndex: sheet.selectedDetentIdentifier.flatMap(detents.firstIndex(of:)),
+                largestUndimmedDetentIndex: sheet.largestUndimmedDetentIdentifier.flatMap(detents.firstIndex(of:))
+            )
+        }
+        return PrototypeNativePresentationHitRegion.region(
+            interaction: interaction,
+            presentedFrame: presented.presentationController?.frameOfPresentedViewInContainerView
+                ?? presented.view.frame,
+            windowBounds: bounds
+        )
     }
 
     override func layoutSubviews() {
@@ -100,7 +123,10 @@ final class PrototypeAgent: NSObject {
         let server = PrototypeServer(
             configuration: PrototypeAgentConfiguration(port: 0, token: publisher.token),
             capabilities: PrototypeViewerHostCapabilities.advertised(
-                model.mode.advertising(PrototypeTestHooks.capabilities(enabled: false))
+                model.mode.advertising(PrototypeTestHooks.capabilities(
+                    enabled: false,
+                    registryCapabilities: model.platformRegistry.capabilities
+                ))
             ),
             maxAuthenticatedClients: 1,
             onReady: { [weak agent] port in
@@ -144,8 +170,9 @@ final class PrototypeAgent: NSObject {
     let model: PrototypeModel
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
-    init(mode: PrototypeLifecycleMode = .session) {
-        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked())
+    init(mode: PrototypeLifecycleMode = .session, registry: PrototypePlatformRegistry = .empty) {
+        // No concrete permission-needing modules are approved for injection yet (#14289).
+        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked(), registry: registry)
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
@@ -207,7 +234,10 @@ final class PrototypeAgent: NSObject {
         )
         let server = PrototypeServer(
             configuration: configuration,
-            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(enabled: testHooksEnabled))
+            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(
+                enabled: testHooksEnabled,
+                registryCapabilities: model.platformRegistry.capabilities
+            ))
         ) { [weak self] message, reply in
             self?.handle(message, reply: reply)
         }
@@ -436,6 +466,7 @@ final class PrototypeAgent: NSObject {
         }
         let window = PassthroughWindow(windowScene: scene)
         window.model = model
+        model.nativePresentationActive = { [weak window] in window?.rootViewController?.presentedViewController != nil }
         window.windowLevel = .alert + 1
         let layers = PrototypeLayersViewController(model: model)
         window.rootViewController = layers

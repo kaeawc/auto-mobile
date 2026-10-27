@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "drawer",
+      "edge": "left",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "child": {
+        "type": "text",
+        "text": "Navigation"
+      }
+    }
+  },
+  "expectedPath": "root.edge",
+  "expectedMessage": "Invalid enum value"
+}

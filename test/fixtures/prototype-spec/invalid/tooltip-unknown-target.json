@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "tooltip",
+      "text": "Helpful hint",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "anchorTo": "target"
+    }
+  },
+  "expectedPath": "root.anchorTo",
+  "expectedMessage": "Unknown anchorTo id \"target\""
+}

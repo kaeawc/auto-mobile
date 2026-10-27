@@ -6,6 +6,7 @@ import {
   versionToApiLevelRange,
   FileAvdConfigReader,
   validateAvdMemory,
+  parseEffectiveHardware,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 describe("parseAvdConfig", () => {
@@ -725,5 +726,60 @@ describe("validateAvdMemory", () => {
     expect(() =>
       validateAvdMemory("Plain", { apiLevel: 36, tag: "google_apis", ramSizeMb: 512 }),
     ).not.toThrow();
+  });
+});
+
+describe("effective hardware from hardware-qemu.ini (#15475)", () => {
+  const fixtureDir = join(import.meta.dir, "../../fixtures/android-avd-effective-ram");
+  const qemu = (name: string) => Bun.file(join(fixtureDir, `hardware-qemu-${name}.ini`)).text();
+
+  // Captured from three product-created AVDs on one arm64 host, every one configured hw.ramSize=2G.
+  it.each([
+    ["api30", 2048],
+    ["api35", 2560],
+    ["api37", 4096],
+  ])("parses the captured %s launch as %i MiB and 4 cores", async (name, ramMb) => {
+    expect(parseEffectiveHardware(await qemu(name))).toEqual({
+      effectiveRamMb: ramMb,
+      effectiveCpuCores: 4,
+    });
+  });
+
+  it("ignores values that are not positive integers", () => {
+    expect(parseEffectiveHardware("hw.ramSize = 2G\nhw.cpu.ncore = 0\n")).toEqual({});
+  });
+
+  it("FileAvdConfigReader reports configured and effective RAM side by side", async () => {
+    const avdHome = resolve("avd-home");
+    // join() so the keys carry the host's separators, as the reader's own path building does.
+    const configPath = join(avdHome, "x.avd", "config.ini");
+    const qemuPath = join(avdHome, "x.avd", "hardware-qemu.ini");
+    const files = new Map<string, string>([[configPath, "hw.ramSize=2G\nhw.cpu.ncore=4\n"]]);
+    const reader = (qemuContent?: string) => {
+      const withQemu = new Map(files);
+      if (qemuContent !== undefined) {
+        withQemu.set(qemuPath, qemuContent);
+      }
+      return new FileAvdConfigReader(
+        async (path) => {
+          const content = withQemu.get(path);
+          if (content === undefined) {
+            throw new Error(`ENOENT ${path}`);
+          }
+          return content;
+        },
+        (path) => withQemu.has(path),
+        avdHome,
+      );
+    };
+    const launched = await reader(await qemu("api37")).readConfig("x");
+    expect(launched).toMatchObject({
+      ramSizeMb: 2048,
+      effectiveRamMb: 4096,
+      effectiveCpuCores: 4,
+    });
+    const neverLaunched = await reader().readConfig("x");
+    expect(neverLaunched?.ramSizeMb).toBe(2048);
+    expect(neverLaunched?.effectiveRamMb).toBeUndefined();
   });
 });

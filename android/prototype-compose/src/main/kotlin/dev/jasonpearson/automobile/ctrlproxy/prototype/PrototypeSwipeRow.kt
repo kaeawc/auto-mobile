@@ -95,7 +95,9 @@ internal fun PrototypeSwipeRow(
       fullSwipe = swipe.fullSwipe == true,
       density = density,
     )
-  val animate = LocalPrototypeMotion.current
+  val animate =
+    LocalPrototypeMotion.current &&
+      LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL
   val scope = rememberCoroutineScope()
   val initial =
     if (coordinator.isOpen(id)) swipeRestOffset(SwipeSettle.Open(coordinator.openSide), geometry)

@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "image",
+      "asset": "a",
+      "filter": {}
+    }
+  },
+  "expectedPath": "root.filter",
+  "expectedMessage": "At least one image filter field is required"
+}

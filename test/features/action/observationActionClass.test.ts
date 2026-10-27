@@ -34,6 +34,7 @@ const advertisedClasses = {
   dragAndDrop: "scroll",
   biometricAuth: "unknown",
   dragPath: "unknown", // Like tapAt: unclassified until coordinate gestures are classified together.
+  hoverAt: "unknown", // Hover has no contact; unclassified like the other coordinate gestures.
   launchApp: "unknown",
   observe: "unknown", // Top-level projection; included to cover every raw/project advertiser.
   multiTouch: "unknown",

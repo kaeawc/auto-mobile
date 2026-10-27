@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "shimmer",
+            "phase": 1.5
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].phase",
+  "expectedMessage": "Invalid number value"
+}

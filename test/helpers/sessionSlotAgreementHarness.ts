@@ -22,6 +22,8 @@ export function slotAgreementRig(
   fs = new FakeTerminalReleaseJournalFileSystem(),
   timer = new FakeTimer(),
   keepAwake?: SessionManagerOptions["keepScreenAwakeRestorer"],
+  /** False leaves the default journal, whose intents are volatile: the write-first release order. */
+  durableJournal = true,
 ) {
   const manager = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),
@@ -29,7 +31,9 @@ export function slotAgreementRig(
   });
   manager.stopCleanupTimer();
   manager.attachDaemonSessionId("shadow-daemon");
-  manager.attachTerminalReleaseJournal(new FileTerminalReleaseJournal("/shadow/journal", fs));
+  if (durableJournal) {
+    manager.attachTerminalReleaseJournal(new FileTerminalReleaseJournal("/shadow/journal", fs));
+  }
   manager.setSlotShadowProbeMode("throw");
   const oracle = slotPredicateOracle(manager.getLegacyLifecycleView());
   const readRecreated = Reflect.get(manager, "isSessionBeingRecreated") as (

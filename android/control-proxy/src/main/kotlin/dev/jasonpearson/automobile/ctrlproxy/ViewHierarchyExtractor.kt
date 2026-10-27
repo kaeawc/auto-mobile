@@ -247,7 +247,7 @@ internal constructor(
           if (disableAllFiltering) {
             rootElement
           } else {
-            val optimizedList = rootElement?.let { optimizeHierarchy(it) }
+            val optimizedList = rootElement?.let { optimizeWindowRoot(it) }
             Log.d(TAG, "[PROCESS] After optimizeHierarchy: ${optimizedList?.size} elements")
 
             val wrappedElement = optimizedList?.let { wrapOptimizedElements(it) }
@@ -623,7 +623,7 @@ internal constructor(
         if (disableAllFiltering) {
           element
         } else {
-          element?.let { wrapOptimizedElements(optimizeHierarchy(it)) }
+          element?.let { wrapOptimizedElements(optimizeWindowRoot(it)) }
         }
       mainPackageName = checkNotNull(activeWindowRoot).packageName?.toString()
       if (!intentChooserDetected && mainHierarchy != null) {
@@ -900,7 +900,7 @@ internal constructor(
     disableAllFiltering: Boolean,
   ): UIElementInfo? =
     if (disableAllFiltering) element
-    else element?.let { wrapOptimizedElements(optimizeHierarchy(it)) }
+    else element?.let { wrapOptimizedElements(optimizeWindowRoot(it)) }
 
   private fun finishWindowScope(
     windowInfos: MutableList<WindowInfo>,
@@ -1795,6 +1795,18 @@ internal constructor(
     }
     return UIElementInfo(children = elements)
   }
+
+  /**
+   * [optimizeHierarchy] for a window root. With wrapper pruning on, the root itself is kept: it
+   * carries the window's bounds and, once stamped, its id, display and ownership (#13956). Only its
+   * descendants are pruned. Without pruning this is exactly [optimizeHierarchy].
+   */
+  internal fun optimizeWindowRoot(root: UIElementInfo): List<UIElementInfo> =
+    if (pruneBaselineWrappers) {
+      listOf(root.copy(children = root.children.flatMap { optimizeHierarchy(it) }))
+    } else {
+      optimizeHierarchy(root)
+    }
 
   /**
    * Optimizes the hierarchy by:

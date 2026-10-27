@@ -163,6 +163,7 @@ enum PrototypeThemeModes {
             try style(entry.style, "\(path).styleWhen[\(index)].style")
         }
         try color(node.scrim, "\(path).scrim", checksSingle: true)
+        try color(node.filter?.tint, "\(path).filter.tint", checksSingle: false)
         try asset(node.asset, "\(path).asset")
         for (index, item) in (node.items ?? []).enumerated() {
             try asset(item.image, "\(path).items[\(index)].image")
@@ -183,6 +184,12 @@ enum PrototypeThemeModes {
         try color(style.background, "\(path).background", checksSingle: false)
         try color(style.color, "\(path).color", checksSingle: false)
         try color(style.shadowColor, "\(path).shadowColor", checksSingle: false)
+        for (index, shadow) in (style.shadows ?? []).enumerated() {
+            try color(shadow.color, "\(path).shadows[\(index)].color", checksSingle: false)
+        }
+        for (index, stop) in (style.border?.gradient?.stops ?? []).enumerated() {
+            try color(stop.color, "\(path).border.gradient.stops[\(index)].color", checksSingle: true)
+        }
         try color(style.border?.color, "\(path).border.color", checksSingle: false)
         for (index, stop) in (style.gradient?.stops ?? []).enumerated() {
             try color(stop.color, "\(path).gradient.stops[\(index)].color", checksSingle: true)

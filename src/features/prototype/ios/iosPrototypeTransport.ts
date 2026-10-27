@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectsField } from "../prototypeDegradedEffects";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import { prototypeTimersUnsupportedMessage } from "../prototypeTimers";
 import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
@@ -146,6 +147,7 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
     ...(prototypeStacksSchema.parse(result.stacks)
       ? { stacks: prototypeStacksSchema.parse(result.stacks) }
       : {}),
+    ...prototypeDegradedEffectsField(result.degradedEffects),
     success: result.success,
     requestId: result.requestId,
     ...resultCount("fired", result.fired),
@@ -388,6 +390,7 @@ export class IosPrototypeTransport implements PrototypeTransport {
       throw error;
     }
     return {
+      ...prototypeDegradedEffectsField(result.degradedEffects),
       success: result.success,
       ...(typeof result.error === "string" ? { error: result.error } : {}),
       ...(isRecord(result.status) ? { status: result.status } : {}),

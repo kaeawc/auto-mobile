@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "noise",
+            "grain": 0.25
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].grain",
+  "expectedMessage": "Invalid number value"
+}

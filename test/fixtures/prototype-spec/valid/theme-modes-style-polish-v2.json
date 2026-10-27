@@ -1,0 +1,94 @@
+{
+  "id": "style-polish",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "active": true
+  },
+  "root": {
+    "type": "scroll",
+    "fadeEdges": {
+      "top": 0,
+      "bottom": 24,
+      "start": 12,
+      "end": 1000
+    },
+    "child": {
+      "type": "image",
+      "asset": "photo",
+      "filter": {
+        "saturation": 2,
+        "tint": {
+          "light": "primary",
+          "dark": "#FFFFFF"
+        }
+      },
+      "style": {
+        "shadows": [
+          {
+            "color": "#000000",
+            "radius": 20
+          },
+          {
+            "color": {
+              "light": "#000000",
+              "dark": "scrim"
+            },
+            "radius": 1000,
+            "spread": -1000,
+            "offset": {
+              "x": -1000,
+              "y": 1000
+            }
+          },
+          {
+            "color": "scrim",
+            "radius": 0,
+            "spread": 1000,
+            "inner": true
+          }
+        ],
+        "cornerStyle": "continuous",
+        "cornerRadius": "full",
+        "border": {
+          "width": 2,
+          "gradient": {
+            "type": "linear",
+            "angle": 45,
+            "stops": [
+              {
+                "color": {
+                  "light": "#FFFFFF",
+                  "dark": "#000000"
+                }
+              },
+              {
+                "color": "primary"
+              }
+            ]
+          }
+        }
+      },
+      "styleWhen": [
+        {
+          "when": {
+            "key": "active",
+            "equals": true
+          },
+          "style": {
+            "cornerStyle": "circular",
+            "shadows": [
+              {
+                "color": "#000000",
+                "radius": 20
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

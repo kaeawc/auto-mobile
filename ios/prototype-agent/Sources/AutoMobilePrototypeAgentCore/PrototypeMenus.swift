@@ -236,13 +236,7 @@ enum PrototypeMenus {
 
     /// Bottom-end alignment in window-local coordinates, clamped on both axes.
     static func origin(anchor: CGRect, surface: CGSize, window: CGSize, rightToLeft: Bool = false) -> CGPoint {
-        CGPoint(
-            x: min(
-                max(0, rightToLeft ? anchor.minX : anchor.maxX - surface.width),
-                max(0, window.width - surface.width)
-            ),
-            y: min(max(0, anchor.maxY), max(0, window.height - surface.height))
-        )
+        PrototypePlacement.menuOrigin(anchor: anchor, surface: surface, window: window, rightToLeft: rightToLeft)
     }
 }
 

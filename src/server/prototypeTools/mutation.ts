@@ -1,5 +1,10 @@
+import {
+  type DegradedEffect,
+  prototypeDegradedEffectsOutput,
+} from "../../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
+import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
 import { pseudoLocalizeSpec } from "../../features/prototype/prototypePseudoLocale";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
@@ -334,10 +339,18 @@ function showAdviceOutput(
   device: BootedDevice,
   target: PrototypeTarget,
   success: boolean,
-): Pick<PrototypeOutput, "platformNotes" | "accessibilityFindings" | "accessibilityFindingsTotal"> {
+): Pick<
+  PrototypeOutput,
+  | "platformNotes"
+  | "accessibilityFindings"
+  | "accessibilityFindingsTotal"
+  | "placeholderFindings"
+  | "placeholderFindingsTotal"
+> {
   return {
     ...platformNotesOutput(args, device, target, success),
     ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
+    ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
   };
 }
 
@@ -673,9 +686,17 @@ function missingAssetsOutput(
   warnings: readonly (string | undefined)[],
   landedWarning?: string,
   spec?: unknown,
-): { missingAssets?: string[]; warning?: string } {
+): {
+  missingAssets?: string[];
+  warning?: string;
+  degradedEffects?: DegradedEffect[];
+} {
+  const degraded: ReturnType<typeof prototypeDegradedEffectsOutput> = result.success
+    ? prototypeDegradedEffectsOutput(result.degradedEffects)
+    : {};
   const warning = [
     ...warnings,
+    degraded.warning,
     result.success ? landedWarning : undefined,
     ...(result.success ? prototypeTimerWarnings(spec) : []),
   ]
@@ -685,6 +706,7 @@ function missingAssetsOutput(
     ...(result.success && result.missingAssets?.length
       ? { missingAssets: result.missingAssets }
       : {}),
+    ...degraded,
     ...(warning ? { warning } : {}),
   };
 }

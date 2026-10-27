@@ -12,6 +12,7 @@ public enum PrototypeSpecStrictValidator {
             else { throw PrototypeContractValidator.invalid("$", "Expected prototype envelope") }
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
+            try PrototypeSharedElementPlan.validate(context.locatedNodes)
             try PrototypeStrictSemantics.layout(context)
             var repeats = PrototypeStrictRepeats(data: modelData)
             try repeats.templates(root.objectFields ?? [:], path: "root")
@@ -31,6 +32,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeStrictSemantics.vocabulary(context, data: modelData)
             try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)
             try PrototypeStrictSemantics.targets(context)
+            try PrototypeTooltips.validate(nodes: context.locatedNodes, scopes: repeats.scopes)
             let nodes = repeats.bound(context.locatedNodes)
             let actions = repeats.bound(context.actions, actions: true)
             try PrototypeStrictBindings.validate(nodes: nodes, actions: actions, state: state)

@@ -11,6 +11,7 @@ import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { Timer } from "../utils/SystemTimer";
 import { CTRL_PROXY_PACKAGE } from "./constants";
 import type { ToggleCapabilities } from "./AndroidCtrlProxyManagerTypes";
+import { settingsCommand, userFlag } from "./setupUser";
 
 /** Live manager dependencies; callbacks preserve manager overrides and test spies. */
 export interface AndroidCtrlProxyAccessibilityHost {
@@ -26,6 +27,8 @@ export interface AndroidCtrlProxyAccessibilityHost {
   clearAvailabilityCache(): void;
   enableViaSettings(): Promise<void>;
   getApiLevel(): Promise<[number | null, boolean]>;
+  /** The user to set CtrlProxy up for on a headless-system-user device; undefined everywhere else. */
+  setupUser(): Promise<number | undefined>;
 }
 
 /** Accessibility settings, capability detection and cached availability. */
@@ -72,10 +75,12 @@ export class AndroidCtrlProxyAccessibility {
       }
     }
 
+    // Resolved outside the try: an unreadable foreground user must surface as itself.
+    const user = await this.host.setupUser();
     try {
       logger.debug("[CTRL_PROXY] Checking if accessibility service is installed");
       const result = await this.host.adb.executeCommand(
-        `shell pm list packages ${CTRL_PROXY_PACKAGE}`,
+        `shell pm list packages${userFlag(user)} ${CTRL_PROXY_PACKAGE}`,
         { noRetry: true },
       );
       const diagnostic = `${result.stdout}\n${result.stderr}`;
@@ -126,10 +131,11 @@ export class AndroidCtrlProxyAccessibility {
       }
     }
 
+    const user = await this.host.setupUser();
     try {
       logger.debug("[CTRL_PROXY] Checking if accessibility service is enabled");
       const result = await this.host.adb.executeCommand(
-        "shell settings get secure enabled_accessibility_services",
+        settingsCommand(user, "get secure enabled_accessibility_services"),
       );
       const diagnostic = `${result.stdout}\n${result.stderr}`;
       if (isAndroidFrameworkUnavailable(diagnostic)) {
@@ -278,6 +284,7 @@ export class AndroidCtrlProxyAccessibility {
       throw new Error(errorMsg);
     }
 
+    const user = await this.host.setupUser();
     try {
       logger.info("Enabling Accessibility Service via settings commands");
       const perf = createGlobalPerformanceTracker();
@@ -285,7 +292,7 @@ export class AndroidCtrlProxyAccessibility {
       // Get current enabled services
       perf.startOperation("readCurrentServices");
       const result = await this.host.adb.executeCommand(
-        "shell settings get secure enabled_accessibility_services",
+        settingsCommand(user, "get secure enabled_accessibility_services"),
       );
       perf.endOperation("readCurrentServices");
       let currentServices = result.stdout.trim();
@@ -310,13 +317,15 @@ export class AndroidCtrlProxyAccessibility {
 
         // Set updated list
         await this.host.adb.executeCommand(
-          `shell settings put secure enabled_accessibility_services "${updatedServices}"`,
+          settingsCommand(user, `put secure enabled_accessibility_services "${updatedServices}"`),
         );
         logger.info("Added AutoMobile service to enabled_accessibility_services");
       }
 
       // Enable accessibility globally
-      await this.host.adb.executeCommand("shell settings put secure accessibility_enabled 1");
+      await this.host.adb.executeCommand(
+        settingsCommand(user, "put secure accessibility_enabled 1"),
+      );
       perf.endOperation("writeServiceEnabled");
       logger.info("Accessibility Service enabled successfully via settings");
     } catch (error) {
@@ -375,12 +384,13 @@ export class AndroidCtrlProxyAccessibility {
       throw new Error(errorMsg);
     }
 
+    const user = await this.host.setupUser();
     try {
       logger.info("Disabling Accessibility Service via settings commands");
 
       // Get current enabled services
       const result = await this.host.adb.executeCommand(
-        "shell settings get secure enabled_accessibility_services",
+        settingsCommand(user, "get secure enabled_accessibility_services"),
       );
       const currentServices = result.stdout.trim();
 
@@ -406,7 +416,7 @@ export class AndroidCtrlProxyAccessibility {
         // Set updated list
         const updatedServices = filteredServices.join(":");
         await this.host.adb.executeCommand(
-          `shell settings put secure enabled_accessibility_services "${updatedServices}"`,
+          settingsCommand(user, `put secure enabled_accessibility_services "${updatedServices}"`),
         );
         logger.info("Removed AutoMobile service from enabled_accessibility_services");
 
@@ -416,7 +426,9 @@ export class AndroidCtrlProxyAccessibility {
           filteredServices.length === 0 ||
           (filteredServices.length === 1 && filteredServices[0] === "")
         ) {
-          await this.host.adb.executeCommand("shell settings put secure accessibility_enabled 0");
+          await this.host.adb.executeCommand(
+            settingsCommand(user, "put secure accessibility_enabled 0"),
+          );
           logger.info("Disabled accessibility globally (no other services remain)");
         }
       }

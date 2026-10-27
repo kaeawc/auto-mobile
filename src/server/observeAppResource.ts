@@ -8,6 +8,7 @@ import { logger } from "../utils/logger";
 import { resolveActiveSessionDevice, type ActiveSessionResolver } from "./activeSessionDevice";
 import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
 import { readRetainedScreenshot } from "./retainedScreenshot";
+import { OBSERVE_APP_SHELL_META, renderObserveAppShellHtml } from "./observeAppShell";
 
 /**
  * MCP Apps UI resource for `observe` (issue #4669). `observe` returns screen
@@ -17,8 +18,10 @@ import { readRetainedScreenshot } from "./retainedScreenshot";
  * and non-Apps hosts simply ignore the `_meta.ui.resourceUri` pointer.
  *
  * The body is fully self-contained (inline CSS + SVG, no external hosts, no
- * scripts) to mirror the repo's artifact CSP posture. Interactive tap-target
- * selection is a deliberate follow-up, not part of this resource.
+ * scripts) to mirror the repo's artifact CSP posture. Clients that advertise MCP Apps
+ * support are served the live postMessage shell in `observeAppShell.ts` instead (#4682);
+ * this snapshot is what every other client reads. Interactive tap-target selection is a
+ * deliberate follow-up.
  */
 export const OBSERVE_APP_RESOURCE_URI = "ui://automobile/observe";
 
@@ -312,6 +315,17 @@ async function buildAppContent(options: {
   dataSource: ObserveAppDataSource;
   context: ResourceReadContext;
 }): Promise<ResourceContent> {
+  // An Apps host gets the stable live shell: it renders the invoking call's result delivered
+  // over postMessage, so nothing here depends on this connection's cached observation. Every
+  // other client keeps the snapshot below, byte for byte (#4682).
+  if (options.context.clientSupportsApps === true) {
+    return {
+      uri: OBSERVE_APP_RESOURCE_URI,
+      mimeType: MCP_APP_MIME_TYPE,
+      text: renderObserveAppShellHtml(),
+      _meta: OBSERVE_APP_SHELL_META,
+    };
+  }
   const observation = await options.dataSource.getObservation(options.context);
   return {
     uri: OBSERVE_APP_RESOURCE_URI,

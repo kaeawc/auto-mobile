@@ -902,7 +902,21 @@ data class PrototypeResult(
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val cleared: Int? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val fired: Int? = null,
+  /**
+   * A warning, like [missingAssets]: the `style.effects` entries of a successful show this device
+   * cannot draw (`prototype_effects_v1`). Omitted when empty and by older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val degradedEffects: List<PrototypeDegradedEffect>? = null,
 ) : WebSocketResponse(), CorrelatedResponse
+
+/**
+ * One `style.effects` entry the device does not draw. [reason] is `api` (the device is below the
+ * effect's API floor, so the node renders unshaded) or `budget` (the effect took longer than 32 ms
+ * a frame for 30 frames and its phase was frozen). [path] is the node's structural path.
+ */
+@Serializable
+data class PrototypeDegradedEffect(val path: String, val type: String, val reason: String)
 
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -1047,6 +1061,9 @@ data class PrototypeStatusEntry(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val storage: PrototypeStorageReport? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val timers: List<PrototypeTimerReport> = emptyList(),
+  /** Effects not drawn right now (`prototype_effects_v1`); absent when every effect renders. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
 )
 
 /** Input validation vocabulary understood by this protocol version. */

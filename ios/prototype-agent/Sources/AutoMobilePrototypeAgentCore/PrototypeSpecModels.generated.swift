@@ -86,6 +86,22 @@ struct ScrollLinked: Codable, Equatable, Sendable {
     let blur: [Double]?
 }
 
+struct IosPresentationNamespaceTab: Codable, Equatable, Sendable {
+    let role: String
+}
+
+struct IosPresentationNamespaceSheet: Codable, Equatable, Sendable {
+    let sizing: String
+}
+
+struct IosPresentationNamespace: Codable, Equatable, Sendable {
+    let buttonStyle: String?
+    let tab: IosPresentationNamespaceTab?
+    let sheet: IosPresentationNamespaceSheet?
+    let hover: String?
+    let navigationTitle: String?
+}
+
 struct IosNamespaceTab: Codable, Equatable, Sendable {
     let role: String
 }
@@ -94,8 +110,9 @@ struct IosNamespaceSheet: Codable, Equatable, Sendable {
     let sizing: String
 }
 
-struct IosNamespace: Codable, Equatable, Sendable {
+struct IosNamespace: Decodable {
     let buttonStyle: String?
+    let bottomAccessory: PrototypeNode?
     let tab: IosNamespaceTab?
     let sheet: IosNamespaceSheet?
     let hover: String?
@@ -126,6 +143,13 @@ struct Padding: Codable, Equatable, Sendable {
 struct SafeAreaPadding: Codable, Equatable, Sendable {
     let edges: [String]
     let types: [String]
+}
+
+/// A node's style animation: mutually exclusive `tempo` or `durationMs`/`easing`.
+struct Animate: Codable, Equatable, Sendable {
+    let durationMs: Int?
+    let easing: String?
+    let tempo: String?
 }
 
 /// A fixed y axis for a chart; `max` is above `min`.

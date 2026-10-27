@@ -14841,7 +14841,7 @@
         "ios": {
           "rule": {
             "kind": "ref",
-            "name": "iosNamespace"
+            "name": "iosPresentationNamespace"
           },
           "optional": true
         },
@@ -17635,7 +17635,7 @@
         "ios": {
           "rule": {
             "kind": "ref",
-            "name": "iosNamespace"
+            "name": "iosPresentationNamespace"
           },
           "optional": true
         },
@@ -18380,6 +18380,13 @@
           "rule": {
             "kind": "enum",
             "values": ["standard", "emphasized", "linear", "spring"]
+          },
+          "optional": true
+        },
+        "tempo": {
+          "rule": {
+            "kind": "enum",
+            "values": ["fast", "default", "slow"]
           },
           "optional": true
         }
@@ -19857,6 +19864,62 @@
       "kind": "enum",
       "values": ["start", "end"]
     },
+    "iosPresentationNamespace": {
+      "kind": "object",
+      "fields": {
+        "buttonStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["glass", "glassProminent"]
+          },
+          "optional": true
+        },
+        "tab": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "role": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["search"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "sheet": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "sizing": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["form", "page", "fitted"]
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "hover": {
+          "rule": {
+            "kind": "enum",
+            "values": ["lift", "highlight"]
+          },
+          "optional": true
+        },
+        "navigationTitle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["large", "inline"]
+          },
+          "optional": true
+        }
+      }
+    },
     "iosNamespace": {
       "kind": "object",
       "fields": {
@@ -19865,6 +19928,10 @@
             "kind": "enum",
             "values": ["glass", "glassProminent"]
           },
+          "optional": true
+        },
+        "bottomAccessory": {
+          "rule": { "kind": "ref", "name": "node" },
           "optional": true
         },
         "tab": {
@@ -21115,6 +21182,10 @@
         "why": "Native iOS glass button treatments have no portable renderer equivalent.",
         "requires": "prototype_platform_namespace_v1"
       },
+      "bottomAccessory": {
+        "why": "The iOS tab bar bottom accessory has no Android navigation equivalent.",
+        "requires": "prototype_platform_namespace_v1"
+      },
       "tab.role": {
         "why": "The search tab role is an iOS tab navigation convention.",
         "requires": "prototype_platform_namespace_v1"
@@ -21386,6 +21457,68 @@
             }
           },
           "optional": true
+        }
+      }
+    }
+  },
+  "motionTokens": {
+    "standard": {
+      "spatial": {
+        "fast": {
+          "dampingRatio": 0.9,
+          "stiffness": 1400
+        },
+        "default": {
+          "dampingRatio": 0.9,
+          "stiffness": 700
+        },
+        "slow": {
+          "dampingRatio": 0.9,
+          "stiffness": 300
+        }
+      },
+      "effects": {
+        "fast": {
+          "dampingRatio": 1,
+          "stiffness": 3800
+        },
+        "default": {
+          "dampingRatio": 1,
+          "stiffness": 1600
+        },
+        "slow": {
+          "dampingRatio": 1,
+          "stiffness": 800
+        }
+      }
+    },
+    "expressive": {
+      "spatial": {
+        "fast": {
+          "dampingRatio": 0.6,
+          "stiffness": 800
+        },
+        "default": {
+          "dampingRatio": 0.8,
+          "stiffness": 380
+        },
+        "slow": {
+          "dampingRatio": 0.8,
+          "stiffness": 200
+        }
+      },
+      "effects": {
+        "fast": {
+          "dampingRatio": 1,
+          "stiffness": 3800
+        },
+        "default": {
+          "dampingRatio": 1,
+          "stiffness": 1600
+        },
+        "slow": {
+          "dampingRatio": 1,
+          "stiffness": 800
         }
       }
     }

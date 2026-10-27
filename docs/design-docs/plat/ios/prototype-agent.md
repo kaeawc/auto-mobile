@@ -1217,11 +1217,23 @@ The contract has no system-sheet dispatcher or fake-mode behavior. `platformMode
 
 ## Platform namespaces (#15257)
 
-Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
-namespace objects on nodes, window and theme for native semantics. Each field has a
-`why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
-Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
-ignore both blocks and do not advertise it.
+Prefer portable fields, portable theme tokens, then `theme.design`; reserve `ios`/`android`
+for native semantics. Each closed contract field has a `why`. Both renderers advertise
+`prototype_platform_namespace_v1` (iOS 17+). Foreign blocks are accepted and ignored with
+paths in `platformNotes`; unknown fields are rejected on either platform. Window/theme
+namespace blocks have no applicable node and are reported as ignored.
+
+Android `indication` controls node clickable feedback (`ripple` or `none`); motion-off
+still disables feedback. Stack `predictiveBack.style` preserves the normal pop for
+`default`, uses horizontal movement and fade for `crossActivity` within the prototype
+activity, and snaps without predictive scrubbing for `none`. Reduced motion still wins.
+
+iOS `buttonStyle` applies `.glass`/`.glassProminent` on iOS 26+, using bordered buttons
+below 26 with a substituted note. `hover` applies lift/highlight on iOS 17+ and is render-only.
+The renderer's tab bars, app bars and sheets are custom drawn to retain per-item identifiers;
+`tab.role`, `bottomAccessory`, `navigationTitle` and `sheet.sizing` are reported as ignored.
+`bottomAccessory` is node-only and structurally validated; its descendants provide no targets,
+references or capabilities on either renderer. iOS ignores all Android fields.
 
 ## Icon effects
 
@@ -1245,3 +1257,27 @@ shared motion-active wire signal or shimmer reporter yet; this local signal is
 not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
 
 Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.
+
+### Motion tokens
+
+`animate.tempo: "fast" | "default" | "slow"` requires `prototype_motion_tokens_v1`
+and cannot be combined with `durationMs` or `easing`. The contract's `motionTokens`
+table selects a physical spring by scheme (`motion: "standard"` by default, or
+`"expressive"`), property role and tempo. `easing: "spring"` selects the default
+tempo of that scheme. Spatial properties are offset, scale, rotation, cornerRadius,
+elevation, shadowColor, padding, border width and dp width/height; alpha, background,
+color and border color use critically damped effects springs.
+
+| Scheme / role         | Damping ratio (fast / default / slow) | Stiffness (fast / default / slow) |
+| --------------------- | ------------------------------------- | --------------------------------- |
+| standard spatial      | 0.9 / 0.9 / 0.9                       | 1400 / 700 / 300                  |
+| expressive spatial    | 0.6 / 0.8 / 0.8                       | 800 / 380 / 200                   |
+| either scheme effects | 1 / 1 / 1                             | 3800 / 1600 / 800                 |
+
+Compose uses `spring(dampingRatio, stiffness)`. SwiftUI uses
+`interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`,
+so both renderers use the same physical spring. Reduced motion snaps spatial
+changes and retains effects; motion off snaps everything. Existing motion v2/v3
+capability requirements still apply; iOS advertises the token capability but
+continues to refuse those broader features until its corresponding capabilities
+are available.

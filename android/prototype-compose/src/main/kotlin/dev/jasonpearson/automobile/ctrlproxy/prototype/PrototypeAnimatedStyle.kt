@@ -7,7 +7,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
@@ -20,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeAnimate
 import dev.jasonpearson.automobile.protocol.PrototypeCornerRadius
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
+import dev.jasonpearson.automobile.protocol.PrototypeMotionTokens
 import dev.jasonpearson.automobile.protocol.PrototypePadding
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 
@@ -39,9 +39,15 @@ internal fun <T> prototypeStyleAnimation(
   effects: Boolean = false,
 ): AnimationSpec<T> {
   if (animate == null || !LocalPrototypeMotion.current) return snap()
+  val scheme = if (LocalPrototypeExpressive.current) "expressive" else "standard"
+  if (animate.tempo != null || animate.easing == "spring")
+    return prototypeTokenSpec(
+      scheme,
+      if (effects) "effects" else "spatial",
+      animate.tempo ?: "default",
+    )
   val duration = animate.durationMs ?: DEFAULT_ANIMATE_MS
   return when (animate.easing) {
-    "spring" -> if (LocalPrototypeExpressive.current) prototypeExpressiveSpec(effects) else spring()
     "linear" -> tween(duration, easing = LinearEasing)
     "emphasized" -> tween(duration, easing = EmphasizedEasing)
     else -> tween(duration, easing = FastOutSlowInEasing)
@@ -69,13 +75,20 @@ internal fun prototypeAnimatedAlpha(node: PrototypeRenderNode): Float {
 
 /** An authored colour, animated when the node declares `animate`; unspecified stays unspecified. */
 @Composable
-internal fun prototypeAnimatedColor(node: PrototypeRenderNode, color: Color): Color {
+internal fun prototypeAnimatedColor(
+  node: PrototypeRenderNode,
+  color: Color,
+  property: String = "color",
+): Color {
   if (!LocalPrototypeMotion.current || !color.isSpecified || node.source?.animate == null)
     return color
   val animated =
     animateColorAsState(
       color,
-      prototypeStyleAnimation(node.source.animate, effects = true),
+      prototypeStyleAnimation(
+        node.source.animate,
+        effects = PrototypeMotionTokens.role(property) == "effects",
+      ),
       label = "prototypeColor",
     )
   ReportPrototypeMotion { animated.value != color }

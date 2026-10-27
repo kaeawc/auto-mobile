@@ -1,0 +1,21 @@
+{
+  "id": "foreign-ios",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Hello",
+    "ios": {
+      "bottomAccessory": {
+        "type": "text",
+        "text": "Playing"
+      },
+      "tab": {
+        "role": "search"
+      }
+    }
+  }
+}

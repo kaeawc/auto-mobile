@@ -397,6 +397,7 @@ class WebSocketServer(
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
     add("prototype_keyframes_v1")
+    add("prototype_motion_tokens_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
     addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     add("prototype_strings_v1")
@@ -415,7 +416,13 @@ class WebSocketServer(
     add("prototype_content_transition_v1")
     add("prototype_icon_effects_v1")
     add("prototype_stack_transitions_v1")
-    addAll(listOf("prototype_stack_patterns_v1", "prototype_zoom_transition_v1"))
+    addAll(
+      listOf(
+        "prototype_stack_patterns_v1",
+        "prototype_platform_namespace_v1",
+        "prototype_zoom_transition_v1",
+      ),
+    )
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")
     add("prototype_shared_element_v2")

@@ -1,3 +1,5 @@
+import { excludeAccessoryReferences } from "./prototypeBindingValidation";
+import { prototypeMotionObjectError } from "./prototypeMotionTokens";
 import { prototypeRoutesError } from "./prototypeRoutes";
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
 import { prototypeDerivedError } from "./prototypeDerivedValidation";
@@ -30,11 +32,7 @@ import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
-import {
-  chargeKeyframeNode,
-  prototypeKeyframesError,
-  prototypeKeyframeTracksError,
-} from "./prototypeKeyframes";
+import { chargeKeyframeNode, prototypeKeyframesError } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { jsonCost } from "./prototypeJsonCost";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -58,7 +56,6 @@ import {
   pagerNodeError,
   pagerStateKeyErrors,
 } from "./prototypePagerValidation";
-
 export type PrototypeValidationResult =
   | { success: true; data: PrototypeSpec }
   | { success: false; error: PrototypeValidationError };
@@ -85,7 +82,6 @@ function bytes(value: unknown): number {
 function refRule(rule: Rule): Rule {
   return definitions[rule.name ?? ""] ?? rule;
 }
-
 /** References whose nesting is bounded by their own contract limit. A request nests actions. */
 const nestedReferences = Object.assign(
   Object.create(null) as Record<string, { limit: number; message: string } | undefined>,
@@ -104,7 +100,6 @@ const nestedReferences = Object.assign(
     },
   },
 );
-
 function visitReference(
   value: unknown,
   rule: Rule,
@@ -303,17 +298,12 @@ function visitObject(
   }
   return objectRuleError(rule, data, path);
 }
-/** The `keyframes` object adds cross-point track rules on top of the generic object constraint. */
 function objectRuleError(
-  rule: Parameters<typeof objectConstraint>[1],
+  rule: Rule,
   data: Record<string, unknown>,
   path: string,
-): ReturnType<typeof objectConstraint> {
-  const tracks =
-    rule === definitions.keyframes
-      ? prototypeKeyframeTracksError(data.tracks, `${path}.tracks`)
-      : undefined;
-  return tracks ?? objectConstraint(data, rule, path);
+): PrototypeValidationError | undefined {
+  return prototypeMotionObjectError(rule, data, path) ?? objectConstraint(data, rule, path);
 }
 function objectConstraint(
   data: Record<string, unknown>,
@@ -544,7 +534,6 @@ export function prototypeDataError(
     (jsonCost(value) > maxBytes ? fail("data", "Data byte limit exceeded") : undefined)
   );
 }
-
 function dataChildren(value: unknown, path: string): { value: unknown; path: string }[] {
   if (Array.isArray(value)) {
     return value.map((child, index) => ({ value: child, path: `${path}[${index}]` }));
@@ -554,7 +543,6 @@ function dataChildren(value: unknown, path: string): { value: unknown; path: str
     .sort()
     .map((key) => ({ value: data[key], path: keyPath(path, key) }));
 }
-
 function walkDataValue(
   value: unknown,
   path: string,
@@ -793,7 +781,6 @@ function gridSpanErrors(context: Context): PrototypeValidationError | undefined 
   }
   return undefined;
 }
-
 /** Tree-shape checks that run after the schema walk, in the order the host reports them. */
 function layoutErrors(
   value: unknown,
@@ -811,7 +798,6 @@ function layoutErrors(
     prototypeStorageError(value)
   );
 }
-
 /** A literal platform-call argument against its `platformModules` rule (#14294). */
 function platformArgumentError(
   value: unknown,
@@ -829,7 +815,6 @@ function platformArgumentError(
   };
   return walk(value, rule, path, context, 0);
 }
-
 /** The host-owned vocabulary: the reserved `automobile-` testTag namespace, then the platform rules. */
 function hostVocabularyError(
   value: unknown,
@@ -887,6 +872,10 @@ function behaviourErrors(
   );
 }
 
+function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
+  return walk(value, definitions.spec, "", context, 0) ?? excludeAccessoryReferences(context);
+}
+
 function validateValue(
   value: unknown,
   options: PrototypeStrictOptions,
@@ -905,7 +894,7 @@ function validateValue(
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     prototypeLazyListLimitError(value) ??
-    walk(value, definitions.spec, "", context, 0) ??
+    walkedError(value, context) ??
     prototypeRoutesError(value, context.nodes, context.actions) ??
     prototypeSharedElementError(context.nodes, repeats, context.actions) ??
     layoutErrors(value, context, repeats) ??
@@ -923,11 +912,7 @@ function validateValue(
     ? { success: false, error: policyError }
     : { success: true, data: parsed.data };
 }
-/**
- * Expands reusable components (#11053) before validating, so every limit applies to the tree the
- * device receives. The expanded spec must also fit the byte limit, because the device re-validates
- * bytes, and an error inside an expansion is reported at its authored location.
- */
+/** Expand components before validation and preserve authored error locations. */
 function validateExpanded(
   value: unknown,
   options: PrototypeStrictOptions,

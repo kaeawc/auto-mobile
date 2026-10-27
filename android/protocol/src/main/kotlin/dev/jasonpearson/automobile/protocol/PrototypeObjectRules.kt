@@ -39,6 +39,8 @@ internal object PrototypeObjectRules {
     }
     val kind = listOf("style", "fadeEdges", "imageFilter").firstOrNull { rule === definitions[it] }
     return PrototypeStylePolishV2Rules.objectError(data, kind ?: "", path)
+      ?: (if (rule === definitions["animate"]) PrototypeMotionTokens.animateError(data, path)
+      else null)
       ?: objectConstraint(data, rule, path)
   }
 

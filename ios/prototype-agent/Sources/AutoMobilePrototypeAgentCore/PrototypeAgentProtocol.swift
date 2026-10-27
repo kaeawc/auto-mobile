@@ -47,6 +47,7 @@ enum PrototypeAgentProtocol {
         carouselCapability,
         chartCapability,
         keyframesCapability,
+        motionTokensCapability,
         lazyListCapability,
         loadingStatesCapability,
         effectsCapability,
@@ -70,6 +71,7 @@ enum PrototypeAgentProtocol {
         iconEffectsCapability,
         stackPatternsCapability,
         zoomTransitionCapability,
+        platformNamespaceCapability,
         reducedMotionCapability,
         sharedElementCapability,
         sharedElementV2Capability,
@@ -102,6 +104,7 @@ enum PrototypeAgentProtocol {
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
     static let designPlatformCapability = "prototype_design_platform_v1"
+    static let platformNamespaceCapability = "prototype_platform_namespace_v1"
     static let zoomTransitionCapability = "prototype_zoom_transition_v1"
     static let stackPatternsCapability = "prototype_stack_patterns_v1"
     static let stackTransitionsCapability = "prototype_stack_transitions_v1"
@@ -185,6 +188,7 @@ enum PrototypeAgentProtocol {
     static let chartCapability = "prototype_chart_v1"
     /// Node `keyframes` tracks played once per trigger change (iOS 17+, #15249).
     static let keyframesCapability = "prototype_keyframes_v1"
+    static let motionTokensCapability = "prototype_motion_tokens_v1"
     /// Locale string tables and integer plural resolution (#14210).
     static let stringsCapability = "prototype_strings_v1"
     /// Authored accessibility semantics and live announcements (#14210).

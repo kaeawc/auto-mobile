@@ -145,7 +145,9 @@ internal object PrototypeBundleCapabilities {
     when (value) {
       is JsonObject ->
         value.any { (key, child) ->
-          key !in skipped && (key in names || hasField(child, names, skipped))
+          key !in skipped &&
+            key !in setOf("ios", "android") &&
+            (key in names || hasField(child, names, skipped))
         }
       is JsonArray -> value.any { hasField(it, names, skipped) }
       else -> false

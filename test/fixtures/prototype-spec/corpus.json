@@ -108,12 +108,20 @@
     "media-tab-item-data.json",
     "menu-overflow.json",
     "motion-none.json",
+    "motion-tokens-default.json",
+    "motion-tokens-fast.json",
+    "motion-tokens-slow.json",
     "motion-v2.json",
     "motion3-alpha.json",
     "motion3-expressive.json",
     "motion3-layout.json",
     "motion3-press.json",
+    "ns-accessory-chart.json",
+    "ns-android-ignored-on-ios.json",
     "ns-block-both.json",
+    "ns-ios-ignored-on-android.json",
+    "ns-list-slots.json",
+    "ns-rendered-path-key.json",
     "on-appear-repeat.json",
     "on-appear.json",
     "opaque-json-keys.json",
@@ -831,6 +839,8 @@
     "motion-animate-unknown-easing.json",
     "motion-style-rotation-over-max.json",
     "motion-style-scale-over-max.json",
+    "motion-tokens-with-duration.json",
+    "motion-tokens-with-easing.json",
     "motion-zoomable-double-tap.json",
     "motion-zoomable-max-scale-below-min.json",
     "motion3-press-nonpressable.json",
@@ -845,8 +855,13 @@
     "negative-page.json",
     "neither-binding.json",
     "node-limit.json",
+    "ns-accessory-scroll-target.json",
+    "ns-accessory-zoom-id.json",
+    "ns-accessory-zoom-shared.json",
     "ns-block-bad-enum.json",
     "ns-block-unknown-field.json",
+    "ns-theme-bottom-accessory.json",
+    "ns-window-bottom-accessory.json",
     "null-optional.json",
     "numeric-payload-budget.json",
     "offset-missing-y.json",
@@ -1475,6 +1490,7 @@
     "strict-gate-prototype_linkify_v1.json",
     "strict-gate-prototype_loading_states_v1.json",
     "strict-gate-prototype_menus_v1.json",
+    "strict-gate-prototype_motion_tokens_v1.json",
     "strict-gate-prototype_motion_v2.json",
     "strict-gate-prototype_motion_v3.json",
     "strict-gate-prototype_network_device_v1.json",
@@ -1963,6 +1979,16 @@
     "zero-line-height.json",
     "zero-weight.json"
   ],
+  "validPlatformNotes": {
+    "ns-android-ignored-on-ios.json": {
+      "platform": "ios",
+      "paths": ["root.android"]
+    },
+    "ns-ios-ignored-on-android.json": {
+      "platform": "android",
+      "paths": ["root.ios"]
+    }
+  },
   "validCapabilities": {
     "backdrop-blur-zero.json": ["prototype_backdrop_v1"],
     "backdrop-full.json": ["prototype_backdrop_v1"],
@@ -2107,7 +2133,16 @@
     "motion3-expressive.json": ["prototype_motion_v3"],
     "motion3-layout.json": ["prototype_motion_v2", "prototype_motion_v3"],
     "motion3-press.json": ["prototype_motion_v3"],
+    "ns-accessory-chart.json": ["prototype_data_model_v1", "prototype_platform_namespace_v1"],
+    "ns-android-ignored-on-ios.json": ["prototype_platform_namespace_v1"],
     "ns-block-both.json": ["prototype_platform_namespace_v1"],
+    "ns-ios-ignored-on-android.json": ["prototype_platform_namespace_v1"],
+    "ns-list-slots.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1",
+      "prototype_platform_namespace_v1"
+    ],
+    "ns-rendered-path-key.json": ["prototype_chat_scroll_v1", "prototype_stack_v1"],
     "on-appear-repeat.json": ["prototype_timers_v1"],
     "on-appear.json": ["prototype_timers_v1"],
     "opaque-json-keys.json": [],
@@ -2580,6 +2615,9 @@
     "share-url-grapheme-path.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-url-grapheme-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-alias-item.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"]
+    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "motion-tokens-fast.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-default.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-slow.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"]
   }
 }

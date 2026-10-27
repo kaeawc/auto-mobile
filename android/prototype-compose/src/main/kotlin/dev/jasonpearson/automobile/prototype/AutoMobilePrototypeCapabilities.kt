@@ -37,6 +37,7 @@ object AutoMobilePrototype {
       "prototype_format_v1",
       "prototype_gestures_v1",
       "prototype_keyframes_v1",
+      "prototype_motion_tokens_v1",
       "prototype_lazy_list_v1",
       "prototype_icon_effects_v1",
       "prototype_linkify_v1",
@@ -74,6 +75,7 @@ object AutoMobilePrototype {
       "prototype_timers_v1",
       "prototype_tooltip_v1",
       "prototype_window_motion_v1",
+      "prototype_platform_namespace_v1",
       "prototype_zoom_transition_v1",
     )
 }

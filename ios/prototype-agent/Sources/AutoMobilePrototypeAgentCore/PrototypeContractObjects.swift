@@ -33,6 +33,7 @@ extension PrototypeContractValidator {
         }
         let kind = ["style", "fadeEdges", "imageFilter"].first { rule == definitions[$0]?.objectFields } ?? ""
         try PrototypeStylePolishV2.validateObject(data, kind: kind, path: path)
+        if rule == definitions["animate"]?.objectFields { try PrototypeMotionTokens.validate(data, path: path) }
         try Self.constraints(data, rule: rule, path: path)
     }
 

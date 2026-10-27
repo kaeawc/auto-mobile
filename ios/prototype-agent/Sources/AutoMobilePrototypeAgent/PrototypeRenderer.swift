@@ -834,13 +834,11 @@
             // "Save" to "Sa..." (#10899); a label wider than the row wraps rather than overflowing,
             // as on Android (#10912).
             .layoutPriority(1)
-            switch node.variant {
-            case "outlined", "tonal": button.buttonStyle(.bordered).tint(themePrimary)
-            case "elevated": button.buttonStyle(.bordered).tint(themePrimary)
-                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-            case "text": button.buttonStyle(.borderless).tint(themePrimary)
-            default: button.buttonStyle(.borderedProminent).tint(themePrimary)
-            }
+            button.modifier(PrototypeNamespaceButtonStyle(
+                style: node.ios?.buttonStyle,
+                variant: node.variant,
+                tint: themePrimary
+            ))
         }
 
         /// The theme's `primary`, so buttons follow the spec theme rather than the system accent (#15445).
@@ -940,28 +938,39 @@
             )
         }
 
+        private var styleAnimation: PrototypeStyleAnimation {
+            PrototypeStyleAnimation(
+                animate: node.animate, scheme: model.spec?.motion,
+                motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            )
+        }
+
         private func styled(_ view: some View) -> some View {
             let padding = style?.padding
             let insets = safeAreaEdges
             let shape = cornerShape
             return view
-                .padding(EdgeInsets(
-                    top: (padding?.top ?? 0) + insets.top,
-                    leading: (padding?.start ?? 0) + insets.left,
-                    bottom: (padding?.bottom ?? 0) + insets.bottom,
-                    trailing: (padding?.end ?? 0) + insets.right
-                ))
-                .modifier(SizeModifier(
+                .animation(styleAnimation.animation("color"), value: palette.color(style?.color))
+                .modifier(PrototypeNamespaceHover(effect: node.ios?.hover))
+                .modifier(PrototypeAnimatedLayout(
+                    insets: EdgeInsets(
+                        top: (padding?.top ?? 0) + insets.top,
+                        leading: (padding?.start ?? 0) + insets.left,
+                        bottom: (padding?.bottom ?? 0) + insets.bottom,
+                        trailing: (padding?.end ?? 0) + insets.right
+                    ),
                     rules: PrototypeSizeRules(
                         style: style,
                         coverSize: coverSize.map { (Double($0.width), Double($0.height)) },
                         weightedAxis: stackAxis,
                         fillsByDefault: node.type == "spacer"
                     ),
-                    alignment: contentAlignment
+                    alignment: contentAlignment,
+                    animation: styleAnimation
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
+                    styleAnimation: styleAnimation,
                     shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                         .spatial,
                     effects: PrototypeEffects.plan(
@@ -970,14 +979,13 @@
                     motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion),
                     authorsEffects: PrototypeEffects.authorsEffects(node)
                 ))
-                .opacity(style?.alpha ?? 1)
+                .modifier(PrototypeAnimatedTransform(style: style, animation: styleAnimation))
                 .modifier(PrototypeKeyframesModifier(
                     frames: node.keyframes,
                     trigger: keyframeTrigger,
                     profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile,
                     activity: model.keyframeActivity
                 ))
-                .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
                 .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(TapModifier(
@@ -1107,7 +1115,7 @@
     }
 
     @MainActor
-    private struct SizeModifier: ViewModifier {
+    struct SizeModifier: ViewModifier {
         let rules: PrototypeSizeRules
         let alignment: Alignment
 

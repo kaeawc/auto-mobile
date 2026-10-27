@@ -257,6 +257,7 @@ internal object PrototypeStrictPolicy {
       if (spec["storage"] != null) need("storage")
       if ("derive" in spec) need("format")
       if ((spec["window"] as? JsonObject)?.get("backdrop") != null) need("backdrop")
+      if ((spec["theme"] as? JsonObject)?.text("design") == "platform") need("design_platform")
       val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
       if (colors?.get("light") != null || colors?.get("dark") != null) need("theme_modes")
     }

@@ -9,6 +9,7 @@ enum PrototypeBundleCapabilities {
         var names = Set<String>()
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
         if spec["strings"] != nil { need("strings") }
+        if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["theme"] != nil { need("theme_modes") }

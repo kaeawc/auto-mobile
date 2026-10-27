@@ -16,6 +16,7 @@ enum PrototypeStrictCapabilities {
                 need("platform_namespace")
             }
         }
+        if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }

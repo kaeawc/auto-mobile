@@ -29,7 +29,7 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
 The 2026-10-26 decisions (#15244) fix the native-look and motion-profile work:
 
 1. **Default look.** `theme.design` defaults to `platform`. iOS prototypes look native by default
-   and the iOS screenshot baselines are re-recorded with it. On Android `platform` is still Material.
+   where native coverage exists. On Android `platform` is still Material.
    `material` stays available to force today's drawing on both platforms.
 2. **Other-platform namespaces.** A renderer ignores the other platform's namespace block (`ios: {...}`
    on Android, `android: {...}` on iOS) and adds a `platformNotes` entry; it does not refuse the spec,
@@ -234,11 +234,12 @@ depth precedes array length, then children; the byte check runs last.
 
 ## Theme
 
-Optional top-level `theme` sets the Material scheme every built-in component draws
+Optional top-level `theme` selects the design and sets the scheme components draw
 from. At least one of its fields is required:
 
 | Field                         | Meaning                                                                                                                                                                           |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `design`                      | `material` or `platform` (default). Explicit `platform` requires `prototype_design_platform_v1`; omission silently retains today’s drawing on older renderers.                    |
 | `mode`                        | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting.                         |
 | `colors.seed`                 | Hex color a full light or dark scheme is generated from.                                                                                                                          |
 | `colors.source`               | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                                              |
@@ -269,6 +270,60 @@ theme's Shapes (`shapes.corner` shifts them), `none` is square and `full` a pill
 role-valued `background` does not take part in inferring the prototype's light/dark
 theme from authored backgrounds (it would be circular); set `theme.mode` or
 `colors.seed` for that.
+
+### Design coverage
+
+The contract's `designCoverage` table records the current drawing for each node. `neutral`
+means layout or content with no design language of its own. Android's platform look is Material.
+On iOS, explicit `theme.design: "platform"` reports `design.fallback` platform notes for Material
+nodes (first 20 paths, with `total` when larger). Omission and `material` report no design fallback
+notes. The four native entries already use SwiftUI controls; changing the default changes no drawing.
+There are no iOS prototype screenshot baselines to re-record.
+
+| Node            | iOS      | Android  | Parts |
+| --------------- | -------- | -------- | ----- |
+| badge           | material | material | —     |
+| bottomNav       | material | material | —     |
+| bottomSheet     | material | material | —     |
+| box             | neutral  | neutral  | —     |
+| button          | native   | material | —     |
+| card            | material | material | —     |
+| carousel        | neutral  | neutral  | —     |
+| chart           | material | material | —     |
+| checkbox        | material | material | —     |
+| chip            | material | material | —     |
+| column          | neutral  | neutral  | —     |
+| datePicker      | native   | material | —     |
+| dialog          | material | material | —     |
+| drawer          | material | material | —     |
+| tooltip         | material | material | —     |
+| divider         | neutral  | neutral  | —     |
+| fab             | material | material | —     |
+| flow            | neutral  | neutral  | —     |
+| grid            | neutral  | neutral  | —     |
+| icon            | neutral  | neutral  | —     |
+| iconButton      | material | material | —     |
+| image           | neutral  | neutral  | —     |
+| listItem        | material | material | —     |
+| menu            | material | material | —     |
+| pager           | neutral  | neutral  | —     |
+| progress        | material | material | —     |
+| radioGroup      | material | material | —     |
+| row             | neutral  | neutral  | —     |
+| scroll          | neutral  | neutral  | —     |
+| searchBar       | material | material | —     |
+| segmentedButton | material | material | —     |
+| select          | material | material | —     |
+| slider          | native   | material | —     |
+| snackbar        | material | material | —     |
+| spacer          | neutral  | neutral  | —     |
+| stack           | neutral  | neutral  | —     |
+| switch          | material | material | —     |
+| tabBar          | material | material | —     |
+| text            | neutral  | neutral  | —     |
+| textField       | material | material | —     |
+| timePicker      | native   | material | —     |
+| topAppBar       | material | material | —     |
 
 ### Light and dark values
 
@@ -3281,6 +3336,14 @@ difference; the fixture note records the divergence policy and unit thresholds.
 `dateTime`, `duration`, `plural`, and `fileSize` remain follow-ups and are invalid
 format kinds. No dependencies are needed: the host uses Intl.NumberFormat,
 Intl.DateTimeFormat and Intl.RelativeTimeFormat.
+
+## Platform namespaces (#15257)
+
+Prefer portable fields, then `theme.design` when available, and reserve `ios`/`android`
+namespace objects on nodes, window and theme for native semantics. Each field has a
+`why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
+Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
+ignore both blocks and do not advertise it.
 
 ## Platform namespaces (#15257)
 

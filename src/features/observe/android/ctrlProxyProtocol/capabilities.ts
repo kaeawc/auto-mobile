@@ -58,6 +58,9 @@ export const PROTOTYPE_WINDOW_CHROME_CAPABILITY = "prototype_window_chrome_v1";
  */
 export const PROTOTYPE_DEAD_TAP_CAPABILITY = "prototype_dead_tap_v1";
 
+/** Honours `theme.design`; a renderer without it falls back to the Material drawing. */
+export const PROTOTYPE_DESIGN_PLATFORM_CAPABILITY = "prototype_design_platform_v1";
+
 /** Buffers a device-persistent prototype's events while no host is connected; answers inspect. */
 export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_replay_v1";
 

@@ -9,6 +9,7 @@
     @Observable
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
+        var design: PrototypeDesign { spec?.theme?.design ?? .platform }
         private(set) var spec: PrototypeSpec?
         /// The shown prototype's `window.backdrop` as it is drawn now (`blur` or the tonal `fallback`).
         var backdropPlan: PrototypeBackdropPlan? {

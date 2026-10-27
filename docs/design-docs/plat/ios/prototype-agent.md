@@ -7,6 +7,68 @@ the spec, validation limits and node vocabulary are shared. Epic #10563.
 Device verification of the iOS window-layer `tapOn` fix (#10498) and the items marked "not
 device-verified" below remain open. `scripts/ios/prototype-agent-demo.ts` is a standalone driver.
 
+## Native look
+
+`theme.design` accepts `material` and `platform`, defaulting to `platform`. Explicit platform
+requests require `prototype_design_platform_v1`. Omitted design falls back silently on older agents.
+The contract's coverage is below; `neutral` nodes carry no design language. Material entries keep
+their current drawing and explicit platform requests report `design.fallback` notes. Button uses
+SwiftUI bordered/borderedProminent/borderless styles; slider, datePicker and timePicker already
+use native controls. No rendering changes accompany this default.
+
+| Node            | iOS      | Android  | Parts |
+| --------------- | -------- | -------- | ----- |
+| badge           | material | material | —     |
+| bottomNav       | material | material | —     |
+| bottomSheet     | material | material | —     |
+| box             | neutral  | neutral  | —     |
+| button          | native   | material | —     |
+| card            | material | material | —     |
+| carousel        | neutral  | neutral  | —     |
+| chart           | material | material | —     |
+| checkbox        | material | material | —     |
+| chip            | material | material | —     |
+| column          | neutral  | neutral  | —     |
+| datePicker      | native   | material | —     |
+| dialog          | material | material | —     |
+| drawer          | material | material | —     |
+| tooltip         | material | material | —     |
+| divider         | neutral  | neutral  | —     |
+| fab             | material | material | —     |
+| flow            | neutral  | neutral  | —     |
+| grid            | neutral  | neutral  | —     |
+| icon            | neutral  | neutral  | —     |
+| iconButton      | material | material | —     |
+| image           | neutral  | neutral  | —     |
+| listItem        | material | material | —     |
+| menu            | material | material | —     |
+| pager           | neutral  | neutral  | —     |
+| progress        | material | material | —     |
+| radioGroup      | material | material | —     |
+| row             | neutral  | neutral  | —     |
+| scroll          | neutral  | neutral  | —     |
+| searchBar       | material | material | —     |
+| segmentedButton | material | material | —     |
+| select          | material | material | —     |
+| slider          | native   | material | —     |
+| snackbar        | material | material | —     |
+| spacer          | neutral  | neutral  | —     |
+| stack           | neutral  | neutral  | —     |
+| switch          | material | material | —     |
+| tabBar          | material | material | —     |
+| text            | neutral  | neutral  | —     |
+| textField       | material | material | —     |
+| timePicker      | native   | material | —     |
+| topAppBar       | material | material | —     |
+
+Before a node becomes `native`, simulator verification must establish the testability contract:
+its `testTag` and every `<testTag>.<part>` remain reachable by `observe` and `tapOn`, observed bounds
+match the control, motion-off settles in one frame, and active motion emits the motion-active signal.
+The current native controls expose no additional authored part suffixes. Further native controls
+and a MaterialLook/PlatformLook renderer split are follow-ups. Segmented Picker, TabView and Menu
+remain custom-drawn because they cannot preserve per-item identifiers; segmentedButton, tabBar,
+bottomNav, menu and select therefore remain Material.
+
 ## Embedded input validation
 
 `PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` is the reject-only

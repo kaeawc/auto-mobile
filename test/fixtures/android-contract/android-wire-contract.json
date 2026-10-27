@@ -7993,6 +7993,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSpecThemeShapes",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "design",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSpecThemeColors": [

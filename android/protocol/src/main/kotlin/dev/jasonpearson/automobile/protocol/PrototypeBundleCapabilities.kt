@@ -19,6 +19,9 @@ internal object PrototypeBundleCapabilities {
     if ("derive" in spec) caps.add("prototype_format_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
+    if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {
+      caps.add("prototype_design_platform_v1")
+    }
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     val scrim = (((spec["window"] as? JsonObject)?.get("placement") as? JsonObject)?.get("scrim"))
     if (

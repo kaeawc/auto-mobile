@@ -200,8 +200,6 @@ export class SessionManagerWiring {
       fenceTerminalRelease: (...args) => this.releasePersistence.fenceTerminalRelease(...args),
       persistTerminalReleaseWithinDeadline: (...args) =>
         this.releaseCommit.persistTerminalReleaseWithinDeadline(...args),
-      abandonReleaseSupersededAfterPersist: (...args) =>
-        this.releaseCommit.abandonReleaseSupersededAfterPersist(...args),
       commitReleaseRemoval: (...args) => this.releaseCommit.commitReleaseRemoval(...args),
       commitReplacedDeviceTeardown: (...args) =>
         this.releaseCommit.commitReplacedDeviceTeardown(...args),

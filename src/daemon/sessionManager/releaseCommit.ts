@@ -61,13 +61,6 @@ export interface SessionReleaseCommitHost {
     afterCommit?: boolean,
   ): Promise<{ snapshot: SessionReleaseSnapshot; persisted: boolean }>;
   scheduleTerminalReleaseRetry(snapshot: SessionReleaseSnapshot): void;
-  abandonReleaseSupersededAfterPersist(
-    session: Session,
-    releaseSnapshot: SessionReleaseSnapshot,
-    pendingCleanup: readonly Promise<void>[],
-    liftTerminalFence: boolean,
-    rowWritten: boolean,
-  ): Promise<null>;
   readonly superseded: SupersededRowReasserts<Session>;
   commitReleaseRemoval(
     sessionId: string,
@@ -232,16 +225,15 @@ export class SessionReleaseCommit {
       // Final fence: evaluated synchronously right before the commit, with no await in between.
       // A terminal fence this release raised is lifted, with its journal intent, so the live
       // session keeps routing; nothing was written for it.
-      if (releaseSuperseded(shouldCommit)) {
+      if (this.declinesAtFinalFence(terminalIntent, shouldCommit)) {
         operation!.commitDeclined = true;
         // A lifted fence is the abandon call's; a fence held before is given back.
         this.undoUncommittedFence(releaseSnapshot, priorFence, terminalIntent, false);
-        return await this.host.abandonReleaseSupersededAfterPersist(
-          session,
-          releaseSnapshot,
+        return this.host.abandonSupersededRelease(
+          sessionId,
+          deviceId,
           pendingCleanup,
           !terminalFenceHeldBefore,
-          terminalIntent === "volatile",
         );
       }
       const owedReasons = this.host.superseded.reasonsOwedTo(session);
@@ -311,6 +303,18 @@ export class SessionReleaseCommit {
     }
     enter("terminal-persist");
     return this.persistCommittedTerminalRelease(snapshot, reason, session);
+  }
+
+  /**
+   * The final supersede fence. A volatile terminal release already wrote its row before this
+   * point: it has won, and a newer confirmation arriving during that write is too late (#11799 W5,
+   * owner decision 2026-10-26).
+   */
+  private declinesAtFinalFence(
+    intent: TerminalIntentDurability | undefined,
+    shouldCommit: ReleaseCommitFence | undefined,
+  ): boolean {
+    return intent !== "volatile" && releaseSuperseded(shouldCommit);
   }
 
   /** What the post-commit row write (if any) leaves for the finalize step. */
@@ -662,39 +666,6 @@ export class SessionReleaseCommit {
     logger.info(
       `Skipping release of ${sessionId}: a newer identity confirmation superseded the eviction of ${deviceId}`,
     );
-    return null;
-  }
-
-  /**
-   * The final supersede fence declined after the terminal write: lift the fence this release raised
-   * and rewrite the live row it terminalized (#11206).
-   */
-
-  async abandonReleaseSupersededAfterPersist(
-    session: Session,
-    releaseSnapshot: SessionReleaseSnapshot,
-    pendingCleanup: readonly Promise<void>[],
-    liftTerminalFence: boolean,
-    rowWritten = true,
-  ): Promise<null> {
-    this.host.abandonSupersededRelease(
-      session.sessionId,
-      releaseSnapshot.deviceId,
-      pendingCleanup,
-      liftTerminalFence,
-    );
-    if (
-      rowWritten &&
-      liftTerminalFence &&
-      releaseSnapshot.terminal &&
-      !this.host.superseded.wasRefused(releaseSnapshot)
-    ) {
-      await this.host.reassertSupersededLiveRow(session, [releaseSnapshot.releaseReason]);
-    } else if (liftTerminalFence && this.host.superseded.remembered(session)?.size) {
-      // This release's refusal proves only that its own write landed nothing. An earlier
-      // superseded release's late row may have deferred its rewrite behind this fence.
-      await this.host.reassertSupersededLiveRow(session, []);
-    }
     return null;
   }
 

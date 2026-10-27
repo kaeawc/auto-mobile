@@ -72,6 +72,7 @@ struct LibraryErrorView: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
+            .readableContentWidth()
         }
     }
 }

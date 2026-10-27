@@ -1,5 +1,5 @@
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-import { record } from "./prototypeTemplate";
+import { mapBindableFields, record } from "./prototypeTemplate";
 
 function addImage(value: unknown, ids: Set<string>): void {
   if (typeof value === "string") {
@@ -19,7 +19,7 @@ function addFont(style: unknown, fonts: Set<string>): void {
   }
 }
 /** Authored node slots, including components, themed images, rich text and conditional styles.
- * Opaque data/state/request bodies are not asset references even if their keys are named asset.
+ * Upload file slots are assets; opaque data/state/literal bodies are not asset references.
  */
 export function collectPrototypeAssetReferences(spec: unknown): {
   images: Set<string>;
@@ -27,7 +27,25 @@ export function collectPrototypeAssetReferences(spec: unknown): {
 } {
   const images = new Set<string>();
   const fonts = new Set<string>();
-  walkPrototypeNodes(spec, (node) => {
+  walkPrototypeNodes(spec, (node, path) => {
+    mapBindableFields(node, path, (value, _at, kind) => {
+      if (kind === "request") {
+        const body = record(record(value)?.body);
+        const files = [
+          body?.file,
+          ...(Array.isArray(body?.multipart)
+            ? body.multipart.map((part) => record(part)?.file)
+            : []),
+        ];
+        for (const file of files) {
+          const asset = record(file)?.asset;
+          if (typeof asset === "string") {
+            images.add(asset);
+          }
+        }
+      }
+      return value;
+    });
     if (node.type === "image") {
       addImage(node.asset, images);
     }

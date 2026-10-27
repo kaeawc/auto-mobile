@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { keySchema, prototypeDataActionValueSchema, stateKeySchema } from "./prototypeActionValues";
 import { PROTOTYPE_REQUEST_METHODS } from "./prototypeRequestProtocol";
@@ -24,14 +25,24 @@ export function bindPrototypeRequestFollowUps(actionSchema: () => z.ZodTypeAny):
 const followUpSchema = z.lazy((): z.ZodTypeAny => (followUps ? followUps() : z.never()));
 const followUpList = z.array(followUpSchema).min(1).max(32).optional();
 
+const uploadDispositionSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(prototypeContractPatterns.uploadDisposition);
+const uploadContentTypeSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(prototypeContractPatterns.uploadContentType);
 const prototypeUploadFileSchema = z.object({ asset: z.string().min(1).max(256) }).strict();
 const prototypeUploadPartSchema = z
   .object({
-    name: z.string().min(1).max(256),
+    name: uploadDispositionSchema,
     value: prototypeDataActionValueSchema.optional(),
     file: prototypeUploadFileSchema.optional(),
-    filename: z.string().min(1).max(256).optional(),
-    contentType: z.string().min(1).max(256).optional(),
+    filename: uploadDispositionSchema.optional(),
+    contentType: uploadContentTypeSchema.optional(),
   })
   .strict()
   .refine((part) => (part.value !== undefined) !== (part.file !== undefined));
@@ -65,7 +76,7 @@ export const requestActionSchema = z
           })
           .strict(),
         z
-          .object({ file: prototypeUploadFileSchema, contentType: z.string().min(1).max(256) })
+          .object({ file: prototypeUploadFileSchema, contentType: uploadContentTypeSchema })
           .strict(),
       ])
       .optional(),

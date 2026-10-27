@@ -148,5 +148,29 @@
   "pointer": {
     "accepted": ["/", "//", "/a", "/a~0b/~1", "/~01", "/é/😀", "/a\n", "/a\r\n", "/a"],
     "rejected": ["", "a", "a/b", "/~", "/~2", "/~10~", "/a~\n"]
+  },
+  "uploadDisposition": {
+    "accepted": ["photo", "photo.png", "résumé 🗂.txt", "space name", "back\\slash"],
+    "rejected": ["", "bad\"name", "a\r", "a\n", "a\t", "a\u0000", "a", "a", "a"]
+  },
+  "uploadContentType": {
+    "accepted": [
+      "image/png",
+      "application/vnd.example+json",
+      "TEXT/PLAIN",
+      "!#$%&'*+.^_`|~012-/token"
+    ],
+    "rejected": [
+      "",
+      "image",
+      "/png",
+      "image/",
+      "image /png",
+      "image/png; charset=utf-8",
+      "image/png\r",
+      "image/png\n",
+      "image/pñg",
+      "image/png/extra"
+    ]
   }
 }

@@ -8,6 +8,24 @@ final class PrototypeBundleExportTests: XCTestCase {
         _ = PrototypeBundleFixtures.corpus
     }
 
+    func testUploadAssetReferencesSkipOpaqueLiterals() throws {
+        let data = Data(#"""
+        {"id":"uploads","window":{"placement":{"type":"fullscreen"}},
+         "data":{"body":{"file":{"asset":"opaque-data"}}},
+         "root":{"type":"button","label":"Upload","onTap":[
+           {"type":"request","method":"POST","url":"https://example.com/upload",
+            "body":{"file":{"asset":"raw"},"contentType":"image/png"},
+            "onSuccess":[{"type":"request","method":"POST","url":"https://example.com/upload",
+              "body":{"multipart":[{"name":"photo","file":{"asset":"part"}},
+                {"name":"text","value":{"value":{"file":{"asset":"opaque-part"}}}}]}}]},
+           {"type":"request","method":"POST","url":"https://example.com/upload",
+            "body":{"value":{"file":{"asset":"opaque-body"}}}}]}}
+        """#.utf8)
+        let refs = try PrototypeBundleReferences(data)
+        XCTAssertEqual(Set(refs.images.map(\.string)), ["raw", "part"])
+        XCTAssertTrue(refs.fonts.isEmpty)
+    }
+
     func testMissingFontExportUsesReferenceAssetMissingCode() throws {
         let fixture = try XCTUnwrap(PrototypeBundleFixtures.corpus.get().cases[1].exportInputs)
         let input = PrototypeBundleExportInput(

@@ -423,6 +423,10 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || !prototypeContractPatterns.blankText.test(value)) &&
+    (!rule.pattern ||
+      prototypeContractPatterns[rule.pattern as keyof typeof prototypeContractPatterns]?.test(
+        value,
+      ) === true) &&
     value.length <= (rule.max ?? Infinity),
   pointer: isPrototypeDataPointer,
   key: (value) => typeof value === "string" && prototypeContractPatterns.stateKey.test(value),

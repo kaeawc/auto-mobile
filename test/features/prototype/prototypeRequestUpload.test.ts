@@ -7,6 +7,8 @@ import {
   MAX_PROTOTYPE_UPLOAD_BYTES,
   MAX_PROTOTYPE_UPLOAD_PARTS,
 } from "../../../src/features/prototype/prototypeRequestLimits";
+import { requestActionSchema } from "../../../src/features/prototype/prototypeRequestSchema";
+import patterns from "../../fixtures/prototype-spec/patterns.json";
 import corpus from "../../fixtures/prototype-spec/corpus.json";
 
 const fixture = (kind: string, name: string): unknown =>
@@ -45,6 +47,40 @@ describe("upload request contract", () => {
         expect(result.error.path).toBe(entry.expectedPath);
       }
     });
+  }
+  for (const verdict of ["accepted", "rejected"] as const) {
+    for (const value of patterns.uploadDisposition[verdict]) {
+      test(`Zod upload disposition ${verdict} ${JSON.stringify(value)}`, () => {
+        for (const field of ["name", "filename"]) {
+          const part = { name: "photo", file: { asset: "hero" }, [field]: value };
+          expect(
+            requestActionSchema.safeParse({
+              type: "request",
+              method: "POST",
+              url: "https://example.com",
+              body: { multipart: [part] },
+            }).success,
+          ).toBe(verdict === "accepted");
+        }
+      });
+    }
+    for (const value of patterns.uploadContentType[verdict]) {
+      test(`Zod upload media type ${verdict} ${JSON.stringify(value)}`, () => {
+        for (const body of [
+          { file: { asset: "hero" }, contentType: value },
+          { multipart: [{ name: "photo", file: { asset: "hero" }, contentType: value }] },
+        ]) {
+          expect(
+            requestActionSchema.safeParse({
+              type: "request",
+              method: "POST",
+              url: "https://example.com",
+              body,
+            }).success,
+          ).toBe(verdict === "accepted");
+        }
+      });
+    }
   }
   test("shared upload limits", () => {
     expect(MAX_PROTOTYPE_UPLOAD_BYTES).toBe(10 * 1024 * 1024);

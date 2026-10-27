@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "POST",
+          "url": "https://example.com/upload",
+          "body": {
+            "multipart": [
+              {
+                "name": "photo",
+                "file": {
+                  "asset": "hero"
+                },
+                "filename": "photo.png",
+                "contentType": "image/png\ninjected"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].body.multipart"
+}

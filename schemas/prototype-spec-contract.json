@@ -6,7 +6,9 @@
     "color": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
-    "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])"
+    "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])",
+    "uploadDisposition": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])",
+    "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -2181,7 +2183,8 @@
                       "contentType": {
                         "rule": {
                           "kind": "string",
-                          "max": 256
+                          "max": 256,
+                          "pattern": "uploadContentType"
                         },
                         "optional": false
                       }
@@ -15028,7 +15031,8 @@
         "name": {
           "rule": {
             "kind": "string",
-            "max": 256
+            "max": 256,
+            "pattern": "uploadDisposition"
           },
           "optional": false
         },
@@ -15049,14 +15053,16 @@
         "filename": {
           "rule": {
             "kind": "string",
-            "max": 256
+            "max": 256,
+            "pattern": "uploadDisposition"
           },
           "optional": true
         },
         "contentType": {
           "rule": {
             "kind": "string",
-            "max": 256
+            "max": 256,
+            "pattern": "uploadContentType"
           },
           "optional": true
         }

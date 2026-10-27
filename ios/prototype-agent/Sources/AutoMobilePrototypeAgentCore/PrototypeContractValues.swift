@@ -32,6 +32,7 @@ extension PrototypeContractValidator {
         case "string":
             return (rule["empty"] == .bool(true) || !text.isEmpty)
                 && (rule["nonblank"] != .bool(true) || !matches("blankText", text))
+                && (rule["pattern"]?.stringValue.map { matches($0, text) } ?? true)
                 && Double(text.utf16.count) >= (rule["min"]?.numberValue ?? 0)
                 && Double(text.utf16.count) <= (rule["max"]?.numberValue ?? .infinity)
         default: return false

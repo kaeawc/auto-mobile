@@ -20063,7 +20063,8 @@
                                           "name": {
                                             "type": "string",
                                             "minLength": 1,
-                                            "maxLength": 256
+                                            "maxLength": 256,
+                                            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])"
                                           },
                                           "value": {
                                             "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/headers/additionalProperties/anyOf/1"
@@ -20081,14 +20082,13 @@
                                             "additionalProperties": false
                                           },
                                           "filename": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 256
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/body/anyOf/1/properties/multipart/items/properties/name"
                                           },
                                           "contentType": {
                                             "type": "string",
                                             "minLength": 1,
-                                            "maxLength": 256
+                                            "maxLength": 256,
+                                            "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+\\/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])"
                                           }
                                         },
                                         "required": ["name"],
@@ -20124,9 +20124,7 @@
                                       "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/body/anyOf/1/properties/multipart/items/properties/file"
                                     },
                                     "contentType": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 256
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/body/anyOf/1/properties/multipart/items/properties/contentType"
                                     }
                                   },
                                   "required": ["file", "contentType"],

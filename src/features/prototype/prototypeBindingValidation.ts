@@ -7,6 +7,7 @@ export interface Rule {
   name?: string;
   empty?: boolean;
   nonblank?: boolean;
+  pattern?: string;
   exclusive?: string[];
   exactlyOne?: string[];
   dependents?: Record<string, string[]>;

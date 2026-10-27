@@ -85,6 +85,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.CrashData
@@ -1956,6 +1957,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             displays = prototypeDisplays,
             clearAssets = { prototypeAssets.clear() },
             hasAsset = { prototypeAssets.lookup(it) != null },
+            validateShaders = { validatePrototypeShaderUniforms(it, prototypeAssets::lookup) },
             images = prototypeImages,
             // The host grants this appop before showing a window.layer "app" prototype.
             appLayerPermitted = {

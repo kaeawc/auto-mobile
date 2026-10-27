@@ -2,8 +2,9 @@ Compiled from "AutoMobilePrototypeCapabilities.kt"
 public final class dev.jasonpearson.automobile.prototype.AutoMobilePrototype {
   public static final dev.jasonpearson.automobile.prototype.AutoMobilePrototype INSTANCE;
   public static final int $stable;
-  public final java.util.Set<java.lang.String> capabilities(dev.jasonpearson.automobile.prototype.PrototypePlatform);
   public final java.util.Set<java.lang.String> getCapabilities();
+  public final java.util.Set<java.lang.String> capabilities(dev.jasonpearson.automobile.prototype.PrototypePlatform);
+  public final java.util.Set<java.lang.String> capabilitiesForSdk$prototype_compose(int);
 }
 Compiled from "AutoMobilePrototype.kt"
 public final class dev.jasonpearson.automobile.prototype.AutoMobilePrototypeKt {
@@ -18,6 +19,8 @@ public final class dev.jasonpearson.automobile.prototype.EmbeddedPrototypeAssets
   public final void prepareFonts(dev.jasonpearson.automobile.protocol.PrototypeSpec, java.io.File);
   public dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetInfo lookup(java.lang.String);
   public byte[] read(java.lang.String);
+  public dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetInfo lookup(java.lang.String, boolean);
+  public byte[] read(java.lang.String, boolean);
   public java.io.File file(java.lang.String);
   public void setChangeListener(dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetChangeListener);
   public final void close();
@@ -199,8 +202,14 @@ public final class dev.jasonpearson.automobile.prototype.PrototypeAssets {
   public static final int $stable;
   public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map<java.lang.String, byte[]>, java.util.Map<java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>);
   public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map, java.util.Map, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final dev.jasonpearson.automobile.prototype.PrototypeAssets withShaders(java.util.Map<java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>);
+  public static dev.jasonpearson.automobile.prototype.PrototypeAssets withShaders$default(dev.jasonpearson.automobile.prototype.PrototypeAssets, java.util.Map, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public final byte[] imageBytes$prototype_compose(java.lang.String);
   public final byte[] fontBytes$prototype_compose(java.lang.String);
+  public final byte[] shaderBytes$prototype_compose(java.lang.String);
+  public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map<java.lang.String, byte[]>, java.util.Map<java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>);
+  public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map<java.lang.String, byte[]>, java.util.Map<java.lang.String, byte[]>);
+  public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map<java.lang.String, byte[]>);
   public dev.jasonpearson.automobile.prototype.PrototypeAssets();
   public static final dev.jasonpearson.automobile.prototype.PrototypeAssets access$getNone$cp();
 }

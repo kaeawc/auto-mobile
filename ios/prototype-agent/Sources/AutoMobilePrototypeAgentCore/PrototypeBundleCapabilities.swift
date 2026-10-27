@@ -140,6 +140,7 @@ enum PrototypeBundleCapabilities {
                 names.insert("prototype_motion_v2")
             }
             if key == "style", child.objectFields?["shader"] != nil { names.insert("prototype_custom_shaders_v1") }
+            if key == "style", child.objectFields?["effects"] != nil { names.insert("prototype_effects_v1") }
             if key == "style", child.objectFields?["runSpacing"] != nil { names.insert("prototype_flow_grid_v1") }
             let textKeys = [
                 "text",

@@ -725,6 +725,18 @@ replacement and a temporary lock-screen hide keep them.
 
 `application/vnd.automobile.agsl` assets carry UTF-8 AGSL source, capped at `MAX_PROTOTYPE_SHADER_ASSET_BYTES = 16384`. Upload a local `.agsl` file through `assets: [{id, path}]`, then reference its id with `style.shader: {asset, uniforms?}` (also accepted in `styleWhen`). The host refuses uploads and shader specs unless `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1`; the Android runtime must advertise `prototype_custom_shaders_v1`. Shader assets share the existing count and total-byte limits. Available assets must have the AGSL MIME type and every supplied uniform must be declared as a scalar float in that source. iOS (including simulator saves) and ProtoViewer bundles refuse custom shaders. Native host export refuses shader specs on both platforms until the generated hosts support shader assets.
 
+The Android runtime advertises `prototype_custom_shaders_v1` only on API 33+. It compiles on `put_prototype_asset` before writing any source; unsupported APIs return a typed refusal naming API 33, and invalid source returns the compiler message capped at 2048 UTF-8 bytes without splitting a character. Failed replacements preserve the previous asset. Device lexical preflight restricts inputs to scalar floats and the node's own `content`; show/patch validation checks every style alternative and hidden descendant against device-compiled scalar declarations, and per-node compilation rechecks all supplied names before setting any values, clamps finite values to [-1000000, 1000000], and gives each node an independent shader instance. Procedural sources without a content declaration receive an unused `uniform shader content;` so the same RenderEffect path can bind the node's content.
+
+Embedded applications supply AGSL bytes through `PrototypeAssets.withShaders` and its optional shader resolver; image and shader lookups use separate typed namespaces even when ids collide. These sources receive the same lexical, UTF-8 and compiler validation before rendering. Each composed node owns its compiled shader, reused across uniform changes and recompiled when its source asset or version changes. Removed float uniforms reset to zero. Compiler diagnostics refer to authored source lines, accounting for the injected content declaration. Each node applies its shader through a clipped Compose graphics layer using `createRuntimeShaderEffect(shader, "content")`. Content remains unshaded while preparation runs, while an asset is missing/unreadable, or on API levels below 33. Missing shader assets follow the existing missingAssets warning/re-upload path and retry on asset changes.
+
+One session-level frame-clock loop runs only while at least one visible shaded node is composed (excluding settled-hidden retained subtrees) and the prototype lifecycle is RESUMED; the control-proxy pauses that lifecycle while hiding its window for capture. Only the newest composed window root owns sampling during a window replacement; retiring an older root cannot hide or pause the new one, and a failed replacement restores the older root. Gaps discard the first interval after resuming without clearing budget evidence. All shaders in the prototype are permanently disabled after 8 consecutive intervals strictly above 24 ms, or more than 30 slow intervals in the last 60 sampled intervals. Intervals at or below 24 ms reset only the consecutive streak; duplicate/backwards timestamps are ignored. Status lists this once as `frame budget exceeded while shaders were active`: it measures whole frame intervals and cannot attribute the delay to a shader. A static expensive shader without fresh frame work cannot be measured, and asynchronous RenderThread/GPU faults cannot be caught.
+
+Synchronous compile/effect/draw exceptions disable only the affected composition instance. Duplicate repeat identities have separate guards; disposed registrations are evicted. `get_prototype_status` reports at most 64 node failures with unique instance ids and bounded reasons, plus a `+N more` summary, in optional `shaderFailures`; host `inspect` adopts these into the next host-local `status`. An in-place show preserves the session budget and recorded failures; dismissal or an explicit reset starts a new lifetime. A remounted node gets a fresh instance guard, while a tripped session budget continues to disable all shaders.
+
+The wire protocol has no host opt-in channel. The existing host gate `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` therefore remains the authorization boundary; capability advertisement alone does not enable the host to send shaders. Direct device clients are responsible for the same opt-in policy.
+
+`needs-device-verify`: real API 33+ compilation and rendering, procedural sources with an unused content input, isolation of each node's sampled content and uniforms, shader output clipped to node bounds, lifecycle/background and capture-hide sampling gaps, frame-budget fallback under sustained and spaced load, and status/inspect reporting after a real rendering failure remain unverified on a device. JVM tests use fake compilers and frame clocks and establish no GPU/rendering proof.
+
 ### Rendering assets (#9301, second slice)
 
 An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the box and clips, `fill` stretches. Bytes are decoded off the main thread with `BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (screen size when an axis wraps) and never above 4 Mi pixels. The decoded-bitmap cache keys on asset id and a power-of-two size bucket, evicts least recently used first and holds at most 32 MiB of decoded pixels (a larger single bitmap is drawn but not retained). A replaced, removed or cleared asset drops its decoded copies immediately and showing nodes reload; uploading a previously missing id fills the placeholder.
@@ -2358,6 +2370,52 @@ placeholder rows makes a skeleton list. The iOS agent advertises the capability 
 sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over the node, reads
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
 Reduce Motion, and rejects shimmer on other node types at the same path.
+
+## Effects (#15128, `prototype_effects_v1`, contract only)
+
+`style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only: a
+`source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param are each
+rejected at the offending path, identically in the TS, Kotlin and Swift validators (so the spec's
+opening rule, no code, holds). `schemas/prototype-spec-contract.json` (`definitions.effect`) is the
+source of truth; the shared corpus pins it.
+
+| `type`                | Params (all optional unless marked)                                                | Android floor |
+| --------------------- | ---------------------------------------------------------------------------------- | ------------- |
+| `noise`               | `amount` 0-1, `grain` 0.5-8 dp, `seed` int 0-65535, `monochrome`                   | 33            |
+| `gradientMesh`        | `colors` exactly 4 (required; hex, role or `{light, dark}`), `softness` 0-1        | 33            |
+| `shimmer`             | `color`, `angle` -360..360 degrees, `width` 0.05-1 of the node                     | any           |
+| `glow`                | `color` (required), `radius` 0-48 dp, `intensity` 0-1                              | any           |
+| `vignette`            | `color`, `intensity` 0-1, `radius` 0-1                                             | any           |
+| `blur`                | `radius` 0-25 dp (required); blurs the node's own content                          | 31            |
+| `pixelate`            | `cell` 1-64 dp (required)                                                          | 33            |
+| `chromaticAberration` | `offset` 0-8 dp, `angle` -360..360 degrees                                         | 33            |
+| `wave`                | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `angle` -360..360 degrees              | 33            |
+| `ripple`              | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `center` `{x, y}` each 0-1 of the node | 33            |
+
+Every effect also takes `animate: {periodMs}` (integer 400-20000; a loop, separate from the
+node-level motion-v2 `animate`) and `phase` 0-1.
+
+- **Paint only.** Effects never change layout, hit testing, observe bounds, accessibility
+  semantics, the host dismiss controls or the host accessibility dismiss action, and never draw
+  outside the node's bounds (the authored viewport for the root).
+- **Frozen phase.** Under `motion: "none"`, animator scale 0, Reduce Motion (iOS) and while the
+  prototype is hidden, an animated effect stays at its `phase` so screenshots are deterministic.
+  `noise` is seeded and never uses device randomness.
+- **`styleWhen`** replaces `effects` as a whole when it matches.
+- **Limits.** `MAX_PROTOTYPE_EFFECTS` (64) and `MAX_PROTOTYPE_ANIMATED_EFFECTS` (8) count over the
+  expanded `repeat` tree. Counting is conservative: every declared list counts, `styleWhen` styles
+  included, although only one list applies at a time. A list longer than 4 is reported at
+  `<path>.style.effects` before the count is applied. The node that crosses a limit is reported
+  (`Effect limit exceeded`, `Animated effect limit exceeded`); a template inside a `repeat` is
+  reported at the `repeat` with the `Expanded` forms of those two messages.
+- **Capability.** Any `effects` list needs `prototype_effects_v1`, checked on `show` and on the full
+  patch result. No CtrlProxy or iOS agent advertises it yet: rendering is tracked by the Android
+  (#15129) and iOS (#15130) render issues, so the host refuses these specs today.
+
+Decisions left to the renderers, to settle in those issues: what `phase` means for an effect
+without a natural cycle (`noise`, `blur`, `pixelate`, `vignette`, `glow`, `gradientMesh`; the
+contract accepts it everywhere), and the colour-role and `{light, dark}` resolution inside effects
+(they use the same resolver as `style.color`; advertising the capability implies supporting it).
 
 ## Charts (#14209, not device-verified)
 

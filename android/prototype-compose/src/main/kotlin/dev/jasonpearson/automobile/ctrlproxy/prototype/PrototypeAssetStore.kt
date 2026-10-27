@@ -45,7 +45,13 @@ data class PrototypeAssetLimits(
  * [PrototypeAssetStore.read].
  */
 @InternalAutoMobilePrototypeApi
-data class PrototypeAssetInfo(val id: String, val mimeType: String, val byteCount: Int)
+data class PrototypeAssetInfo(
+  val id: String,
+  val mimeType: String,
+  val byteCount: Int,
+  /** Present only after successful device compilation; never supplied by a wire client. */
+  val shaderUniforms: Set<String>? = null,
+)
 
 /**
  * Tells the renderer's decoded-image cache that stored assets changed. [ids] names the assets whose
@@ -67,6 +73,11 @@ interface PrototypeAssetSource {
   /** Call off the main thread. Null when unknown, or when the OS evicted the file. */
   fun read(id: String): ByteArray?
 
+  /** Typed reads keep independently supplied embedded image and shader ids disjoint. */
+  fun lookup(id: String, shader: Boolean): PrototypeAssetInfo? = lookup(id)
+
+  fun read(id: String, shader: Boolean): ByteArray? = read(id)
+
   /** The stored file for [id] (fonts load from a path); null when unknown or not file-backed. */
   fun file(id: String): File? = null
 
@@ -85,6 +96,8 @@ enum class PrototypeAssetRejection {
   TOTAL_LIMIT,
   STORAGE_FAILURE,
   SESSION_ENDED,
+  SHADER_UNSUPPORTED_API,
+  SHADER_COMPILE_FAILURE,
 }
 
 @InternalAutoMobilePrototypeApi
@@ -126,6 +139,7 @@ class PrototypeAssetStore(
   val limits: PrototypeAssetLimits = PrototypeAssetLimits(),
   private val session: () -> Int = { 0 },
   private val fileWorker: Executor = Executor { it.run() },
+  private val shaderCompiler: PrototypeShaderCompiler = AndroidPrototypeShaderCompiler(),
 ) : PrototypeAssetSource {
   private class Entry(val info: PrototypeAssetInfo, val fileName: String)
 
@@ -133,7 +147,7 @@ class PrototypeAssetStore(
   private class Reservation(
     val generation: Long,
     val fileName: String,
-    val info: PrototypeAssetInfo,
+    var info: PrototypeAssetInfo,
     val rejection: PrototypeAssetPutResult.Rejected? = null,
   )
 
@@ -211,7 +225,10 @@ class PrototypeAssetStore(
       return synchronized(putLock) {
         purgeOrphansLocked()
         val reservation = synchronized(this) { reserve(id, mimeType, bytes, changes) }
-        reservation.rejection ?: writeAndCommit(reservation, bytes, changes)
+        reservation.rejection
+          ?: (if (mimeType == "application/vnd.automobile.agsl") shaderRejection(reservation, bytes)
+          else null)
+          ?: writeAndCommit(reservation, bytes, changes)
       }
     } finally {
       changes.deliver(changeListener)
@@ -404,18 +421,38 @@ class PrototypeAssetStore(
           PrototypeAssetRejection.TOO_LARGE,
           "Prototype asset is ${bytes.size} bytes; the limit is ${maxBytesFor(mimeType)}.",
         )
-      mimeType == "application/vnd.automobile.agsl" ->
-        rejected(
-          PrototypeAssetRejection.UNSUPPORTED_MIME_TYPE,
-          "Custom AGSL shaders are not supported by this runtime yet; no shader was stored.",
-        )
-      !matchesSignature(mimeType, bytes) ->
+      mimeType != "application/vnd.automobile.agsl" && !matchesSignature(mimeType, bytes) ->
         rejected(
           PrototypeAssetRejection.CONTENT_MISMATCH,
           "Prototype asset bytes are not a valid $mimeType ${if (isFontMimeType(mimeType)) "font" else "image"}.",
         )
       else -> null
     }
+
+  /** Runs outside the store monitor: compilation must not block main-thread lookups or clear. */
+  private fun shaderRejection(
+    reservation: Reservation,
+    bytes: ByteArray,
+  ): PrototypeAssetPutResult.Rejected? {
+    val source = bytes.toString(Charsets.UTF_8)
+    if (!source.toByteArray(Charsets.UTF_8).contentEquals(bytes)) {
+      return rejected(PrototypeAssetRejection.CONTENT_MISMATCH, "AGSL source must be valid UTF-8.")
+    }
+    val result = shaderCompiler.compile(source)
+    val error = result.exceptionOrNull()
+    if (error == null) {
+      reservation.info =
+        reservation.info.copy(shaderUniforms = result.getOrThrow().floatUniforms.toSet())
+      return null
+    }
+    return rejected(
+      (error as? PrototypeShaderCompileException)?.reason
+        ?: PrototypeAssetRejection.SHADER_COMPILE_FAILURE,
+      boundedPrototypeShaderError(
+        error.message ?: "AGSL compilation failed; check the shader source.",
+      ),
+    )
+  }
 
   private fun maxBytesFor(mimeType: String) =
     when {

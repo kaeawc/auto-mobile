@@ -57,6 +57,7 @@ export interface PrototypeLastResult {
    */
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  shaderFailures?: Record<string, string>;
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -79,6 +80,7 @@ export interface AdoptedPrototype {
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  shaderFailures?: Record<string, string>;
   pages: PrototypeEvent["pages"];
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
@@ -269,6 +271,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
+      shaderFailures: structuredClone(prototype.shaderFailures),
       success: true,
       timestamp: this.clock.now(),
     };

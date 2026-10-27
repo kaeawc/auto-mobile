@@ -222,6 +222,7 @@ export interface PrototypeStatusEntry {
   /** Device-reported `storage` block state (prototype_storage_v1, #12522); parsePrototypeStorageReport validates it. */
   storage?: unknown;
   timers?: unknown;
+  shaderFailures?: Record<string, string>;
 }
 
 /**

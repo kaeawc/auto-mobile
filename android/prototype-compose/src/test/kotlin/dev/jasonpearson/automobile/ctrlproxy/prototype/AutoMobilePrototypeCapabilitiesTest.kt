@@ -29,13 +29,11 @@ class AutoMobilePrototypeCapabilitiesTest {
     }
   }
 
-  private val exclusions =
-    setOf(
-      // The test module is a placeholder no production runtime advertises.
-      "prototype_platform_test_v1",
-      // #15131: slice 1 defines the contract; Kotlin runtime support arrives in slice 2.
-      "prototype_custom_shaders_v1",
-    )
+  /**
+   * The test module is a placeholder no production runtime advertises. `style.effects` (#15128) has
+   * a validated contract and no renderer yet.
+   */
+  private val exclusions = setOf("prototype_platform_test_v1", "prototype_effects_v1")
 
   @Test
   fun `shared spec capabilities are supported`() {
@@ -47,8 +45,18 @@ class AutoMobilePrototypeCapabilitiesTest {
       "Remove exclusions once supported",
       exclusions.none { it in AutoMobilePrototype.capabilities },
     )
-    val missing = requiredCapabilities - AutoMobilePrototype.capabilities - exclusions
+    val missing = requiredCapabilities - AutoMobilePrototype.capabilitiesForSdk(33) - exclusions
     assertTrue("Renderer is missing spec capabilities: $missing", missing.isEmpty())
+  }
+
+  @Test
+  fun `production getter delegates to the sdk gated capabilities set`() {
+    assertEquals(
+      AutoMobilePrototype.capabilitiesForSdk(android.os.Build.VERSION.SDK_INT),
+      AutoMobilePrototype.capabilities,
+    )
+    assertTrue("prototype_custom_shaders_v1" !in AutoMobilePrototype.capabilitiesForSdk(32))
+    assertTrue("prototype_custom_shaders_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
   }
 
   @Test

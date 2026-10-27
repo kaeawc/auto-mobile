@@ -87,6 +87,12 @@ data class PrototypeStyle(
   val scale: Double? = null,
   /** A drawn rotation in degrees (-360..360) about the node's centre (#14208). */
   val rotation: Double? = null,
+  /**
+   * Paint-only looks applied in order (#15128): `{type, ...params, animate?, phase?}` objects the
+   * structural contract has already validated. Gated by `prototype_effects_v1`; a renderer decodes
+   * the entries it draws, so the model keeps them as raw objects.
+   */
+  val effects: List<JsonObject>? = null,
   val alignment: String? = null,
   val arrangement: String? = null,
   val spacing: Double? = null,

@@ -7873,6 +7873,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "shaderFailures",
+        "type": "map",
+        "nullable": false,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStorageBlock": [
@@ -8065,6 +8071,12 @@
       {
         "name": "rotation",
         "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "effects",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       },

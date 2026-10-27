@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
@@ -185,6 +186,8 @@ class PrototypeController(
   private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
   /** Where requests wait for their response; they are cancelled when their prototype ends. */
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
+  private val validateShaders: (PrototypeNode) -> Unit = {},
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
@@ -449,6 +452,7 @@ class PrototypeController(
       }
     val resolved = PrototypeDataResolver.resolve(validated)
     guardPrototypeTree(resolved.root)
+    validateShaders(resolved.root)
     if (resolved.root !== validated.root) requireResolvedPrototypeAnchors(resolved.root)
     return validated
   }
@@ -579,6 +583,9 @@ class PrototypeController(
         exclusively = { block -> settleRequest(runtime, block) },
         requestLimiter = requestLimiter,
         initialPlatformState = surfaceHost.initialDeviceState(request),
+        shaderSession =
+          if (preservePages) previous?.runtime?.shaderSession ?: PrototypeShaderSession()
+          else PrototypeShaderSession(),
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -1009,6 +1016,7 @@ class PrototypeController(
       appearance = surface.theme.value.appearance,
       storage = runtime.storage?.report(),
       timers = runtime.timerReports(),
+      shaderFailures = runtime.shaderSession.failures(),
     )
   }
 

@@ -132,6 +132,7 @@ private fun PrototypeStyle.mergedOver(prototype: PrototypeStyle): PrototypeStyle
     shimmer = prototype.shimmer ?: shimmer,
     scale = prototype.scale ?: scale,
     rotation = prototype.rotation ?: rotation,
+    effects = prototype.effects ?: effects,
     alignment = prototype.alignment ?: alignment,
     arrangement = prototype.arrangement ?: arrangement,
     spacing = prototype.spacing ?: spacing,
@@ -147,5 +148,6 @@ private fun PrototypeStyle.mergedOver(prototype: PrototypeStyle): PrototypeStyle
     fontStyle = prototype.fontStyle ?: fontStyle,
     overflow = prototype.overflow ?: overflow,
     fontFamily = prototype.fontFamily ?: fontFamily,
+    shader = prototype.shader ?: shader,
     textStyle = prototype.textStyle ?: textStyle,
   )

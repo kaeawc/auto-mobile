@@ -70,6 +70,7 @@ class CommandAdvertisementTest {
       "prototype_chat_scroll_v1",
       "prototype_emit_context_v1",
       "prototype_checks_v1",
+      "prototype_custom_shaders_v1",
       "prototype_appearance_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
@@ -103,6 +104,7 @@ class CommandAdvertisementTest {
           .supportedCommands()
       assertTrue("All sealed requests on API $sdk", commands.containsAll(sealedRequestTypes))
       assertTrue("Request ID echo on API $sdk", commands.contains("request_id_echo_v1"))
+      assertEquals(sdk >= 33, "prototype_custom_shaders_v1" in commands)
       assertCoreCommands(commands)
       assertPrototypeCommands(commands)
       assertEquals(commands.size, commands.toSet().size)

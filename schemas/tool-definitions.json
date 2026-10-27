@@ -41370,6 +41370,11 @@
           "additionalProperties": false
         },
         "pressRecognized": {
+          "description": "Long press heuristic: a context menu, text selection, or new window appeared. False means none was seen, not that a tap was sent",
+          "type": "boolean"
+        },
+        "longClickAdvertised": {
+          "description": "Android long press: whether the pressed node advertises a long-click action. False means it has no long-click handler, so the app handles the hold like a tap",
           "type": "boolean"
         },
         "contextMenuOpened": {

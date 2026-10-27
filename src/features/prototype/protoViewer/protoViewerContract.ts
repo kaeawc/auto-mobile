@@ -98,6 +98,11 @@ const entry = {
   request: z.string(),
   libraryId: z.string().regex(PROTOVIEWER_LIBRARY_ID),
   label: z.string(),
+  /** iOS: the screen the app was on, as native pixels "WxH". Absent from Android and older apps. */
+  screen: z
+    .string()
+    .regex(/^\d{1,5}x\d{1,5}$/)
+    .optional(),
 };
 
 const workResultSchema = z.discriminatedUnion("status", [

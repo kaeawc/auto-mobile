@@ -84,6 +84,7 @@ function emptyEmitName(name: string, path: string, scope: Scope): RepeatError | 
 
 /** A state key must bind to a literal key for every item; the failing item is reported. */
 function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError | undefined {
+  if (templateFieldReferences(key, { alias: "route", index: false }).length) return undefined;
   if (!hasPlaceholder(key, scope.binding)) {
     return STATE_KEY.test(key) ? undefined : fail(path, "Invalid key value");
   }
@@ -260,7 +261,11 @@ function literalPlaceholderError(
   if (typeof value !== "string") {
     return undefined;
   }
-  if (kind === "key" && !STATE_KEY.test(value)) {
+  if (
+    kind === "key" &&
+    !templateFieldReferences(value, { alias: "route", index: false }).length &&
+    !STATE_KEY.test(value)
+  ) {
     return fail(path, "State key placeholder outside a repeat template");
   }
   return isDataPathKind(kind) && prototypeDataPathHasIndex(value)
@@ -568,10 +573,14 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   }
   return located.flatMap((entry) => {
     const scope = scopes.find((candidate) => entry.path.startsWith(`${candidate.path}.children[`));
-    const operandTemplated =
-      scope !== undefined &&
+    const routeOperand =
       typeof entry.value.value === "string" &&
-      hasPlaceholder(entry.value.value, scope.binding);
+      templateFieldReferences(entry.value.value, { alias: "route", index: false }).length > 0;
+    const operandTemplated =
+      routeOperand ||
+      (scope !== undefined &&
+        typeof entry.value.value === "string" &&
+        hasPlaceholder(entry.value.value, scope.binding));
     const templated =
       scope &&
       checkedKeyValues(entry.value).some(

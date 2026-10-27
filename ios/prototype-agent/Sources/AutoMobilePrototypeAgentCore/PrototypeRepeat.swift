@@ -197,7 +197,8 @@ enum PrototypeRepeat {
         var name = String.UnicodeScalarView()
         name.append(contentsOf: inner.dropFirst(prefix.count))
         let field = String(name)
-        return isFieldName(field) ? (.field(field), end) : nil
+        return (alias == "route" ? PrototypeContractValidator.matches("pathKey", field) : isFieldName(field)) ?
+            (.field(field), end) : nil
     }
 
     static func isFieldName(_ name: String) -> Bool {

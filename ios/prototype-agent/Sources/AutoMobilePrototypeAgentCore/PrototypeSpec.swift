@@ -515,6 +515,17 @@ struct StyleWhen: Decodable {
     let style: Style
 }
 
+struct PrototypeRouteEntry: Decodable, Sendable {
+    let screen: String
+    let params: [String: JSONValue]?
+}
+
+struct PrototypeRoute: Decodable, Sendable {
+    let params: [String: String]?
+    let onEnter: [PrototypeAction]?
+    let onBack: [PrototypeAction]?
+}
+
 struct PrototypeAction: Decodable, Sendable {
     let type: String
     let name: String?
@@ -524,6 +535,10 @@ struct PrototypeAction: Decodable, Sendable {
     let page: JSONValue?
     let stack: String?
     let screen: String?
+    let params: [String: JSONValue]?
+    let force: Bool?
+    /// Contract-only setStack path; data actions retain their existing string path.
+    let stackPath: [PrototypeRouteEntry]?
     let transition: PrototypeStackTransition?
     /// `setData`/`appendData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
@@ -556,7 +571,7 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, params, force
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
@@ -570,7 +585,8 @@ struct PrototypeAction: Decodable, Sendable {
         into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
-        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil
+        actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
+        params: [String: JSONValue]? = nil, force: Bool? = nil, stackPath: [PrototypeRouteEntry]? = nil
     ) {
         self.id = id
         self.afterMs = afterMs
@@ -585,6 +601,9 @@ struct PrototypeAction: Decodable, Sendable {
         self.page = page
         self.stack = stack
         self.screen = screen
+        self.params = params
+        self.force = force
+        self.stackPath = stackPath
         self.transition = transition
         self.path = path
         self.key = key
@@ -602,6 +621,46 @@ struct PrototypeAction: Decodable, Sendable {
         self.timeoutMs = timeoutMs
         self.onSuccess = onSuccess
         self.onError = onError
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        try self.init(
+            type: type,
+            name: container.decodeIfPresent(String.self, forKey: .name),
+            payload: container.decodeIfPresent(JSONValue.self, forKey: .payload),
+            context: container.decodeIfPresent(PrototypeEmitContext.self, forKey: .context),
+            pager: container.decodeIfPresent(String.self, forKey: .pager),
+            page: container.decodeIfPresent(JSONValue.self, forKey: .page),
+            stack: container.decodeIfPresent(String.self, forKey: .stack),
+            screen: container.decodeIfPresent(String.self, forKey: .screen),
+            path: type == "setStack" ? nil : container.decodeIfPresent(String.self, forKey: .path),
+            key: container.decodeIfPresent(String.self, forKey: .key),
+            value: container.decodeIfPresent(JSONValue.self, forKey: .value),
+            by: container.decodeIfPresent(Double.self, forKey: .incrementAmount),
+            requireValid: container.decodeIfPresent([String].self, forKey: .requireValid),
+            method: container.decodeIfPresent(String.self, forKey: .method),
+            url: container.decodeIfPresent(String.self, forKey: .url),
+            headers: container.decodeIfPresent([String: JSONValue].self, forKey: .headers),
+            query: container.decodeIfPresent([String: JSONValue].self, forKey: .query),
+            body: container.decodeIfPresent(JSONValue.self, forKey: .body),
+            into: container.decodeIfPresent(String.self, forKey: .into),
+            statusKey: container.decodeIfPresent(String.self, forKey: .statusKey),
+            via: container.decodeIfPresent(String.self, forKey: .via),
+            timeoutMs: container.decodeIfPresent(Double.self, forKey: .timeoutMs),
+            onSuccess: container.decodeIfPresent([PrototypeAction].self, forKey: .onSuccess),
+            onError: container.decodeIfPresent([PrototypeAction].self, forKey: .onError),
+            id: container.decodeIfPresent(String.self, forKey: .id),
+            afterMs: container.decodeIfPresent(Int.self, forKey: .afterMs),
+            everyMs: container.decodeIfPresent(Int.self, forKey: .everyMs),
+            maxRuns: container.decodeIfPresent(Int.self, forKey: .maxRuns),
+            actions: container.decodeIfPresent([PrototypeAction].self, forKey: .actions),
+            transition: container.decodeIfPresent(PrototypeStackTransition.self, forKey: .transition),
+            params: container.decodeIfPresent([String: JSONValue].self, forKey: .params),
+            force: container.decodeIfPresent(Bool.self, forKey: .force),
+            stackPath: type == "setStack" ? container.decode([PrototypeRouteEntry].self, forKey: .path) : nil
+        )
     }
 
     /// This action and every action nested in its `onSuccess` / `onError` lists, depth first.
@@ -752,6 +811,7 @@ final class PrototypeNode: Decodable {
     let child: PrototypeNode?
     let start: String?
     let screens: [String: PrototypeNode]?
+    let routes: [String: PrototypeRoute]?
     /// Structured screen definitions distinguish content edits from an unchanged navigation rebuild.
     let screenDefinitions: JSONValue?
     let text: String?
@@ -872,6 +932,7 @@ final class PrototypeNode: Decodable {
         case leadingIcon, trailing, swipeActions
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
+             routes,
              linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, keyboardType, secure, multiline, minLines, maxLength, trailingIcon,
@@ -959,6 +1020,7 @@ final class PrototypeNode: Decodable {
         start = try container.decodeIfPresent(String.self, forKey: .start)
         screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
         screenDefinitions = try container.decodeIfPresent(JSONValue.self, forKey: .screens)
+        routes = try container.decodeIfPresent([String: PrototypeRoute].self, forKey: .routes)
         spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
         linkify = try container.decodeIfPresent(PrototypeLinkifyOptions.self, forKey: .linkify)
         activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)

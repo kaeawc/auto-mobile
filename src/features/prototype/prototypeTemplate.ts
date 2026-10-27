@@ -43,7 +43,12 @@ function token(inner: string, binding: Binding): Segment | undefined {
   }
   const prefix = `${binding.alias}.`;
   const name = inner.slice(prefix.length);
-  return inner.startsWith(prefix) && STATE_KEY.test(name) ? { kind: "field", name } : undefined;
+  return inner.startsWith(prefix) &&
+    (binding.alias === "route"
+      ? prototypeContractPatterns.pathKey.test(name)
+      : STATE_KEY.test(name))
+    ? { kind: "field", name }
+    : undefined;
 }
 
 /** Splits `text` into placeholder segments by a plain scan, exactly as Kotlin and Swift do. */
@@ -149,7 +154,9 @@ export type FieldKind =
   | "deviceRequest"
   | "scrollTo"
   | "timer"
-  | "stackTransition";
+  | "stackTransition"
+  | "routeFeature"
+  | "routePointer";
 
 /** True for the kinds holding a `/data/...` path with `{index}` segments. */
 export const isDataPathKind = (kind: FieldKind): boolean =>
@@ -205,6 +212,7 @@ function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): 
 }
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
+  mapField(condition, "data", path, "routePointer", visit);
   mapField(condition, "key", path, "key", visit);
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
@@ -221,6 +229,9 @@ function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
 /** A `{state}` binding names a (possibly repeat-bound) key; every other form is an emit binding. */
 function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
   const binding = record(value);
+  if (binding && typeof binding.data === "string") {
+    visit(binding.data, `${at}.data`, "routePointer");
+  }
   return binding && Object.hasOwn(binding, "state")
     ? { ...binding, state: visit(binding.state, `${at}.state`, "key") }
     : visit(value, at, "emitBinding");
@@ -260,6 +271,30 @@ function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {
 }
 
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+  if (["push", "replace", "setStack"].includes(String(action.type))) {
+    if (action.type === "setStack" || action.params !== undefined)
+      visit(action, path, "routeFeature");
+    const entries =
+      action.type === "setStack" && Array.isArray(action.path) ? action.path : [action];
+    const mapped = entries.map((raw, index) => {
+      const entry = record(raw) ? { ...record(raw)! } : undefined;
+      if (!entry || !record(entry.params)) return raw;
+      const prefix =
+        action.type === "setStack" ? `${path}.path[${index}].params` : `${path}.params`;
+      entry.params = Object.fromEntries(
+        Object.entries(record(entry.params)!).map(([name, value]) => [
+          name,
+          typeof value === "string"
+            ? visit(value, memberPath(prefix, name), "operand")
+            : mapBinding(value, memberPath(prefix, name), visit),
+        ]),
+      );
+      return entry;
+    });
+    if (action.type === "setStack") action.path = mapped;
+    else action.params = record(mapped[0])?.params;
+  }
+  if (action.type === "pop" && action.force !== undefined) visit(action, path, "routeFeature");
   switch (action.type) {
     case "setState":
       mapField(action, "key", path, "key", visit);
@@ -443,7 +478,16 @@ function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
  * fields, `visibleWhen`, `styleWhen`, `onTap`, `onLongPress`, `onDoubleTap`, then state-key fields. Returns a copy with each
  * visited value replaced by the visitor's result.
  */
-export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor): Raw {
+export function mapBindableFields(
+  node: Raw,
+  path: string,
+  visitor: FieldVisitor,
+  includeRoutePointers = false,
+): Raw {
+  const visit: FieldVisitor = (value, at, kind, dataCondition) =>
+    kind === "routePointer" && !includeRoutePointers
+      ? value
+      : visitor(value, at, kind, dataCondition);
   const copy = { ...node };
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
@@ -472,6 +516,21 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
     return entry;
   });
   mapActions(copy, path, visit);
+  if (copy.type === "stack") {
+    const routes = record(copy.routes);
+    if (routes)
+      copy.routes = Object.fromEntries(
+        Object.entries(routes).map(([name, raw]) => {
+          const route = { ...record(raw) };
+          const routePath = memberPath(`${path}.routes`, name);
+          for (const field of ["onEnter", "onBack"])
+            mapList(route, field, routePath, (action, actionPath) =>
+              mapAction(action, actionPath, visit),
+            );
+          return [name, route];
+        }),
+      );
+  }
   mapObject(copy, "swipeActions", path, (entry, entryPath) => {
     for (const side of ["start", "end"]) {
       mapList(entry, side, entryPath, (action, actionPath) => mapPart(action, actionPath, visit));

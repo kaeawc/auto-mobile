@@ -1,3 +1,4 @@
+import { prototypeRouteFields, PROTOTYPE_ROUTES_CAPABILITY } from "./prototypeRoutes";
 import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
 import {
   prototypeStylePolishV2Fields,
@@ -131,6 +132,12 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_ROUTES_CAPABILITY,
+    fields: prototypeRouteFields,
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_routes_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
   {
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
     fields: prototypeStylePolishV2Fields,

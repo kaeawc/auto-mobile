@@ -40,7 +40,9 @@
       "_{item.id}",
       "{item.id}{index}",
       "{aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{index}"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{index}",
+      "draft_{route.postId}",
+      "{route.ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp}"
     ],
     "rejected": [
       "",

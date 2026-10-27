@@ -33,7 +33,9 @@ class AutoMobilePrototypeCapabilitiesTest {
    * The test module is a placeholder no production runtime advertises. `style.effects` (#15128) has
    * a validated contract and no renderer yet.
    */
-  private val exclusions = setOf("prototype_platform_test_v1", "prototype_effects_v1")
+  // Routes are contract-only until navigation and restore semantics ship.
+  private val exclusions =
+    setOf("prototype_routes_v1", "prototype_platform_test_v1", "prototype_effects_v1")
 
   @Test
   fun `shared spec capabilities are supported`() {

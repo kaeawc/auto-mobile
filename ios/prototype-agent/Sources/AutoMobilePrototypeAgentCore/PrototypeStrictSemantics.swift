@@ -41,7 +41,8 @@ enum PrototypeStrictSemantics {
         let children = all.filter { $0.objectFields?["visibleWhen"] != nil }
         guard !children.isEmpty else { return 0 }
         let instances: Int
-        if case let .array(items)? = fields["repeat"]?.objectFields?["items"] { instances = items.count } else { instances = 1 }
+        if case let .array(items)? = fields["repeat"]?.objectFields?["items"] { instances = items.count }
+        else { instances = 1 }
         let count = children.count * instances
         let ms = stagger["ms"]?.numberValue ?? 0
         let order = stagger["order"]?.stringValue
@@ -58,6 +59,17 @@ enum PrototypeStrictSemantics {
         var bytes = 0
         for (index, key) in PrototypeContractValidator.strings(storage["keys"]).enumerated() {
             let path = "storage.keys[\(index)]"
+            if key.hasPrefix("stack:") {
+                let context = try PrototypeContractValidator.inspect(.object(fields))
+                if !context.locatedNodes
+                    .contains(where: {
+                        $0.value["type"] == .string("stack") && $0.value["id"] == .string(String(key.dropFirst(6)))
+                    })
+                {
+                    throw PrototypeContractValidator.invalid(path, "Unknown storage stack")
+                }
+                continue
+            }
             guard let parsed = PrototypeStorageKey.parse(key) else { throw PrototypeContractValidator.invalid(
                 path,
                 "Invalid storage key"

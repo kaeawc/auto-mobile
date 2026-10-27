@@ -16,6 +16,25 @@ internal object PrototypeStorageValidation {
     for ((index, raw) in keys.withIndex()) {
       val key = raw.jsonPrimitive.content
       val path = "storage.keys[$index]"
+      if (key.startsWith("stack:")) {
+        val context = PrototypeStateChecks.Context()
+        // Reuse the contract visitor to collect declared stack nodes.
+        PrototypeStructuralWalk.walk(
+          spec,
+          PrototypeSpecContract.definitions.getValue("spec").jsonObject,
+          "",
+          context,
+          0,
+        )
+        if (
+          context.nodes.none {
+            it.value["type"] == JsonPrimitive("stack") &&
+              it.value["id"] == JsonPrimitive(key.removePrefix("stack:"))
+          }
+        )
+          return PrototypeSpecError(path, "Unknown storage stack")
+        continue
+      }
       val value =
         when (val parsed = PrototypeStorageKey.parse(key)) {
           null -> return PrototypeSpecError(path, "Invalid storage key")

@@ -48,7 +48,16 @@ extension PrototypeContractValidator {
                 guard let end = units[(index + 1)...].firstIndex(of: 125) else { return false }
                 let token = String(decoding: units[(index + 1) ..< end], as: UTF16.self)
                 let parts = token.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
-                guard token == "index" || (parts.count == 2 && parts.allSatisfy(PrototypeRepeat.isFieldName)) else {
+                guard token == "index" ||
+                    (
+                        parts
+                            .count == 2 &&
+                            (
+                                parts[0] == "route" ? PrototypeContractValidator.matches("pathKey", parts[1]) : parts
+                                    .allSatisfy(PrototypeRepeat.isFieldName)
+                            )
+                    )
+                else {
                     return false
                 }
                 placeholders += 1

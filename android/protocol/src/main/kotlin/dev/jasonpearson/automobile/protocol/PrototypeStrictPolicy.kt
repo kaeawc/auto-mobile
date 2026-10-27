@@ -11,8 +11,15 @@ internal object PrototypeStrictPolicy {
     library: Boolean,
     context: PrototypeStateChecks.Context,
   ): PrototypeSpecError? {
-    if (supported != null && !supported.containsAll(required(spec))) {
-      return PrototypeSpecError("$", "Unsupported capabilities")
+    if (supported != null) {
+      val missing = required(spec) - supported
+      if (missing.isNotEmpty())
+        return PrototypeSpecError(
+          "$",
+          if (missing == setOf("prototype_routes_v1"))
+            "Unsupported capabilities: prototype_routes_v1"
+          else "Unsupported capabilities",
+        )
     }
     val window = spec["window"] as? JsonObject
     if (library && window?.text("layer") == "system")
@@ -232,6 +239,12 @@ internal object PrototypeStrictPolicy {
     fun envelope(spec: JsonObject) {
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
+      if (
+        ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().any {
+          it.jsonPrimitive.content.startsWith("stack:")
+        }
+      )
+        need("routes")
       val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
       if (colors?.get("light") != null || colors?.get("dark") != null) need("theme_modes")
     }
@@ -292,11 +305,28 @@ internal object PrototypeStrictPolicy {
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
+      if (
+        PrototypeBindableFields.first<Boolean>(fields, "", includeRoutePointers = true) { raw, _, _
+          ->
+          (raw as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.content
+            ?.let { text -> true.takeIf { PrototypeRouteRules.fields(text).isNotEmpty() } }
+        } == true
+      )
+        need("routes")
       if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
       typeFeatures[type]?.let(::need)
+      if (
+        (type == "stack" && "routes" in fields) ||
+          (type in listOf("push", "replace") && "params" in fields) ||
+          (type == "pop" && "force" in fields) ||
+          type == "setStack"
+      )
+        need("routes")
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }

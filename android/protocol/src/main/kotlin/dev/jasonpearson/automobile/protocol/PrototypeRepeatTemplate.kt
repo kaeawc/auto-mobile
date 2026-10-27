@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** One piece of a string with `{as.field}` / `{index}` placeholders resolved into segments. */
@@ -191,7 +192,8 @@ internal enum class PrototypeBindableKind {
    * limits) but `{data:/pointer}` and `{key}` are read when the request runs, so the render-time
    * data resolver leaves it alone.
    */
-  REQUEST_TEXT;
+  REQUEST_TEXT,
+  ROUTE_POINTER;
 
   /** The kinds holding a `/data/...` path with `{index}` segments. */
   fun isDataPath(): Boolean = this == DATA_PATH || this == REQUEST_INTO
@@ -214,9 +216,13 @@ internal object PrototypeBindableFields {
   fun <T : Any> first(
     node: JsonObject,
     path: String,
+    includeRoutePointers: Boolean = false,
     visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ): T? {
-    val visitor = Visitor(visit)
+    val visitor = Visitor { raw, at, kind ->
+      if (kind == PrototypeBindableKind.ROUTE_POINTER && !includeRoutePointers) null
+      else visit(raw, at, kind)
+    }
     return visitor.node(node, path)
   }
 
@@ -258,6 +264,9 @@ internal object PrototypeBindableFields {
 
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
+      field(condition, "data", path, PrototypeBindableKind.ROUTE_POINTER)?.let {
+        return it
+      }
       field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
@@ -303,11 +312,28 @@ internal object PrototypeBindableFields {
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+        "push",
+        "replace" -> routeParams(action, path)
+        "setStack" ->
+          objects(action, "path", path).firstNotNullOfOrNull { (entry, at) ->
+            routeParams(entry, at)
+          }
         "startTimer" -> actionLists(action, listOf("actions"), path)
         "request" -> request(action, path)
         "platform" -> platform(action, path)
         else -> null
       }
+
+    fun routeParams(action: JsonObject, path: String): T? {
+      for ((name, value) in (action["params"] as? JsonObject).orEmpty()) {
+        val at = memberPath("$path.params", name)
+        val result =
+          if (value is JsonObject) binding(value, at)
+          else visit(value, at, PrototypeBindableKind.OPERAND)
+        if (result != null) return result
+      }
+      return null
+    }
 
     /** Mirrors `mapPlatformAction` (#14294): argument bindings, into, statusKey, follow-ups. */
     fun platform(action: JsonObject, path: String): T? {
@@ -370,7 +396,10 @@ internal object PrototypeBindableFields {
       visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
         return it
       }
-      return (value as? JsonObject)?.let { field(it, "state", at, PrototypeBindableKind.KEY) }
+      return (value as? JsonObject)?.let {
+        field(it, "state", at, PrototypeBindableKind.KEY)
+          ?: field(it, "data", at, PrototypeBindableKind.ROUTE_POINTER)
+      }
     }
 
     fun emitContext(action: JsonObject, path: String): T? {
@@ -385,7 +414,8 @@ internal object PrototypeBindableFields {
     }
 
     fun actions(data: JsonObject, path: String): T? {
-      for (field in listOf("onTap", "onLongPress", "onDoubleTap", "onDismiss")) {
+      for (field in
+        listOf("onTap", "onLongPress", "onDoubleTap", "onDismiss", "onEnter", "onBack")) {
         for ((action, actionPath) in objects(data, field, path)) {
           action(action, actionPath)?.let {
             return it
@@ -395,7 +425,14 @@ internal object PrototypeBindableFields {
       return null
     }
 
-    fun node(node: JsonObject, path: String): T? = Components(this).node(node, path)
+    fun node(node: JsonObject, path: String): T? {
+      for ((name, raw) in (node["routes"] as? JsonObject).orEmpty()) {
+        actions(raw.jsonObject, memberPath("$path.routes", name))?.let {
+          return it
+        }
+      }
+      return Components(this).node(node, path)
+    }
   }
 
   private class Components<T : Any>(val visitor: Visitor<T>) {

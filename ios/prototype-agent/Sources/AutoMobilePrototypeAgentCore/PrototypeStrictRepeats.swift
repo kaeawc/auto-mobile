@@ -117,7 +117,7 @@ struct PrototypeStrictRepeats {
                             throw PrototypeContractValidator.invalid(at, "Unknown repeat field")
                         }
                     }
-                    if keyField {
+                    if keyField, PrototypeRoutes.fields(text).isEmpty {
                         for (index, item) in scope.items.enumerated() {
                             let bound = PrototypeRepeatInstance(alias: scope.alias, item: item, index: index)
                                 .interpolate(text)
@@ -135,7 +135,10 @@ struct PrototypeStrictRepeats {
                     {
                         throw PrototypeContractValidator.invalid(path, "Unknown repeat field")
                     }
-                } else if keyField, !PrototypeContractValidator.primitive(child, rule: ["kind": .string("key")]) {
+                } else if keyField, PrototypeRoutes.fields(text).isEmpty, !PrototypeContractValidator.primitive(
+                    child,
+                    rule: ["kind": .string("key")]
+                ) {
                     throw PrototypeContractValidator.invalid(at, "Key placeholder outside repeat")
                 }
             } else {
@@ -192,27 +195,44 @@ struct PrototypeStrictRepeats {
     }
 
     func bound(_ entries: [PrototypeLocatedValue], actions: Bool = false) -> [PrototypeLocatedValue] {
-        entries.flatMap { entry -> [PrototypeLocatedValue] in
-            guard let scope = scopes.first(where: { entry.path.hasPrefix("\($0.path).children[") })
-            else { return [entry] }
-            let keys = PrototypeStrictBindings.boundKeys(entry.value) + [entry.value["key"]?.stringValue]
-                .compactMap { $0 }
-            let operand = entry.value["value"]?.stringValue ?? ""
-            let templated = PrototypeRepeat.segments(operand, alias: scope.alias)
+        entries
+            .filter { entry in
+                !PrototypeStrictBindings.boundKeys(entry.value)
+                    .contains { !PrototypeRoutes.fields($0).isEmpty } && PrototypeRoutes
+                    .fields(entry.value["key"]?.stringValue ?? "").isEmpty
+            }.flatMap { entry -> [PrototypeLocatedValue] in
+                guard let scope = scopes.first(where: { entry.path.hasPrefix("\($0.path).children[") })
+                else { return [.init(
+                    value: entry.value,
+                    path: entry.path,
+                    operandTemplated: !PrototypeRoutes.fields(entry.value["value"]?.stringValue ?? "").isEmpty
+                )] }
+                let keys = PrototypeStrictBindings.boundKeys(entry.value) + [entry.value["key"]?.stringValue]
+                    .compactMap { $0 }
+                let operand = entry.value["value"]?.stringValue ?? ""
+                let templated = !PrototypeRoutes.fields(operand).isEmpty || PrototypeRepeat.segments(
+                    operand,
+                    alias: scope.alias
+                )
                 .contains { if case .literal = $0 { return false }; return true }
-            guard keys
-                .contains(where: {
-                    PrototypeRepeat.segments($0, alias: scope.alias)
-                        .contains { if case .literal = $0 { return false }; return true }
-                })
-            else {
-                return [.init(value: entry.value, path: entry.path, operandTemplated: templated)]
+                guard keys
+                    .contains(where: {
+                        PrototypeRepeat.segments($0, alias: scope.alias)
+                            .contains { if case .literal = $0 { return false }; return true }
+                    })
+                else {
+                    return [.init(value: entry.value, path: entry.path, operandTemplated: templated)]
+                }
+                return scope.items.enumerated().map { index, item in
+                    let instance = PrototypeRepeatInstance(alias: scope.alias, item: item, index: index)
+                    let value = actions ? instance.bindAction(.object(entry.value)) : instance
+                        .bind(.object(entry.value))
+                    return .init(
+                        value: value.objectFields ?? entry.value,
+                        path: entry.path,
+                        operandTemplated: templated
+                    )
+                }
             }
-            return scope.items.enumerated().map { index, item in
-                let instance = PrototypeRepeatInstance(alias: scope.alias, item: item, index: index)
-                let value = actions ? instance.bindAction(.object(entry.value)) : instance.bind(.object(entry.value))
-                return .init(value: value.objectFields ?? entry.value, path: entry.path, operandTemplated: templated)
-            }
-        }
     }
 }

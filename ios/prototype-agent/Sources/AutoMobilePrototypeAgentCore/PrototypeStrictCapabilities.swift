@@ -12,6 +12,8 @@ enum PrototypeStrictCapabilities {
         }
         if spec["data"] != nil { need("data_model") }
         if spec["storage"] != nil { need("storage") }
+        if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
+            .contains(where: { $0.hasPrefix("stack:") }) { need("routes") }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
            colors["light"] != nil || colors["dark"] != nil { need("theme_modes") }
         func scan(_ value: JSONValue, field: String = "") {
@@ -21,6 +23,7 @@ enum PrototypeStrictCapabilities {
             guard let fields = value.objectFields else { return }
             if fields.count == 1, fields["value"] != nil { return }
             func textBinding(_ text: String) {
+                if !PrototypeRoutes.fields(text).isEmpty { need("routes") }
                 if PrototypeDataText.substitutionLength(text, data: nil).recognized { need("data_model") }
             }
             var own = fields
@@ -44,6 +47,9 @@ enum PrototypeStrictCapabilities {
                 "scrollTo": "chat_scroll",
             ]
             if let feature = types[type] { need(feature) }
+            if (type == "stack" && fields["routes"] != nil) ||
+                (["push", "replace"].contains(type) && fields["params"] != nil) ||
+                (type == "pop" && fields["force"] != nil) || type == "setStack" { need("routes") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }
             if includeAgentGates, type == "icon",

@@ -53,6 +53,7 @@ internal object PrototypeRepeatFields {
     path: String,
     scope: Scope,
   ): PrototypeSpecError? {
+    if (PrototypeRouteRules.fields(key).isNotEmpty()) return null
     if (segments.all { it is PrototypeRepeatSegment.Literal }) {
       return if (stateKeyPattern.matches(key)) null else fail(path, "Invalid key value")
     }

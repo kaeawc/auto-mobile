@@ -239,6 +239,32 @@ class PrototypeSpecCorpusTest {
     }
   }
 
+  @TestFactory
+  fun routeDiagnostics(): List<DynamicTest> =
+    invalid
+      .filter {
+        it.name.startsWith("routes-") && invalidJson.getValue(it)["expectedMessage"] != null
+      }
+      .map { file ->
+        DynamicTest.dynamicTest("route diagnostic ${file.name}") {
+          val fixture = invalidJson.getValue(file)
+          assertEquals(
+            PrototypeSpecValidation.Failure(
+              PrototypeSpecError(
+                fixture.getValue("expectedPath").jsonPrimitive.content,
+                fixture.getValue("expectedMessage").jsonPrimitive.content,
+              ),
+            ),
+            PrototypeSpecValidator.validate(
+              invalidSpec.getValue(file),
+              ((fixture["options"] as? JsonObject)?.get("supportedCapabilities") as? JsonArray)
+                ?.map { it.jsonPrimitive.content }
+                ?.toSet(),
+            ),
+          )
+        }
+      }
+
   companion object {
     @BeforeAll @JvmStatic fun loadFixtures() = PrototypeSpecFixtures.loadFixtures()
   }

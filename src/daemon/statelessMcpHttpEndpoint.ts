@@ -410,20 +410,10 @@ export class StatelessMcpHttpEndpoint<
     headerSessionKey: string | undefined,
     sendJsonRpcError: (message: string, error?: unknown) => void,
   ): Promise<void> {
-    const listening = jsonRpcMessages(parsedBody).some(
-      (message) => message.method === "subscriptions/listen",
-    );
-    // The SDK caps open listen streams per handler, and each request has its own handler, so the
-    // cap is enforced here across the endpoint.
-    if (
-      listening &&
-      this.modernListenStreams >= (this.deps.modern?.maxListenStreams ?? MAX_MODERN_LISTEN_STREAMS)
-    ) {
-      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "5" });
-      res.end(JSON.stringify({ error: "Too many open subscription streams" }));
+    const slot = this.openListenSlot(parsedBody, res);
+    if (!slot) {
       return;
     }
-    if (listening) this.modernListenStreams++;
     const controller = new AbortController();
     const handler = (this.deps.modern?.createHandler ?? createMcpHandler)(
       (ctx) => {
@@ -469,11 +459,33 @@ export class StatelessMcpHttpEndpoint<
       logger.error("Modern MCP HTTP request handling failed:", error);
       sendJsonRpcError("Server error", error);
     } finally {
-      if (listening) this.modernListenStreams--;
+      slot.release();
       clearKeepalive();
       socket?.off("close", close);
       await request.close();
     }
+  }
+
+  /**
+   * Admits a modern request, counting `subscriptions/listen` streams against the endpoint-wide cap
+   * (the SDK caps per handler, and each request has its own). Answers 429 and returns null past it.
+   */
+  private openListenSlot(parsedBody: unknown, res: Res): { release(): void } | null {
+    const listening = jsonRpcMessages(parsedBody).some(
+      (message) => message.method === "subscriptions/listen",
+    );
+    if (!listening) {
+      return { release: () => {} };
+    }
+    if (
+      this.modernListenStreams >= (this.deps.modern?.maxListenStreams ?? MAX_MODERN_LISTEN_STREAMS)
+    ) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "5" });
+      res.end(JSON.stringify({ error: "Too many open subscription streams" }));
+      return null;
+    }
+    this.modernListenStreams++;
+    return { release: () => void this.modernListenStreams-- };
   }
 
   private getModernBus(): ServerEventBus {

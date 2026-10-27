@@ -379,7 +379,7 @@ describe("opt-in modern HTTP routing", () => {
     await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
     await first;
     const again = h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
-    for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+    await Promise.all(Array.from({ length: 10 }, () => Promise.resolve()));
     expect(h.createHandler).toHaveBeenCalledTimes(2);
     await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
     await again;

@@ -405,6 +405,12 @@ class PrototypeAssetStore(
     bytes: ByteArray,
   ): PrototypeAssetPutResult.Rejected? =
     when {
+      PrototypeAssetContract.isMediaId(id) ->
+        rejected(
+          PrototypeAssetRejection.INVALID_ID,
+          "Prototype asset ids cannot start with ${PrototypeAssetContract.MEDIA_ID_PREFIX}; " +
+            "the device mints those for its media items.",
+        )
       id.isEmpty() || id.length > limits.maxIdLength ->
         rejected(
           PrototypeAssetRejection.INVALID_ID,

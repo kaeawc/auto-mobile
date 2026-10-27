@@ -53,12 +53,22 @@ enum PrototypeStrictSemantics {
         }.max() ?? 0
     }
 
-    static func storage(_ fields: [String: JSONValue]) throws {
+    static func storage(_ fields: [String: JSONValue], context: PrototypeContractValidator) throws {
         guard let storage = fields["storage"]?.objectFields else { return }
         var pointers: [String] = []
         var bytes = 0
         for (index, key) in PrototypeContractValidator.strings(storage["keys"]).enumerated() {
             let path = "storage.keys[\(index)]"
+            if key.hasPrefix("stack:") {
+                if !context.locatedNodes
+                    .contains(where: {
+                        $0.value["type"] == .string("stack") && $0.value["id"] == .string(String(key.dropFirst(6)))
+                    })
+                {
+                    throw PrototypeContractValidator.invalid(path, "Unknown storage stack")
+                }
+                continue
+            }
             guard let parsed = PrototypeStorageKey.parse(key) else { throw PrototypeContractValidator.invalid(
                 path,
                 "Invalid storage key"
@@ -89,6 +99,25 @@ enum PrototypeStrictSemantics {
     static func vocabulary(_ context: PrototypeContractValidator, data: [String: JSONValue]?) throws {
         for node in context.locatedNodes {
             let fields = node.value, path = node.path, type = fields["type"]?.stringValue
+            if fields["press"] != nil,
+               ![
+                   "button",
+                   "iconButton",
+                   "fab",
+                   "chip",
+                   "listItem",
+                   "switch",
+                   "checkbox",
+                   "radioGroup",
+                   "segmentedButton",
+                   "select",
+                   "menu"
+               ].contains(type ?? ""),
+               !["onTap", "onLongPress", "onDoubleTap"]
+               .contains(where: { !PrototypeStrictBindings.array(fields[$0]).isEmpty })
+            {
+                throw PrototypeContractValidator.invalid("\(path).press", "press requires a pressable node")
+            }
             if !["box", "row", "column", "card"].contains(type ?? "") {
                 if fields["style"]?
                     .objectFields?["shimmer"] !=
@@ -186,13 +215,32 @@ enum PrototypeStrictSemantics {
         var pagers = Set<String>(), stacks: [String: [String: JSONValue]] = [:]
         for node in context.locatedNodes {
             let fields = node.value, path = node.path, type = fields["type"]?.stringValue
+            if fields["press"] != nil,
+               ![
+                   "button",
+                   "iconButton",
+                   "fab",
+                   "chip",
+                   "listItem",
+                   "switch",
+                   "checkbox",
+                   "radioGroup",
+                   "segmentedButton",
+                   "select",
+                   "menu"
+               ].contains(type ?? ""),
+               !["onTap", "onLongPress", "onDoubleTap"]
+               .contains(where: { !PrototypeStrictBindings.array(fields[$0]).isEmpty })
+            {
+                throw PrototypeContractValidator.invalid("\(path).press", "press requires a pressable node")
+            }
             if type == "pager", let id = fields["id"]?.stringValue,
                !pagers.insert(id).inserted { throw PrototypeContractValidator.invalid("\(path).id", "Duplicate pager") }
             if type == "stack", let id = fields["id"]?.stringValue {
                 if stacks[id] != nil { throw PrototypeContractValidator.invalid("\(path).id", "Duplicate stack") }
                 let screens = fields["screens"]?.objectFields ?? [:]
                 if screens[fields["start"]?.stringValue ?? ""] ==
-                    nil { throw PrototypeContractValidator.invalid("\(path).start", "Unknown start") }
+                    nil { throw PrototypeContractValidator.invalid("\(path).start", "Unknown start screen") }
                 stacks[id] = screens
             }
         }
@@ -216,11 +264,11 @@ enum PrototypeStrictSemantics {
             if let stack = action.value["stack"]?.stringValue {
                 guard let screens = stacks[stack] else { throw PrototypeContractValidator.invalid(
                     "\(action.path).stack",
-                    "Unknown stack"
+                    "Unknown stack id"
                 ) }
                 if let screen = action.value["screen"]?.stringValue,
                    screens[screen] ==
-                   nil { throw PrototypeContractValidator.invalid("\(action.path).screen", "Unknown screen") }
+                   nil { throw PrototypeContractValidator.invalid("\(action.path).screen", "Unknown stack screen") }
             }
         }
     }

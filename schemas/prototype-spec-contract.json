@@ -2,7 +2,7 @@
   "patterns": {
     "pathKey": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])",
     "stateKey": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])",
-    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
+    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
     "color": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
@@ -22,6 +22,11 @@
     "MAX_PROTOTYPE_NODES": 2000,
     "MAX_PROTOTYPE_DEPTH": 24,
     "MAX_PROTOTYPE_IMAGES": 32,
+    "MAX_PROTOTYPE_MEDIA_ITEMS": 64,
+    "MAX_PROTOTYPE_MEDIA_TOTAL_BYTES": 536870912,
+    "MAX_PROTOTYPE_MEDIA_IMAGE_BYTES": 33554432,
+    "MAX_PROTOTYPE_MEDIA_VIDEO_BYTES": 268435456,
+    "MAX_PROTOTYPE_MEDIA_AUDIO_BYTES": 33554432,
     "MAX_PROTOTYPE_SPEC_BYTES": 1048576,
     "MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES": 4096,
     "MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH": 24,
@@ -729,6 +734,17 @@
             "dark": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
               },
               "optional": false
             }
@@ -1691,6 +1707,17 @@
                 "name": "stackTransition"
               },
               "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
+            },
+            "params": {
+              "rule": {
+                "kind": "ref",
+                "name": "routeParams"
+              },
+              "optional": true
             }
           }
         },
@@ -1709,6 +1736,12 @@
                 "kind": "string"
               },
               "optional": false
+            },
+            "force": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
             }
           }
         },
@@ -1756,6 +1789,17 @@
               "rule": {
                 "kind": "ref",
                 "name": "stackTransition"
+              },
+              "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
+              "optional": true
+            },
+            "params": {
+              "rule": {
+                "kind": "ref",
+                "name": "routeParams"
               },
               "optional": true
             }
@@ -2580,6 +2624,36 @@
               "optional": false
             }
           }
+        },
+        "setStack": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["setStack"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "routeEntry"
+                }
+              },
+              "optional": false
+            }
+          }
         }
       }
     },
@@ -2683,6 +2757,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -2838,6 +2919,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -2938,6 +3026,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3100,6 +3195,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3200,6 +3302,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3355,6 +3464,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3429,6 +3545,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3585,6 +3708,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3659,6 +3789,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3834,6 +3971,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -3908,6 +4052,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4079,6 +4230,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -4179,6 +4337,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4335,6 +4500,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]
@@ -4436,6 +4608,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4593,6 +4772,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -4698,6 +4884,13 @@
             },
             "effect": {
               "rule": { "kind": "ref", "name": "iconEffect" },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
               "optional": true
             },
             "transition": {
@@ -4840,6 +5033,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -4914,6 +5114,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -5043,6 +5250,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -5117,6 +5331,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -5398,6 +5619,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "dependents": {
@@ -5478,6 +5706,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5640,6 +5875,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
               },
               "optional": true
             }
@@ -5719,6 +5961,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5883,6 +6132,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -5957,6 +6213,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6113,6 +6376,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6187,6 +6457,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6361,6 +6638,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6435,6 +6719,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6589,6 +6880,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6663,6 +6961,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6832,6 +7137,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -6906,6 +7218,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7094,6 +7413,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7168,6 +7494,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7323,6 +7656,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7423,6 +7763,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7571,6 +7918,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7645,6 +7999,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7795,6 +8156,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -7869,6 +8237,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8025,6 +8400,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8099,6 +8481,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8247,6 +8636,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8321,6 +8717,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8496,6 +8899,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8570,6 +8980,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8706,6 +9123,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8780,6 +9204,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8915,6 +9346,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -8989,6 +9427,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9138,6 +9583,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -9212,6 +9664,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9388,6 +9847,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -9462,6 +9928,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9611,6 +10084,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -9685,6 +10165,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9843,6 +10330,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -9917,6 +10411,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10090,6 +10591,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -10164,6 +10672,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10325,6 +10840,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -10399,6 +10921,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10586,6 +11115,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -10660,6 +11196,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10857,6 +11400,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -10931,6 +11481,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11104,6 +11661,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -11179,6 +11743,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11346,6 +11917,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -11421,6 +11999,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11596,6 +12181,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -11670,6 +12262,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11865,6 +12464,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -11939,6 +12545,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12042,6 +12655,24 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "routes": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "route"
+                }
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -12116,6 +12747,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12286,6 +12924,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -12361,6 +13006,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12537,6 +13189,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -12611,6 +13270,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12774,6 +13440,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
         },
@@ -12848,6 +13521,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -13071,8 +13751,35 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
             }
           }
+        }
+      }
+    },
+    "shared": {
+      "kind": "object",
+      "fields": {
+        "key": {
+          "rule": {
+            "kind": "string",
+            "min": 1,
+            "max": 256
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "enum",
+            "values": ["element", "bounds"]
+          },
+          "optional": false
         }
       }
     },
@@ -13142,6 +13849,13 @@
             "kind": "boolean"
           },
           "optional": true
+        },
+        "transition": {
+          "rule": {
+            "kind": "enum",
+            "values": ["auto", "none", "fade", "slide", "scale"]
+          },
+          "optional": true
         }
       }
     },
@@ -13180,7 +13894,7 @@
         "motion": {
           "rule": {
             "kind": "enum",
-            "values": ["none", "standard", "reduced"]
+            "values": ["none", "standard", "reduced", "expressive"]
           },
           "optional": true
         },
@@ -16084,6 +16798,15 @@
             }
           },
           "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
+          },
+          "optional": true
         }
       }
     },
@@ -16415,6 +17138,15 @@
           "rule": {
             "kind": "ref",
             "name": "colorValue"
+          },
+          "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
           },
           "optional": true
         }
@@ -17197,7 +17929,16 @@
     },
     "stackTransition": {
       "kind": "enum",
-      "values": ["platform", "slide", "fade", "none"]
+      "values": [
+        "platform",
+        "slide",
+        "fade",
+        "none",
+        "sharedAxisX",
+        "sharedAxisY",
+        "fadeThrough",
+        "zoom"
+      ]
     },
     "shader": {
       "kind": "object",
@@ -18163,6 +18904,145 @@
           "optional": true
         }
       }
+    },
+    "routeParams": {
+      "kind": "record",
+      "maxEntries": 16,
+      "item": {
+        "kind": "choice",
+        "options": [
+          {
+            "kind": "scalar"
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "state": {
+                "rule": {
+                  "kind": "boundKey"
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "item": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "index": {
+                "rule": {
+                  "kind": "enum",
+                  "values": [true]
+                },
+                "optional": false
+              }
+            }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "data": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": false
+              }
+            }
+          }
+        ]
+      }
+    },
+    "routeEntry": {
+      "kind": "object",
+      "fields": {
+        "screen": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "params": {
+          "rule": {
+            "kind": "ref",
+            "name": "routeParams"
+          },
+          "optional": true
+        }
+      }
+    },
+    "route": {
+      "kind": "object",
+      "fields": {
+        "params": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "item": {
+              "kind": "enum",
+              "values": ["string", "number", "boolean"]
+            }
+          },
+          "optional": true
+        },
+        "onEnter": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": true
+        },
+        "onBack": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": true
+        }
+      }
+    },
+    "press": {
+      "kind": "object",
+      "atLeastOne": true,
+      "fields": {
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.85,
+            "max": 1
+          },
+          "optional": true
+        },
+        "alpha": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.5,
+            "max": 1
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [
@@ -18300,6 +19180,70 @@
           }
         }
       }
+    },
+    "haptics": {
+      "capability": "prototype_platform_haptics_v1",
+      "calls": {
+        "perform": {
+          "args": {
+            "effect": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": [
+                  "click",
+                  "tick",
+                  "heavyClick",
+                  "doubleClick",
+                  "selection",
+                  "success",
+                  "warning",
+                  "error",
+                  "impactLight",
+                  "impactMedium",
+                  "impactHeavy",
+                  "longPress"
+                ]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "sound": {
+      "capability": "prototype_platform_sound_v1",
+      "calls": {
+        "play": {
+          "args": {
+            "sound": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["click", "send", "receive", "shutter"]
+              }
+            },
+            "volume": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 100
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {
@@ -18546,5 +19490,37 @@
     "headers",
     "query",
     "strings"
-  ]
+  ],
+  "eventPayloads": {
+    "screen_changed": {
+      "kind": "object",
+      "fields": {
+        "screen": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "depth": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 1,
+            "max": 32
+          },
+          "optional": false
+        },
+        "params": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "item": {
+              "kind": "scalar"
+            }
+          },
+          "optional": true
+        }
+      }
+    }
+  }
 }

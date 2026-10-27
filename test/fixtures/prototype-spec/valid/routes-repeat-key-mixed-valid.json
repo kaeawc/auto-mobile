@@ -1,0 +1,43 @@
+{
+  "id": "routes-review",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "text",
+        "text": "Home"
+      },
+      "detail": {
+        "type": "column",
+        "repeat": {
+          "as": "row",
+          "items": [
+            {
+              "id": "good"
+            }
+          ]
+        },
+        "children": [
+          {
+            "type": "switch",
+            "stateKey": "fav_{row.id}_{route.x}"
+          }
+        ]
+      }
+    },
+    "routes": {
+      "detail": {
+        "params": {
+          "x": "string"
+        }
+      }
+    }
+  }
+}

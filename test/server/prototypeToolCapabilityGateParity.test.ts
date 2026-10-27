@@ -36,6 +36,16 @@ const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+  prototype_routes_v1: {
+    ...fixture({
+      type: "stack",
+      id: "label",
+      start: "home",
+      screens: { home: label },
+      routes: { home: {} },
+    }),
+    with: ["prototype_stack_v1"],
+  },
   prototype_design_platform_v1: {
     minimalSpec: { ...base, theme: { design: "platform" } },
     ops: [],
@@ -173,9 +183,37 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     style: { shimmer: true },
     children: [{ type: "spacer" }],
   }),
+  prototype_motion_v3: {
+    ...fixture({ ...label, animate: {}, style: { cornerRadius: 8 } }),
+    with: ["prototype_motion_v2"],
+  },
+  prototype_window_motion_v1: fixture({
+    type: "column",
+    id: "label",
+    repeat: { items: [{ label: "A" }], as: "item", stagger: 50 },
+    children: [{ type: "text", text: "A" }],
+  }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
   prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
   prototype_reduced_motion_v1: { minimalSpec: { ...base, motion: "reduced" }, ops: [] },
+  prototype_shared_element_v2: fixture({
+    type: "box",
+    id: "label",
+    children: [
+      {
+        ...label,
+        id: "first",
+        shared: { key: "hero", as: "element" },
+        visibleWhen: { key: "liked", equals: true },
+      },
+      {
+        ...label,
+        id: "second",
+        shared: { key: "hero", as: "element" },
+        visibleWhen: { key: "liked", equals: false },
+      },
+    ],
+  }),
   prototype_shared_element_v1: fixture({
     type: "box",
     id: "label",
@@ -184,6 +222,16 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       { ...label, id: "second", sharedKey: "hero", visibleWhen: { key: "liked", equals: false } },
     ],
   }),
+  prototype_stack_patterns_v1: {
+    ...fixture({
+      type: "stack",
+      id: "label",
+      start: "home",
+      transition: "sharedAxisY",
+      screens: { home: { type: "spacer" } },
+    }),
+    with: ["prototype_stack_v1", "prototype_stack_transitions_v1"],
+  },
   prototype_stack_transitions_v1: {
     ...fixture({
       type: "stack",
@@ -316,11 +364,56 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_haptics_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["haptics"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "haptics.perform", args: { effect: { value: "tick" } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_sound_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["sound"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "sound.play", args: { sound: { value: "click" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_namespace_v1: fixture({
     ...label,
     ios: { hover: "lift" },
     android: { indication: "none" },
   }),
+  prototype_platform_media_items_v1: {
+    ...fixture({
+      type: "image",
+      id: "label",
+      asset: { data: "/photo" },
+      contentDescription: "Photo",
+    }),
+    with: ["prototype_data_model_v1"],
+  },
   prototype_platform_test_v1: {
     minimalSpec: {
       ...base,
@@ -677,3 +770,21 @@ test("Android shader asset repair retains the injected opt-in environment", asyn
   expect(proxy.getPrototypeAssetHistory()).toHaveLength(2);
   expect(proxy.getPrototypeHistory()).toHaveLength(2);
 });
+
+test.each(["android", "ios"] as const)(
+  "%s refuses every authored window transition without window motion capability",
+  async (platform) => {
+    const device: BootedDevice = { platform, deviceId: `window-${platform}`, name: "Fake" };
+    for (const transition of ["auto", "none", "fade", "slide", "scale"]) {
+      const result = await show(device, { ...base, window: { ...base.window, transition } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("prototype_window_motion_v1");
+    }
+    expect(proxy.getPrototypeHistory()).toEqual([]);
+    expect(agent.requests).toEqual([]);
+    advertise("prototype_window_motion_v1");
+    expect(
+      (await show(device, { ...base, window: { ...base.window, transition: "scale" } })).success,
+    ).toBe(true);
+  },
+);

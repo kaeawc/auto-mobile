@@ -40,6 +40,8 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
 export const prototypeModelSelection = {
   iconEffectTrigger: {},
   iconEffect: {},
+  press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
+  shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},
   backdrop: { languages: ["kotlin"] },
@@ -52,6 +54,8 @@ export const prototypeModelSelection = {
   // Swift Action is a flat struct and Node a final class with different shapes; both stay hand-written.
   action: actionModelOptions,
   node: nodeModelOptions,
+  routeEntry: { languages: ["kotlin"] },
+  route: { languages: ["kotlin"] },
   scrollEdge: {},
   scrollTransition: {},
   scrollLinked: {},
@@ -174,6 +178,7 @@ export const prototypeModelSelection = {
 } as const satisfies ModelSelection;
 
 export const prototypeTypeRefs = {
+  routeParams: { kotlin: "Map<String, JsonElement>" },
   ...nodeActionTypeRefs,
   iconEffectRepeat: { kotlin: "PrototypeIconEffectRepeat", swift: "PrototypeIconEffectRepeat" },
   colorValue: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },

@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -18,6 +19,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 class PrototypeMultiSurfaceTest {
+  private val cleanupScope = TestScope()
   private val hosts = mutableListOf(FakePrototypeHost())
   private val timer = FakePrototypeTimer()
   private val events = mutableListOf<PrototypeEvent>()
@@ -99,6 +101,7 @@ class PrototypeMultiSurfaceTest {
             clientCount = { clients },
           ),
         foreground = foreground,
+        requestScope = cleanupScope,
         clearAssets = { cleared++ },
         hostFactory = { FakePrototypeHost().also { hosts += it } },
         deviceAppearance = deviceAppearance,
@@ -301,6 +304,7 @@ class PrototypeMultiSurfaceTest {
     controller.onConfigurationChanged()
     assertFalse(controller.isShowing)
     assertEquals(1, dismissed)
+    cleanupScope.runCurrent()
     assertEquals(1, cleared)
   }
 
@@ -327,6 +331,7 @@ class PrototypeMultiSurfaceTest {
       assertEquals(0, cleared)
       controller.dismiss("a", "a", null)
       assertEquals(1, dismissed)
+      cleanupScope.runCurrent()
       assertEquals(1, cleared)
     }
 
@@ -406,6 +411,7 @@ class PrototypeMultiSurfaceTest {
       assertTrue(status().isEmpty())
       assertTrue(hosts.none { it.isShowing })
       assertEquals(1, dismissed)
+      cleanupScope.runCurrent()
       assertEquals(1, cleared)
       controller.dismiss("empty", null, true)
       assertEquals(1, dismissed)
@@ -605,6 +611,7 @@ class PrototypeMultiSurfaceTest {
       controller.dismissForUnbind()
       assertTrue(status().isEmpty())
       assertEquals(2, dismissed)
+      cleanupScope.runCurrent()
       assertEquals(1, cleared)
     }
 

@@ -1,3 +1,4 @@
+import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -72,27 +73,7 @@ row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`icon
 \`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
-export const GUIDE_TEMPLATES = `## Starter templates
-
-The repository ships eight validated multi-screen specs, each a \`stack\` with a \`testTag\` on every
-interactive node. In a checkout, show one with \`specPath\` (an absolute path) from
-\`test/fixtures/prototype-spec/valid/\`, or copy its shape when writing a spec:
-
-- \`template-onboarding.json\`: welcome, sign-up form with \`checks\`, a button gated by
-  \`enabledWhen {valid}\`, \`emit\` with \`requireValid\`, done.
-- \`template-feed-detail.json\`: a \`repeat\` over \`{path: "/posts"}\` inside a refreshable \`scroll\`; a
-  tap stores the row in state and \`push\`es the detail screen.
-- \`template-tabbed-home.json\`: a \`pager\` driven by a \`bottomNav {pager}\`, plus a pushed screen.
-- \`template-checkout.json\`: quantity stepper, form with \`select\` and \`datePicker\`, and a
-  \`bottomSheet\` confirmation.
-- \`template-settings.json\`: \`listItem\` switches, \`radioGroup\`, \`slider\`, \`dialog\`, \`snackbar\` and
-  a \`storage\` block.
-- \`template-search.json\`: docked \`searchBar\` whose child lists \`/results\` and shows an empty
-  state with \`{data, empty: true}\`.
-- \`template-chat.json\`: reversed \`scroll\` with \`stickToEnd\`, quick-reply chips that
-  \`appendData\`, and a composer that \`emit\`s \`message_sent\` with the draft as context (Android only).
-- \`template-dashboard.json\`: \`chart\` line, bar and ring over \`/data\`, and a \`startTimer\` clock.
-`;
+export { GUIDE_TEMPLATES } from "./prototypeGuideTemplates";
 
 /**
  * Hand-written authoring prose for the `automobile:prototype` resource. Everything that names a
@@ -116,13 +97,25 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
+Route contract (requires \`prototype_routes_v1\`, currently unadvertised by Android and iOS):
+keep \`screens\` as bare nodes and optionally add \`routes:{screen:{params?,onEnter?,onBack?}}\`.
+Declare up to 16 params per screen as string|number|boolean; names match [A-Za-z_][A-Za-z0-9_]*.
+Push/replace accept a flat \`params\` map of scalars or {state}/{data}/{item}/{index:true} bindings;
+all declared params are required, literals must match their types, and extra names are refused.
+\`setStack {stack,path:[{screen,params?}]}\` takes 1-32 entries. In a screen and its lifecycle actions,
+\`{route.name}\` binds in the same fields as repeat placeholders, condition operands and whole
+/data pointer segments. onEnter/onBack each take 1-32 actions with normal nesting limits;
+a direct same-stack pop in onBack needs \`force:true\` (dialog actions are independent).
+Storage keys may name \`stack:<id>\`. Runtime navigation, lifecycle execution and path restore
+are deferred; the reserved reports keep \`path:string[]\` and add parallel \`params:object[]\`,
+with optional params beside screen/depth in screen_changed payloads.
 Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
 Transitions snap under \`motion: "none"\` or Android animator/transition scale 0, and fade under
 \`motion: "reduced"\` or iOS Reduce Motion. A stack's
-\`transition\` accepts only those four values and no longer animates the stack's own visibility
+\`transition\` accepts only those navigation values and no longer animates the stack's own visibility
 (earlier specs using \`expand\`, \`scale\`, \`slideStart\`, \`slideEnd\` or \`blurReplace\` on a stack
 are now refused): wrap the stack in a \`box\` with \`visibleWhen\` and a visibility transition for
 that. Each entry's scroll position is restored on pop. A stack cannot appear inside a repeat template.
@@ -260,12 +253,18 @@ settling, pager scrolling and shared morphs) with a crossfade or snap with fade.
 other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
 Off makes every change instant.
 
-\`sharedKey\` requires \`prototype_shared_element_v1\` and \`visibleWhen\` on the same node.
-Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each key labels exactly two nodes, at most 16 distinct
-keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
-inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
-not visible together. Full motion morphs the pair's bounds between different content; reduced
-uses ordinary visibility fades and off swaps instantly.
+\`shared: {key, as: "element" | "bounds"}\` requires \`prototype_shared_element_v2\` and
+\`visibleWhen\` on the same node (zoom sources exempt). Element shares identical content (a hero image); bounds shares
+a container with changing content and crossfades both sides. \`sharedKey\` remains the
+\`prototype_shared_element_v1\` bounds alias; a node cannot set both. Literal v2 keys allow
+letters, digits, underscore and hyphen, starting with a letter or underscore (1-64 characters).
+A spec has at most 16 resolved keys, including unmatched feed items. Literal keys pair exactly two nodes, neither nested in the
+other. Inside repeat children, use \`shared: {key: "story-{item.id}", as: "bounds"}\` with
+\`repeat.key: "id"\`: placeholders must name that same field; index and constant keys are refused.
+Each item resolves a distinct key, used at most twice; unmatched feed items remain ordinary cards.
+The pair must use the same as value and cannot cross a dialog or bottomSheet boundary.
+Choose visibility conditions so the pair is not visible together. Full motion morphs geometry;
+reduced uses ordinary visibility crossfades and off swaps instantly.
 
 ## Motion v2
 
@@ -291,6 +290,8 @@ Scale holds while its trigger is truthy; replace follows icon name changes. Redu
 except reduced replace crossfades. Android approximates effects with scale/alpha/rotation and
 crossfades. iOS 17 uses bounce for wiggle, none for rotate and pulse for breathe; drawOn needs
 26 and otherwise uses replace. \`platformNotes\` reports approximations/fallbacks with node paths.
+
+${GUIDE_MOTION_V3}
 
 ## Choreography
 
@@ -418,6 +419,7 @@ very top of the screen, including under the status bar. A \`topAppBar\` or top c
 A host-owned two-finger long press (about 1 s) anywhere on the window reveals a dismiss pill for
 5 s; tapping it dismisses with reason \`user\`. Agent dismiss, a replacing show, authored dismiss,
 the session's five-minute idle TTL and last-client disconnect still work.
+\`window.transition\` (auto|none|fade|slide|scale) and \`repeat.stagger\` (0-100 ms per instance, capped at 600 ms) require \`prototype_window_motion_v1\` on Android.
 \`window.persistence: "device"\` defaults to \`bar\` and keeps its existing persistence behaviour.
 The device implementations ship separately: without the capability a device keeps the bar,
 explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successful fullscreen

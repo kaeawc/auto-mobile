@@ -1,0 +1,95 @@
+{
+  "spec": {
+    "id": "routes",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "button",
+          "label": "Open",
+          "onTap": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "detail",
+              "params": {
+                "postId": "p1",
+                "count": "one",
+                "flag": true
+              }
+            },
+            {
+              "type": "replace",
+              "stack": "nav",
+              "screen": "home"
+            },
+            {
+              "type": "setStack",
+              "stack": "nav",
+              "path": [
+                {
+                  "screen": "home"
+                },
+                {
+                  "screen": "detail",
+                  "params": {
+                    "postId": "p1",
+                    "count": 2,
+                    "flag": false
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "detail": {
+          "type": "text",
+          "text": "Post {route.postId} ({route.count})"
+        }
+      },
+      "routes": {
+        "home": {
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "home"
+            }
+          ]
+        },
+        "detail": {
+          "params": {
+            "postId": "string",
+            "count": "number",
+            "flag": "boolean"
+          },
+          "onEnter": [
+            {
+              "type": "emit",
+              "name": "entered"
+            }
+          ],
+          "onBack": [
+            {
+              "type": "pop",
+              "stack": "nav",
+              "force": true
+            }
+          ]
+        }
+      }
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["stack:nav"]
+    }
+  },
+  "expectedPath": "root.screens[\"home\"].onTap[0]",
+  "expectedMessage": "Wrong type for route param \"count\""
+}

@@ -191,6 +191,9 @@ enum PrototypeThemeModes {
         case let .modes(light, dark):
             if !isColor(light) { throw violation("\(path).light", message) }
             if !isColor(dark) { throw violation("\(path).dark", message) }
+        case .data:
+            // A media item binding is an image-slot form; the shared contract refuses it on a colour.
+            throw violation(path, message)
         }
     }
 

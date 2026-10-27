@@ -1,4 +1,5 @@
 import { PROTOTYPE_SHADER_MIME_TYPE, validatePrototypeShaderSource } from "./prototypeShaderSource";
+import { PROTOTYPE_MEDIA_ID_PREFIX, isPrototypeMediaId } from "./prototypeMediaItems";
 import contract from "../../../schemas/prototype-asset-contract.json";
 
 /**
@@ -97,6 +98,9 @@ export function prototypeAssetUploadProblem(asset: PrototypeAssetUpload): string
 
 /** Asset ids are opaque nonempty strings with a transport length cap. */
 export function prototypeAssetIdProblem(id: string): string | null {
+  if (isPrototypeMediaId(id)) {
+    return `Prototype asset ids cannot start with ${PROTOTYPE_MEDIA_ID_PREFIX}; the device mints those for its media items.`;
+  }
   return id.length === 0 || id.length > MAX_PROTOTYPE_ASSET_ID_LENGTH
     ? `Prototype asset id must be 1 to ${MAX_PROTOTYPE_ASSET_ID_LENGTH} characters.`
     : null;

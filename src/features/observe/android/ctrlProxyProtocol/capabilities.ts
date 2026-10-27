@@ -113,7 +113,15 @@ export const PROTOTYPE_STRING_CONDITIONS_CAPABILITY = "prototype_string_conditio
  * field and draw a plain window, so the host refuses the show.
  */
 export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
+/**
+ * Spec-language gate (#14192): an `image` `asset` (or tab item `image`) of the form
+ * `{data: "/pointer"}` resolving to a device media item id. Not a platform module, so it needs no
+ * `requires.platform` entry.
+ */
+export const PROTOTYPE_MEDIA_ITEMS_CAPABILITY = "prototype_platform_media_items_v1";
 /** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
+export const PROTOTYPE_MOTION_V3_CAPABILITY = "prototype_motion_v3";
+export const PROTOTYPE_WINDOW_MOTION_CAPABILITY = "prototype_window_motion_v1";
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 /** Icon symbol effects with triggers and bounded or infinite repeats. */
 export const PROTOTYPE_ICON_EFFECTS_CAPABILITY = "prototype_icon_effects_v1";
@@ -126,6 +134,7 @@ export const PROTOTYPE_LAZY_LIST_CAPABILITY = "prototype_lazy_list_v1";
 /** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
 export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
+export const PROTOTYPE_ROUTES_CAPABILITY = "prototype_routes_v1";
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
@@ -149,8 +158,10 @@ export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";
 
 export const PROTOTYPE_REDUCED_MOTION_CAPABILITY = "prototype_reduced_motion_v1";
 export const PROTOTYPE_SHARED_ELEMENT_CAPABILITY = "prototype_shared_element_v1";
+export const PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY = "prototype_shared_element_v2";
 
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_PATTERNS_CAPABILITY = "prototype_stack_patterns_v1";
 export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
 

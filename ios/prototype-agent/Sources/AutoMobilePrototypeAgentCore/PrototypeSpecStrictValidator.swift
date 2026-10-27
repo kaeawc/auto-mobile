@@ -12,12 +12,13 @@ public enum PrototypeSpecStrictValidator {
             else { throw PrototypeContractValidator.invalid("$", "Expected prototype envelope") }
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
+            try PrototypeRoutes.validate(fields, context: context)
             try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
             try PrototypeLazyList.validate(root: root, data: modelData, state: state)
             try PrototypeLazyList.validateAppend(actions: context.actions, data: modelData)
             try PrototypeDerivedValidator.validate(derive: fields["derive"], root: root, data: modelData)
             try PrototypeScrollMotion.validate(root, data: modelData)
-            try PrototypeSharedElementPlan.validate(context.locatedNodes)
+            try PrototypeSharedElementPlan.validate(context.locatedNodes, data: modelData, actions: context.actions)
             try PrototypeStrictSemantics.layout(context)
             try PrototypeStrictSemantics.pagerStateKeys(context)
             var repeats = PrototypeStrictRepeats(data: modelData)
@@ -25,7 +26,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardRepeatPathCells(root, data: modelData)
             try PrototypeLimits.guardSubstitutedText(root, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
-            try PrototypeStrictSemantics.storage(fields)
+            try PrototypeStrictSemantics.storage(fields, context: context)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
             try PrototypeRequestValidator.validate(root, state: state)
             try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
@@ -59,10 +60,10 @@ public enum PrototypeSpecStrictValidator {
             if let supportedCapabilities,
                !PrototypeStrictCapabilities.required(fields).isSubset(of: supportedCapabilities)
             {
-                let missing = PrototypeStrictCapabilities.required(fields).subtracting(supportedCapabilities).sorted()
+                let missing = PrototypeStrictCapabilities.required(fields).subtracting(supportedCapabilities)
                 throw PrototypeContractValidator.invalid(
                     "$",
-                    "Unsupported capabilities: " + missing.joined(separator: ", ")
+                    "Unsupported capabilities: \(PrototypeContractValidator.sorted(missing).joined(separator: ", "))"
                 )
             }
             if library, PrototypeCustomShaders.uses(fields) {

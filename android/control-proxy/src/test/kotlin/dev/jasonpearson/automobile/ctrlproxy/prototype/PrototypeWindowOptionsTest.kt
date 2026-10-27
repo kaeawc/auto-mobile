@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -12,6 +14,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 class PrototypeWindowOptionsTest {
+  private val cleanupScope = TestScope()
   private val host = FakePrototypeHost()
   private val timer = FakePrototypeTimer()
   private val events = mutableListOf<PrototypeEvent>()
@@ -26,6 +29,7 @@ class PrototypeWindowOptionsTest {
       eventSink = PrototypeEventSink { events += it },
       clock = { timer.now },
       lifecycle = PrototypeLifecycle(timer, TTL, clientCount = { clients }),
+      requestScope = cleanupScope,
       clearAssets = { assetClears++ },
       appLayerPermitted = { appLayerPermitted },
       packageName = "test.ctrlproxy",
@@ -117,6 +121,7 @@ class PrototypeWindowOptionsTest {
       clients = 1
       controller.onClientConnected()
       assertEquals("""{"reason":"user"}""", lastDismissReason())
+      cleanupScope.runCurrent()
       assertEquals(1, assetClears)
 
       clients = 1
@@ -124,6 +129,7 @@ class PrototypeWindowOptionsTest {
       controller.dismiss(null, "proto", null)
       assertFalse(host.isShowing)
       assertEquals("""{"reason":"agent"}""", lastDismissReason())
+      cleanupScope.runCurrent()
       assertEquals(2, assetClears)
     }
 

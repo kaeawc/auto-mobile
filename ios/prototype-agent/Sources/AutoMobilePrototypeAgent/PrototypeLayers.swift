@@ -289,7 +289,11 @@
         private var swipeRTL: Bool { layoutDirection == .rightToLeft }
 
         private func swipeAnimation(_ target: String) -> PrototypeStackAnimation {
-            PrototypeStackNavigation.animation(
+            switch model.stackTransition(target) {
+            case .sharedAxisX, .sharedAxisY, .fadeThrough: return .none
+            default: break
+            }
+            return PrototypeStackNavigation.animation(
                 declared: model.stackTransition(target), specMotion: model.spec?.motion,
                 reduceMotion: reduceMotion, direction: .pop
             )

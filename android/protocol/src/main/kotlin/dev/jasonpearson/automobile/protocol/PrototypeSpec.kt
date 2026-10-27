@@ -27,6 +27,7 @@ data class PrototypeRepeat(
   val itemsPath: String? = null,
   val key: String? = null,
   val derive: Map<String, PrototypeDerivedEntry>? = null,
+  val stagger: Int? = null,
 )
 
 @Serializable
@@ -35,6 +36,7 @@ private data class PrototypeRepeatWire(
   val `as`: String,
   val key: String? = null,
   val derive: Map<String, PrototypeDerivedEntry>? = null,
+  val stagger: Int? = null,
 )
 
 /** Keeps the source pointer in `items.path`, never as a wire-level `itemsPath` member. */
@@ -51,7 +53,7 @@ object PrototypeRepeatSerializer :
     val items =
       if (source == null) json.decodeFromJsonElement<List<Map<String, PrototypeScalar>>>(wire.items)
       else emptyList()
-    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key, wire.derive)
+    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key, wire.derive, wire.stagger)
   }
 
   override fun toJson(value: PrototypeRepeat): JsonElement {
@@ -59,7 +61,9 @@ object PrototypeRepeatSerializer :
     val items =
       value.itemsPath?.let { buildJsonObject { put("path", it) } }
         ?: json.encodeToJsonElement(value.items)
-    return json.encodeToJsonElement(PrototypeRepeatWire(items, value.`as`, value.key, value.derive))
+    return json.encodeToJsonElement(
+      PrototypeRepeatWire(items, value.`as`, value.key, value.derive, value.stagger),
+    )
   }
 }
 
@@ -222,6 +226,7 @@ data class PrototypeWindow(
   val deadTaps: Boolean? = null,
   /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
   val backdrop: PrototypeBackdrop? = null,
+  val transition: String? = null,
 )
 
 /**
@@ -301,8 +306,8 @@ data class PrototypeSpec(
   val root: PrototypeNode,
   val theme: PrototypeSpecTheme? = null,
   /**
-   * `none` is instant; `reduced` keeps fades/colors and snaps spatial motion; standard follows
-   * system scales.
+   * `none` is instant; `reduced` keeps fades/colors and snaps spatial motion; `expressive` uses
+   * Material expressive springs. Standard follows system scales.
    */
   val motion: String? = null,
   val data: JsonObject? = null,

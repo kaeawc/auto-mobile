@@ -1,3 +1,4 @@
+import { prototypeRoutesError } from "./prototypeRoutes";
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
 import { prototypeDerivedError } from "./prototypeDerivedValidation";
 import { prototypeScrollMotionError } from "./prototypeScrollMotion";
@@ -19,6 +20,7 @@ import { prototypeStorageError } from "./prototypeStorage";
 import { prototypeStringsError, prototypeStringsTableError } from "./prototypeStrings";
 import { prototypeLoadingStatesError } from "./prototypeLoadingStates";
 import { prototypeChoreographyError } from "./prototypeChoreography";
+import { prototypeMotionV3Error } from "./prototypeMotionV3";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
@@ -26,6 +28,7 @@ import { prototypePlatformError, prototypeReservedTestTagError } from "./prototy
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
+import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { effectUses } from "./prototypeEffects";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -738,8 +741,12 @@ function stateTypeErrors(
   repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   const checked: Checked = {
-    nodes: repeatKeyInstances(value, context.nodes, repeats).map(bound),
-    actions: repeatKeyInstances(value, context.actions, repeats).map(bound),
+    nodes: repeatKeyInstances(value, context.nodes, repeats)
+      .map(bound)
+      .filter((entry) => !routeBoundKeys(entry.value)),
+    actions: repeatKeyInstances(value, context.actions, repeats)
+      .map(bound)
+      .filter((entry) => !routeBoundKeys(entry.value)),
   };
   return (
     bindingErrors(checked, data) ??
@@ -824,7 +831,11 @@ function hostVocabularyError(
 
 /** Motion and choreography share one set of located nodes. */
 function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
-  return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
+  return (
+    prototypeMotionV3Error(nodes) ??
+    prototypeMotionV2Error(nodes) ??
+    prototypeChoreographyError(nodes)
+  );
 }
 
 /** Cross-node references share the component-expanded tree and repeat cardinalities. */
@@ -880,7 +891,8 @@ function validateValue(
   const error =
     prototypeLazyListLimitError(value) ??
     walk(value, definitions.spec, "", context, 0) ??
-    prototypeSharedElementError(context.nodes) ??
+    prototypeRoutesError(value, context.nodes, context.actions) ??
+    prototypeSharedElementError(context.nodes, repeats, context.actions) ??
     layoutErrors(value, context, repeats) ??
     prototypeScrollMotionError(value, context.nodes) ??
     behaviourErrors(value, context, data, repeats, componentTimers);

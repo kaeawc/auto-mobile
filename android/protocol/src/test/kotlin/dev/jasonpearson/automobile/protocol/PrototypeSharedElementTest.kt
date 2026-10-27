@@ -51,6 +51,25 @@ class PrototypeSharedElementTest {
     )
   }
 
+  @Test
+  fun `v2 object and repeat keys use only the new capability`() {
+    for (name in listOf("shared-v2-element", "shared-v2-bounds", "shared-v2-repeat")) {
+      val input = fixtureDirectory().resolve("valid/$name.json").readText()
+      val result = PrototypeSpecValidator.validate(input)
+      assertTrue(result is PrototypeSpecValidation.Success, result.toString())
+      val fields = Json.parseToJsonElement(input).jsonObject
+      val caps = PrototypeStrictPolicy.required(fields)
+      assertTrue("prototype_shared_element_v2" in caps)
+      assertFalse("prototype_shared_element_v1" in caps)
+      assertTrue(
+        "prototype_shared_element_v2" in
+          PrototypeBundleCapabilities.required(
+            PrototypeBundleSpec.references(input.toByteArray()),
+          ),
+      )
+    }
+  }
+
   companion object {
     @BeforeAll @JvmStatic fun warmup() = PrototypeSpecFixtures.loadFixtures()
   }

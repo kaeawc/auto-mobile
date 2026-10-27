@@ -7,14 +7,18 @@ enum PrototypeBundleCapabilities {
         let value = try PrototypeBundleJSON(data, code: .specInvalidJSON, path: "spec.json").value
         guard let spec = value.objectFields else { return [] }
         var names = Set<String>()
+        if spec["motion"] == .string("expressive") { names.insert(PrototypeMotionV3.capability) }
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
         if spec["strings"] != nil { need("strings") }
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
+        if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
+        if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
+            .contains(where: { $0.hasPrefix("stack:") }) { need("routes") }
         if spec["window"]?.objectFields?["backdrop"] != nil { need("backdrop") }
         if spec["platform"] != nil || spec["requires"] != nil { need("platform") }
         if case let .array(modules) = spec["requires"]?.objectFields?["platform"] {
@@ -37,7 +41,11 @@ enum PrototypeBundleCapabilities {
             if node["semantics"] != nil { need("semantics") }
             if PrototypeStrings.textFields(.object(node))
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
+            if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
             if node["sharedKey"] != nil { need("shared_element") }
+            if PrototypeMotionV3.required(node) { names.insert(PrototypeMotionV3.capability) }
+            if PrototypeMediaItems.usedBy(node) { names.insert(PrototypeMediaItems.capability) }
+            if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
             if PrototypeStringConditions.uses(node) { need("string_conditions") }
             if type == "icon", node["effect"] != nil { need("icon_effects") }
@@ -94,6 +102,9 @@ enum PrototypeBundleCapabilities {
                 if node["indicator"] != nil { need("carousel") }
             }
             if type == "stack", node["transition"] != nil { need("stack_transitions") }
+            if type == "stack",
+               ["sharedAxisX", "sharedAxisY", "fadeThrough", "zoom"]
+               .contains(node["transition"]?.stringValue ?? "") { need("stack_patterns") }
             let transition = type == "stack" ? nil : node["transition"]
             let transitionType = transition?.objectFields?["type"]?.stringValue
                 ?? transition?.stringValue ?? ""
@@ -120,6 +131,9 @@ enum PrototypeBundleCapabilities {
         guard let fields = value.objectFields else { return }
         if fields["onAppear"] != nil { names.insert("prototype_timers_v1") }
         let type = fields["type"]?.stringValue
+        if (type == "stack" && fields["routes"] != nil) ||
+            (["push", "replace"].contains(type ?? "") && fields["params"] != nil) ||
+            (type == "pop" && fields["force"] != nil) || type == "setStack" { names.insert("prototype_routes_v1") }
         if type == "startTimer" || type == "cancelTimer" { names.insert("prototype_timers_v1") }
         if type == "request" {
             names.insert("prototype_network_v1")
@@ -133,6 +147,12 @@ enum PrototypeBundleCapabilities {
         if type == "scrollTo" { names.insert("prototype_chat_scroll_v1") }
         if ["push", "replace"].contains(type ?? ""), fields["transition"] != nil {
             names.insert("prototype_stack_transitions_v1")
+        }
+        if ["push", "replace"].contains(type ?? ""),
+           fields["source"] != nil || ["sharedAxisX", "sharedAxisY", "fadeThrough", "zoom"]
+           .contains(fields["transition"]?.stringValue ?? "")
+        {
+            names.insert("prototype_stack_patterns_v1")
         }
         if type == nil, fields["data"]?.stringValue != nil { names.insert("prototype_data_model_v1") }
         if type == nil, let pointer = fields["platform"]?.stringValue {

@@ -12,6 +12,16 @@ struct IconEffect: Codable, Equatable, Sendable {
     let `repeat`: PrototypeIconEffectRepeat?
 }
 
+struct PrototypePress: Decodable, Equatable, Sendable {
+    let scale: Double?
+    let alpha: Double?
+}
+
+struct Shared: Decodable, Equatable, Sendable {
+    let key: String
+    let `as`: String
+}
+
 struct ShadowOffset: Codable, Equatable, Sendable {
     let x: Double
     let y: Double

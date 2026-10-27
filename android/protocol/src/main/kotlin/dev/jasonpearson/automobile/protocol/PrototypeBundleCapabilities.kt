@@ -8,11 +8,13 @@ internal object PrototypeBundleCapabilities {
   fun required(refs: PrototypeBundleReferences): List<String> {
     val spec = refs.spec
     val caps = linkedSetOf<String>()
+    if (PrototypeRouteRules.uses(spec, refs.context)) caps.add("prototype_routes_v1")
     specContent(spec, caps)
     specPresentation(spec, caps)
     for (node in PrototypeBundleSpec.nodes(spec)) {
       if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
         caps.add("prototype_pager_state_key_v1")
+      if (PrototypeMotionV3.required(node)) caps.add(PrototypeMotionV3.CAPABILITY)
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
       fields(node, caps)
@@ -37,7 +39,10 @@ internal object PrototypeBundleCapabilities {
       val block = spec[key] as? JsonObject ?: continue
       if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
     }
+    if (text(spec["motion"]) == "expressive") caps.add(PrototypeMotionV3.CAPABILITY)
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
+    if ((spec["window"] as? JsonObject)?.get("transition") != null)
+      caps.add("prototype_window_motion_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
     if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {
@@ -72,7 +77,10 @@ internal object PrototypeBundleCapabilities {
       "startTimer",
       "cancelTimer" -> caps.add("prototype_timers_v1")
       "push",
-      "replace" -> if ("transition" in action) caps.add("prototype_stack_transitions_v1")
+      "replace" -> {
+        if ("transition" in action) caps.add("prototype_stack_transitions_v1")
+        if (PrototypeStackPatternRules.required(action)) caps.add("prototype_stack_patterns_v1")
+      }
       "scrollTo" -> caps.add("prototype_chat_scroll_v1")
       "emit" -> if ("context" in action) caps.add("prototype_emit_context_v1")
     }

@@ -48,6 +48,7 @@ enum PrototypeAgentProtocol {
         chartCapability,
         lazyListCapability,
         loadingStatesCapability,
+        effectsCapability,
         stylePolishV2Capability,
         stringsCapability,
         semanticsCapability,
@@ -65,8 +66,10 @@ enum PrototypeAgentProtocol {
         stackTransitionsCapability,
         designPlatformCapability,
         iconEffectsCapability,
+        stackPatternsCapability,
         reducedMotionCapability,
         sharedElementCapability,
+        sharedElementV2Capability,
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,
@@ -88,10 +91,14 @@ enum PrototypeAgentProtocol {
     static let scrollMotionCapability = "prototype_scroll_motion_v1"
     static let formatCapability = "prototype_format_v1"
     static let pagerStateKeyCapability = "prototype_pager_state_key_v1"
+    /// `style.effects` (#15130): all ten looks render, the shader-sampled ones falling back to no effect
+    /// on a node SwiftUI backs with a platform view, reported in `degradedEffects`.
+    static let effectsCapability = "prototype_effects_v1"
     static let lazyListCapability = "prototype_lazy_list_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
     static let designPlatformCapability = "prototype_design_platform_v1"
+    static let stackPatternsCapability = "prototype_stack_patterns_v1"
     static let stackTransitionsCapability = "prototype_stack_transitions_v1"
     /// Native SF Symbol effects on iOS 17 and later.
     static let iconEffectsCapability = "prototype_icon_effects_v1"
@@ -99,6 +106,7 @@ enum PrototypeAgentProtocol {
     static let reducedMotionCapability = "prototype_reduced_motion_v1"
     /// `sharedKey` morphs between `visibleWhen` swaps via matchedGeometryEffect (#15115).
     static let sharedElementCapability = "prototype_shared_element_v1"
+    static let sharedElementV2Capability = "prototype_shared_element_v2"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.

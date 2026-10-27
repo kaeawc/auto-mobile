@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -72,6 +71,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 import kotlin.math.hypot
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -166,7 +166,7 @@ fun PrototypeRuntimeContent(
   val transitionScale by rememberTransitionAnimationScale(resolver)
   val profile = prototypeMotionProfile(snapshot.spec.motion, durationScale, transitionScale)
   val motion = profile != PrototypeMotionProfile.OFF
-  if (snapshot.active) {
+  if (snapshot.active || LocalPrototypeWindowRetainsContent.current) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
       // the order they happened, whatever the dispatcher does with separately launched jobs.
@@ -191,6 +191,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeShaderSession provides runtime.shaderSession,
         LocalPrototypeIconCapture provides capture,
+        LocalPrototypeExpressive provides (snapshot.spec.motion == "expressive"),
         LocalPrototypeMotion provides motion,
         LocalPrototypeScrollReduced provides (snapshot.spec.motion == "reduced"),
         LocalPrototypeMotionProfile provides profile,
@@ -273,7 +274,7 @@ fun PrototypeSpecContent(
   interact: (PrototypeInteraction) -> Unit = {},
 ) {
   PrototypeTheme(root, theme) {
-    PrototypeSharedRoot(root) {
+    PrototypeMotionSharedRoot(root) {
       val gestureTaps = remember { PrototypeGestureTaps() }
       val density = LocalDensity.current.density
       val currentInteract = rememberUpdatedState(interact)
@@ -304,19 +305,21 @@ fun PrototypeSpecContent(
           }
           modals.forEach { node ->
             key(node.identity) {
-              if (node.role == "menu") {
-                val parent = menuParents[node.identity]
-                RenderPrototypeMenu(
-                  node,
-                  Modifier.prototypeShader(node).then(prototypeNodeModifier(node, interact)),
-                  parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
-                  interact,
+              PrototypeModalMotion(node, interact) { modalInteract ->
+                if (node.role == "menu") {
+                  val parent = menuParents[node.identity]
+                  RenderPrototypeMenu(
+                    node,
+                    Modifier.prototypeShader(node).then(prototypeNodeModifier(node, modalInteract)),
+                    parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                    modalInteract,
+                  )
+                } else RenderPrototypeModal(node, modalInteract)
+                PrototypeAnchorLayer(
+                  remember(node) { layeredPrototypeAnchorsIn(node.children) },
+                  modalInteract,
                 )
-              } else RenderPrototypeModal(node, interact)
-              PrototypeAnchorLayer(
-                remember(node) { layeredPrototypeAnchorsIn(node.children) },
-                interact,
-              )
+              }
             }
           }
           PrototypeExpandedSelect(root, modals, menuLayers, interact)
@@ -506,13 +509,16 @@ internal fun Modifier.boundedScrollViewport(vertical: Boolean): Modifier =
 @Composable
 @Suppress("LongParameterList") // The shared render entry point; callers pass only what they need.
 internal fun RenderPrototypeNode(
-  node: PrototypeRenderNode,
+  renderedNode: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
   anchorLayer: Boolean = false,
 ) {
+  val node =
+    if (LocalPrototypeModalInputEnabled.current) renderedNode
+    else renderedNode.copy(enabled = false)
   // An anchored node below the root is drawn by its window's anchor layer, not in its parent.
   if (!windowRoot && !anchorLayer && isLayeredPrototypeAnchor(node)) {
     CaptureAnchorLocals(node.identity)
@@ -529,14 +535,20 @@ internal fun RenderPrototypeNode(
       prototypeVisibilityTransition(
         node.source.transition?.type.takeUnless { node.role == "stack" },
         LocalPrototypeMotionProfile.current,
-        shared = node.source.sharedKey != null,
+        shared = node.source.resolvedSharedKey != null,
       )
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
-      exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
+      enter =
+        if (LocalPrototypeExpressive.current)
+          prototypeExpressiveEnter(visibilityTransition, prototypeRtl(), node.enterDelayMs)
+        else prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+      exit =
+        if (LocalPrototypeExpressive.current)
+          prototypeExpressiveExit(visibilityTransition, prototypeRtl())
+        else prototypeExitTransition(visibilityTransition, prototypeRtl()),
     ) {
       ReportPrototypeMotion { transition.isRunning }
       ProvideAnchorFade(
@@ -571,7 +583,7 @@ private fun nodeVisibilityTransition(node: PrototypeRenderNode): String? =
   prototypeVisibilityTransition(
     node.source?.transition?.type,
     LocalPrototypeMotionProfile.current,
-    shared = node.source?.sharedKey != null,
+    shared = node.source?.resolvedSharedKey != null,
   )
 
 @Composable
@@ -615,12 +627,13 @@ private fun RenderPrototypeVisibility(
         visible = node.visible,
         modifier = parentModifier,
         enter =
-          prototypeEnterTransition(
-            visibilityTransition,
-            prototypeRtl(),
-            node.enterDelayMs,
-          ),
-        exit = prototypeExitTransition(visibilityTransition, prototypeRtl()),
+          if (LocalPrototypeExpressive.current)
+            prototypeExpressiveEnter(visibilityTransition, prototypeRtl(), node.enterDelayMs)
+          else prototypeEnterTransition(visibilityTransition, prototypeRtl(), node.enterDelayMs),
+        exit =
+          if (LocalPrototypeExpressive.current)
+            prototypeExpressiveExit(visibilityTransition, prototypeRtl())
+          else prototypeExitTransition(visibilityTransition, prototypeRtl()),
       ) {
         ReportPrototypeMotion { transition.isRunning }
         ProvideAnchorFade(
@@ -1432,25 +1445,32 @@ private fun RenderPrototypeSheet(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeBottomSheetNode ?: return
-  if (!node.sheetOpen) return
   BoxWithConstraints(Modifier.fillMaxSize()) {
     val heights = prototypeSheetHeights(source.detents, maxHeight.value.toDouble())
     var height by remember(node.identity, heights) { mutableDoubleStateOf(heights.first()) }
     var drag by remember(node.identity) { mutableDoubleStateOf(0.0) }
     val density = LocalDensity.current.density
+    val sheetHeight = prototypeSettledSheetHeight((height - drag).toFloat(), drag != 0.0)
     Box(
       Modifier.fillMaxSize()
         .background(
           prototypeThemedScrim(null, source.scrim)
             ?: prototypeSheetScrimFallback(prototypePalette()),
         )
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
+        .then(
+          if (node.sheetOpen)
+            Modifier.clickable {
+              interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+            }
+          else Modifier,
+        ),
     )
     Column(
       modifier
+        .prototypeModalSurface("slide")
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
-        .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
+        .height(sheetHeight.coerceIn(0f, maxHeight.value).dp)
         .then(
           // The authored background and gradient are already painted by `modifier`; a later opaque
           // fill would cover them, so the surface is only the fallback when neither is authored.
@@ -1458,24 +1478,28 @@ private fun RenderPrototypeSheet(
             Modifier.background(MaterialTheme.colorScheme.surface)
           else Modifier,
         )
-        .pointerInput(heights, height, source.dismissOnSwipe) {
-          detectVerticalDragGestures(
-            onDragStart = { drag = 0.0 },
-            onVerticalDrag = { change, amount ->
-              change.consume()
-              drag += amount / density
-            },
-            onDragCancel = { drag = 0.0 },
-            onDragEnd = {
-              val settled = settlePrototypeSheet(heights, height, drag, source.dismissOnSwipe)
-              drag = 0.0
-              if (settled == null) interact(PrototypeInteraction.SheetDismiss(source.openWhen))
-              else height = settled
-            },
-          )
-        }
+        .then(
+          if (node.sheetOpen)
+            Modifier.pointerInput(heights, height, source.dismissOnSwipe) {
+              detectVerticalDragGestures(
+                onDragStart = { drag = 0.0 },
+                onVerticalDrag = { change, amount ->
+                  change.consume()
+                  drag += amount / density
+                },
+                onDragCancel = { drag = 0.0 },
+                onDragEnd = {
+                  val settled = settlePrototypeSheet(heights, height, drag, source.dismissOnSwipe)
+                  drag = 0.0
+                  if (settled == null) interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+                  else height = settled
+                },
+              )
+            }
+          else Modifier,
+        )
         // Consume body taps to keep the scrim from closing the sheet through empty content.
-        .clickable {
+        .clickable(enabled = node.sheetOpen) {
           if (!source.onTap.isNullOrEmpty())
             interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
         },
@@ -1509,9 +1533,9 @@ private fun prototypeNodeModifier(
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ): Modifier {
-  val style = node.style.source
+  val style = prototypeAnimatedLayout(node)
   val actions = node.source?.onTap.orEmpty()
-  val tappable = prototypeNodeTappable(node)
+  val tappable = prototypeNodeTappable(node) && LocalPrototypeModalInputEnabled.current
   val handleVisual =
     node.semantics == null &&
       (node.role == "icon" || node.role == "image") &&
@@ -1527,9 +1551,18 @@ private fun prototypeNodeModifier(
   // Draw-time offset, scale and rotation, animated with the node's `animate` (#14208).
   modifier = modifier.prototypeStyleTransform(node).prototypeScrollMotion(node)
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
-  val pressScale = style.pressScale
-  if (tappable && pressScale != null) {
-    modifier = modifier.prototypePressScale(presses, pressScale.toFloat())
+  val press = node.source?.press
+  val pressScale = press?.scale ?: style.pressScale
+  val pressAlpha = press?.alpha
+  if (prototypePressApplies(tappable, press != null, pressScale, pressAlpha)) {
+    if (!tappable && node.enabled) modifier = modifier.prototypeComponentPress(presses)
+    modifier =
+      modifier.prototypePressScale(
+        presses,
+        (pressScale ?: 1.0).toFloat(),
+        (pressAlpha ?: 1.0).toFloat(),
+        drawOnly = press != null,
+      )
   }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
@@ -1547,7 +1580,10 @@ private fun prototypeNodeModifier(
     ?.takeIf { style.shadows == null }
     ?.let {
       val shadowColor =
-        prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
+        prototypeAnimatedColor(
+          node,
+          prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor,
+        )
       modifier =
         modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
     }
@@ -1581,7 +1617,11 @@ private fun prototypeNodeModifier(
         )
       } else {
         val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
-        modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
+        modifier.border(
+          it.width.toFloat().dp,
+          prototypeAnimatedColor(node, checkNotNull(borderColor)),
+          shape,
+        )
       }
   }
   modifier = modifier.prototypeShimmer(style.shimmer == true)
@@ -1618,7 +1658,7 @@ private fun prototypeNodeModifier(
             onClickLabel = node.semantics?.hint,
             enabled = node.enabled,
             interactionSource = presses,
-            indication = LocalIndication.current,
+            indication = prototypeIndication(LocalPrototypeMotion.current),
             onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
             onLongClickLabel = longPress?.let { PROTOTYPE_LONG_PRESS_ACTION_LABEL },
             onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
@@ -1637,7 +1677,7 @@ private fun prototypeNodeModifier(
           onClickLabel = node.semantics?.hint,
           enabled = node.enabled,
           interactionSource = presses,
-          indication = LocalIndication.current,
+          indication = prototypeIndication(LocalPrototypeMotion.current),
         ) {
           gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) }
         }
@@ -2043,3 +2083,11 @@ internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
     }
   }
 }
+
+/** Press feedback draws for tappable nodes, and for any node that authors `press`. */
+private fun prototypePressApplies(
+  tappable: Boolean,
+  hasPress: Boolean,
+  scale: Double?,
+  alpha: Double?,
+): Boolean = (tappable || hasPress) && (scale != null || alpha != null)

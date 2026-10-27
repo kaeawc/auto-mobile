@@ -1,5 +1,6 @@
 import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
 import { z } from "zod/v4";
+import { MAX_PROTOTYPE_FEEDBACK_LOG_ENTRIES } from "../../features/prototype/prototypeFeedbackLog";
 import {
   PROTOTYPE_EVENT_KINDS,
   SAVED_PROTOTYPE_ERROR_CODES,
@@ -85,6 +86,21 @@ const lastResultSchema = z.object({
       "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
     ),
   degradedEffects: z.array(prototypeDegradedEffectSchema).optional(),
+  feedbackLog: z
+    .array(
+      z.object({
+        timeMs: z.number().int().safe().nonnegative(),
+        effect: z.string().optional(),
+        sound: z.string().optional(),
+        nodeId: z.string().optional(),
+        suppressed: z.literal(true).optional(),
+      }),
+    )
+    .max(MAX_PROTOTYPE_FEEDBACK_LOG_ENTRIES)
+    .optional()
+    .describe(
+      "inspect: the last haptic (effect) and sound calls this prototype made, oldest first, at most 64, each with the owning nodeId when one node made the call and suppressed when a system setting or the ringer stopped it. Reported by a device advertising prototype_platform_haptics_v1 or prototype_platform_sound_v1; absent when none were made",
+    ),
   warning: z
     .string()
     .optional()
@@ -142,6 +158,13 @@ const prototypeEventOutputSchema = z.object({
       z.object({
         path: z.array(z.string().min(1)).min(1).max(32),
         depth: z.number().int().min(1).max(32),
+        params: z
+          .array(
+            z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).and(z.unknown()),
+          )
+          .min(1)
+          .max(32)
+          .optional(),
       }),
     )
     .optional(),
@@ -286,6 +309,15 @@ export const prototypeOutputSchema = z.object({
             z.object({
               path: z.array(z.string().min(1)).min(1).max(32),
               depth: z.number().int().min(1).max(32),
+              params: z
+                .array(
+                  z
+                    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+                    .and(z.unknown()),
+                )
+                .min(1)
+                .max(32)
+                .optional(),
             }),
           )
           .optional()

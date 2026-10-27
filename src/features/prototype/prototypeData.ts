@@ -277,6 +277,15 @@ function usesAtNode(node: Raw, path: string): Set<string> {
   if (node.type === "icon" && record(record(node.effect)?.trigger)?.data !== undefined) {
     fields.add(`${path}.effect.trigger.data`);
   }
+  // A `{data: "/pointer"}` image binding reads /data like any other pointer (#14192).
+  if (node.type === "image" && typeof record(node.asset)?.data === "string") {
+    fields.add(`${path}.asset`);
+  }
+  (Array.isArray(node.items) ? node.items : []).forEach((item, index) => {
+    if (typeof record(record(item)?.image)?.data === "string") {
+      fields.add(`${path}.items[${index}].image`);
+    }
+  });
   conditionFields(node.enabledWhen, `${path}.enabledWhen`, fields);
   conditionFields(node.visibleWhen, `${path}.visibleWhen`, fields);
   conditionFields(node.errorWhen, `${path}.errorWhen`, fields);

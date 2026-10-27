@@ -246,17 +246,25 @@
         }
 
         @ViewBuilder private var sharedContent: some View {
-            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
-            let plan = PrototypeSharedElementPlan(
-                node: node,
-                profile: motion.profile,
-                conflictingKeys: node.sharedKey == nil || !motion.spatial ? [] : sharedConflicts
-            )
+            let plan = sharedPlan
             if plan.apply, let key = plan.key, let sharedNamespace {
-                barContent.matchedGeometryEffect(id: key, in: sharedNamespace, isSource: isVisible)
+                barContent.matchedGeometryEffect(
+                    id: key,
+                    in: sharedNamespace,
+                    properties: .frame,
+                    isSource: isVisible
+                )
             } else {
                 barContent
             }
+        }
+
+        private var sharedPlan: PrototypeSharedElementPlan {
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            return PrototypeSharedElementPlan(
+                node: node, profile: motion.profile,
+                conflictingKeys: node.resolvedSharedKey == nil || !motion.spatial ? [] : sharedConflicts
+            )
         }
 
         private var sharedConflicts: Set<String> {
@@ -267,6 +275,8 @@
         private var visibilityTransition: AnyTransition {
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
             // Explicit transition animation fades filtered children even when parent layout snaps.
+            let plan = sharedPlan
+            if node.shared != nil, plan.apply { return plan.crossfade ? .opacity : .identity }
             return motion.fadeOnly && transition != .instant
                 ? transition.swiftUITransition.animation(.easeInOut(duration: 0.25))
                 : transition.swiftUITransition
@@ -313,7 +323,7 @@
             return node.visibleWhen == nil ? .instant : motion.visibility(
                 transition: node.transition,
                 nodeType: node.type,
-                shared: node.sharedKey != nil
+                shared: node.resolvedSharedKey != nil
             )
         }
 
@@ -934,7 +944,13 @@
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
-                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
+                    shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                        .spatial,
+                    effects: PrototypeEffects.plan(
+                        style?.effects, platformBackedSubtree: PrototypeEffects.hasPlatformBackedSubtree(node)
+                    ),
+                    motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion),
+                    authorsEffects: PrototypeEffects.authorsEffects(node)
                 ))
                 .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .opacity(style?.alpha ?? 1)

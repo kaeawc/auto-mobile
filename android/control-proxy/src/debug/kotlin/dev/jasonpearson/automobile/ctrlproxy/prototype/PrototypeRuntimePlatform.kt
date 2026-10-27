@@ -1,7 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.content.Context
 import dev.jasonpearson.automobile.prototype.PrototypePlatform
 
-/** No permission-needing integrations are registered in the overlay. */
-internal fun prototypeRuntimePlatform(): PrototypePlatform =
-  PrototypePlatform(listOf(dev.jasonpearson.automobile.prototype.TestPlatformModule()))
+/** The haptics and sound modules, plus the contract test module that debug builds carry. */
+internal fun prototypeRuntimePlatform(context: Context): PrototypePlatform =
+  PrototypePlatform(
+    prototypeFeedbackModules(context) + dev.jasonpearson.automobile.prototype.TestPlatformModule(),
+  )

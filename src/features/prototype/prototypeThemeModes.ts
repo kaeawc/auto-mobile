@@ -42,7 +42,9 @@ function list(value: unknown): unknown[] {
 }
 
 function pairAt(value: unknown, path: string): string[] {
-  return record(value) ? [path] : [];
+  // `{data: "/pointer"}` is a media item binding (#14192), not a per-mode pair.
+  const pair = record(value);
+  return pair && pair.data === undefined ? [path] : [];
 }
 
 /** A slot that took hex only before: a pair or a role name both need the capability. */

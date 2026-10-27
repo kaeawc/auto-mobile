@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
@@ -30,6 +31,7 @@ import {
   MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS,
   PROTOTYPE_ACCESSIBILITY_RULES,
 } from "../../features/prototype/prototypeAccessibilityLint";
+import { MAX_PROTOTYPE_PLACEHOLDER_FINDINGS } from "../../features/prototype/prototypePlaceholderLint";
 import {
   MAX_PROTOTYPE_SPEC_BYTES,
   prototypeSpecSchema,
@@ -243,17 +245,18 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "open",
           "clearStorage",
           "simulate",
+          "screenMap",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host-only: screenMap",
         },
       ),
       spec: specInput
         .optional()
         .describe(
-          'Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. {data: pointer, empty: true|false} conditions (missing, [], {} or "" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child\'s total delay at most 600 ms), require prototype_choreography_v1. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.',
+          'style.shadows, style.cornerStyle, style.border.gradient, scroll.fadeEdges and image.filter require prototype_style_polish_v2. Full prototype spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. show always renders the whole spec; spec.state is authoritative. Use show for a new screen or a window, theme or root change; patch for content (/data), state (/state) or one node by id (replaceNode), requiring prototype_patch_v1. window.layer "app" and window.persistence "device" need a CtrlProxy advertising prototype_window_options_v1. Per-mode forms need a device advertising prototype_theme_modes_v1 and are refused otherwise: a colour field, gradient stop or scrim as {light, dark} (each hex or a role), a role name in a gradient stop or scrim, theme.colors.light / theme.colors.dark {role: hex} maps applied after the flat overrides for the resolved mode, and image.asset or a tabBar/bottomNav item image as {light, dark} asset ids. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. searchBar requires prototype_search_bar_v1 for show and patch. {data: pointer, empty: true|false} conditions (missing, [], {} or "" is empty) and style shimmer on box/row/column/card require prototype_loading_states_v1. Node animate {durationMs?,easing?}, style scale (0-4)/rotation (degrees), transition slideStart|slideEnd|scale and image zoomable {maxScale 1-8} (not with onDoubleTap) require prototype_motion_v2. transition as {type, delayMs?} (0-600 ms) or blurReplace, and box/row/column stagger {ms 0-100, order? forward|reverse|center} (every child\'s total delay at most 600 ms), require prototype_choreography_v1. motion: "reduced" requires prototype_reduced_motion_v1; iOS Reduce Motion selects reduced, Android animator/transition scale 0 selects off. sharedKey requires prototype_shared_element_v1 and visibleWhen on the same node, exactly two non-nested nodes per key, at most 16 keys, and no repeat templates. Full motion morphs shared bounds, reduced fades, none snaps. Stack transition platform|slide|fade|none (default platform) and optional push/replace transition overrides require prototype_stack_transitions_v1; pop/popToRoot take no override. Stack transition controls screen navigation, not its own visibleWhen. chart {variant line|area|bar|ring, series:[{path,x?,y,label,color?}] (1-4, each a /data array of objects with a numeric y), yRange?, xLabels?, goal?} requires prototype_chart_v1. Text nodes take exactly one of text or spans (1–64 strict {text,style?,onTap?} entries with nonempty text and inline typography/color/background only); spans require prototype_rich_text_v1, resolved span texts concatenate without separators for observe, and span taps run actions without opening URLs. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats.',
         ),
       ops: withJsonSchemaOverride(
         z.array(z.record(z.string(), z.unknown())).min(1).max(MAX_PROTOTYPE_PATCH_OPS),
@@ -366,6 +369,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .literal(true)
         .optional()
         .describe("save only: requires pin; accepts the launcher dialog, verifies the pin"),
+      restartLauncher: z
+        .literal(false)
+        .optional()
+        .describe(
+          "save only (Android): false skips the automatic default-launcher restart that runs when a pinned or updated shortcut is not visible on the home screen",
+        ),
       removeIcon: z
         .literal(true)
         .optional()
@@ -425,6 +434,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "icon",
     "pin",
     "autoConfirm",
+    "restartLauncher",
     "removeIcon",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
@@ -439,7 +449,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       "pseudoLocale",
     ],
     patch: ["id", "ops", "baseRevision"],
-    save: ["spec", "assets", "label", "icon", "pin", "autoConfirm"],
+    save: ["spec", "assets", "label", "icon", "pin", "autoConfirm", "restartLauncher"],
     listSaved: [],
     deleteSaved: ["id", "removeIcon"],
     open: ["id"],
@@ -448,6 +458,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     dismiss: ["id", "all"],
     status: [],
     inspect: [],
+    screenMap: ["spec", "specPath"],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
   };
   for (const field of fields) {
@@ -473,16 +484,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     validateAwaitEventInput(value, ctx);
   }
   validateProtoViewerTimeout(value, ctx);
-  if (value.action === "show" && (value.spec === undefined) === (value.specPath === undefined)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["spec"],
-      message:
-        value.spec === undefined
-          ? "show requires exactly one of spec or specPath"
-          : "show takes either spec or specPath, not both",
-    });
-  }
+  validateSpecSource(value, ctx);
   if (value.action === "dismiss" && (value.id === undefined) === (value.all === undefined)) {
     ctx.addIssue({
       code: "custom",
@@ -507,6 +509,20 @@ function validateProtoViewerTimeout(
   }
 }
 
+function validateSpecSource(value: z.infer<typeof prototypeSchema>, ctx: z.RefinementCtx): void {
+  const takesSpecSource = value.action === "show" || value.action === "screenMap";
+  if (takesSpecSource && (value.spec === undefined) === (value.specPath === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["spec"],
+      message:
+        value.spec === undefined
+          ? `${value.action} requires exactly one of spec or specPath`
+          : `${value.action} takes either spec or specPath, not both`,
+    });
+  }
+}
+
 function validateAwaitEventInput(
   value: z.infer<typeof prototypeSchema>,
   ctx: z.RefinementCtx,
@@ -524,7 +540,12 @@ function validateAwaitEventInput(
 }
 
 /** status and inspect show nothing on the device: reads (#10965). The rest are control. */
-export const PROTOTYPE_READ_ACTIONS: readonly string[] = ["status", "inspect", "listSaved"];
+export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
+  "status",
+  "inspect",
+  "listSaved",
+  "screenMap",
+];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
   return PROTOTYPE_READ_ACTIONS.includes(args.action);
@@ -587,6 +608,11 @@ const lastResultSchema = z.object({
     .describe(
       "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
     ),
+  degradedEffects: z.array(prototypeDegradedEffectSchema).optional(),
+  warning: z
+    .string()
+    .optional()
+    .describe("Effects omitted or frozen by the device, with their paths and reasons"),
   storage: prototypeStorageOutputField,
   timers: z
     .array(
@@ -647,6 +673,34 @@ const prototypeEventOutputSchema = z.object({
   timestamp: z.number(),
 });
 export const prototypeOutputSchema = z.object({
+  screenMap: z
+    .object({
+      nodes: z.array(
+        z.object({
+          id: z.string(),
+          kind: z.enum(["root", "stackScreen", "pagerPage", "sheet", "dialog"]),
+          path: z.string(),
+          label: z.string().optional(),
+          start: z.literal(true).optional(),
+        }),
+      ),
+      edges: z.array(
+        z.object({
+          from: z.string(),
+          to: z.string(),
+          action: z.enum(["push", "replace", "pop", "popToRoot", "setPage"]),
+          trigger: z.object({
+            path: z.string(),
+            testTag: z.string().optional(),
+            id: z.string().optional(),
+            label: z.string().optional(),
+          }),
+        }),
+      ),
+    })
+    .optional()
+    .describe("screenMap only: the spec's screens and the actions that move between them"),
+  mermaid: z.string().optional().describe("screenMap only: the same map as a Mermaid flowchart"),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
   viewer: z
     .object({
@@ -687,6 +741,16 @@ export const prototypeOutputSchema = z.object({
     )
     .optional(),
   pinned: z.enum(["pinned", "pending", "unsupported"]).optional(),
+  launcherRestarted: z
+    .boolean()
+    .optional()
+    .describe(
+      "Android save with pin: true when the default launcher was restarted to show the shortcut.",
+    ),
+  shortcutVisible: z
+    .boolean()
+    .optional()
+    .describe("Android: whether the shortcut was seen on the home screen after a pin or update."),
   errorCode: z
     .enum([...SAVED_PROTOTYPE_ERROR_CODES, "unsupported_capability", "unsupported_platform"])
     .optional(),
@@ -790,7 +854,7 @@ export const prototypeOutputSchema = z.object({
     .max(MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS)
     .optional()
     .describe(
-      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA) or small-touch-target (authored size under 48dp); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
+      "Successful show or patch: advisory accessibility lint of the device spec (never refuses a show). rule is unlabeled-control, unlabeled-image, unlabeled-text-field, low-contrast (authored text colour vs. its resolved background, per light/dark mode, WCAG AA), small-touch-target (authored size under 48dp) or transition-without-visible-when (a node transition with no visibleWhen, which never runs); path is the node in the component-expanded device spec; value/minimum give the ratio or dp. Absent when nothing is found.",
     ),
   accessibilityFindingsTotal: z
     .number()
@@ -798,6 +862,25 @@ export const prototypeOutputSchema = z.object({
     .positive()
     .optional()
     .describe("Total accessibility findings, present only when accessibilityFindings was capped"),
+  placeholderFindings: z
+    .array(
+      z.object({
+        path: z.string(),
+        placeholder: z.string(),
+        detail: z.string(),
+      }),
+    )
+    .max(MAX_PROTOTYPE_PLACEHOLDER_FINDINGS)
+    .optional()
+    .describe(
+      "Successful show or patch: advisory lint for a repeat or state placeholder in a field that does not bind it, so it would be drawn literally (for example chip.label, badge.text, textField.placeholder). path is the field in the component-expanded device spec; placeholder is the text as authored. Never refuses a show. Absent when nothing is found.",
+    ),
+  placeholderFindingsTotal: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Total placeholder findings, present only when placeholderFindings was capped"),
   event: prototypeEventOutputSchema.optional(),
   timedOut: z
     .literal(true)
@@ -813,6 +896,7 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "show or save with assets: assets the device confirmed, also present on failure. They stay on the device until the prototype session ends.",
     ),
+  degradedEffects: z.array(prototypeDegradedEffectSchema).optional(),
   missingAssets: z
     .array(z.string())
     .optional()
@@ -835,7 +919,7 @@ export const prototypeOutputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
+      "show or patch succeeded or awaitEvent timed out, and it needs attention: reports degraded effects with paths and api/budget reasons, names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
     ),
   anchors: z
     .array(

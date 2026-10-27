@@ -352,6 +352,8 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeTabBarNode -> "tabBar"
     is PrototypeBottomNavNode -> "bottomNav"
     is PrototypeBottomSheetNode -> "bottomSheet"
+    is PrototypeTooltipNode -> "tooltip"
+    is PrototypeDrawerNode -> "drawer"
   }
 
 private fun prototypeNodeText(
@@ -378,6 +380,7 @@ private fun prototypeNodeText(
       node.text?.let { interpolatePrototypeText(it, localState, inPager) }.orEmpty()
     is PrototypeDialogNode ->
       node.title?.let { interpolatePrototypeText(it, localState, inPager) }.orEmpty()
+    is PrototypeTooltipNode -> interpolatePrototypeText(node.text, localState, inPager)
     is PrototypeSnackbarNode -> interpolatePrototypeText(node.text, localState, inPager)
     else -> ""
   }
@@ -395,6 +398,8 @@ private fun prototypeNodeIconName(node: PrototypeNode): String? =
 internal fun prototypeOpenWhen(node: PrototypeNode?): PrototypeSheetCondition? =
   when (node) {
     is PrototypeBottomSheetNode -> node.openWhen
+    is PrototypeTooltipNode -> node.openWhen
+    is PrototypeDrawerNode -> node.openWhen
     is PrototypeSearchBarNode -> node.activeKey?.let { PrototypeSheetCondition(it, true) }
     is PrototypeDialogNode -> node.openWhen
     is PrototypeMenuNode -> node.openWhen
@@ -771,19 +776,25 @@ private fun inlineTextFieldVisible(node: PrototypeRenderNode): Boolean =
   }
 
 /** Roles drawn above the whole author tree while their `openWhen` holds, never inline. */
-internal val PROTOTYPE_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar", "menu")
+internal val PROTOTYPE_MODAL_ROLES =
+  setOf("bottomSheet", "dialog", "snackbar", "menu", "tooltip", "drawer")
 
 /**
  * Open sheets, dialogs and snackbars are rendered last, in tree order, so a modal scrim covers the
  * entire prototype window.
  */
-internal fun modalPrototypeSheets(node: PrototypeRenderNode): List<PrototypeRenderNode> {
+internal fun modalPrototypeSheets(
+  node: PrototypeRenderNode,
+  includeClosedDrawers: Boolean = false,
+): List<PrototypeRenderNode> {
   if (!node.visible) return emptyList()
   val modal = node.role in PROTOTYPE_MODAL_ROLES
-  if (modal && !node.sheetOpen) return emptyList()
+  if (modal && !node.sheetOpen)
+    return if (includeClosedDrawers && node.role == "drawer") listOf(node) else emptyList()
   val children =
     if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
-  return (if (modal) listOf(node) else emptyList()) + children.flatMap(::modalPrototypeSheets)
+  return (if (modal) listOf(node) else emptyList()) +
+    children.flatMap { modalPrototypeSheets(it, includeClosedDrawers) }
 }
 
 /** Roles that compose their children inline through the node renderer; others never draw them. */
@@ -804,7 +815,7 @@ private val PROTOTYPE_INLINE_CONTAINER_ROLES =
 
 /** A non-root anchored node: drawn in the window-level anchor layer, never in its parent. */
 internal fun isLayeredPrototypeAnchor(node: PrototypeRenderNode): Boolean =
-  node.source?.anchor is PrototypeBoundsAnchor
+  node.role != "tooltip" && node.source?.anchor is PrototypeBoundsAnchor
 
 /**
  * An anchored node drawn in a window-level layer, with the [ancestors] it was authored under (the

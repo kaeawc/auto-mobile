@@ -1,6 +1,7 @@
 /**
  * Simple logger utility with different log levels
  */
+import { currentLogContext } from "./logContext";
 import { productionStallTimer, type LogSinkTimer } from "./loggerStreamLifecycle";
 import { formatLogRecord } from "./loggerValues";
 import { testOverrides } from "./testOverrides";
@@ -893,10 +894,15 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
     return;
   }
   try {
-    const safeLogMessage = formatLogRecord(logFormat, ownLogPrefix, level, message, args).replace(
-      /[\r\n\t]/g,
-      " ",
-    );
+    const context = currentLogContext();
+    const contextualMessage = context ? `trace=${context.traceId} ${message}` : message;
+    const safeLogMessage = formatLogRecord(
+      logFormat,
+      ownLogPrefix,
+      level,
+      contextualMessage,
+      args,
+    ).replace(/[\r\n\t]/g, " ");
     // Start both configured writes before awaiting either one. A failed file
     // sink must not suppress the process-stream record in `both` mode.
     mirrorToLegacyStdout(safeLogMessage);

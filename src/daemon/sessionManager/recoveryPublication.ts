@@ -17,6 +17,10 @@ import {
   runWithAbortSignal,
 } from "../../utils/AbortContext";
 import { type BackoffPolicy } from "../../utils/Backoff";
+import {
+  publishSessionDeviceRebound,
+  type SessionDeviceReboundEmitter,
+} from "../sessionDeviceReboundBroadcast";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -50,6 +54,7 @@ import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import { type SessionLifecycleSlots } from "./internalContracts";
 
 export interface SessionRecoveryPublicationHost {
+  readonly sessionDeviceReboundEmitter: SessionDeviceReboundEmitter | undefined;
   recoveryTargetFromPersisted(
     sessionId: string,
     persisted: DeviceSession | undefined,
@@ -104,11 +109,9 @@ export interface SessionRecoveryPublicationHost {
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
+    recovery?: boolean,
   ): Session;
-  guardedRowRewriteOptions(
-    supersededReasons: readonly string[],
-    expectedRowGeneration?: number,
-  ): UpsertActiveSessionOptions;
+  guardedRowRewriteOptions(expectedRowGeneration?: number): UpsertActiveSessionOptions;
   readonly superseded: SupersededRowReasserts<Session>;
   readonly sessions: Map<string, Session>;
   restoreReleasedRowAfterReassert(session: Session): Promise<void>;
@@ -346,12 +349,30 @@ export class SessionRecoveryPublication {
     return snapshot;
   }
 
+  /**
+   * A session force-released while its rebind was in flight is gone: announcing a move after its
+   * release would tell clients a dead session is live on the new serial.
+   */
+  private publishReboundIfLive(
+    sessionId: string,
+    existing: Session,
+    previousDevice: string,
+    recovery: boolean | undefined,
+  ): void {
+    // Only a recovery announces itself: a client-chosen move is not news to its own client (#15456).
+    if (recovery !== true || this.host.sessions.get(sessionId) !== existing) {
+      return;
+    }
+    publishSessionDeviceRebound(this.host.sessionDeviceReboundEmitter, existing, previousDevice);
+  }
+
   async persistAndPublishRebind(
     existing: Session,
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
     deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
+    recovery?: boolean,
   ): Promise<Session> {
     const activeSetups = Array.from(this.host.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
@@ -370,9 +391,15 @@ export class SessionRecoveryPublication {
     }
     await this.host.liveness.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
       await this.host.persistSession(
-        this.host.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+        this.host.createReboundSession(
+          existing,
+          assignedDevice,
+          platform,
+          stableDeviceId,
+          recovery,
+        ),
         existing,
-        this.host.guardedRowRewriteOptions([...(this.host.superseded.remembered(existing) ?? [])]),
+        this.host.guardedRowRewriteOptions(),
       );
       // The rebind's row is live: a rewrite still owed from before it is settled (#11557), so a
       // terminal row found under the session later is the UUID's end, not that rewrite's.
@@ -457,7 +484,7 @@ export class SessionRecoveryPublication {
     // Recreate after awaited work to preserve activity and label-routing updates made in flight.
     Object.assign(
       existing,
-      this.host.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+      this.host.createReboundSession(existing, assignedDevice, platform, stableDeviceId, recovery),
     );
     const sessionId = existing.sessionId;
     this.host.rowWriter.noteLive(sessionId);
@@ -474,6 +501,7 @@ export class SessionRecoveryPublication {
     if (assignedDevice !== previousDevice) {
       // Full: the replacement (including the same AVD on another serial) has its own screen.
       this.host.notifyDeviceOwnershipChange(assignedDevice, "full");
+      this.publishReboundIfLive(sessionId, existing, previousDevice, recovery);
     }
     if (!replacementFence) {
       this.host.notifySessionDeviceUnbound(existing.sessionId, previousDevice, {

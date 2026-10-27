@@ -24,6 +24,26 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
 - Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
+The 2026-10-26 decisions (#15244) fix the native-look and motion-profile work:
+
+1. **Default look.** `theme.design` defaults to `platform`. iOS prototypes look native by default
+   and the iOS screenshot baselines are re-recorded with it. On Android `platform` is still Material.
+   `material` stays available to force today's drawing on both platforms.
+2. **Other-platform namespaces.** A renderer ignores the other platform's namespace block (`ios: {...}`
+   on Android, `android: {...}` on iOS) and adds a `platformNotes` entry; it does not refuse the spec,
+   so one spec runs on both. This matches iOS ignoring `window.layer: "app"`.
+3. **iOS Reduce Motion** maps to the _reduced_ profile (crossfades), not to _off_. The system
+   setting `UIAccessibility.prefersCrossFadeTransitions` maps to _reduced_ as well.
+4. **Native controls without per-item identifiers** (segmented `Picker`, `TabView`, `Menu`) keep the
+   custom-drawn fallback. Each control is revisited after #15462.
+5. **`surface: "glass"` on Android** waits for real backdrop blur (API 31+ `RenderEffect`, after the
+   #15126 spike). Below API 31 it uses only a tonal fallback.
+6. **Width classes** are native per platform. Android reports the Material window size classes
+   (compact, medium, expanded); iOS reports only its horizontal size class (compact, regular). Specs
+   branch per platform.
+7. **Xcode 27.** An advisory (non-required) Xcode 27 iOS build runs on the self-hosted Macs now. The
+   required jobs switch after a green week. #15261 proceeds behind `#available`.
+
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; prototype opacity is a percentage; app-element anchoring is supported; observe
 includes prototype nodes by default; existing tap/text tools target prototype nodes;
@@ -40,7 +60,7 @@ blanket focusability proposal).
 | `window`  | Required window configuration below.                                                                                   |
 | `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
 | `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
-| `motion`  | Optional `none` or `standard` (default). See Motion below.                                                             |
+| `motion`  | Optional `none`, `reduced` or `standard` (default). See Motion below.                                                  |
 | `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
 | `root`    | Required single node.                                                                                                  |
 
@@ -351,6 +371,7 @@ Every node has required `type`. All other common properties are optional:
 | `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
 | `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
 | `transition`         | Except on stacks (see Stack transitions), optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
+| `sharedKey`          | Optional opaque key naming this `visibleWhen` node as the same element as one other node. See Shared element morphs.                         |
 | `anchor`             | Bounds or app-element anchor below.                                                                                                          |
 | `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
@@ -548,6 +569,38 @@ this slice does not redact it.
 
 ## Style
 
+`prototype_style_polish_v2` gates layered `style.shadows`, `style.cornerStyle`,
+`style.border.gradient`, `scroll.fadeEdges` and `image.filter`. A renderer must advertise
+this capability before a host sends these fields.
+
+- `shadows` is 1–3 strict `{color, radius, spread?, offset?, inner?}` entries. Radius is
+  0–1000 dp, spread and each offset axis are -1000–1000 dp. Omitted spread is 0,
+  omitted offset is `{x:0,y:0}`, and omitted inner is false. Layers paint in array
+  order within the outer and inner groups: first is bottom-most, later layers sit on top.
+  Blur radius `b` uses Gaussian sigma `b/2` (CSS-like blur). Android adapts this to
+  the platform blur filter, whose minimum nonzero sigma is approximately 0.5 px.
+  `color` takes the same hex, role or `{light,dark}` forms as `shadowColor`. `shadows` excludes both
+  `elevation` and `shadowColor`, including explicit zero elevation.
+- `cornerStyle` is `circular` (default) or `continuous`, including with `cornerRadius: "full"`.
+  Continuous corners use dependency-free cubic smoothing (approximately 0.6), tapering
+  to circular at half the short side so full radii remain valid pills/circles.
+- A border is strict `{width, color?, gradient?}`, with exactly one of `color` or
+  `gradient`. Gradient reuses the linear/radial background-gradient contract.
+- A scroll node's `fadeEdges` is strict `{top?, bottom?, start?, end?}`, with at least
+  one edge, each 0–1000 dp. Fades draw only on edges that can still scroll; start/end
+  mirror in RTL. Top/bottom apply only to vertical scrolling, start/end only to horizontal
+  scrolling. Each fade is capped to its viewport dimension.
+- An image node's `filter` is strict `{saturation?, tint?}`, with at least one field.
+  Saturation is 0–2 and tint is a colour value. Saturation applies first, then tint
+  multiplies the image channels (including alpha). Other node types cannot set filter.
+
+Pairs in shadows and image tint, and pairs or role names in border gradient stops,
+also require `prototype_theme_modes_v1`.
+
+Rendering order: transform, press scale, size, alpha, drop shadows (`shadows`/`elevation`
+draw before the clip), clip (`cornerRadius` + `cornerStyle`), background, gradient,
+shimmer, border (color or gradient), inner shadows.
+
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
 Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
 size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
@@ -567,7 +620,7 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cornerRadius`                                   | Nonnegative dp, a Shapes token (`none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`), or strict per-corner `{topStart?, topEnd?, bottomEnd?, bottomStart?}` of nonnegative dp where an omitted corner is square. Start and end follow the layout direction.                                                                                                                                                                                                                                     |
-| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `border`                                         | `{width, color?, gradient?}`; nonnegative dp width; exactly one paint source, a colour value or a linear/radial gradient.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `elevation`                                      | Nonnegative dp. Draws a shadow in the node's corner shape, behind its clip, background and border.                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `shadowColor`                                    | Hex color or color role name tinting the `elevation` shadow (ambient and spot). Without `elevation` it draws nothing; absent, the platform shadow color applies.                                                                                                                                                                                                                                                                                                                                                   |
 | `gradient`                                       | `{type: "linear", angle, stops}` or `{type: "radial", stops}`. `angle` is a finite number of degrees clockwise from left-to-right (0 = left to right, 90 = top to bottom). `stops` is 2–4 `{color, position?}` with a hex color and an optional 0–1 `position`; positions apply only when every stop has one (a position below the previous stop's is raised to it), otherwise stops are evenly spaced. Radial gradients are centered and reach the corners. Painted over `background` in the node's corner shape. |
@@ -739,11 +792,72 @@ jumping.
 A non-stack node's optional `transition` picks the `visibleWhen` enter/exit: `none`
 (instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
 fade). Absent keeps the default fade + expand. It has no effect on nodes
-without `visibleWhen`, or when motion is off.
+without `visibleWhen`, or when motion is off; a show reports the advisory
+`transition-without-visible-when` accessibility finding for that case.
 
 A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
+
+### Motion profiles (#15115, `prototype_reduced_motion_v1`)
+
+Motion runs in one of three profiles, decided identically on both platforms from the spec's
+`motion` and the system setting:
+
+| Profile   | Chosen when                                                                                                            | Behaviour                                                                                                                                                                                                                                     |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `full`    | Neither of the rows below applies.                                                                                     | Every animation described in this section.                                                                                                                                                                                                    |
+| `reduced` | `motion: "reduced"`, or on iOS system Reduce Motion.                                                                   | Spatial animations (slide, expand and shrink, scale, container size, `pressScale`, swipe-row and stack slides, shared element morphs) become crossfades or snap. Loops (shimmer, indeterminate progress) rest. Color and alpha still animate. |
+| `off`     | `motion: "none"`, or on Android animator duration scale 0 or transition animation scale 0 (read from Settings.Global). | Everything is instant.                                                                                                                                                                                                                        |
+
+`none` wins over `reduced`, and a system `off` wins over both. Android has no system reduced
+setting, so there `reduced` comes from the spec alone; both scales are observed while the prototype
+is shown. On iOS the system Reduce Motion setting selects `reduced` rather than `off`, so a Reduce
+Motion run shows crossfades; `motion: "none"` is still fully instant. `motion: "reduced"` needs
+`prototype_reduced_motion_v1`, which the host checks before showing.
+
+### Shared element morphs (#15115, `prototype_shared_element_v1`)
+
+`sharedKey` names two `visibleWhen` nodes as one element, so swapping them morphs the first into
+the second (a list row into a detail card, a thumbnail into a viewer):
+
+```json
+{
+  "state": { "open": false },
+  "root": {
+    "type": "box",
+    "children": [
+      {
+        "type": "row",
+        "sharedKey": "album",
+        "visibleWhen": { "key": "open", "equals": false },
+        "onTap": [{ "type": "setState", "key": "open", "value": true }],
+        "children": [{ "type": "text", "text": "Album" }]
+      },
+      {
+        "type": "card",
+        "sharedKey": "album",
+        "visibleWhen": { "key": "open", "equals": true },
+        "onTap": [{ "type": "setState", "key": "open", "value": false }],
+        "children": [{ "type": "text", "text": "Album" }]
+      }
+    ]
+  }
+}
+```
+
+Rules, enforced by every validator with exact paths: `sharedKey` is a key (same grammar as state
+keys) and is allowed only on a node that also has `visibleWhen`; each key is used by exactly two
+nodes, neither inside the other; a spec has at most 16 distinct keys; keys are rejected on a
+`repeat` node and anywhere inside its template. Shared elements across pager pages and `stack`
+screens are not supported.
+
+Under `full`, bounds, size and crossfaded content animate from one node to the other. Android wraps
+the prototype in a `SharedTransitionLayout` only when a spec has a key and applies `sharedBounds`
+(not `sharedElement`: the two nodes differ in content); the morph runs on the `visibleWhen`
+transition, so it counts in the motion-active signal. Under `reduced` the pair crossfades in place
+and under `off` it swaps instantly. A pair that is visible at the same time does not morph.
+`sharedKey` needs `prototype_shared_element_v1`, which the host checks before showing.
 
 ### Motion-active signal (#15114)
 
@@ -758,6 +872,18 @@ intentional infinite animations (today only the shimmer) and is ignored by hosts
 `observe(waitFor: stable)` and the launcher/SystemUI quiet-tree wait do not settle
 while `active` is positive and stay bounded by their usual timeout. The count is
 zero after a single frame under `motion: "none"` or animator scale 0.
+
+### Screen map (#14125)
+
+`prototype {action:"screenMap", spec | specPath}` is host-only (no device request). It walks the
+spec, after component expansion, and returns `screenMap {nodes, edges}` plus a `mermaid` flowchart.
+Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the start screen), each
+`pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
+`bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
+the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
+and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
+`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
+state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
 
 ### Stack transitions
 
@@ -774,8 +900,8 @@ is validated by both agents, and both advertise the capability.
 
 Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
 popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
-`motion: "none"` and animator duration scale 0 snap immediately. The reduced-motion composition
-hook changes slides to crossfades; system preference wiring is deferred to #15115.
+`motion: "none"` and animator duration scale 0 snap immediately. The reduced profile (see Motion
+profiles) changes slides to crossfades.
 
 Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
 current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows
@@ -1307,6 +1433,15 @@ a `_v2` gate that checks the fields that version introduced. The gates are gener
 `platformModules` and join `PROTOTYPE_SPEC_CAPABILITY_GATES`, so show, patch and `replaceNode`
 refuse uniformly. Because every module use must be declared in the root `requires`, which a patch
 cannot add, a patch never introduces a module the shown spec did not already require.
+
+Android's renderer accepts an identity-stable `PrototypePlatform` containing an immutable module
+registry. The host supplies modules; it retains ownership and closes them after all surfaces detach.
+The built-in device module projects the host's measured window state. Each surface subscribes to
+module state and events, and the controller shares a four-call limiter across its surfaces. Calls
+resolve arguments at invocation, wait outside the interaction lock, and commit result, metadata,
+status, outcome event and follow-ups under that lock. Replacement, reset and dismissal cancel calls;
+cancellation reports an outcome without running follow-ups. CtrlProxy registers only the device
+module in release; debug additionally registers the permission-free test module.
 
 The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
 `invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
@@ -1895,6 +2030,24 @@ Device checks must cover keyguard timing, daemon death, pager page 3 across rota
 
 Android only. The iOS agent does not lift a sheet above the keyboard; whether to rely on UIKit keyboard avoidance or match this is an open decision (see [iOS prototype agent](../ios/prototype-agent.md#open-decisions)).
 
+## Placeholder lint (#15444)
+
+A successful `show` or `patch` returns `placeholderFindings` when a repeat or state placeholder sits
+in a field that does not bind it, so it would be drawn literally. It is advisory, host-only and
+never refuses a show. Each finding names the field `path` (for example `root.children[0].label`),
+the `placeholder` as authored and a `detail`. The output keeps 50 findings, and
+`placeholderFindingsTotal` reports the full count when it is capped.
+
+- A repeat placeholder (`{index}`, or `{alias.field}` for an enclosing `repeat.as`) in a text field
+  that is not in the bindable set, such as `chip.label` or `badge.text`. Fields that bind
+  (`button.label`, `topAppBar.title`, `searchBar.placeholder`, and `text` nodes) are not reported.
+- A `{key}` state placeholder naming a declared `state` key in `chip.label`, `badge.text`,
+  `textField.placeholder` or `searchBar.placeholder`. Only a `text` node reads `{key}` from state.
+  Other fields are left alone because a renderer may bind them beyond the contract.
+
+Whether to widen binding to these fields is a separate contract decision (#15444); until then use a
+`text` node next to the field.
+
 ## Accessibility lint (#14126)
 
 A successful `show` or `patch` returns `accessibilityFindings`: an advisory, host-only lint of the
@@ -1902,13 +2055,14 @@ component-expanded spec sent to the device. It never refuses a show and needs no
 Each finding names a `rule`, the node `path` and a `detail`. The output keeps 50 findings, and
 `accessibilityFindingsTotal` reports the full count when it is capped.
 
-| Rule                   | Finds                                                                                                                                                                                                                                                                                                                                                                 |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unlabeled-control`    | A node with `onTap`, `onLongPress` or `onDoubleTap`, or an `iconButton`, `fab`, `switch`, `checkbox`, `slider` or `select`, with no `contentDescription`, `label`, `text`, `spans`, `headline` or `title` on itself or a descendant.                                                                                                                                  |
-| `unlabeled-image`      | An `image` or `icon` with a `testTag` but no `contentDescription`. An untagged, non-tappable one without a description is decorative: the renderers hide it from accessibility, so it is not reported.                                                                                                                                                                |
-| `unlabeled-text-field` | A `textField` or `searchBar` with no `label`, `placeholder` or `contentDescription`.                                                                                                                                                                                                                                                                                  |
-| `low-contrast`         | A `text` node with an authored `style.color` below WCAG AA against the nearest background the host can resolve: 4.5:1, or 3:1 for large text (`textSize` 24 or more, 18.66 or more at `fontWeight` 700, or a `display`/`headline` `textStyle`). It is checked in light and dark, or only the mode `theme.mode` pins; `mode` names the failing one, `value` the ratio. |
-| `small-touch-target`   | A tappable node or control whose authored `width`, `height`, `maxWidth` or `maxHeight` is under 48dp (44pt on iOS); `value` is the smallest side. Sizes left to layout are not checked.                                                                                                                                                                               |
+| Rule                              | Finds                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unlabeled-control`               | A node with `onTap`, `onLongPress` or `onDoubleTap`, or an `iconButton`, `fab`, `switch`, `checkbox`, `slider` or `select`, with no `contentDescription`, `label`, `text`, `spans`, `headline` or `title` on itself or a descendant.                                                                                                                                  |
+| `unlabeled-image`                 | An `image` or `icon` with a `testTag` but no `contentDescription`. An untagged, non-tappable one without a description is decorative: the renderers hide it from accessibility, so it is not reported.                                                                                                                                                                |
+| `unlabeled-text-field`            | A `textField` or `searchBar` with no `label`, `placeholder` or `contentDescription`.                                                                                                                                                                                                                                                                                  |
+| `low-contrast`                    | A `text` node with an authored `style.color` below WCAG AA against the nearest background the host can resolve: 4.5:1, or 3:1 for large text (`textSize` 24 or more, 18.66 or more at `fontWeight` 700, or a `display`/`headline` `textStyle`). It is checked in light and dark, or only the mode `theme.mode` pins; `mode` names the failing one, `value` the ratio. |
+| `small-touch-target`              | A tappable node or control whose authored `width`, `height`, `maxWidth` or `maxHeight` is under 48dp (44pt on iOS); `value` is the smallest side. Sizes left to layout are not checked.                                                                                                                                                                               |
+| `transition-without-visible-when` | A non-stack node with a `transition` but no `visibleWhen`: nothing ever enters or exits, so the transition never runs.                                                                                                                                                                                                                                                |
 
 Colours resolve on the host as the renderers do: a hex value, a `{light, dark}` pair, or a role
 from the Material 3 baseline scheme with `theme.colors` overrides (flat, then per mode). A
@@ -2260,6 +2414,93 @@ sweeps the same band (1.2 s, 35% white, clipped to the node's corner shape) over
 "Loading" to VoiceOver with the updates-frequently trait, draws no band under `motion: "none"` or
 Reduce Motion, and rejects shimmer on other node types at the same path.
 
+## Effects (#15128, #15129, `prototype_effects_v1`, not device-verified)
+
+`style.effects` is an array of 1-4 effects drawn in order. The list is closed and data-only: a
+`source` key, `type: "shader"`, a fifth effect, an unknown type and an out-of-range param are each
+rejected at the offending path, identically in the TS, Kotlin and Swift validators (so the spec's
+opening rule, no code, holds). `schemas/prototype-spec-contract.json` (`definitions.effect`) is the
+source of truth; the shared corpus pins it.
+
+| `type`                | Params (all optional unless marked)                                                | Android floor |
+| --------------------- | ---------------------------------------------------------------------------------- | ------------- |
+| `noise`               | `amount` 0-1, `grain` 0.5-8 dp, `seed` int 0-65535, `monochrome`                   | 33            |
+| `gradientMesh`        | `colors` exactly 4 (required; hex, role or `{light, dark}`), `softness` 0-1        | 33            |
+| `shimmer`             | `color`, `angle` -360..360 degrees, `width` 0.05-1 of the node                     | any           |
+| `glow`                | `color` (required), `radius` 0-48 dp, `intensity` 0-1                              | any           |
+| `vignette`            | `color`, `intensity` 0-1, `radius` 0-1                                             | any           |
+| `blur`                | `radius` 0-25 dp (required); blurs the node's own content                          | 31            |
+| `pixelate`            | `cell` 1-64 dp (required)                                                          | 33            |
+| `chromaticAberration` | `offset` 0-8 dp, `angle` -360..360 degrees                                         | 33            |
+| `wave`                | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `angle` -360..360 degrees              | 33            |
+| `ripple`              | `amplitude` 0-16 dp, `wavelength` 8-400 dp, `center` `{x, y}` each 0-1 of the node | 33            |
+
+Every effect also takes `animate: {periodMs}` (integer 400-20000; a loop, separate from the
+node-level motion-v2 `animate`) and `phase` 0-1.
+
+- **Paint only.** Effects never change layout, hit testing, observe bounds, accessibility
+  semantics, the host dismiss controls or the host accessibility dismiss action, and never draw
+  outside the node's bounds (the authored viewport for the root).
+- **Frozen phase.** Under `motion: "none"`, animator scale 0, Reduce Motion (iOS) and while the
+  prototype is hidden, an animated effect stays at its `phase` so screenshots are deterministic.
+  `noise` is seeded and never uses device randomness.
+- **`styleWhen`** replaces `effects` as a whole when it matches.
+- **Limits.** `MAX_PROTOTYPE_EFFECTS` (64) and `MAX_PROTOTYPE_ANIMATED_EFFECTS` (8) count over the
+  expanded `repeat` tree. Counting is conservative: every declared list counts, `styleWhen` styles
+  included, although only one list applies at a time. A list longer than 4 is reported at
+  `<path>.style.effects` before the count is applied. The node that crosses a limit is reported
+  (`Effect limit exceeded`, `Animated effect limit exceeded`); a template inside a `repeat` is
+  reported at the `repeat` with the `Expanded` forms of those two messages.
+- **Capability.** Any `effects` list needs `prototype_effects_v1`, checked on `show` and on the full
+  patch result. CtrlProxy and the embedded renderer advertise it (#15129); the iOS agent does not yet
+  (#15130), so the host still refuses these specs on iOS.
+
+### Android rendering (#15129)
+
+Compose plus bundled AGSL, in `android/prototype-compose` (`PrototypeEffects*.kt`); the same module
+renders in CtrlProxy and ProtoViewer. No spec carries shader source: the AGSL programs are constants
+in `PrototypeEffectShaders`.
+
+- **Layers.** Distortions (`blur`, `pixelate`, `chromaticAberration`, `wave`, `ripple`) are one
+  chained layer `RenderEffect` around the node's background and content, in authored order, clipped
+  to the node's bounds. `gradientMesh` paints between the background and the content. `shimmer`,
+  `glow`, `vignette` and `noise` paint over the content, clipped to the node's shape, undistorted.
+  Effects sit inside the node, so the host dismiss controls and the node's observe bounds are untouched.
+  A node with a distortion clips anything that overflows its bounds, as the effect itself must not.
+- **API floors and fallback.** Brush-based looks (`shimmer`, `glow`, `vignette`) draw on any API,
+  `blur` needs 31, the AGSL ones 33. Below its floor an effect is omitted and the node renders
+  unshaded. The device reports every omitted effect as `degradedEffects: [{path, type, reason:
+  "api"}]` on the show result and on `inspect_prototypes` (omitted when empty; older hosts see the
+  same frame). `path` is the node's render identity (the `root.child...` key the renderer and
+  `observe` use) plus the authored effect index, `<identity>.style.effects[<i>]`, and follows the
+  `styleWhen` style in force when the reply is built. `reason: "budget"` entries use the same form.
+- **Settled by the renderer (conservative choices).**
+  - `phase` and `animate` move only `shimmer`, `wave` and `ripple`; `noise`, `gradientMesh`,
+    `glow`, `vignette`, `blur`, `pixelate` and `chromaticAberration` are static looks and ignore
+    both (they still count against the limits).
+  - Colours resolve like `style.color`: hex keeps its own alpha, a role comes from the active
+    scheme, a `{light, dark}` pair picks the shown mode; `scrim` is its plain scheme colour.
+  - A `shimmer` band never exceeds 0.5 alpha; with no colour it is white at 0.35. `glow` is an
+    inward edge glow (it never leaves the node), `vignette` defaults to black.
+  - Defaults when omitted: `noise` amount 0.1, grain 1 dp, seed 0, monochrome; `gradientMesh`
+    softness 0.5; `shimmer` angle 20, width 0.3; `glow` radius 12 dp, intensity 0.6; `vignette`
+    intensity 0.4, radius 0.7; `chromaticAberration` offset 2 dp; `wave` and `ripple` amplitude 4 dp,
+    wavelength 48 dp, `ripple` centre `{0.5, 0.5}`.
+- **Time.** An animated effect reads one per-node frame clock (`withFrameNanos`). It does not
+  advance under `motion: "none"`, animator duration scale 0, while the window is not shown, or in
+  direct `PrototypeSpecContent` callers (previews and screenshots), so those keep the authored
+  `phase`. `noise` is seeded from `seed` alone.
+- **Frame budget.** If a node's frame interval stays above 32 ms for 30 frames in a row the node
+  freezes its phase and `inspect_prototypes` lists its animated effects with reason `budget`. The
+  guard times the window's frames, not the effect's own cost, so a slow GPU (the `-gpu swiftshader`
+  CI emulators) freezes animated effects; the entry clears when a patch or show replaces the node.
+  Decision on the open question: no new `prototype_event` kind (that closed list is a contract change
+  shared with the TS host and iOS), so a frozen effect is visible on the next `inspect`, not pushed.
+  ProtoViewer shows no note when it degrades an effect; that stays an open follow-up.
+- **Owed device checks.** Goldens on API 30, 33 and 36 (`effects_all_types`, pending in
+  `PrototypeSpecContentScreenshotTest`), and a real-GPU look at the AGSL effects. Robolectric covers
+  decoding, API planning, the clock and budget on fakes, and bounds stability.
+
 ## Charts (#14209, not device-verified)
 
 A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series
@@ -2314,8 +2555,10 @@ a hashtag is `#` and up to 100 letters, marks, digits or `_`, not all digits; a 
 `https://` up to the next whitespace with trailing `.,;:!?'")]}` removed. Inside `onTap` only,
 `{match: "text"}` reads the tapped match (`@ana`) and `{match: "kind"}` its kind: as a `setState`
 value, a `setData` / `appendData` value or an emit context entry, for example
-`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused, as
-are repeat bindings inside `onTap`. A URL tap never opens a browser; that is the `links.open`
+`setState profileHandle {match: "text"}` then `push profile`. `{match}` anywhere else is refused.
+Inside a repeat, `onTap` also binds `{item: "field"}`, `{index: true}`, `{alias.field}` and `{index}`
+per row, including state keys such as `liked_{item.id}`. Repeat binding preserves `{match}` for
+tap-time resolution; emit payloads and `{value: ...}` literals remain opaque. A URL tap never opens a browser; that is the `links.open`
 platform call. Matches are links like tappable spans (Android `tapOn {accessibilityLink}`, iOS
 `tapAt`) and require `prototype_linkify_v1`.
 
@@ -2328,7 +2571,7 @@ The shared contract caps spans at 64 per text node. Host tests do not verify dev
 
 `menu` and `select` require `prototype_menus_v1`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 
-A `menu` requires `openWhen: {key, equals}` with a boolean equality and 1–16 strict `items`. Each item is `{label, icon?, trailingText?, enabled?, onTap?}` or exactly `{type:"divider"}`. Labels and trailing text are nonempty, icons use the existing icon names, and `onTap` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes `!equals` to the open key; item actions run after closing.
+A `menu` requires `openWhen: {key, equals}` with a boolean equality and 1–16 strict `items`. Each item is `{label, icon?, trailingText?, enabled?, onTap?}` or exactly `{type:"divider"}`. Labels and trailing text are nonempty, icons use the existing icon names, and `onTap` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface aligns to its parent’s bottom end. When it cannot fit below and fits above, it opens above the parent; otherwise it keeps its below placement clamped inside the window. Horizontal alignment is unchanged. An enabled item or outside tap writes `!equals` to the open key; item actions run after closing.
 
 While a menu is open, the page behind it is removed from the accessibility tree, like a dialog; the menu items and outside-dismiss layer remain exposed. Closing restores the page. An expanded select leaves the page in the accessibility tree.
 
@@ -2337,6 +2580,45 @@ A `select` requires a string `stateKey` and 2–32 `{value,label}` options with 
 Rendering stays inside the prototype window on both platforms so `observe` and `tapOn` reach the normal hierarchy. Android uses an in-window surface rather than a separate DropdownMenu/Popup window. iOS uses an in-window list rather than system SwiftUI Menu/Picker popups; successful iOS shows report this substitution in `platformNotes`. Menu icons use the existing SF Symbols mapping on iOS.
 
 The select field and menu surface carry the node `testTag`. Select option rows use `<testTag>.<value>`; menu item rows use `<testTag>.<index>`, with zero-based positions including dividers. Android adds row tags only when `testTag` is set; iOS falls back to `(testTag ?? id).<value>` or `(testTag ?? id).<index>`.
+
+## Tooltip and drawer
+
+`tooltip` requires `prototype_tooltip_v1`, nonblank `text`, boolean `openWhen: {key, equals}`,
+and exactly one of `anchorTo` or `anchor`. `anchorTo` names exactly one node id after component
+and repeat expansion; self references and absent targets report `Unknown anchorTo id`, and
+multiple instances report `Duplicate anchorTo id`, at the tooltip's `.anchorTo` path. Bounds
+anchors use the host-resolved screen rectangle plus offset. Tooltips are hoisted overlays, not
+ordinary anchored layout children. An unlaid-out target draws no bubble or scrim and keeps state.
+
+The pure `placePrototypeBubble` function places tooltips inside the window with an 8 dp gap and
+margin. `caret` names the bubble edge pointing at the target: `top` places it below, `bottom`
+above, and `start`/`end` mirror with layout direction. `auto` prefers below. An unavailable side
+flips to its opposite; auto can use horizontal space when neither vertical side fits. If neither
+side fits, the larger available side wins and the origin is clamped. The caret tracks the target
+center, clamped away from the bubble corners. Menu placement shares this calculation.
+
+Optional `spotlight` draws the themed scrim at 40% with an even-odd rounded cutout around the
+target: `padding` defaults to 8 dp and `cornerRadius` to 12 dp, both integers from 0 through 64.
+The bubble exposes text and the node test tag to accessibility; the scrim uses `<testTag>.close`.
+With a spotlight the page semantics are cleared, focus moves to the bubble and returns to the
+`anchorTo` target on dismissal. Without a spotlight the page stays interactive and exposed.
+Scrim taps and bubble taps without `onTap` write `!equals`, then run optional `onDismiss` actions.
+A bubble with `onTap` runs only those actions, allowing state-driven tours.
+
+`drawer` requires `prototype_drawer_v1`, `edge: start|end`, boolean `openWhen`, and one `child`.
+The logical edge mirrors in RTL. Its surface fills the safe-area height and is
+`min(320dp, window width - 56dp)` wide. Optional `scrim` uses the themed color-value rules;
+omission uses the scrim role at 40%. The scrim's `<testTag>.close` tap writes `!equals`.
+`dismissOnSwipe` defaults to true: dragging toward the panel's edge beyond half its width
+uses the bottom-sheet settle rule to dismiss. Opening is state-driven only.
+
+Drawers clear the page's accessibility semantics, move focus into the panel, restore the page's
+previous focus on close, and take Back/Escape before stack navigation or window dismissal.
+The last open panel remains composed through exit, including removal from the author tree.
+Panel motion is a 300 ms edge slide with a fading scrim; `motion: none` or animator scale zero
+settles instantly. `LocalPrototypeReducedMotion` replaces the slide with a cross-fade. Drawer
+transitions report through `ReportPrototypeMotion` until settled; the renderer does not supply
+the reduced-motion preference itself.
 
 ## Checks
 
@@ -2459,6 +2741,14 @@ prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
   fresh pin is reported `pending`. Declining delivers no callback. `autoConfirm` taps the dialog's accept
   button by label and reports `pinned` only after `listSaved` confirms (#12266, device-verification
   work: launcher dialogs differ).
+- A launcher caches its workspace, so a new or updated shortcut can stay invisible (#14887). After a
+  `pinned` result, or a save whose shortcut was `updated`, the host looks for the label on the home
+  screen. If it is missing, it resolves the default launcher (`cmd package resolve-activity`), and
+  when that package is a known launcher runs `am force-stop` plus a HOME intent once, waits for the
+  launcher's tree to go quiet, and looks again. The result reports `launcherRestarted` and
+  `shortcutVisible`; an unknown launcher is left alone with a warning. It is on by default on
+  emulators and physical devices; `restartLauncher:false` opts out. It never runs on a pending pin
+  (no shortcut exists yet) and runs at most once per call.
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
   screen-off device reports `device_locked`; the save remains and a retry is safe.
 - The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`

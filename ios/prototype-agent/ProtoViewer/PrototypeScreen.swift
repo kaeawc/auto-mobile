@@ -21,14 +21,17 @@ struct PrototypeScreen: View {
     @State private var confirmsReset = false
     @State private var watchdog = PrototypeRenderWatchdog(clock: SystemPrototypeClock())
 
+    private let registry: PrototypePlatformRegistry
     private let network: PrototypeNetworkConfiguration
 
     init(
         store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch,
+        registry: PrototypePlatformRegistry = .empty,
         onLoaded: @escaping @MainActor () -> Void = {}, onLoadFailed: @escaping @MainActor () -> Void = {},
         onClose: @escaping @MainActor () -> Void
     ) {
         self.onClose = onClose
+        self.registry = registry
         self.onLoaded = onLoaded
         self.onLoadFailed = onLoadFailed
         self.store = store
@@ -95,6 +98,7 @@ struct PrototypeScreen: View {
             } else if let content, let storage {
                 AutoMobilePrototypeView(
                     spec: content.spec, assets: content.assets, storage: .directory(storage), network: network,
+                    registry: registry,
                     onDismiss: { _ in onClose() },
                     onLoadError: {
                         watchdog.cancel()

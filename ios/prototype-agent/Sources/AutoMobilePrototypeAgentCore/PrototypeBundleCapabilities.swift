@@ -8,6 +8,7 @@ enum PrototypeBundleCapabilities {
         guard let spec = value.objectFields else { return [] }
         var names = Set<String>()
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
+        if spec["motion"] == .string("reduced") { need("reduced_motion") }
         if spec["data"] != nil { need("data_model") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
@@ -27,6 +28,9 @@ enum PrototypeBundleCapabilities {
             if let root = component.objectFields?["root"] { pending.append(root) }
         }
         while let node = pending.popLast()?.objectFields {
+            if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
+            if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
+            if node["sharedKey"] != nil { need("shared_element") }
             let type = node["type"]?.stringValue ?? ""
             let featureTypes = [
                 "flow": "flow_grid",
@@ -34,6 +38,8 @@ enum PrototypeBundleCapabilities {
                 "carousel": "carousel",
                 "searchBar": "search_bar",
                 "menu": "menus",
+                "tooltip": "tooltip",
+                "drawer": "drawer",
                 "select": "menus",
                 "stack": "stack",
                 "chart": "chart",
@@ -111,6 +117,11 @@ enum PrototypeBundleCapabilities {
             names.insert("prototype_stack_transitions_v1")
         }
         if type == nil, fields["data"]?.stringValue != nil { names.insert("prototype_data_model_v1") }
+        if type == nil, let pointer = fields["platform"]?.stringValue {
+            names.insert("prototype_platform_v1")
+            if let module = PrototypeDataPointer.tokens(pointer).first,
+               let capability = PrototypePlatformValidator.modules[module]?.capability { names.insert(capability) }
+        }
         if type == "platform", let method = fields["call"]?.stringValue {
             names.insert("prototype_platform_v1")
             if let module = method.split(separator: ".").first,
@@ -132,6 +143,7 @@ enum PrototypeBundleCapabilities {
             if key == "style", let style = child.objectFields, style["scale"] != nil || style["rotation"] != nil {
                 names.insert("prototype_motion_v2")
             }
+            if key == "style", child.objectFields?["effects"] != nil { names.insert("prototype_effects_v1") }
             if key == "style", child.objectFields?["runSpacing"] != nil { names.insert("prototype_flow_grid_v1") }
             let textKeys = [
                 "text",
@@ -148,7 +160,12 @@ enum PrototypeBundleCapabilities {
             if textKeys.contains(key), let text = child.stringValue {
                 if PrototypeDataText.substitutionLength(text, data: nil)
                     .recognized { names.insert("prototype_data_model_v1") }
-                if !PrototypePlatformValidator.placeholders(text).isEmpty { names.insert("prototype_platform_v1") }
+                for pointer in PrototypePlatformValidator.placeholders(text) {
+                    names.insert("prototype_platform_v1")
+                    if let module = PrototypeDataPointer.tokens(pointer).first,
+                       let capability = PrototypePlatformValidator.modules[module]?
+                       .capability { names.insert(capability) }
+                }
             }
             scanSlots(child, names: &names)
         }

@@ -592,3 +592,36 @@ skip the read; cancellation remains cancellation.
 
 Tools for Siri (#14892), dictation, HealthKit, widgets and Spotlight lookups
 register a dependency and a scoped preflight call when they ship.
+
+## Audio capabilities (#13626)
+
+The `capabilityInventory` of a device reports whether it can record or play audio, so a scheduler can
+keep audio tests off hosts that can never pass them.
+
+| id                                 | `supported` when                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `ios.simulator.audioInput`         | the host's CoreAudio default input has at least one input stream                                  |
+| `ios.simulator.audioOutput`        | the host's CoreAudio default output has at least one output stream                                |
+| `ios.simulator.audioOutputCapture` | the default output is virtual or a known loopback driver, so its signal can be read back (#13629) |
+| `android.emulator.audioInput`      | `hw.audioInput=yes`, no `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`), and a host input exists  |
+| `android.emulator.audioOutput`     | `hw.audioOutput=yes` and no `-no-audio`                                                           |
+
+An unsupported entry carries an actionable `reason`, for example "No host audio input device;
+install a virtual loopback device and make it the default input". A supported host entry names the
+default device and its transport (`built-in`, `virtual`, `usb`, ...) in its `reason`, so "real mic"
+and "virtual loopback" can be told apart.
+
+- **Probe.** `src/utils/audio/coreAudioHal.ts` reads the CoreAudio HAL through `bun:ffi`
+  (`AudioObjectGetPropertyData` on the system object, then the default device's streams, name and
+  transport). HAL property queries need no GUI session, so the probe runs the same from a LaunchDaemon
+  service user or an SSH session; it never uses `system_profiler` or ScreenCaptureKit.
+- **Cache.** The answer is cached for the daemon's lifetime and re-probed whenever either default
+  device id changes (one cheap HAL query each per read); `refreshHostAudio()` forces a re-probe.
+- **Not probed.** On a host without a probe (Linux; ALSA/PulseAudio/PipeWire is not implemented) iOS
+  audio entries are left out and Android input follows the AVD config alone, so the inventory never
+  over-claims. Under `bun test` the default probe reports "not probed"; tests inject a fake HAL.
+- **Evidence.** The unit tests run the interpretation over a CoreAudio capture from a MacBook Pro
+  (`test/fixtures/host-audio/coreaudio-macbook-pro.json`) and an Android `config.ini` capture
+  (`test/fixtures/android-avd-audio/config.ini`). A host with no input or a loopback default is a fake
+  HAL scenario, not a capture, and a LaunchDaemon run with no Aqua session is an owed manual check,
+  so the PR is `needs-device-verify`.

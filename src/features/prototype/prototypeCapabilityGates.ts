@@ -1,3 +1,15 @@
+import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
+import {
+  prototypeStylePolishV2Fields,
+  prototypeStylePolishV2UnsupportedMessage,
+} from "./prototypeStylePolishV2";
+import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeReducedMotionFields,
+  prototypeSharedElementFields,
+  prototypeReducedMotionUnsupportedMessage,
+  prototypeSharedElementUnsupportedMessage,
+} from "./prototypeSharedElement";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeStackTransitionFields,
@@ -5,6 +17,9 @@ import {
 } from "./prototypeStackTransitions";
 import {
   PROTOTYPE_TIMERS_CAPABILITY,
+  PROTOTYPE_EFFECTS_CAPABILITY,
+  PROTOTYPE_REDUCED_MOTION_CAPABILITY,
+  PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -110,6 +125,12 @@ import {
   prototypeChecksUnsupportedMessage,
 } from "./prototypeChecksCapability";
 
+import { PROTOTYPE_TOOLTIP_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeTooltipFields, prototypeTooltipUnsupportedMessage } from "./prototypeTooltip";
+
+import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeDrawerFields, prototypeDrawerUnsupportedMessage } from "./prototypeDrawer";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown) => string[];
@@ -118,6 +139,21 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
+    fields: prototypeStylePolishV2Fields,
+    unsupportedMessage: prototypeStylePolishV2UnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_DRAWER_CAPABILITY,
+    fields: prototypeDrawerFields,
+    unsupportedMessage: prototypeDrawerUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_TOOLTIP_CAPABILITY,
+    fields: prototypeTooltipFields,
+    unsupportedMessage: prototypeTooltipUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,
     fields: prototypeThemeModeFields,
@@ -194,6 +230,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeChoreographyUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_EFFECTS_CAPABILITY,
+    fields: prototypeEffectFields,
+    unsupportedMessage: prototypeEffectsUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_CHART_CAPABILITY,
     fields: prototypeChartFields,
     unsupportedMessage: prototypeChartUnsupportedMessage,
@@ -222,6 +263,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_STACK_CAPABILITY,
     fields: prototypeStackFields,
     unsupportedMessage: (_fields, platform) => prototypeStackUnsupportedMessage(platform),
+  },
+  {
+    capability: PROTOTYPE_REDUCED_MOTION_CAPABILITY,
+    fields: prototypeReducedMotionFields,
+    unsupportedMessage: prototypeReducedMotionUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
+    fields: prototypeSharedElementFields,
+    unsupportedMessage: prototypeSharedElementUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,

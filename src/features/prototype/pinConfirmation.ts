@@ -8,6 +8,8 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { textOrDescription, type SearchableEntry } from "../utility/SearchableNode";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { resolveConfiguredHomePackage } from "../observe/androidLauncherPackages";
+import type { LauncherRefreshDriver } from "./launcherRefresh";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 
@@ -112,15 +114,35 @@ export function savedAdbDependencies(
     anchorHierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
     timer?: Timer;
   },
-): { adb: AdbExecutor; pinConfirmation: PinConfirmationDriver } {
+): {
+  adb: AdbExecutor;
+  pinConfirmation: PinConfirmationDriver;
+  launcherRefresh: LauncherRefreshDriver;
+} {
   const adb = (dependencies.adbFactory ?? defaultAdbClientFactory).create(device);
+  const capture = (dependencies.anchorHierarchyCaptureFactory ?? createDeviceHierarchyCapture)(
+    device,
+  );
+  const timer = dependencies.timer ?? defaultTimer;
   return {
     adb,
     pinConfirmation: {
-      capture: (dependencies.anchorHierarchyCaptureFactory ?? createDeviceHierarchyCapture)(device),
-      timer: dependencies.timer ?? defaultTimer,
+      capture,
+      timer,
       tapAt: async (x, y) => {
         await adb.executeCommand(`shell input tap ${x} ${y}`);
+      },
+    },
+    launcherRefresh: {
+      capture,
+      timer,
+      resolveLauncher: () => resolveConfiguredHomePackage(adb, device.deviceId, timer),
+      restartLauncher: async (launcherPackage) => {
+        await adb.executeCommand(`shell am force-stop ${launcherPackage}`, { noRetry: true });
+        await adb.executeCommand(
+          "shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME",
+          { noRetry: true },
+        );
       },
     },
   };

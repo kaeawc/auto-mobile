@@ -44,14 +44,19 @@ enum PrototypeAgentProtocol {
         carouselCapability,
         chartCapability,
         loadingStatesCapability,
+        stylePolishV2Capability,
         textFieldLeadingIconCapability,
         refreshCapability,
         searchBarCapability,
         richTextCapability,
         linkifyCapability,
         menusCapability,
+        tooltipCapability,
+        drawerCapability,
         stackCapability,
-        "prototype_stack_transitions_v1",
+        stackTransitionsCapability,
+        reducedMotionCapability,
+        sharedElementCapability,
         emitContextCapability,
         checksCapability,
         identifierTestTagOnlyCapability,
@@ -59,6 +64,8 @@ enum PrototypeAgentProtocol {
         clearStorageRequest,
         storageCapability,
         timersCapability,
+        "prototype_platform_v1",
+        "prototype_platform_device_v1",
         advanceClockRequest,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
@@ -67,6 +74,11 @@ enum PrototypeAgentProtocol {
     static let showInPlaceCapability = "prototype_show_in_place_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"
+    static let stackTransitionsCapability = "prototype_stack_transitions_v1"
+    /// Reduced-motion profile: crossfades, loops at rest, no springs (#15115).
+    static let reducedMotionCapability = "prototype_reduced_motion_v1"
+    /// `sharedKey` morphs between `visibleWhen` swaps via matchedGeometryEffect (#15115).
+    static let sharedElementCapability = "prototype_shared_element_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.
@@ -90,6 +102,7 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    static let stylePolishV2Capability = "prototype_style_polish_v2"
     /// Eager wrapping flow and equal-width spanning grid containers (#12070).
     static let flowGridCapability = "prototype_flow_grid_v1"
     /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that
@@ -148,6 +161,8 @@ enum PrototypeAgentProtocol {
     static let linkifyCapability = "prototype_linkify_v1"
     /// In-window menus and exposed select option lists.
     static let menusCapability = "prototype_menus_v1"
+    static let tooltipCapability = "prototype_tooltip_v1"
+    static let drawerCapability = "prototype_drawer_v1"
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
     static let emitContextCapability = "prototype_emit_context_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined

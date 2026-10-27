@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "shadows": [
+          {
+            "color": "#000000",
+            "radius": 20,
+            "inner": "true"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.shadows[0].inner",
+  "expectedMessage": "Invalid boolean value"
+}

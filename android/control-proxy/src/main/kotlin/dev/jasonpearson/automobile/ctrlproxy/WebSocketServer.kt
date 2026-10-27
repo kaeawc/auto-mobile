@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.ctrlproxy.pointer.PointerInjectionSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
@@ -38,6 +39,8 @@ class WebSocketServer(
   private val scope: CoroutineScope,
   private val perfProvider: PerfProvider = PerfProvider.instance,
   private val options: WebSocketServerOptions = WebSocketServerOptions(),
+  private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
+    dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -276,6 +279,8 @@ class WebSocketServer(
     addPrototypeRuntimeFlags()
     addPrototypeWindowFlags()
     add("prototype_menus_v1")
+    add("prototype_tooltip_v1")
+    add("prototype_drawer_v1")
     // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
     // page directions, press_and_hold, set_progress with progress, custom with customAction) and
     // lists the node's available actions in a refusal (#14077). Older APKs refuse them as
@@ -306,6 +311,15 @@ class WebSocketServer(
     add("tap_double_v1")
     // request_two_finger_swipe honours fingerCount (2-5); older services perform two fingers.
     add("multi_finger_gesture_v1")
+    // PointerInstrumentation injects a stylus (tool type, pressure, tilt, buttons) through
+    // UiAutomation, which accessibility dispatchGesture cannot, and hover enter/move/exit (#13097).
+    // Hosts require the flag before sending either. Only where `am instrument --no-restart` exists
+    // (see PointerInjectionSupport); device-unverified until the probe in the design note runs, so
+    // releases stay gated by the manual test.
+    if (PointerInjectionSupport.advertised(options.sdkInt())) {
+      add("stylus_input_v1")
+      add("hover_input_v1")
+    }
     // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
     // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the
     // reply when this flag is present, so an older runner never costs them a timeout.
@@ -360,25 +374,32 @@ class WebSocketServer(
     // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
+    add("prototype_platform_v1")
+    add("prototype_platform_device_v1")
+    addAll(platform.registry.capabilities)
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
-    add("prototype_gestures_v1")
-    add("prototype_swipe_actions_v1")
-    add("prototype_text_field_actions_v1")
-    add("prototype_carousel_v1")
+    addAll(listOf("prototype_gestures_v1", "prototype_swipe_actions_v1"))
+    addAll(listOf("prototype_text_field_actions_v1", "prototype_carousel_v1"))
     add("prototype_text_field_leading_icon_v1")
     add("prototype_refresh_v1")
     // In-tree search fields support query edits, search actions and active-key result subtrees.
     add("prototype_search_bar_v1")
     add("prototype_rich_text_v1")
     // {data, empty} conditions and style shimmer for loading placeholders (#14207).
-    add("prototype_loading_states_v1")
+    addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
+    // style.effects (#15129): noise, gradientMesh, shimmer, glow, vignette, blur, pixelate,
+    // chromaticAberration, wave and ripple. Every effect renders on its API floor or is omitted and
+    // reported in degradedEffects, so a host may send the list to any APK that advertises this.
+    add("prototype_effects_v1")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).
     add("prototype_choreography_v1")
     add("prototype_stack_transitions_v1")
+    add("prototype_reduced_motion_v1")
+    add("prototype_shared_element_v1")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).

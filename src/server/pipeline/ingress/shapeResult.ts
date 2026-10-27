@@ -1,9 +1,10 @@
-import { defaultDaemonContext } from "../../../daemon/daemonContext";
+import { defaultDaemonContext, type DevicePoolReads } from "../../../daemon/daemonContext";
 import { daemonShuttingDownMcpOutcome } from "../../../daemon/daemonShutdownOutcome";
 import { SessionReleasedDuringCreationError } from "../../../models/deviceAcquisitionRefusals";
 import {
   DaemonSessionCreationRejectedError,
   TerminalSessionError,
+  type SessionManager,
 } from "../../../daemon/sessionManager";
 import type { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { defaultTimer } from "../../../utils/SystemTimer";
@@ -12,6 +13,7 @@ import {
   deviceLossOutcomeFromError,
   deviceLostErrorFromAbortSignal,
   enrichDeviceLossOutcome,
+  enrichDeviceLossOutcomeFromSession,
   remainingDeviceLossIncidentWaitMs,
   type DeviceLossOutcome,
 } from "../../../utils/deviceLossOutcome";
@@ -29,23 +31,40 @@ import {
 import type { McpToolCallResult } from "../../toolCallDispatch";
 import { toolHasOutputSchema, type RegisteredTool } from "../../toolRegistry";
 
-async function resolveDeviceLossOutcome(
+export interface DeviceLossDaemonContext {
+  devicePool(): Pick<DevicePoolReads, "waitForEmulatorLossIncident"> | undefined;
+  sessionManager(): Pick<SessionManager, "peekSession"> | undefined;
+}
+
+export async function resolveDeviceLossOutcome(
   deviceLoss: DeviceLossOutcome,
   timeoutMs?: number,
+  daemon: DeviceLossDaemonContext = defaultDaemonContext,
 ): Promise<DeviceLossOutcome> {
-  const devicePool = deviceLoss.incidentId ? defaultDaemonContext.devicePool() : undefined;
-  if (!deviceLoss.incidentId || !devicePool) {
-    return deviceLoss;
-  }
+  let outcome = deviceLoss;
   try {
-    const incident = await devicePool.waitForEmulatorLossIncident(deviceLoss.incidentId, timeoutMs);
-    return enrichDeviceLossOutcome(deviceLoss, incident);
+    const devicePool = deviceLoss.incidentId ? daemon.devicePool() : undefined;
+    if (deviceLoss.incidentId && devicePool) {
+      const incident = await devicePool.waitForEmulatorLossIncident(
+        deviceLoss.incidentId,
+        timeoutMs,
+      );
+      outcome = enrichDeviceLossOutcome(deviceLoss, incident);
+    }
   } catch (incidentError) {
     logger.warn(
-      `[MCP] Failed to resolve device-loss incident ${deviceLoss.incidentId}: ${incidentError}`,
+      `[MCP] Failed to resolve device-loss incident ${deviceLoss.incidentId}`,
       incidentError,
     );
-    return deviceLoss;
+  }
+  try {
+    const session = outcome.sessionUuid
+      ? daemon.sessionManager()?.peekSession(outcome.sessionUuid)
+      : undefined;
+    return enrichDeviceLossOutcomeFromSession(outcome, session);
+  } catch (error) {
+    logger.warn("[MCP] Failed to read session for device-loss continuity", error);
+    return outcome;
   }
 }
 

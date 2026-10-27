@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "visibleWhen": {
+        "platform": "/device/orientation",
+        "equals": "portrait"
+      }
+    },
+    "requires": {
+      "platform": ["device"]
+    }
+  },
+  "expectedPath": "root.visibleWhen.platform",
+  "expectedMessage": "Unknown platform state /device/orientation"
+}

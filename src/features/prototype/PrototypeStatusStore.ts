@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectsField, type DegradedEffect } from "./prototypeDegradedEffects";
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
@@ -57,6 +58,7 @@ export interface PrototypeLastResult {
    */
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  degradedEffects?: DegradedEffect[];
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -79,6 +81,7 @@ export interface AdoptedPrototype {
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  degradedEffects?: DegradedEffect[];
   pages: PrototypeEvent["pages"];
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
@@ -268,6 +271,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
+      ...prototypeDegradedEffectsField(prototype.degradedEffects),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
       success: true,
       timestamp: this.clock.now(),

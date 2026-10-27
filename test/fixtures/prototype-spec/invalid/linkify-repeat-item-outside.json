@@ -1,31 +1,33 @@
 {
   "spec": {
-    "id": "a",
+    "id": "linkify-repeat",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
+    "state": {
+      "liked_a": false,
+      "liked_b": false,
+      "handle_a": "",
+      "handle_b": "",
+      "number": 0
+    },
+    "data": {
+      "last": 0
+    },
     "root": {
       "type": "column",
-      "repeat": {
-        "items": [
-          {
-            "id": "1"
-          }
-        ],
-        "as": "item"
-      },
       "children": [
         {
           "type": "text",
-          "text": "@ana",
+          "text": "{post.body}",
           "linkify": {
             "kinds": ["mention"],
             "onTap": [
               {
                 "type": "emit",
-                "name": "x",
+                "name": "tap",
                 "context": {
                   "id": {
                     "item": "id"
@@ -38,6 +40,5 @@
       ]
     }
   },
-  "expectedPath": "root.children[0].linkify.onTap[0].context.id",
-  "expectedMessage": "linkify actions cannot use repeat bindings"
+  "expectedPath": "root.children[0].linkify.onTap[0].context.id"
 }

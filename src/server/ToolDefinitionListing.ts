@@ -33,7 +33,11 @@ export class ToolDefinitionListing {
     // with the wire (issue #2990), the same way `suppressOutputSchema` above keeps the
     // two in sync for the strip flag.
     const compactBounds = true;
-    const listedTools = this.getAllTools(options);
+    // Name order (code-unit, locale-independent) keeps tools/list byte-identical however tools
+    // were registered, so client and prompt caches stay stable (#13943).
+    const listedTools = [...this.getAllTools(options)].sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    );
     const configurableToolNames = listedTools
       .filter((tool) => this.isUserConfigurableTool(tool.name))
       .map((tool) => tool.name)

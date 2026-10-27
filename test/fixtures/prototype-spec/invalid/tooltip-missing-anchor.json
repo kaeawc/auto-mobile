@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "tooltip",
+      "text": "Helpful hint",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      }
+    }
+  },
+  "expectedPath": "root.anchorTo",
+  "expectedMessage": "Exactly one of anchorTo, anchor is required"
+}

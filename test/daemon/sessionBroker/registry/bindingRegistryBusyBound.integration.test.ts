@@ -88,6 +88,8 @@ describe("registry busy bound (real SQLite)", () => {
         "2026_10_20_011_session_broker_resource_indexes",
         "2026_10_21_012_device_mutation_journal",
         BROKER_TIMING_MIGRATION,
+        "2026_10_26_014_device_claims",
+        "2026_10_27_015_device_claims_metadata",
       ]);
       peer.exec("COMMIT");
       locked = false;

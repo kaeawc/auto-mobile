@@ -18,7 +18,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** The platform vocabulary's reserved names (#14294). */
 object PrototypePlatform {
@@ -100,18 +102,24 @@ internal object PrototypePlatformRules {
         }
       }
       is Use.Call -> callError(use.action, use.path, declared)
-      is Use.Read -> {
-        val name = pointerModule(use.pointer)
-        when {
-          module(name) == null -> fail(use.path, "Unknown platform module $name")
-          name !in declared.modules -> notDeclared(use.path, name)
-          else -> null
-        }
-      }
+      is Use.Read -> readError(use, declared)
       is Use.Event ->
         if (use.inHandler) null
         else fail(use.path, "{event} is only available inside a platform.on handler")
     }
+
+  private fun readError(use: Use.Read, declared: Declared): PrototypeSpecError? {
+    val name = pointerModule(use.pointer)
+    return when {
+      module(name) == null -> fail(use.path, "Unknown platform module $name")
+      name !in declared.modules -> notDeclared(use.path, name)
+      module(name)?.member("state")?.let { state ->
+        val tokens = PrototypeDataPointer.tokens(use.pointer)
+        tokens.size != 2 || tokens[1] !in state
+      } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
+      else -> null
+    }
+  }
 
   private fun callError(action: JsonObject, path: String, declared: Declared): PrototypeSpecError? {
     val call = action.text("call")
@@ -139,7 +147,7 @@ internal object PrototypePlatformRules {
     return action.text("into")?.let(::intoError)?.let { fail("$path.into", it) }
   }
 
-  private fun argumentsError(
+  internal fun argumentsError(
     action: JsonObject,
     path: String,
     definition: JsonObject,
@@ -179,5 +187,28 @@ internal object PrototypePlatformRules {
         "Emit names starting with ${PrototypePlatform.RESERVED_EMIT_PREFIX} are reserved for runtime events",
       )
     else null
+  }
+}
+
+/** Checks resolved runtime arguments against the same contract rules as literal arguments. */
+object PrototypePlatformCalls {
+  val maxInFlight: Int =
+    PrototypeSpecContract.limits
+      .getValue("MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT")
+      .jsonPrimitive
+      .int
+  val defaultTimeoutMs: Int =
+    PrototypeSpecContract.limits.getValue("DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS").jsonPrimitive.int
+
+  fun eventOwner(name: String): String? = eventModule(name)
+
+  fun argumentsError(call: String, args: JsonObject): PrototypeSpecError? {
+    val definition = callDefinition(call)?.second ?: return fail("call", "Unknown platform call")
+    val bound = JsonObject(args.mapValues { JsonObject(mapOf("value" to it.value)) })
+    return PrototypePlatformRules.argumentsError(
+      JsonObject(mapOf("args" to bound)),
+      "platform",
+      definition,
+    )
   }
 }

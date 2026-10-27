@@ -1,8 +1,5 @@
-import {
-  parseEnvelope,
-  SUPPORTED_SIGNATURE_ALGORITHMS,
-  TREE_INPUT_HASH_ALGORITHM,
-} from "../attestationSchema";
+import { expectedInputHashAlgorithm } from "../tier1InputHash";
+import { parseEnvelope, SUPPORTED_SIGNATURE_ALGORITHMS } from "../attestationSchema";
 import type { AttestationSignature, AttestationTier } from "../attestationSchema";
 import { policyEnvironment, type ValidationEvidence } from "./envelopeAdapter";
 import { timingSafeEqual } from "node:crypto";
@@ -186,7 +183,10 @@ function fieldFailures(evidence: ValidationEvidence): IgnoreReason[] {
   return reasons;
 }
 function hashFailures(evidence: ValidationEvidence, ctx: DecisionContext): IgnoreReason[] {
-  if (evidence.envelope.payload.inputHashAlgorithm !== TREE_INPUT_HASH_ALGORITHM) {
+  if (
+    evidence.envelope.payload.inputHashAlgorithm !==
+    expectedInputHashAlgorithm(evidence.envelope.payload.lane)
+  ) {
     return ["hash-mismatch"];
   }
   if (ctx.recomputedInputHash === null) {

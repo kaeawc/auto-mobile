@@ -50,6 +50,11 @@ import {
   type PinConfirmationOutcome,
 } from "../features/prototype/pinConfirmation";
 
+import {
+  refreshLauncherForShortcut,
+  type LauncherRefreshDriver,
+} from "../features/prototype/launcherRefresh";
+
 export type PrototypeSavedAction = "save" | "listSaved" | "deleteSaved";
 export type PrototypeSavedErrorCode =
   | SavedPrototypeErrorCode
@@ -62,6 +67,10 @@ export interface PrototypeSavedOutput {
   saved?: SavedPrototypeInfo;
   savedPrototypes?: (Omit<SavedPrototypeEntry, "savedAt"> & { savedAt?: number })[];
   pinned?: "pinned" | "pending" | "unsupported";
+  /** Whether the default launcher was restarted so a new or updated shortcut shows (#14887). */
+  launcherRestarted?: boolean;
+  /** Whether the shortcut was seen on the home screen after pin/update; absent when not checked. */
+  shortcutVisible?: boolean;
   warning?: string;
   uploadedAssets?: UploadedPrototypeAsset[];
   viewer?: ProtoViewerEntry;
@@ -73,6 +82,8 @@ export interface PrototypeSavedInput {
   icon?: string;
   pin?: true;
   autoConfirm?: true;
+  /** false opts out of the automatic launcher restart after a pin or shortcut update. */
+  restartLauncher?: false;
   id?: string;
   removeIcon?: true;
   timeoutMs?: number;
@@ -87,6 +98,8 @@ export interface PrototypeSavedDependencies {
   adb?: AdbExecutor;
   /** Accepts the launcher's pin dialog for `autoConfirm`; absent means it cannot be driven. */
   pinConfirmation?: PinConfirmationDriver;
+  /** Looks for the shortcut and restarts the launcher when it is missing; absent skips it. */
+  launcherRefresh?: LauncherRefreshDriver;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
   signal?: AbortSignal;
 }
@@ -236,23 +249,63 @@ async function saveAndroidPrototype(
     args.timeoutMs,
   );
   const output = savedPrototypeResult(args, result);
-  if (!args.pin || !output.success) {
+  if (!output.success) {
     return { ...output, ...uploaded };
+  }
+  return { ...output, ...(await pinAndRefresh(deps, args, result)), ...uploaded };
+}
+
+/** The pin step (when asked for) and the launcher refresh that follows a shortcut change. */
+async function pinAndRefresh(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedInput,
+  result: PrototypeResult,
+): Promise<Partial<PrototypeSavedOutput>> {
+  if (!args.pin) {
+    // An updated shortcut (new label or icon) can show stale in the launcher without a pin call.
+    return await refreshLauncher(deps, args, result.saved?.shortcut === "updated");
   }
   // The pin transport takes no signal, so a cancellation that landed during the save must stop
   // the second mutation here; the completed save is still reported.
   if (deps.signal?.aborted) {
     return {
-      ...output,
       warning: "The request was cancelled after the save, so the prototype was not pinned.",
-      ...uploaded,
     };
   }
-  return {
-    ...output,
-    ...(await pinSavedPrototype(deps, args, result.saved?.id ?? args.spec!.id)),
-    ...uploaded,
-  };
+  const pinned = await pinSavedPrototype(deps, args, result.saved?.id ?? args.spec!.id);
+  return { ...pinned, ...(await refreshLauncher(deps, args, pinned.pinned === "pinned")) };
+}
+
+/**
+ * Restarts the default launcher when a pinned or updated shortcut is not showing (#14887). Runs
+ * once per call, only when the shortcut exists, and never fails the save.
+ */
+async function refreshLauncher(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedInput,
+  shortcutExists: boolean,
+): Promise<Partial<PrototypeSavedOutput>> {
+  if (!deps.launcherRefresh || args.restartLauncher === false || !shortcutExists) {
+    return {};
+  }
+  try {
+    const outcome = await refreshLauncherForShortcut(deps.launcherRefresh, {
+      label: args.label ?? args.spec!.id,
+      signal: deps.signal,
+    });
+    return {
+      launcherRestarted: outcome.launcherRestarted,
+      shortcutVisible: outcome.shortcutVisible,
+      ...(outcome.message ? { warning: outcome.message } : {}),
+    };
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // The pin already succeeded; a failed launcher check only leaves visibility unreported.
+    logger.warn(`[prototype] launcher refresh failed: ${errorMessage(error)}`, error);
+    return {};
+  }
 }
 
 const PIN_PENDING_WARNING =

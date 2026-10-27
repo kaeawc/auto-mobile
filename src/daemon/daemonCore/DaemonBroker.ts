@@ -1,3 +1,4 @@
+import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
   DaemonCoreServices,
@@ -28,6 +29,7 @@ import {
   type SessionBrokerService,
 } from "../sessionBroker/service";
 import {
+  discardsAndroidSnapshotOnExit,
   readSessionBrokerHostConfig,
   type SessionBrokerHostConfig,
 } from "../sessionBroker/hostConfig";
@@ -82,6 +84,7 @@ export interface DaemonBrokerHost {
     | "setBackgroundRegistryUpgrade"
   >;
   bindingRegistry: () => Promise<SqliteBindingRegistry> | undefined;
+  deviceClaimMirrors: () => DeviceClaimMirrorHub;
   setBindingRegistry: (value: Promise<SqliteBindingRegistry> | undefined) => void;
   brokerDeviceAcquisition: () => DaemonBrokerDeviceAcquisitionHandle | undefined;
   setBrokerDeviceAcquisition: (value: DaemonBrokerDeviceAcquisitionHandle | undefined) => void;
@@ -226,6 +229,9 @@ export class DaemonBroker {
     );
     const acquisition = createDaemonBrokerDeviceAcquisition({
       registry: () => this.host.openBindingRegistry(),
+      // Unconfigured Android reuse destroys a released emulator, so its exit snapshot is waste.
+      // Warm reuse (snapshot or keep-booted) and an unread config keep the default (#15477).
+      discardAndroidSnapshotOnExit: () => discardsAndroidSnapshotOnExit(this.sessionBrokerConfig),
       // The broker and native ledger enforce the same cap independently: reservations are not
       // added to native usage twice, and unaccounted native devices can still refuse creation.
       resourceBudgetPolicy: {
@@ -339,6 +345,8 @@ export class DaemonBroker {
     // daemon is gone. Runs once per open, after the open succeeds.
     opening.then(
       (registry) => {
+        // Claims taken before the registry opened, and releases still owed, reach the table now.
+        this.host.deviceClaimMirrors().registryOpened(registry.deviceClaims());
         void this.brokerExecutionRelease?.recoverSettledBindings();
         const acquisition = this.host.brokerDeviceAcquisition();
         if (
@@ -385,6 +393,19 @@ export class DaemonBroker {
     this.host.setBrokerDeviceAcquisition(undefined);
     const registry = this.host.bindingRegistry();
     this.host.setBindingRegistry(undefined);
+    // A write already sent must settle before this daemon's rows are removed below.
+    this.host.deviceClaimMirrors().dispose();
+    await this.host.deviceClaimMirrors().idle();
+    try {
+      // The device allocation claims are released after this stage, when the table is gone: this
+      // daemon's rows leave with its registry so a clean stop strands none (#11811 b).
+      await (await registry)?.deviceClaims().releaseOwnedBy(process.pid);
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Withdrawing this daemon's device claims failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
     try {
       await (await registry)?.close();
     } catch (error) {

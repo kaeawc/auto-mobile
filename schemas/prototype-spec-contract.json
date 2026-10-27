@@ -13496,6 +13496,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "scrollTransition": {
               "rule": {
                 "kind": "ref",

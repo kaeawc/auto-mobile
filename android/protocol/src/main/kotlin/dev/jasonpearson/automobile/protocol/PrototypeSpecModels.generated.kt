@@ -253,9 +253,7 @@ sealed class PrototypeNode {
   abstract val style: PrototypeStyle?
   abstract val styleWhen: List<PrototypeStyleWhen>?
   abstract val visibleWhen: PrototypeCondition?
-  open val shared: PrototypeShared?
-    get() = null
-
+  abstract val shared: PrototypeShared?
   abstract val sharedKey: String?
   /**
    * `none`, `fade`, `expand`, `slide`, or (#14208) `slideStart`, `slideEnd` or `scale`, or (#15247)

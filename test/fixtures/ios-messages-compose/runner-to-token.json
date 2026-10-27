@@ -1,0 +1,926 @@
+{
+  "data": {
+    "hierarchy": {
+      "bounds": {
+        "bottom": 874,
+        "left": 0,
+        "right": 402,
+        "top": 0
+      },
+      "className": "XCUIApplication",
+      "node": [
+        {
+          "bounds": {
+            "bottom": 132,
+            "left": 0,
+            "right": 402,
+            "top": 78
+          },
+          "className": "UINavigationBar",
+          "extras": {
+            "automobile:iosWindowLayer": "2"
+          },
+          "node": [
+            {
+              "bounds": {
+                "bottom": 110,
+                "left": 132,
+                "right": 269,
+                "top": 89
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "resource-id": "ConversationTitle",
+              "role": "button",
+              "text": "New Message",
+              "view-id": "ConversationTitle"
+            },
+            {
+              "bounds": {
+                "bottom": 118,
+                "left": 346,
+                "right": 382,
+                "top": 82
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "role": "button",
+              "text": "Cancel",
+              "view-id": "28ea4e51-de20-763a-045b-7c58e4e85296"
+            }
+          ],
+          "resource-id": "CKComposeChat",
+          "view-id": "CKComposeChat"
+        },
+        {
+          "bounds": {
+            "bottom": 190,
+            "left": 16,
+            "right": 386,
+            "top": 142
+          },
+          "className": "UIScrollView",
+          "extras": {
+            "automobile:iosWindowLayer": "2"
+          },
+          "node": [
+            {
+              "actions": ["set_text", "clear_text"],
+              "bounds": {
+                "bottom": 190,
+                "left": 30,
+                "right": 377,
+                "top": 142
+              },
+              "className": "UITextField",
+              "clickable": "true",
+              "focused": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 178,
+                    "left": 50,
+                    "right": 85,
+                    "top": 172
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "role": "button",
+                  "text": "No Name, Searching",
+                  "view-id": "cf5e67b6-ec54-7a31-262f-476012f8a992"
+                },
+                {
+                  "className": "UIView",
+                  "node": [
+                    {
+                      "className": "UIView",
+                      "resource-id": "com.apple.text.grabber.leading",
+                      "view-id": "com.apple.text.grabber.leading"
+                    },
+                    {
+                      "className": "UIView",
+                      "resource-id": "com.apple.text.grabber.leading",
+                      "view-id": "com.apple.text.grabber.leading"
+                    }
+                  ],
+                  "resource-id": "_UITextSelectionRangeAdjustmentContainerView",
+                  "view-id": "_UITextSelectionRangeAdjustmentContainerView"
+                },
+                {
+                  "bounds": {
+                    "bottom": 190,
+                    "left": 344,
+                    "right": 374,
+                    "top": 142
+                  },
+                  "className": "UIView",
+                  "text": "Vertical scroll bar, 1 page",
+                  "view-id": "4952fa22-7005-2a05-73de-5efa46cf1cf8"
+                },
+                {
+                  "bounds": {
+                    "bottom": 187,
+                    "left": 30,
+                    "right": 377,
+                    "top": 163
+                  },
+                  "className": "UIView",
+                  "text": "Horizontal scroll bar, 1 page",
+                  "view-id": "85f3d454-13ba-91c6-b3c5-5097834f269f"
+                }
+              ],
+              "resource-id": "To:",
+              "role": "textfield",
+              "text": "To:",
+              "value": "No Name, Searching ",
+              "view-id": "To:"
+            },
+            {
+              "bounds": {
+                "bottom": 182,
+                "left": 344,
+                "right": 377,
+                "top": 149
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "resource-id": "ComposeRecipientAddButton",
+              "role": "button",
+              "text": "Add Contact",
+              "view-id": "ComposeRecipientAddButton"
+            },
+            {
+              "bounds": {
+                "bottom": 175,
+                "left": 30,
+                "right": 50,
+                "top": 157
+              },
+              "className": "UILabel",
+              "role": "text",
+              "text": "To:",
+              "view-id": "2180dc7d-5cbf-c98f-4917-e993db5d263d"
+            },
+            {
+              "bounds": {
+                "bottom": 190,
+                "left": 353,
+                "right": 383,
+                "top": 142
+              },
+              "className": "UIView",
+              "text": "Vertical scroll bar, 1 page",
+              "view-id": "2037779a-170b-bf3b-b2e2-b44a3635337d"
+            }
+          ],
+          "scrollable": "true",
+          "view-id": "ac50f791-c1fe-9561-c0bd-223e2b48d651"
+        },
+        {
+          "bounds": {
+            "bottom": 573,
+            "left": 0,
+            "right": 402,
+            "top": 516
+          },
+          "className": "UIView",
+          "extras": {
+            "automobile:iosWindowLayer": "2"
+          },
+          "node": [
+            {
+              "bounds": {
+                "bottom": 557,
+                "left": 16,
+                "right": 56,
+                "top": 517
+              },
+              "className": "UIButton",
+              "role": "button",
+              "text": "add",
+              "view-id": "df67da36-db1d-13f2-22fc-42b12064c2c5"
+            },
+            {
+              "bounds": {
+                "bottom": 557,
+                "left": 68,
+                "right": 386,
+                "top": 516
+              },
+              "className": "UIScrollView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": {
+                    "bottom": 557,
+                    "left": 79,
+                    "right": 341,
+                    "top": 516
+                  },
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "hint-text": "",
+                  "node": [
+                    {
+                      "className": "UIView",
+                      "node": [
+                        {
+                          "className": "UIView",
+                          "resource-id": "com.apple.text.grabber.leading",
+                          "view-id": "com.apple.text.grabber.leading"
+                        },
+                        {
+                          "className": "UIView",
+                          "resource-id": "com.apple.text.grabber.leading",
+                          "view-id": "com.apple.text.grabber.leading"
+                        }
+                      ],
+                      "resource-id": "_UITextSelectionRangeAdjustmentContainerView",
+                      "view-id": "_UITextSelectionRangeAdjustmentContainerView"
+                    },
+                    {
+                      "bounds": {
+                        "bottom": 557,
+                        "left": 308,
+                        "right": 338,
+                        "top": 516
+                      },
+                      "className": "UIView",
+                      "text": "Vertical scroll bar, 1 page",
+                      "view-id": "83f26459-b0d0-bd79-02f7-c4d223354efa"
+                    },
+                    {
+                      "bounds": {
+                        "bottom": 554,
+                        "left": 79,
+                        "right": 341,
+                        "top": 533
+                      },
+                      "className": "UIView",
+                      "text": "Horizontal scroll bar, 1 page",
+                      "view-id": "942e1855-8492-4c8c-d8b1-087f3ff62bb4"
+                    }
+                  ],
+                  "resource-id": "messageBodyField",
+                  "role": "textfield",
+                  "text": "Message",
+                  "value": "",
+                  "view-id": "messageBodyField"
+                },
+                {
+                  "bounds": {
+                    "bottom": 537,
+                    "left": 68,
+                    "right": 381,
+                    "top": 516
+                  },
+                  "className": "UIView",
+                  "text": "Horizontal scroll bar, 1 page",
+                  "view-id": "577cb7c4-a416-4bf8-ca84-c44c6138cf5b"
+                },
+                {
+                  "bounds": {
+                    "bottom": 540,
+                    "left": 348,
+                    "right": 378,
+                    "top": 533
+                  },
+                  "className": "UIView",
+                  "text": "Vertical scroll bar, 1 page",
+                  "view-id": "47f9ffae-a06b-06ed-5bb1-7c81cf4164d3"
+                }
+              ],
+              "scrollable": "true",
+              "view-id": "0f7c2468-2e45-c81b-7e9f-7801af6b33b8"
+            },
+            {
+              "bounds": {
+                "bottom": 548,
+                "left": 354,
+                "right": 376,
+                "top": 526
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 548,
+                    "left": 354,
+                    "right": 376,
+                    "top": 526
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "role": "button",
+                  "text": "Record audio",
+                  "view-id": "8e0d2e3e-f053-c7ba-ff75-f773d6ee6f02"
+                }
+              ],
+              "resource-id": "axAudioButton",
+              "role": "button",
+              "text": "Record audio",
+              "view-id": "axAudioButton"
+            }
+          ],
+          "resource-id": "MessageEntryView",
+          "view-id": "MessageEntryView"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 0,
+            "right": 402,
+            "top": 62
+          },
+          "className": "UIScrollView",
+          "extras": {
+            "automobile:iosWindowLayer": "2"
+          },
+          "node": [
+            {
+              "bounds": {
+                "bottom": 238,
+                "left": 0,
+                "right": 402,
+                "top": 212
+              },
+              "className": "UILabel",
+              "role": "text",
+              "text": "Text Message • SMS\n Encrypted",
+              "view-id": "a0532e46-550e-946f-7fd2-4519eb762fa6"
+            }
+          ],
+          "scrollable": "true",
+          "view-id": "ea232fd9-9818-cd7a-5fde-165f153414aa"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 0,
+            "right": 402,
+            "top": 62
+          },
+          "className": "UIToolbar",
+          "extras": {
+            "automobile:iosWindowLayer": "2"
+          },
+          "resource-id": "Toolbar",
+          "text": "Toolbar",
+          "view-id": "Toolbar"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 0,
+            "right": 402,
+            "top": 573
+          },
+          "className": "UIView",
+          "extras": {
+            "automobile:iosWindowLayer": "1"
+          },
+          "resource-id": "inputView",
+          "view-id": "inputView"
+        },
+        {
+          "bounds": {
+            "bottom": 816,
+            "left": 0,
+            "right": 402,
+            "top": 590
+          },
+          "className": "UIKeyboard",
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          },
+          "node": [
+            {
+              "bounds": {
+                "bottom": 816,
+                "left": 0,
+                "right": 402,
+                "top": 590
+              },
+              "className": "UIView",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 4,
+                    "right": 43,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "q",
+                  "view-id": "5b4c11e7-935d-7ea9-b0c8-27cbf83130a3"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 44,
+                    "right": 83,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "w",
+                  "view-id": "ae0bc640-0baa-f2fc-c243-b8bab4137e0c"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 83,
+                    "right": 123,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "e",
+                  "view-id": "33a235e8-1ec5-9729-c449-a9e4f2afdbcf"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 122,
+                    "right": 162,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "r",
+                  "view-id": "6df4b4a5-e807-f55b-7038-e8859e82cc21"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 162,
+                    "right": 202,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "t",
+                  "view-id": "34b1b326-8434-0923-19fc-d83d3946b30e"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 202,
+                    "right": 241,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "y",
+                  "view-id": "8f28e2d4-0e75-bea7-4707-ea94947fdd63"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 241,
+                    "right": 281,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "u",
+                  "view-id": "09db8b60-c6b1-b127-1670-a8734f0e7811"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 281,
+                    "right": 320,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "i",
+                  "view-id": "1424b9b3-cff5-1042-9731-078495d892fa"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 320,
+                    "right": 359,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "o",
+                  "view-id": "98c39ac5-f910-fff0-c817-4ca4779ef57f"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 360,
+                    "right": 399,
+                    "top": 597
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "p",
+                  "view-id": "90cd7f0a-9c44-914d-edee-8be125bb33bc"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 24,
+                    "right": 63,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "a",
+                  "view-id": "bd4be8c1-4799-d5d3-3803-0b3643631880"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 63,
+                    "right": 103,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "s",
+                  "view-id": "22e463f4-c636-4879-70b4-1dfc7c229754"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 103,
+                    "right": 142,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "d",
+                  "view-id": "a7b4f362-6c13-c81a-ef18-0baea0fc1a1d"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 142,
+                    "right": 182,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "f",
+                  "view-id": "5bfc0263-9b45-d6ed-14f3-2708929d3d39"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 182,
+                    "right": 221,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "g",
+                  "view-id": "9554b3fc-1612-54d2-a95e-81b4eb6d88a8"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 221,
+                    "right": 261,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "h",
+                  "view-id": "53fb6460-9f9f-2c48-197f-0688e2a8e0ea"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 261,
+                    "right": 300,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "j",
+                  "view-id": "f5c314a0-3f31-2b39-7e62-ce0a008cb281"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 300,
+                    "right": 340,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "k",
+                  "view-id": "7cb8fd0d-75dc-54ef-b6aa-6a3ab41c02ab"
+                },
+                {
+                  "bounds": {
+                    "bottom": 705,
+                    "left": 340,
+                    "right": 379,
+                    "top": 651
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "l",
+                  "view-id": "4b975a22-7510-e15e-f2c5-ba94a35b41fa"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 4,
+                    "right": 55,
+                    "top": 705
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "shift",
+                  "role": "button",
+                  "text": "shift",
+                  "view-id": "shift"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 63,
+                    "right": 103,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "z",
+                  "view-id": "f845c18c-df97-4dbe-a408-a0a093648f1f"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 103,
+                    "right": 142,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "x",
+                  "view-id": "2ad81adc-fe86-660b-1e65-078b79ec3ae8"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 142,
+                    "right": 182,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "c",
+                  "view-id": "e5d7ef03-d374-8e24-d8eb-7d6a3268cf0a"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 182,
+                    "right": 221,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "v",
+                  "view-id": "dc4fd1e3-a10b-2e9d-ea4e-51e7d0514600"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 221,
+                    "right": 261,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "b",
+                  "view-id": "b79d4ff2-db3e-4a8b-2728-0cacc8c1d324"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 261,
+                    "right": 300,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "n",
+                  "view-id": "6fd5065e-fb59-8ce2-d5b8-cc83b093c5ba"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 300,
+                    "right": 340,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "text": "m",
+                  "view-id": "6beba193-0416-01ab-61fd-54a65331b408"
+                },
+                {
+                  "bounds": {
+                    "bottom": 759,
+                    "left": 348,
+                    "right": 399,
+                    "top": 705
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "resource-id": "delete",
+                  "text": "delete",
+                  "view-id": "delete"
+                },
+                {
+                  "bounds": {
+                    "bottom": 813,
+                    "left": 4,
+                    "right": 103,
+                    "top": 759
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "resource-id": "more",
+                  "text": "phone pad",
+                  "view-id": "more"
+                },
+                {
+                  "bounds": {
+                    "bottom": 813,
+                    "left": 103,
+                    "right": 300,
+                    "top": 759
+                  },
+                  "className": "UIKeyboardKey",
+                  "clickable": "true",
+                  "resource-id": "space",
+                  "text": "space",
+                  "view-id": "space"
+                },
+                {
+                  "bounds": {
+                    "bottom": 813,
+                    "left": 300,
+                    "right": 399,
+                    "top": 759
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "Return",
+                  "role": "button",
+                  "text": "return",
+                  "view-id": "Return"
+                }
+              ],
+              "resource-id": "UIKeyboardLayoutStar Preview",
+              "view-id": "UIKeyboardLayoutStar Preview"
+            }
+          ],
+          "view-id": "880d3dd4-c8ea-3861-6518-d83709aae9e1"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 8,
+            "right": 76,
+            "top": 805
+          },
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          },
+          "role": "button",
+          "text": "Emoji",
+          "view-id": "1a60aac5-509c-0a2e-c126-21d6964eb98c"
+        },
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 325,
+            "right": 393,
+            "top": 805
+          },
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          },
+          "resource-id": "dictation",
+          "role": "button",
+          "text": "Dictate",
+          "view-id": "dictation"
+        }
+      ],
+      "text": "Messages",
+      "view-id": "5feceb66-ffc8-6f38-d952-786c6d696c79"
+    },
+    "insets": {
+      "available": false,
+      "displayCutoutInfo": {
+        "classification": "unknown"
+      },
+      "source": "unavailable",
+      "units": "unknown"
+    },
+    "nativeScale": 3,
+    "packageName": "com.apple.MobileSMS",
+    "pixelHeight": 2622,
+    "pixelWidth": 1206,
+    "screenHeight": 874,
+    "screenScale": 3,
+    "screenWidth": 402,
+    "updatedAt": 1793032071394,
+    "windowInfo": {
+      "bounds": {
+        "bottom": 874,
+        "left": 0,
+        "right": 402,
+        "top": 0
+      },
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    },
+    "windows": [
+      {
+        "bounds": {
+          "bottom": 874,
+          "left": 0,
+          "right": 402,
+          "top": 0
+        },
+        "id": 0,
+        "isActive": true,
+        "isFocused": true,
+        "type": 1
+      }
+    ]
+  },
+  "frameContext": "778D176A-5007-4B84-BAD4-83C5EEEF96F2:1:500ef5c4ab65c664",
+  "perfTiming": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "durationMs": 1,
+                    "name": "checkState"
+                  }
+                ],
+                "durationMs": 1,
+                "name": "ensureForegroundApp"
+              },
+              {
+                "durationMs": 69,
+                "name": "snapshot"
+              },
+              {
+                "durationMs": 3,
+                "name": "buildHierarchy"
+              },
+              {
+                "durationMs": 1,
+                "name": "mergeTypedTextInputs"
+              },
+              {
+                "durationMs": 1,
+                "name": "optimize"
+              },
+              {
+                "durationMs": 50,
+                "name": "systemAlerts"
+              }
+            ],
+            "durationMs": 127,
+            "name": "getViewHierarchy"
+          }
+        ],
+        "durationMs": 127,
+        "name": "extraction"
+      }
+    ],
+    "durationMs": 127,
+    "name": "handleRequestHierarchy"
+  },
+  "requestId": "cap-1",
+  "servedFromCache": false,
+  "timestamp": 1793032071395,
+  "type": "hierarchy_update"
+}

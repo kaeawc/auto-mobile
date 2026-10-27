@@ -1161,14 +1161,7 @@ class PrototypeRuntime(
       maximum?.let { put("maxItems", it.toLong()) }
       put("revision", revision)
     }
-    val value =
-      when (write) {
-        is PrototypeDataWrite.Set -> write.value
-        is PrototypeDataWrite.Append -> write.value
-        is PrototypeDataWrite.Prepend -> write.value
-        is PrototypeDataWrite.Extend -> write.value
-        is PrototypeDataWrite.Remove -> null
-      }
+    val value = dataWriteValue(write)
     val full = payload(value)
     return if (
       full.toString().toByteArray(Charsets.UTF_8).size <=
@@ -1177,6 +1170,16 @@ class PrototypeRuntime(
       full
     else payload(null)
   }
+
+  private fun dataWriteValue(write: PrototypeDataWrite): JsonElement? =
+    when (write) {
+      is PrototypeDataWrite.Upsert -> error("Realtime data writes require a supporting runtime")
+      is PrototypeDataWrite.Set -> write.value
+      is PrototypeDataWrite.Append -> write.value
+      is PrototypeDataWrite.Prepend -> write.value
+      is PrototypeDataWrite.Extend -> write.value
+      is PrototypeDataWrite.Remove -> null
+    }
 
   private suspend fun startPlatformCall(
     action: PrototypePlatformAction,

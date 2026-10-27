@@ -117,6 +117,9 @@ sealed class PrototypePageTarget {
 
 @Serializable(with = PrototypeScalarSerializer::class)
 sealed class PrototypeScalar {
+  /** Authored binding retained by the contract; resolved only by a supporting runtime. */
+  data class Binding(val value: JsonObject) : PrototypeScalar()
+
   data class Text(val value: String) : PrototypeScalar()
 
   data class Numeric(val value: Double) : PrototypeScalar()
@@ -373,6 +376,12 @@ object PrototypePageTargetSerializer :
 object PrototypeScalarSerializer :
   PrototypeJsonValueSerializer<PrototypeScalar>("PrototypeScalar") {
   override fun fromJson(value: JsonElement): PrototypeScalar {
+    if (
+      value is JsonObject &&
+        value.size == 1 &&
+        value.keys.single() in setOf("event", "platform", "match")
+    )
+      return PrototypeScalar.Binding(value)
     val primitive = value as? JsonPrimitive ?: throw SerializationException("Expected scalar")
     if (primitive.isString) return PrototypeScalar.Text(primitive.content)
     primitive.booleanOrNull?.let {
@@ -385,6 +394,7 @@ object PrototypeScalarSerializer :
 
   override fun toJson(value: PrototypeScalar): JsonElement =
     when (value) {
+      is PrototypeScalar.Binding -> value.value
       is PrototypeScalar.Text -> JsonPrimitive(value.value)
       is PrototypeScalar.Numeric -> JsonPrimitive(value.value)
       is PrototypeScalar.BooleanValue -> JsonPrimitive(value.value)

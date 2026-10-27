@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "wss://example.com/{secret}",
+        "via": "device"
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "channels.c.url",
+  "expectedMessage": "Secure value cannot be bound into a request"
+}

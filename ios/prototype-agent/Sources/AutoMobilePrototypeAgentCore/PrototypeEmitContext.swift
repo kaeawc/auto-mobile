@@ -130,7 +130,7 @@ struct PrototypeEmitContext: Decodable {
 
     /// Foundation supplies JSON string escaping; number sizes follow the host's JSON.stringify.
     /// Count recursively so numbers in data objects/arrays use the same spelling as scalar bindings.
-    private static func jsonByteCount(_ value: JSONValue) -> Int? {
+    static func jsonByteCount(_ value: JSONValue) -> Int? {
         switch value {
         case .null: return 4
         case let .bool(value): return value ? 4 : 5

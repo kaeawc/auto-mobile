@@ -1,3 +1,9 @@
+import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
+import {
+  prototypeChannelsError,
+  prototypeChannelCallError,
+  prototypeRealtimeFields,
+} from "./prototypeChannels";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -68,6 +74,7 @@ export interface PrototypePlatformStateEntry {
 }
 export interface PrototypePlatformModule {
   capability: string;
+  deviceCapability?: string;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   calls: Record<string, PrototypePlatformCall>;
@@ -262,6 +269,9 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     uses.push({ kind: "handler", path: at, event });
     scanValue(handlers![event], at, true, uses);
   }
+  for (const handler of prototypeChannelHandlers(root)) {
+    scanValue(handler.value, handler.path, true, uses);
+  }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
     scanValue(node, path, false, uses);
   }
@@ -313,12 +323,9 @@ function argumentsError(
       }
       continue;
     }
-    const binding = record(args[name]);
-    if (binding && Object.hasOwn(binding, "value")) {
-      const error = check(binding.value, declared.value, `${at}.value`);
-      if (error) {
-        return error;
-      }
+    const error = argumentValueError(action, name, args[name], at, declared.value, check);
+    if (error) {
+      return error;
     }
   }
   return undefined;
@@ -327,7 +334,12 @@ function argumentsError(
 function callError(
   action: Raw,
   path: string,
-  context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
+  context: {
+    declared: Set<string>;
+    permissions: Set<string>;
+    background: Set<string>;
+    channels: Raw;
+  },
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   const call = prototypePlatformCall(action.call);
@@ -372,6 +384,7 @@ function strings(value: unknown): Set<string> {
 function readError(
   use: { path: string; pointer: string },
   declared: Set<string>,
+  channels: Raw,
 ): PrototypePlatformError | undefined {
   const name = prototypePlatformPointerModule(use.pointer);
   if (!module(name)) {
@@ -381,7 +394,17 @@ function readError(
     return notDeclared(use.path, name);
   }
   const state = module(name)?.state;
-  const key = prototypePlatformPointerKey(use.pointer);
+  const tokens = use.pointer
+    .slice(1)
+    .split("/")
+    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+  if (name === "realtime" && (tokens.length !== 3 || !Object.hasOwn(channels, tokens[1]))) {
+    return { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  }
+  const key =
+    name === "realtime" && tokens.length === 3
+      ? tokens[2]
+      : prototypePlatformPointerKey(use.pointer);
   return state && (key === undefined || !Object.hasOwn(state, key))
     ? { path: use.path, message: `Unknown platform state ${use.pointer}` }
     : undefined;
@@ -416,7 +439,12 @@ function comparisonError(
 
 function useError(
   use: PrototypePlatformUse,
-  context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
+  context: {
+    declared: Set<string>;
+    permissions: Set<string>;
+    background: Set<string>;
+    channels: Raw;
+  },
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   switch (use.kind) {
@@ -430,7 +458,7 @@ function useError(
     case "call":
       return callError(use.action, use.path, context, check);
     case "read":
-      return readError(use, context.declared) ?? comparisonError(use, check);
+      return readError(use, context.declared, context.channels) ?? comparisonError(use, check);
     case "event":
       return use.inHandler
         ? undefined
@@ -482,6 +510,7 @@ export function prototypePlatformError(
   const root = record(spec) ?? {};
   const requires = record(root.requires) ?? {};
   const context = {
+    channels: record(root.channels) ?? {},
     declared: strings(requires.platform),
     permissions: new Set(
       (Array.isArray(requires.permissions) ? requires.permissions : []).map(
@@ -490,12 +519,12 @@ export function prototypePlatformError(
     ),
     background: strings(requires.background),
   };
-  const error = requiresError(root);
+  const error = prototypeChannelsError(root) ?? requiresError(root);
   if (error) {
     return error;
   }
   for (const use of prototypePlatformUses(root)) {
-    const found = useError(use, context, check);
+    const found = useError(use, context, check) ?? channelUseError(use, root);
     if (found) {
       return found;
     }
@@ -558,7 +587,16 @@ export function prototypePlatformFields(spec: unknown): string[] {
 /** Authored paths needing one module's capability. */
 export function prototypePlatformModuleFields(spec: unknown, name: string): string[] {
   return unique(
-    authoredUses(spec)
+    [
+      ...(name === "realtime"
+        ? prototypeRealtimeFields(spec).map((path) => ({
+            kind: "declared" as const,
+            path,
+            module: name,
+          }))
+        : []),
+      ...authoredUses(spec),
+    ]
       .filter((use) => usedModule(use) === name)
       .map((use) => use.path),
   );
@@ -587,11 +625,56 @@ export function prototypePlatformUnsupportedMessage(
 }
 
 /** One generated gate per module in the `platformModules` table. */
-export const PROTOTYPE_PLATFORM_MODULE_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).map(
-  ([name, definition]) => ({
-    capability: definition.capability,
-    fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
-    unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-      unsupported(fields, platform, definition.capability, `the ${name} platform module`),
-  }),
+export const PROTOTYPE_PLATFORM_MODULE_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(
+  ([name, definition]) => [
+    {
+      capability: definition.capability,
+      fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
+      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+        unsupported(fields, platform, definition.capability, `the ${name} platform module`),
+    },
+    ...(definition.deviceCapability
+      ? [
+          {
+            capability: definition.deviceCapability,
+            fields: (spec: unknown) => prototypeRealtimeFields(spec, true),
+            unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+              unsupported(
+                fields,
+                platform,
+                definition.deviceCapability!,
+                "device realtime channels",
+              ),
+          },
+        ]
+      : []),
+  ],
 );
+
+function argumentValueError(
+  action: Raw,
+  name: string,
+  value: unknown,
+  at: string,
+  rule: Rule,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  if (typeof value === "string") {
+    if (String(action.call).startsWith("realtime.") && name === "channel") {
+      return undefined;
+    }
+    return { path: at, message: "Invalid union value" };
+  }
+  const binding = record(value);
+  if (binding && Object.hasOwn(binding, "value")) {
+    const error = check(binding.value, rule, `${at}.value`);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+function channelUseError(use: PrototypePlatformUse, root: Raw): PrototypePlatformError | undefined {
+  return use.kind === "call" ? prototypeChannelCallError(use.action, use.path, root) : undefined;
+}

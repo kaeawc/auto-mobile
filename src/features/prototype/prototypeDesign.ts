@@ -26,6 +26,7 @@ export function designFallbackPaths(
   if (effectiveDesign(spec) !== "platform") {
     return [];
   }
+  const nativeNodes = new Set(prototypeNativeDesignNodes(supports));
   const paths: string[] = [];
   walkPrototypeNodes(spec, (node, path) => {
     const type = node.type;
@@ -34,7 +35,7 @@ export function designFallbackPaths(
       Object.hasOwn(prototypeDesignCoverage, type) &&
       (prototypeDesignCoverage[type as keyof typeof prototypeDesignCoverage].ios === "material" ||
         (prototypeDesignCoverage[type as keyof typeof prototypeDesignCoverage].ios === "native" &&
-          !supports(prototypeDesignNativeCapability(type))))
+          !nativeNodes.has(type)))
     ) {
       paths.push(path);
     }
@@ -42,15 +43,24 @@ export function designFallbackPaths(
   return paths;
 }
 
+const legacyNativeNodes = new Set(["button", "slider", "datePicker", "timePicker", "pasteButton"]);
+
 /** Per-control capabilities come from the connected iOS agent's OS-filtered advertisement. */
 export function prototypeDesignNativeCapability(type: string): string {
   return `prototype_design_ios_${type}_v1`;
 }
 
 export function prototypeNativeDesignNodes(supports: (capability: string) => boolean): string[] {
+  const hasPerTypeCoverage = Object.keys(prototypeDesignCoverage).some((type) =>
+    supports(prototypeDesignNativeCapability(type)),
+  );
+  const legacy = supports("prototype_design_platform_v1") && !hasPerTypeCoverage;
   return Object.entries(prototypeDesignCoverage)
     .filter(
-      ([type, entry]) => entry.ios === "native" && supports(prototypeDesignNativeCapability(type)),
+      ([type, entry]) =>
+        entry.ios === "native" &&
+        (supports(prototypeDesignNativeCapability(type)) ||
+          (legacy && legacyNativeNodes.has(type))),
     )
     .map(([type]) => type)
     .sort();

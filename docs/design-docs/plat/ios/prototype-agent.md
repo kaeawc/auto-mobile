@@ -12,9 +12,14 @@ device-verified" below remain open. `scripts/ios/prototype-agent-demo.ts` is a s
 `theme.design` accepts `material` and `platform`, defaulting to `platform`. Explicit platform
 requests require `prototype_design_platform_v1`; omitted design remains accepted on older agents.
 `neutral` nodes carry no design language; Material entries keep their drawing. Omitted and explicit
-platform design report `design.fallback` from the agent's advertised per-control coverage.
+platform design report `design.fallback` from the agent's advertised per-control coverage. Agents
+with only `prototype_design_platform_v1` retain the five pre-existing native controls; switch and
+checkbox require their per-type capabilities.
 Button, slider, datePicker, timePicker and pasteButton use native controls. Switch and checkbox use
-Toggle (checkbox style for checkbox); explicit material keeps their custom drawing.
+Toggle with a full-row Button style; the Button alone owns the testTag and hit target, while the
+switch drawing is hidden from accessibility. Labels are overridden only when authored. Checkbox
+retains `checked`/`unchecked` values and the selected trait when checked in both designs; switch
+retains `1`/`0` and the toggle trait. Explicit material keeps their custom drawing.
 
 | Node            | iOS      | Android  | Parts |
 | --------------- | -------- | -------- | ----- |

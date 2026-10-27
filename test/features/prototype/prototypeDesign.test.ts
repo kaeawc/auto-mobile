@@ -129,7 +129,7 @@ test("iOS default design notes cap paths; Android and material stay silent", () 
     total: 22,
     values: prototypeNativeDesignNodes(() => true),
     detail:
-      "These nodes keep the Material drawing. Native iOS nodes advertised by this agent are listed in values (see designCoverage).",
+      "These nodes keep the Material drawing. Native iOS nodes supported by this agent are listed in values when known (see designCoverage).",
   });
   expect(prototypePlatformNotes(spec, "android", () => true)).toEqual([]);
   for (const theme of [{ design: "material" }]) {
@@ -169,4 +169,53 @@ test("native coverage declares reachable control parts; per-item fallbacks expla
     expect(prototypeDesignCoverage[type].ios).toBe("material");
     expect(prototypeDesignCoverage[type].reason).toContain("per-item identifiers");
   }
+});
+
+test("legacy platform coverage preserves existing native controls and reports new toggles as fallbacks", () => {
+  const types = [
+    "button",
+    "slider",
+    "datePicker",
+    "timePicker",
+    "pasteButton",
+    "switch",
+    "checkbox",
+  ];
+  const spec = {
+    ...base,
+    root: { type: "column", children: types.map((type) => ({ type })) },
+  };
+  const legacy = (capability: string) => capability === "prototype_design_platform_v1";
+  expect(prototypeNativeDesignNodes(legacy)).toEqual([
+    "button",
+    "datePicker",
+    "pasteButton",
+    "slider",
+    "timePicker",
+  ]);
+  expect(designFallbackPaths(spec, legacy)).toEqual(["root.children[5]", "root.children[6]"]);
+  const note = prototypePlatformNotes(spec, "ios", legacy).find(
+    (entry) => entry.construct === "design.fallback",
+  );
+  expect(note?.paths).toEqual(["root.children[5]", "root.children[6]"]);
+  expect(note?.values).toEqual(prototypeNativeDesignNodes(legacy));
+});
+
+test("per-type coverage is authoritative once advertised", () => {
+  const supports = (capability: string) =>
+    capability === "prototype_design_platform_v1" ||
+    capability === prototypeDesignNativeCapability("switch");
+  expect(prototypeNativeDesignNodes(supports)).toEqual(["switch"]);
+  expect(designFallbackPaths({ root: { type: "button" } }, supports)).toEqual(["root"]);
+  expect(designFallbackPaths({ root: { type: "switch" } }, supports)).toEqual([]);
+});
+
+test("agents without design coverage do not emit an empty native values list", () => {
+  const note = prototypePlatformNotes(
+    { ...base, root: { type: "switch" } },
+    "ios",
+    () => false,
+  ).find((entry) => entry.construct === "design.fallback");
+  expect(note?.paths).toEqual(["root"]);
+  expect(note).not.toHaveProperty("values");
 });

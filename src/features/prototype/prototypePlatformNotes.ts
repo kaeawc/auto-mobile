@@ -45,7 +45,7 @@ export interface PrototypePlatformNote {
   paths: string[];
   /** Total occurrences when more than the cap were found. */
   total?: number;
-  /** icon.name: sorted distinct placeholders; strings.fallback: up to 20 referenced keys; design.fallback: advertised native iOS node types. */
+  /** icon.name: sorted distinct placeholders; strings.fallback: up to 20 referenced keys; design.fallback: known native iOS node types, when available. */
   values?: string[];
   detail: string;
 }
@@ -470,15 +470,16 @@ export function prototypePlatformNotes(
   });
   const fallbackPaths = designFallbackPaths(spec, supports);
   if (fallbackPaths.length) {
+    const nativeNodes = prototypeNativeDesignNodes(supports);
     notes.push({
       platform: "ios",
       construct: "design.fallback",
       effect: "substituted",
       paths: fallbackPaths.slice(0, 20),
       ...(fallbackPaths.length > 20 ? { total: fallbackPaths.length } : {}),
-      values: prototypeNativeDesignNodes(supports),
+      ...(nativeNodes.length ? { values: nativeNodes } : {}),
       detail:
-        "These nodes keep the Material drawing. Native iOS nodes advertised by this agent are listed in values (see designCoverage).",
+        "These nodes keep the Material drawing. Native iOS nodes supported by this agent are listed in values when known (see designCoverage).",
     });
   }
   return [

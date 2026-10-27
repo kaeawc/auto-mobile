@@ -42,13 +42,17 @@ final class PrototypeDesignTests: XCTestCase {
             let android: String
             let parts: [String]?
         }
+        struct Variant: Decodable {}
+        struct Node: Decodable { let variants: [String: Variant] }
+        struct Definitions: Decodable { let node: Node }
         struct Contract: Decodable {
             let designCoverage: [String: Coverage]
-            let definitions: [String: JSONValue]
+            let definitions: Definitions
         }
         let contract = try JSONDecoder().decode(Contract.self, from: Data(prototypeSpecContractData.utf8))
-        let variants = try XCTUnwrap(contract.definitions["node"]?.objectFields?["variants"]?.objectFields)
+        let variants = contract.definitions.node.variants
         XCTAssertEqual(Set(contract.designCoverage.keys), Set(variants.keys))
+        let advertised = Set(PrototypeAgentProtocol.advertisedCapabilities())
         for (type, entry) in contract.designCoverage {
             XCTAssertTrue(["native", "material", "neutral"].contains(entry.ios))
             XCTAssertTrue(["material", "neutral"].contains(entry.android))
@@ -59,10 +63,16 @@ final class PrototypeDesignTests: XCTestCase {
                 XCTAssertEqual(PrototypeComponentLook.resolve(type: type, design: nil), .platform)
                 XCTAssertEqual(PrototypeComponentLook.resolve(type: type, design: .material), .material)
                 for part in parts {
-                    XCTAssertEqual(PrototypeComponentLook.identifier(testTag: "tag", part: part), "tag")
-                    XCTAssertNil(PrototypeComponentLook.identifier(testTag: nil, part: part))
+                    let owner: PrototypeComponentLook.IdentifierOwner = ["switch", "checkbox"].contains(type)
+                        ? .toggle : .renderer
+                    XCTAssertEqual(PrototypeComponentLook.identifier(
+                        type: type, design: .platform, testTag: "tag", owner: owner, part: part
+                    ), "tag")
+                    XCTAssertNil(PrototypeComponentLook.identifier(
+                        type: type, design: .platform, testTag: nil, owner: owner, part: part
+                    ))
                 }
-                XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities().contains(
+                XCTAssertTrue(advertised.contains(
                     PrototypeComponentLook.capability(for: type)
                 ))
             } else {
@@ -73,6 +83,58 @@ final class PrototypeDesignTests: XCTestCase {
             Set(PrototypeComponentLook.registeredParts.keys),
             Set(contract.designCoverage.filter { $0.value.ios == "native" }.keys)
         )
+    }
+
+    func testToggleCoverageIdentifierHasOneOwnerAcrossDesigns() {
+        for type in ["switch", "checkbox"] {
+            for design: PrototypeDesign? in [nil, .platform, .material] {
+                let toggleOwns = design != .material
+                XCTAssertEqual(PrototypeComponentLook.identifier(
+                    type: type, design: design, testTag: "row", owner: .toggle
+                ), toggleOwns ? "row" : nil)
+                XCTAssertEqual(PrototypeComponentLook.identifier(
+                    type: type, design: design, testTag: "row", owner: .renderer
+                ), toggleOwns ? nil : "row")
+            }
+        }
+    }
+
+    /// SwiftPM excludes UIKit. Bind the pure ownership policy to both renderer call sites so
+    /// removing either integration cannot leave a green identifier-only coverage assertion.
+    func testToggleCoverageRendererUsesIdentifierOwnershipAndSingleRowTarget() throws {
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/AutoMobilePrototypeAgent")
+        let renderer = try String(
+            contentsOf: sources.appendingPathComponent("PrototypeRenderer.swift"),
+            encoding: .utf8
+        )
+        let toggle = try String(
+            contentsOf: sources.appendingPathComponent("PrototypeToggleView.swift"),
+            encoding: .utf8
+        )
+        let compactRenderer = renderer.filter { !$0.isWhitespace }
+        XCTAssertTrue(compactRenderer.contains("PrototypeComponentLook.identifier(type:node.type,"))
+        XCTAssertTrue(compactRenderer.contains("testTag:node.testTag,owner:.renderer"))
+        XCTAssertTrue(toggle.contains("identifier: PrototypeComponentLook.identifier("))
+        XCTAssertTrue(toggle.contains("testTag: node.testTag, owner: .toggle"))
+        XCTAssertTrue(toggle.contains("content.accessibilityIdentifier(identifier)"))
+        XCTAssertTrue(toggle.contains(".toggleStyle(PrototypeRowToggleStyle("))
+        XCTAssertTrue(toggle.contains("Button { configuration.isOn.toggle() }"))
+        XCTAssertTrue(toggle.contains(".contentShape(Rectangle())"))
+        XCTAssertTrue(toggle.contains(".allowsHitTesting(false)"))
+        XCTAssertTrue(toggle.contains("if let label { content.accessibilityLabel(label) }"))
+        XCTAssertFalse(toggle.contains(".accessibilityElement(children: .ignore)"))
+        XCTAssertFalse(toggle.contains(".accessibilityLabel(node.label ??"))
+        XCTAssertTrue(toggle.contains("configuration.isOn ? .isSelected : []"))
+        XCTAssertTrue(toggle.contains("PrototypeComponentLook.toggleAccessibilityValue("))
+    }
+
+    func testToggleAccessibilityValuesPreserveCheckboxSemantics() {
+        XCTAssertEqual(PrototypeComponentLook.toggleAccessibilityValue(type: "checkbox", isOn: true), "checked")
+        XCTAssertEqual(PrototypeComponentLook.toggleAccessibilityValue(type: "checkbox", isOn: false), "unchecked")
+        XCTAssertEqual(PrototypeComponentLook.toggleAccessibilityValue(type: "switch", isOn: true), "1")
+        XCTAssertEqual(PrototypeComponentLook.toggleAccessibilityValue(type: "switch", isOn: false), "0")
     }
 
     func testNativeCoverageAdvertisementUsesOSFiltering() {

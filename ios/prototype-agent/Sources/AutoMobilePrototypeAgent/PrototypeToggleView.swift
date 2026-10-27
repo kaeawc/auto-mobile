@@ -48,7 +48,7 @@
         }
 
         @ViewBuilder private var nativeToggle: some View {
-            let toggle = Toggle(isOn: Binding(get: { isOn }, set: { value in setValue(value) })) {
+            Toggle(isOn: Binding(get: { isOn }, set: { value in setValue(value) })) {
                 if let label = node.label { Text(label) }
             }
             .tint(ComponentColors(palette: palette).primary)
@@ -58,17 +58,13 @@
                 transaction.animation = duration == 0 ? nil : .easeInOut(duration: Double(duration) / 1000)
                 transaction.disablesAnimations = duration == 0
             }
-            // Hide UIKit-private descendants: only the whole drawn control is promised.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(node.label ?? "")
-            .accessibilityValue(isOn ? "1" : "0")
-            .accessibilityAddTraits(.isToggle)
-            .accessibilityAction { setValue(!isOn) }
-            if node.type == "checkbox" {
-                toggle.toggleStyle(PrototypeCheckboxToggleStyle())
-            } else {
-                toggle.toggleStyle(.switch)
-            }
+            .toggleStyle(PrototypeRowToggleStyle(
+                checkbox: node.type == "checkbox", label: node.label,
+                identifier: PrototypeComponentLook.identifier(
+                    type: node.type, design: model.spec?.theme?.design,
+                    testTag: node.testTag, owner: .toggle
+                )
+            ))
         }
 
         /// The previous Material drawing, including its accessibility values and layout.
@@ -94,17 +90,51 @@
         }
     }
 
-    private struct PrototypeCheckboxToggleStyle: ToggleStyle {
+    /// The Button is the sole accessible hit target. Its native switch drawing is decorative;
+    /// never wrap this Button in accessibilityElement(children: .ignore) (#10899).
+    private struct PrototypeRowToggleStyle: ToggleStyle {
+        let checkbox: Bool
+        let label: String?
+        let identifier: String?
+
         func makeBody(configuration: Configuration) -> some View {
-            Button { configuration.isOn.toggle() } label: {
-                HStack(spacing: 8) {
-                    PrototypeGlyph(symbol: configuration.isOn ? "checkmark.square.fill" : "square")
-                    configuration.label
+            identified(labelled(
+                Button { configuration.isOn.toggle() } label: {
+                    HStack(spacing: 8) {
+                        if checkbox {
+                            PrototypeGlyph(symbol: configuration.isOn ? "checkmark.square.fill" : "square")
+                                .accessibilityHidden(true)
+                            configuration.label
+                        } else {
+                            configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+                            Toggle(isOn: configuration.$isOn) { EmptyView() }
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
+            ))
+            .accessibilityValue(PrototypeComponentLook.toggleAccessibilityValue(
+                type: checkbox ? "checkbox" : "switch", isOn: configuration.isOn
+            ))
+            .accessibilityAddTraits(checkbox ? (configuration.isOn ? .isSelected : []) : .isToggle)
+        }
+
+        @ViewBuilder
+        private func labelled(_ content: some View) -> some View {
+            if let label { content.accessibilityLabel(label) }
+            else { content }
+        }
+
+        @ViewBuilder
+        private func identified(_ content: some View) -> some View {
+            if let identifier { content.accessibilityIdentifier(identifier) }
+            else { content }
         }
     }
 #endif

@@ -211,9 +211,11 @@ decision; no coalescing behavior is implemented.
 export const GUIDE_NATIVE_DESIGN = `Theme design: \`theme.design\` accepts \`material\` or \`platform\` (default).
 Explicit platform requires \`prototype_design_platform_v1\`. Android platform look is Material.
 On iOS button, slider, datePicker, timePicker, pasteButton, switch and checkbox use native controls
-where advertised by the connected agent. Switch and checkbox retain custom drawing for material.
+where covered by the connected agent. Agents advertising only prototype_design_platform_v1
+cover button, slider, datePicker, timePicker and pasteButton; switch/checkbox require per-type coverage.
+Switch and checkbox retain custom drawing for material.
 Omitted and explicit platform design report \`design.fallback\` for other styled nodes (first 20
-paths, plus \`total\` beyond); \`values\` lists that agent's native node types. Layout/content nodes
+paths, plus \`total\` beyond); \`values\` lists that agent's known native node types when available. Layout/content nodes
 are neutral. Native coverage parts \`self\` mean the control's testTag, with no private subparts.
 SegmentedButton, tabBar, bottomNav, menu and select keep custom drawing to preserve per-item ids.
 Material and Android do not report design fallback notes.`;

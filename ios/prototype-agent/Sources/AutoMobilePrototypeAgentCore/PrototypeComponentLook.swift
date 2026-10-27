@@ -29,10 +29,25 @@ enum PrototypeComponentLook {
         return .platform
     }
 
-    /// `self` explicitly declares the control's testTag, without promising UIKit-private children
-    /// such as a switch thumb or the date picker's internal calendar cells.
-    static func identifier(testTag: String?, part: String = "self") -> String? {
-        testTag.map { part == "self" ? $0 : "\($0).\(part)" }
+    enum IdentifierOwner { case renderer, toggle }
+
+    /// The styled toggle's Button owns its tag; an outer wrapper must not create a second element.
+    static func identifier(
+        type: String,
+        design: PrototypeDesign?,
+        testTag: String?,
+        owner: IdentifierOwner,
+        part: String = "self"
+    )
+        -> String?
+    {
+        let ownsToggle = (type == "switch" || type == "checkbox") && resolve(type: type, design: design) == .platform
+        guard owner == (ownsToggle ? .toggle : .renderer) else { return nil }
+        return testTag.map { part == "self" ? $0 : "\($0).\(part)" }
+    }
+
+    static func toggleAccessibilityValue(type: String, isOn: Bool) -> String {
+        type == "checkbox" ? (isOn ? "checked" : "unchecked") : (isOn ? "1" : "0")
     }
 
     static func capability(for type: String) -> String { "prototype_design_ios_\(type)_v1" }

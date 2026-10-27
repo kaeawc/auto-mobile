@@ -949,7 +949,12 @@
                 .modifier(IdentifierModifier(
                     // The search bar's editable field owns the node identifier.
                     identifier: node.type == "searchBar" ? nil : PrototypeComponentLook
-                        .identifier(testTag: node.testTag),
+                        .identifier(
+                            type: node.type,
+                            design: model.spec?.theme?.design,
+                            testTag: node.testTag,
+                            owner: .renderer
+                        ),
                     label: accessibilityLabelOverride,
                     grouping: grouping,
                     semantics: node.semantics,

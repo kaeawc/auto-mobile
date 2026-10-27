@@ -63,7 +63,7 @@ describe("prototype iOS minimum OS (#15242)", () => {
       ),
       "utf8",
     );
-    const block = /static let table: \[String: Int\] = \[([^\]]*)\]/.exec(swift)?.[1] ?? "";
+    const block = /static let table(?:: \[String: Int\])? = \[([^\]]*)\]/.exec(swift)?.[1] ?? "";
     const entries = [...block.matchAll(/"(prototype_[a-z0-9_]+)":\s*(\d+)/g)].map(
       ([, name, major]) => [name, Number(major)] as const,
     );

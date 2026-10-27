@@ -864,3 +864,16 @@ reuses that artifact and publishes its checksum in the notes. Older registry ent
 resolve to "viewer unavailable". The host template provider resolves: explicit path,
 `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`, configured local builds, then a checksum-pinned release cache/download
 (unless `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD`).
+
+## Icon effects
+
+`prototype_icon_effects_v1` is advertised on iOS 17 and later. Icon `effect`
+selects native SF Symbol effects through a pure type/version decision table:
+bounce, pulse, scale.up, variableColor and replace need 17; wiggle, rotate and
+breathe need 18 and fall back to bounce, none and pulse on 17; drawOn needs 26
+and otherwise uses replace. `trigger: {key}` or `{data}` replays on value changes;
+`repeat` is "infinite" or 1–20 and cannot coexist with trigger. Replace follows
+name changes. Reduced/off profiles rest; reduced replace uses a plain crossfade.
+The host reports fallback notes with node paths, using the discovered OS version
+when available. The shared validator charges repeated effects against the eight
+animated-effect budget, including expanded list instances.

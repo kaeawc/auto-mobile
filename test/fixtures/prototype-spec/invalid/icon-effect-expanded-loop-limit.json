@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "icon-effects",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "flag": false
+    },
+    "data": {
+      "revision": 0
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [{}, {}, {}, {}, {}, {}, {}, {}, {}]
+      },
+      "children": [
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": 1
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat.as",
+  "expectedMessage": "Required property"
+}

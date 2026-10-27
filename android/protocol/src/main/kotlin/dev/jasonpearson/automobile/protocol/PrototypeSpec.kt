@@ -622,6 +622,7 @@ data class PrototypeIconNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
   val name: String,
+  val effect: PrototypeIconEffect? = null,
   /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
   val variant: String? = null,
 ) : PrototypeNode()

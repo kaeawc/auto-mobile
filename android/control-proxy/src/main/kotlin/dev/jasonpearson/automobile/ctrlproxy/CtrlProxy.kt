@@ -3699,7 +3699,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           capture.value
         } else {
           prototypesHidden = null
-          screenshotController.takeScreenshotAsync(targetDisplayId)
+          dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+            screenshotController.takeScreenshotAsync(targetDisplayId)
+          }
         }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
@@ -3750,11 +3752,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ): PrototypeHiddenCapture<ScreenshotCaptureOutcome> =
     if (::prototypeController.isInitialized)
       prototypeController.withHiddenForCapture {
-        screenshotController.takeScreenshotAsync(targetDisplayId)
+        dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+          screenshotController.takeScreenshotAsync(targetDisplayId)
+        }
       }
     else
       PrototypeHiddenCapture(
-        screenshotController.takeScreenshotAsync(targetDisplayId),
+        dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+          screenshotController.takeScreenshotAsync(targetDisplayId)
+        },
         prototypeExcluded = true,
       )
 

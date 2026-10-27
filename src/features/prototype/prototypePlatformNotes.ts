@@ -8,6 +8,7 @@ import {
   PROTOTYPE_ICON_VARIANT_CAPABILITY,
   PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import { prototypeIconEffectNotes } from "./prototypeIconEffectNotes";
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
@@ -17,6 +18,7 @@ export type PrototypePlatformNoteConstruct =
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
+  | "icon.effect"
   | "icon.name"
   | "icon.variant"
   | "textField.variant"
@@ -27,7 +29,7 @@ export type PrototypePlatformNoteConstruct =
   | "select";
 export type PrototypePlatformNoteEffect = "ignored" | "substituted";
 export interface PrototypePlatformNote {
-  platform: "ios";
+  platform: "ios" | "android";
   construct: PrototypePlatformNoteConstruct;
   effect: PrototypePlatformNoteEffect;
   /** Paths in the component-expanded, anchor-resolved device spec, in tree order, capped at 20.
@@ -367,9 +369,10 @@ export function prototypePlatformNotes(
   spec: PrototypeSpec,
   platform: "android" | "ios",
   supports: (capability: string) => boolean,
+  osMajor?: number,
 ): PrototypePlatformNote[] {
   if (platform === "android") {
-    return [];
+    return prototypeIconEffectNotes(spec, platform);
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
@@ -440,5 +443,5 @@ export function prototypePlatformNotes(
           },
         ];
   });
-  return [...notes, ...menus];
+  return [...notes, ...menus, ...prototypeIconEffectNotes(spec, platform, osMajor)];
 }

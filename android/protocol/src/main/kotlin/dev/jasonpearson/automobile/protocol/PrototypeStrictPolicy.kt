@@ -298,6 +298,13 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
+      if (type == "icon" && "effect" in fields) need("icon_effects")
+      if (
+        type == "icon" &&
+          ((fields["effect"] as? JsonObject)?.get("trigger") as? JsonObject)?.containsKey("data") ==
+            true
+      )
+        need("data_model")
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)

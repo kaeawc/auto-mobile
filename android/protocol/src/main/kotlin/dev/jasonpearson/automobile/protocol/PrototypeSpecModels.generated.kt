@@ -6,6 +6,19 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class PrototypeIconEffectTrigger(
+  val key: String? = null,
+  val data: String? = null,
+)
+
+@Serializable
+data class PrototypeIconEffect(
+  val type: String,
+  val trigger: PrototypeIconEffectTrigger? = null,
+  val repeat: PrototypeIconEffectRepeat? = null,
+)
+
+@Serializable
 data class PrototypeShadowOffset(
   val x: Double,
   val y: Double,

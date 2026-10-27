@@ -802,13 +802,14 @@ export const prototypeOutputSchema = z.object({
   platformNotes: z
     .array(
       z.object({
-        platform: z.literal("ios"),
+        platform: z.enum(["android", "ios"]),
         construct: z.enum([
           "stack",
           "carousel",
           "node.id",
           "bottomSheet.dismissOnSwipe",
           "bottomSheet.detents",
+          "icon.effect",
           "icon.name",
           "icon.variant",
           "textField.variant",
@@ -829,7 +830,7 @@ export const prototypeOutputSchema = z.object({
     )
     .optional()
     .describe(
-      "Successful show on iOS only: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+      "Successful show: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
     ),
   accessibilityFindings: z
     .array(

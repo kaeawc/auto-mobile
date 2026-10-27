@@ -32,6 +32,9 @@ enum PrototypeBundleCapabilities {
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
             if node["sharedKey"] != nil { need("shared_element") }
             let type = node["type"]?.stringValue ?? ""
+            if type == "icon", node["effect"] != nil { need("icon_effects") }
+            if type == "icon",
+               node["effect"]?.objectFields?["trigger"]?.objectFields?["data"] != nil { need("data_model") }
             let featureTypes = [
                 "flow": "flow_grid",
                 "grid": "flow_grid",

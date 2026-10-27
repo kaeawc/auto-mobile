@@ -1,0 +1,95 @@
+{
+  "spec": {
+    "id": "icon-effects",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "flag": false
+    },
+    "data": {
+      "revision": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        },
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": "infinite"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[8]",
+  "expectedMessage": "Animated effect limit exceeded"
+}

@@ -513,6 +513,30 @@
         }
 
         @ViewBuilder private var iconView: some View {
+            if let effect = node.effect {
+                let value = effect.trigger?.key.flatMap { model.state[$0] }
+                    ?? effect.trigger?.data.flatMap { PrototypeDataPointer.resolve(model.spec?.data, pointer: $0) }
+                PrototypeIconEffectView(
+                    effect: effect,
+                    value: value,
+                    name: node.name ?? "",
+                    profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile
+                ) {
+                    effectIconImage
+                }
+            } else { plainIconView }
+        }
+
+        @ViewBuilder private var effectIconImage: some View {
+            if let symbol = prototypeSymbol(node.name, variant: node.variant) {
+                Image(systemName: symbol)
+                    .font(.system(size: style?.textSize ?? 24))
+                    .foregroundColor(palette.color(style?.color) ?? contentColor)
+                    .accessibilityHidden(accessibilityLabelOverride == nil)
+            } else { plainIconView }
+        }
+
+        @ViewBuilder private var plainIconView: some View {
             if let symbol = prototypeSymbol(node.name, variant: node.variant) {
                 if accessibilityLabelOverride == nil {
                     PrototypeGlyph(symbol: symbol)

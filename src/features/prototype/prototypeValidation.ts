@@ -273,6 +273,12 @@ function objectConstraint(
   rule: Rule,
   path: string,
 ): PrototypeValidationError | undefined {
+  if (rule.atMostOne && rule.atMostOne.filter((key) => Object.hasOwn(data, key)).length > 1) {
+    return fail(
+      keyPath(path, rule.atMostOne[0]),
+      `At most one of ${rule.atMostOne.join(", ")} is allowed`,
+    );
+  }
   if (rule.binding && Object.hasOwn(data, "pager") === Object.hasOwn(data, "stateKey")) {
     return fail(keyPath(path, "pager"), "Exactly one of pager or stateKey is required");
   }

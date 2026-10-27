@@ -55,6 +55,7 @@ enum PrototypeAgentProtocol {
         drawerCapability,
         stackCapability,
         stackTransitionsCapability,
+        iconEffectsCapability,
         reducedMotionCapability,
         sharedElementCapability,
         emitContextCapability,
@@ -76,6 +77,7 @@ enum PrototypeAgentProtocol {
     static let stackCapability = "prototype_stack_v1"
     static let stackTransitionsCapability = "prototype_stack_transitions_v1"
     /// Reduced-motion profile: crossfades, loops at rest, no springs (#15115).
+    static let iconEffectsCapability = "prototype_icon_effects_v1"
     static let reducedMotionCapability = "prototype_reduced_motion_v1"
     /// `sharedKey` morphs between `visibleWhen` swaps via matchedGeometryEffect (#15115).
     static let sharedElementCapability = "prototype_shared_element_v1"

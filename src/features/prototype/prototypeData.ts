@@ -266,6 +266,9 @@ function usesAtNode(node: Raw, path: string): Set<string> {
     }
     return value;
   });
+  if (node.type === "icon" && record(record(node.effect)?.trigger)?.data !== undefined) {
+    fields.add(`${path}.effect.trigger.data`);
+  }
   conditionFields(node.enabledWhen, `${path}.enabledWhen`, fields);
   conditionFields(node.visibleWhen, `${path}.visibleWhen`, fields);
   if (Array.isArray(node.styleWhen)) {

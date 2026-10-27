@@ -83,6 +83,7 @@ data class PrototypeRenderNode(
    * rank times `ms` plus its own `transition.delayMs`, at most 600 ms.
    */
   val enterDelayMs: Int = 0,
+  val iconEffectValue: kotlinx.serialization.json.JsonElement? = null,
 )
 
 @Immutable
@@ -279,6 +280,20 @@ internal class PrototypeNodeMapping(
         spans =
           (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
         chart = chart,
+        iconEffectValue =
+          (node as? PrototypeIconNode)?.effect?.trigger?.let { trigger ->
+            trigger.data?.let {
+              dev.jasonpearson.automobile.protocol.PrototypeDataPointer.resolve(data, it)
+            }
+              ?: trigger.key?.let { key ->
+                localState[key]?.let {
+                  kotlinx.serialization.json.Json.encodeToJsonElement(
+                    PrototypeScalar.serializer(),
+                    it,
+                  )
+                }
+              }
+          },
         enterDelayMs =
           (staggerDelayMs + (node.transition?.delayMs ?: 0)).coerceAtMost(
             PrototypeChoreographyRules.MAX_DELAY_MS,

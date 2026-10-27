@@ -21,6 +21,7 @@ import {
   type PrototypeJson,
 } from "./prototypeJson";
 import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeIconEffectSchema } from "./prototypeIconEffects";
 import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -294,6 +295,7 @@ const iconBaseSchema = z
     type: z.enum(["icon"]),
     name: iconNameSchema,
     variant: iconVariantSchema.optional(),
+    effect: prototypeIconEffectSchema.optional(),
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();

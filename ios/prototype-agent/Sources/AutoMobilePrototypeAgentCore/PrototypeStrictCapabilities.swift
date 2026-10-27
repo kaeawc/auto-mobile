@@ -45,6 +45,9 @@ enum PrototypeStrictCapabilities {
                 "scrollTo": "chat_scroll",
             ]
             if let feature = types[type] { need(feature) }
+            if type == "icon", fields["effect"] != nil { need("icon_effects") }
+            if type == "icon",
+               fields["effect"]?.objectFields?["trigger"]?.objectFields?["data"] != nil { need("data_model") }
             if fields["sharedKey"] != nil { need("shared_element") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }

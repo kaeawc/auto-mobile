@@ -22,6 +22,9 @@ internal object PrototypeBundleNodeCapabilities {
         "grid" to "flow_grid_v1",
       )
     typed[type]?.let { caps.add("prototype_$it") }
+    if (type == "icon" && "effect" in n) caps.add("prototype_icon_effects_v1")
+    val trigger = (n["effect"] as? JsonObject)?.get("trigger") as? JsonObject
+    if (type == "icon" && trigger?.containsKey("data") == true) caps.add("prototype_data_model_v1")
     general(n, type, caps)
     controls(n, type, caps)
     appearance(n, type, caps)

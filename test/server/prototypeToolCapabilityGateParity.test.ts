@@ -797,3 +797,47 @@ test.each(["android", "ios"] as const)(
     ).toBe(true);
   },
 );
+
+for (const platform of ["android", "ios"] as const) {
+  test(`${platform} zoom accepts patterns-only agents and reports native rendering separately`, async () => {
+    const device = {
+      platform,
+      deviceId: `zoom-${platform}`,
+      name: "Fake",
+      osVersion: "18",
+    } as BootedDevice;
+    const zoom = JSON.parse(
+      readFileSync(
+        new URL("../fixtures/prototype-spec/valid/stack-patterns-zoom.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    advertise(
+      "prototype_stack_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_patterns_v1",
+      "prototype_shared_element_v1",
+    );
+    agent.handshake.capabilities = agent.handshake.capabilities.filter(
+      (value) => value !== "prototype_zoom_transition_v1",
+    );
+    const fallback = await show(device, zoom);
+    expect(fallback.success).toBe(true);
+    expect(fallback.platformNotes).toContainEqual(
+      expect.objectContaining({ construct: "stack.zoom" }),
+    );
+    advertise(
+      "prototype_zoom_transition_v1",
+      "prototype_stack_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_patterns_v1",
+      "prototype_shared_element_v1",
+      "prototype_show_in_place_v1",
+    );
+    const native = await show(device, zoom);
+    expect(native.success).toBe(true);
+    expect(native.platformNotes?.some(({ construct }) => construct === "stack.zoom") ?? false).toBe(
+      false,
+    );
+  });
+}

@@ -134,20 +134,23 @@ internal fun PrototypeStackContent(
   val reducedMotion = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
   val animation = resolveStackAnimation(source.stackTransition, change, motion, reducedMotion)
   val rtl = prototypeRtl()
-  AnimatedStackContent(
-    frame,
-    source,
-    motion,
-    reducedMotion,
-    preview,
-    runtime,
-    seek,
-    modifier,
-    animation,
-    rtl,
-    node.style.alignment,
-  ) { screen ->
-    StackScreen(screen, store, interact)
+  PrototypeStackSharedRoot(source) {
+    AnimatedStackContent(
+      frame,
+      source,
+      motion,
+      reducedMotion,
+      preview,
+      runtime,
+      seek,
+      modifier,
+      animation,
+      rtl,
+      node.style.alignment,
+      change,
+    ) { screen ->
+      StackScreen(screen, store, interact)
+    }
   }
 }
 
@@ -180,6 +183,7 @@ private fun AnimatedStackContent(
   animation: StackAnimation,
   rtl: Boolean,
   alignment: Alignment,
+  change: PrototypeStackChange?,
   draw: @Composable (StackFrame) -> Unit,
 ) {
   // One keyed content tree owns screen state through ordinary navigation and back previews.
@@ -210,13 +214,7 @@ private fun AnimatedStackContent(
       val current = snapshot?.let { stackFrame(runtime, it, source.id) } ?: frame
       val target = backPreview?.let { stackFrame(runtime, it, source.id) } ?: current
       val kind =
-        resolveStackAnimation(
-            source.stackTransition,
-            (backPreview ?: snapshot)?.stackChange?.takeIf { it.id == source.id },
-            motion,
-            reducedMotion,
-          )
-          .kind
+        resolveStackSnapshotAnimation(source, backPreview ?: snapshot, motion, reducedMotion)
       inFlight = true
       try {
         settleStack(
@@ -238,7 +236,14 @@ private fun AnimatedStackContent(
     contentKey = { it.key },
     contentAlignment = alignment,
   ) {
-    draw(it)
+    PrototypeStackZoomScreen(
+      change.takeIf { kind == StackTransitionKind.Zoom },
+      it.key,
+      it.node,
+      this,
+    ) {
+      draw(it)
+    }
   }
 }
 
@@ -317,6 +322,7 @@ private fun stackTransform(
   val timing = tween<Float>(STACK_DURATION_MS, easing = LinearOutSlowInEasing)
   return when (kind) {
     StackTransitionKind.None -> EnterTransition.None togetherWith ExitTransition.None
+    StackTransitionKind.Zoom -> fadeIn(timing) togetherWith fadeOut(timing)
     StackTransitionKind.Fade ->
       if (fadeThrough) {
         fadeIn(

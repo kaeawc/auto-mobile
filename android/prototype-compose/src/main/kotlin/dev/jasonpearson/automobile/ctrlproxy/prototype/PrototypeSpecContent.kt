@@ -566,15 +566,14 @@ internal fun RenderPrototypeNode(
       }
     }
   } else if (node.visible) {
-    RenderPrototypeNodeContentWithViewport(node, interact, parentModifier, weightAxis, windowRoot)
+    RenderPrototypeNodeContentWithViewport(
+      node,
+      interact,
+      parentModifier.prototypeStackZoomNode(node),
+      weightAxis,
+      windowRoot,
+    )
   }
-}
-
-private fun usesPlainVisibility(node: PrototypeRenderNode): Boolean {
-  val type = node.source?.transition?.type
-  return node.role != "stack" &&
-    node.source?.visibleWhen != null &&
-    (type == "fade" || type == "none")
 }
 
 /** The node's visibility transition under the current motion profile. */

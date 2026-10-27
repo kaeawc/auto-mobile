@@ -1189,6 +1189,7 @@
     "strict-gate-prototype_timers_v1.json",
     "strict-gate-prototype_tooltip_v1.json",
     "strict-gate-prototype_window_motion_v1.json",
+    "strict-gate-prototype_zoom_transition_v1.json",
     "strict-header-bound-cr.json",
     "strict-header-bound-crlf.json",
     "strict-header-bound-lf.json",

@@ -9,9 +9,10 @@ enum PrototypeStackAnimation: Equatable {
     case slide, fade, none, sharedAxisX, sharedAxisY, fadeThrough
 }
 
-struct PrototypeStackEntry: Equatable, Identifiable {
+struct PrototypeStackEntry: Equatable, Hashable, Identifiable {
     let id: Int
     let screen: String
+    var zoomSource: String? = nil
 }
 
 struct PrototypeStackChange: Equatable {

@@ -32,6 +32,7 @@ import { shownAppearance } from "../../features/prototype/prototypeAppearance";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
 import { prototypeGestureFields } from "../../features/prototype/prototypeGestures";
 import { parsePrototypeHiddenReason } from "../../features/prototype/prototypeHidden";
+import { PROTOTYPE_ZOOM_RENDERING_GATE } from "../../features/prototype/prototypeZoomTransition";
 import {
   prototypePlatformNotes,
   prototypeStringsFallbackNotes,
@@ -322,7 +323,7 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...showAdviceOutput(authoredArgs, device, prototypeTarget, result.success),
+      ...(await showAdviceOutput(authoredArgs, device, prototypeTarget, result.success)),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
@@ -351,21 +352,23 @@ function pseudoLocalizedArgs<T extends { action: string; pseudoLocale?: boolean;
 }
 
 /** Advisory platform notes and accessibility findings for a successful show. */
-function showAdviceOutput(
+async function showAdviceOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
   target: PrototypeTarget,
   success: boolean,
-): Pick<
-  PrototypeOutput,
-  | "platformNotes"
-  | "accessibilityFindings"
-  | "accessibilityFindingsTotal"
-  | "placeholderFindings"
-  | "placeholderFindingsTotal"
+): Promise<
+  Pick<
+    PrototypeOutput,
+    | "platformNotes"
+    | "accessibilityFindings"
+    | "accessibilityFindingsTotal"
+    | "placeholderFindings"
+    | "placeholderFindingsTotal"
+  >
 > {
   return {
-    ...platformNotesOutput(args, device, target, success),
+    ...(await platformNotesOutput(args, device, target, success)),
     ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
     ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
   };
@@ -376,19 +379,26 @@ function deviceOsMajor(device: BootedDevice): number | undefined {
 }
 
 /** Notes describe the expanded, anchor-resolved spec actually sent to the device. */
-function platformNotesOutput(
+async function platformNotesOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
   target: PrototypeTarget,
   success: boolean,
-): Pick<PrototypeOutput, "platformNotes"> {
+): Promise<Pick<PrototypeOutput, "platformNotes">> {
   if (args.action !== "show" || !success) {
     return {};
   }
+  const androidZoom =
+    PROTOTYPE_ZOOM_RENDERING_GATE.fields(args.spec).length > 0
+      ? await target.android?.supportsCommand(PROTOTYPE_ZOOM_RENDERING_GATE.capability)
+      : false;
   const notes: NonNullable<PrototypeOutput["platformNotes"]> = prototypePlatformNotes(
     args.spec as PrototypeSpec,
     device.platform === "ios" ? "ios" : "android",
-    (capability) => target.ios?.supportsCapability(capability) === true,
+    (capability) =>
+      device.platform === "android"
+        ? capability === PROTOTYPE_ZOOM_RENDERING_GATE.capability && androidZoom === true
+        : target.ios?.supportsCapability(capability) === true,
     deviceOsMajor(device),
   );
   notes.push(...prototypeStringsFallbackNotes(args.spec as PrototypeSpec, args.locale));

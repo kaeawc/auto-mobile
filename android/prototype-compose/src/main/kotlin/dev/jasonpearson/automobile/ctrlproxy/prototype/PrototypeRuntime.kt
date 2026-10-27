@@ -43,6 +43,7 @@ data class PrototypeRuntimeSnapshot(
   val stateRevisions: Map<String, Long> = emptyMap(),
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   val stackChange: PrototypeStackChange? = null,
+  val stackEdges: Map<String, List<PrototypeStackEdge>> = emptyMap(),
   /** Device-local error visibility, cleared on spec replacement. */
   val shownErrors: Set<String> = emptySet(),
   /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
@@ -399,6 +400,7 @@ class PrototypeRuntime(
       revision = before.revision,
       stateRevisions = before.stateRevisions,
       platformState = before.platformState,
+      stackEdges = before.retainedStackEdges(next.stacks),
     )
   }
 
@@ -704,7 +706,7 @@ class PrototypeRuntime(
           )
         }
         is PrototypePushAction ->
-          changeStack(action.stack, "push", action.stackTransition) { node, path ->
+          changeStack(action.stack, "push", action.stackTransition, action.source) { node, path ->
             if (
               path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
                 !node.screens.containsKey(action.screen)
@@ -713,12 +715,11 @@ class PrototypeRuntime(
             else path + action.screen
           }
         is PrototypePopAction ->
-          changeStack(action.stack) { _, path ->
-            if (path.size == 1) path else path.dropLast(1)
-          }
+          changeStack(action.stack) { _, path -> path.dropLast(1).ifEmpty { path } }
         is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
         is PrototypeReplaceAction ->
-          changeStack(action.stack, "replace", action.stackTransition) { node, path ->
+          changeStack(action.stack, "replace", action.stackTransition, action.source) { node, path
+            ->
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
         PrototypeDismissAction -> dismiss()
@@ -891,36 +892,15 @@ class PrototypeRuntime(
     val stack = current.stacks.getValue(id)
     return current.copy(
       stacks = current.stacks + (id to PrototypeStackSnapshot(stack.path.dropLast(1))),
-      stackChange = PrototypeStackChange(id, "pop"),
+      stackChange = current.stackPopChange(id),
     )
-  }
-
-  private fun stackPopTarget(
-    root: PrototypeRenderNode,
-    stacks: Map<String, PrototypeStackSnapshot>,
-  ): String? {
-    var target: String? = null
-    fun visit(node: PrototypeRenderNode) {
-      if (!node.visible || node.role in PROTOTYPE_MODAL_ROLES) return
-      val stack = node.source as? PrototypeStackNode
-      if (stack != null && (stacks[stack.id]?.depth ?: 1) > 1) target = stack.id
-      // Visit parents before children: a nested top-screen stack wins over its ancestor.
-      // Among siblings the last eligible stack in document order wins, matching render order.
-      val children =
-        if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page))
-        else node.children
-      children.forEach(::visit)
-    }
-    visit(root)
-    // Hoisted modals render last; stacks in their visible bodies take Back before inline ones.
-    modalPrototypeSheets(root).forEach { modal -> modal.children.forEach(::visit) }
-    return target
   }
 
   private suspend fun changeStack(
     id: String,
     direction: String = "pop",
     override: PrototypeStackTransition? = null,
+    source: String? = null,
     transform: (PrototypeStackNode, List<String>) -> List<String>,
   ) {
     val node = stackNodes(current.spec.root)[id] ?: return
@@ -928,11 +908,12 @@ class PrototypeRuntime(
     val path = transform(node, before.path)
     if (path == before.path) return
     val next = PrototypeStackSnapshot(path.toList())
+    val edge = PrototypeStackEdge(path.last(), override ?: node.stackTransition, source)
     mutableSnapshot.value =
       current.copy(
         stacks = current.stacks + (id to next),
-        stackChange =
-          PrototypeStackChange(id, direction, override, (current.stackChange?.sequence ?: 0) + 1),
+        stackChange = current.stackNavigationChange(id, direction, edge, path),
+        stackEdges = current.stackEdges + (id to current.nextStackEdges(id, direction, edge, path)),
       )
     if (before.path.last() != path.last() || before.depth != next.depth) {
       emit(

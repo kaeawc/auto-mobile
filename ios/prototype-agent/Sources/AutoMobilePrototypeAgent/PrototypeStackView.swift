@@ -96,6 +96,7 @@
     struct PrototypeStackView: View {
         let node: PrototypeNode
         let model: PrototypeModel
+        var segment: [PrototypeStackEntry]? = nil
         @Environment(\.layoutDirection) private var layoutDirection
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.prototypeStackActive) private var ancestorActive
@@ -109,7 +110,7 @@
         @State private var focusAnchor = PrototypeStackFocusAnchor()
 
         private var id: String { node.id ?? "" }
-        private var current: [PrototypeStackEntry] { model.stackEntries[id] ?? [] }
+        private var current: [PrototypeStackEntry] { segment ?? model.stackEntries[id] ?? [] }
         private var rtl: Bool { layoutDirection == .rightToLeft }
         private var drag: PrototypeModel.StackDrag? {
             model.stackDrag.flatMap { $0.target == id ? $0 : nil }

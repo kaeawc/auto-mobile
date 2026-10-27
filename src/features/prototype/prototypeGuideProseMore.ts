@@ -133,6 +133,8 @@ up to 200 points per screen and a 48-unit grid. There is no screenshot overlay y
 
 Stack transition patterns: \`sharedAxisX\`, \`sharedAxisY\`, \`fadeThrough\` and \`zoom\` (and a push/replace
 \`source\`) require \`prototype_stack_patterns_v1\`; zoom needs a source naming exactly one shared key.
-Zoom falls back to fadeThrough on Android and the platform push on iOS; composed patterns pop
-non-interactively.
+With \`prototype_zoom_transition_v1\`, zoom morphs source-to-root on Android and uses native
+interactive zoom on iOS 18+. Older agents keep fadeThrough (Android) or platform push (iOS 17);
+platformNotes reports the fallback. The new capability reports rendering, not spec acceptance.
+Reduced motion crossfades and motion off snaps; composed iOS patterns pop non-interactively.
 `;

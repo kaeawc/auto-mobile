@@ -88,6 +88,11 @@ internal object PrototypeStructuralWalk {
     if (node.text("type") == "image")
       context.images += maxOf(1, prototypeImageSlotUses(node["asset"]))
     if (context.images > MAX_PROTOTYPE_IMAGES) return fail(path, "Image limit exceeded")
+    if (
+      "keyframes" in node &&
+        ++context.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
+    )
+      return fail("$path.keyframes", "Keyframe node limit exceeded")
     PrototypeEffectRules.charge(node, path, context)?.let {
       return it
     }

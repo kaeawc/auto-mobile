@@ -944,6 +944,7 @@ final class PrototypeNode: Decodable {
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
     let validateOn: PrototypeValidateOn?
+    let keyframes: JSONValue?
     /// Stack navigation, or other nodes' `visibleWhen` enter/exit (`none`, `fade`, `expand`, `slide`).
     /// Absent visibility transitions use fade + expand; stacks always use that visibility default.
     let transition: String?
@@ -1096,7 +1097,7 @@ final class PrototypeNode: Decodable {
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
-             transition
+             transition, keyframes
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1139,6 +1140,7 @@ final class PrototypeNode: Decodable {
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
         shared = try container.decodeIfPresent(Shared.self, forKey: .shared)
         sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
+        keyframes = try container.decodeIfPresent(JSONValue.self, forKey: .keyframes)
         transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         scrollTransition = try container.decodeIfPresent(ScrollTransition.self, forKey: .scrollTransition)
         scrollLinked = try container.decodeIfPresent(ScrollLinked.self, forKey: .scrollLinked)

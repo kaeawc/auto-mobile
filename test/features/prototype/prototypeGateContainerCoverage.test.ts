@@ -116,6 +116,19 @@ const fixtures: Record<string, Node> = {
   },
   prototype_string_conditions_v1: { ...label, visibleWhen: { key: "name", contains: "A" } },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
+  prototype_keyframes_v1: {
+    ...label,
+    keyframes: {
+      trigger: { key: "liked" },
+      durationMs: 600,
+      tracks: {
+        scale: [
+          [0, 1],
+          [1, 1],
+        ],
+      },
+    },
+  },
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v3: { ...label, animate: {}, style: { cornerRadius: 8 } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },

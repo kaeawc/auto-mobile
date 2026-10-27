@@ -74,7 +74,8 @@
     "MAX_PROTOTYPE_MEDIA_IMAGE_BYTES": 33554432,
     "MAX_PROTOTYPE_MEDIA_VIDEO_BYTES": 268435456,
     "MAX_PROTOTYPE_MEDIA_AUDIO_BYTES": 33554432,
-    "MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES": 65536
+    "MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES": 65536,
+    "MAX_PROTOTYPE_KEYFRAME_NODES": 16
   },
   "definitions": {
     "iconEffectTrigger": {
@@ -3306,6 +3307,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -3582,6 +3590,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -3851,6 +3866,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -4093,6 +4115,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -4358,6 +4387,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -4615,6 +4651,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -4894,6 +4937,13 @@
                 "values": ["numeric", "crossfade", "none"]
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           },
           "exactlyOne": ["text", "spans"]
@@ -5166,6 +5216,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -5270,7 +5327,10 @@
               "optional": true
             },
             "effect": {
-              "rule": { "kind": "ref", "name": "iconEffect" },
+              "rule": {
+                "kind": "ref",
+                "name": "iconEffect"
+              },
               "optional": true
             },
             "shared": {
@@ -5425,6 +5485,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -5642,6 +5709,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -6013,6 +6087,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           },
           "dependents": {
@@ -6271,6 +6352,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -6526,6 +6614,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -6768,6 +6863,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -7032,6 +7134,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -7272,6 +7381,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -7529,6 +7645,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -7807,6 +7930,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -8048,6 +8178,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -8312,6 +8449,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -8548,6 +8692,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -8794,6 +8945,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -9028,6 +9186,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -9293,6 +9458,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -9517,6 +9689,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -9738,6 +9917,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -9975,6 +10161,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -10241,6 +10434,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -10476,6 +10676,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -10722,6 +10929,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -10985,6 +11199,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -11232,6 +11453,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -11507,6 +11735,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -11794,6 +12029,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -12055,6 +12297,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           },
           "binding": true
@@ -12309,6 +12558,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -12573,6 +12829,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -12858,6 +13121,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -13058,6 +13328,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -13316,6 +13593,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -13583,6 +13867,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -13832,6 +14123,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -14145,6 +14443,13 @@
                 "name": "press"
               },
               "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
             }
           }
         },
@@ -14353,6 +14658,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
               },
               "optional": true
             }
@@ -19969,6 +20281,151 @@
             "max": 1
           },
           "optional": true
+        }
+      }
+    },
+    "keyframePoints": {
+      "kind": "array",
+      "min": 2,
+      "max": 8,
+      "item": {
+        "kind": "array",
+        "min": 2,
+        "max": 2,
+        "item": {
+          "kind": "number",
+          "integer": false
+        }
+      }
+    },
+    "keyframeTrack": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "array",
+          "min": 2,
+          "max": 8,
+          "item": {
+            "kind": "array",
+            "min": 2,
+            "max": 2,
+            "item": {
+              "kind": "number",
+              "integer": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "points": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframePoints"
+              },
+              "optional": false
+            },
+            "curve": {
+              "rule": {
+                "kind": "enum",
+                "values": ["linear", "standard", "spring"]
+              },
+              "optional": true
+            }
+          }
+        }
+      ]
+    },
+    "keyframes": {
+      "kind": "object",
+      "fields": {
+        "trigger": {
+          "rule": {
+            "kind": "object",
+            "exactlyOne": ["key", "data"],
+            "fields": {
+              "key": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": true
+              },
+              "data": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": false
+        },
+        "durationMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 100,
+            "max": 3000
+          },
+          "optional": false
+        },
+        "tracks": {
+          "rule": {
+            "kind": "object",
+            "atLeastOne": true,
+            "fields": {
+              "scale": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "scaleX": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "scaleY": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "rotation": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "offsetX": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "offsetY": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              },
+              "alpha": {
+                "rule": {
+                  "kind": "ref",
+                  "name": "keyframeTrack"
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": false
         }
       }
     }

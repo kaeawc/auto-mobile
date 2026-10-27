@@ -138,3 +138,54 @@ describe("the row agrees with the session across peers, re-issue, forced release
     },
   );
 });
+
+// #11799: the same invariants with durable journal intents, where a terminal release commits
+// before its row is written. A larger sweep than the volatile one, since the ordering is new.
+const DURABLE: SessionRowRunOptions = { durable: true };
+const DURABLE_EXTENDED: SessionRowRunOptions = { allowed: EXTENDED_OPERATIONS, durable: true };
+const DURABLE_SWEEP_CASES = 100;
+
+describe("the row agrees with the session when terminal releases commit first (#11799)", () => {
+  let db: Kysely<Database>;
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    await runSessionRowInterleaving(db, 0, DURABLE);
+    await runSessionRowInterleaving(db, 0, DURABLE_EXTENDED);
+  });
+
+  afterAll(async () => {
+    await db.destroy();
+  });
+
+  const sweeps = Array.from(
+    { length: DURABLE_SWEEP_CASES },
+    (_, index) => index * SEEDS_PER_CASE + 1,
+  );
+
+  test.each(sweeps)("first model, seeds %d and the next 1", async (first) => {
+    const seeds = Array.from({ length: SEEDS_PER_CASE }, (_, index) => first + index);
+
+    expect(await violationsOf(db, seeds, DURABLE)).toEqual([]);
+  });
+
+  test.each(sweeps)("second model, seeds %d and the next 1", async (first) => {
+    const seeds = Array.from({ length: SEEDS_PER_CASE }, (_, index) => first + index);
+
+    expect(await violationsOf(db, seeds, DURABLE_EXTENDED)).toEqual([]);
+  });
+
+  test.each(casesOf(REGRESSION_SEEDS))(
+    "the first model's regression seeds: %p",
+    async (...seeds) => {
+      expect(await violationsOf(db, seeds, DURABLE)).toEqual([]);
+    },
+  );
+
+  test.each(EXTENDED_REGRESSION_SEEDS.flatMap(casesOf))(
+    "the second model's regression seeds (%d, ...)",
+    async (...seeds) => {
+      expect(await violationsOf(db, seeds, DURABLE_EXTENDED)).toEqual([]);
+    },
+  );
+});

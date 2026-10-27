@@ -1,3 +1,4 @@
+import { parsePrototypeFeedbackLog } from "../../src/features/prototype/prototypeFeedbackLog";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { toolStructured } from "../helpers/toolResponse";
 import {
@@ -166,6 +167,55 @@ describe("prototype simulate and timer reports", () => {
     expect((await call(android, { action: "inspect" })).prototypes?.[0]?.timers).toEqual(timers);
     expect((await call(android, { action: "status" })).prototypes?.[0]?.timers).toEqual(timers);
   });
+  test("inspect returns the device's feedback log, dropping malformed entries (#14329)", async () => {
+    const reported = { id: "proto", persistent: false, state: {}, pages: {}, lastSequence: 0 };
+    const feedbackLog = [
+      { timeMs: 10, effect: "selection", nodeId: "like" },
+      { timeMs: 20, sound: "send", suppressed: true },
+    ];
+    proxy.setInspectReply({
+      success: true,
+      prototypes: [
+        {
+          ...reported,
+          feedbackLog: [
+            ...feedbackLog,
+            { timeMs: 30, effect: "tick", sound: "click" },
+            { timeMs: -1, effect: "tick" },
+            "nonsense",
+          ],
+        },
+      ],
+    });
+    expect((await call(android, { action: "inspect" })).prototypes?.[0]?.feedbackLog).toEqual(
+      feedbackLog,
+    );
+    expect((await call(android, { action: "status" })).prototypes?.[0]?.feedbackLog).toEqual(
+      feedbackLog,
+    );
+    proxy.setInspectReply({ success: true, prototypes: [{ ...reported, feedbackLog: [] }] });
+    expect(
+      (await call(android, { action: "inspect" })).prototypes?.[0]?.feedbackLog,
+    ).toBeUndefined();
+  });
+
+  test("iOS inspect returns the agent's feedback log (#14329)", async () => {
+    const status = { shown: true, id: "proto", pages: {}, state: {}, lastSequence: 0 };
+    agent.queueReplies({
+      status: { ...status, feedbackLog: [{ timeMs: 5, effect: "success", nodeId: "done" }] },
+    });
+    expect((await call(ios, { action: "inspect" })).prototypes?.[0]?.feedbackLog).toEqual([
+      { timeMs: 5, effect: "success", nodeId: "done" },
+    ]);
+  });
+
+  test("the feedback log keeps only the newest 64 entries (#14329)", () => {
+    const entries = Array.from({ length: 70 }, (_, index) => ({ timeMs: index, effect: "tick" }));
+    const parsed = parsePrototypeFeedbackLog(entries);
+    expect(parsed).toHaveLength(64);
+    expect(parsed?.[0]?.timeMs).toBe(6);
+  });
+
   test("iOS inspect reports timers and normalizes absent timers", async () => {
     agent.handshake.capabilities.push("prototype_timers_v1");
     const status = { shown: true, id: "proto", pages: {}, state: {}, lastSequence: 0 };

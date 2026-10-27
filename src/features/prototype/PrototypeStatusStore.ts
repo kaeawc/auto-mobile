@@ -1,3 +1,4 @@
+import type { PrototypeFeedbackEntry } from "./prototypeFeedbackLog";
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
@@ -57,6 +58,8 @@ export interface PrototypeLastResult {
    */
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  /** The device's last haptic and sound calls for this prototype, from an `inspect` (#14329). */
+  feedbackLog?: PrototypeFeedbackEntry[];
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -79,6 +82,7 @@ export interface AdoptedPrototype {
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  feedbackLog?: PrototypeFeedbackEntry[];
   pages: PrototypeEvent["pages"];
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
@@ -269,6 +273,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
+      ...(prototype.feedbackLog ? { feedbackLog: structuredClone(prototype.feedbackLog) } : {}),
       success: true,
       timestamp: this.clock.now(),
     };

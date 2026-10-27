@@ -30,6 +30,7 @@ import {
   MAX_PROTOTYPE_ACCESSIBILITY_FINDINGS,
   PROTOTYPE_ACCESSIBILITY_RULES,
 } from "../../features/prototype/prototypeAccessibilityLint";
+import { MAX_PROTOTYPE_FEEDBACK_LOG_ENTRIES } from "../../features/prototype/prototypeFeedbackLog";
 import { MAX_PROTOTYPE_PLACEHOLDER_FINDINGS } from "../../features/prototype/prototypePlaceholderLint";
 import {
   MAX_PROTOTYPE_SPEC_BYTES,
@@ -618,6 +619,21 @@ const lastResultSchema = z.object({
     )
     .max(8)
     .optional(),
+  feedbackLog: z
+    .array(
+      z.object({
+        timeMs: z.number().int().safe().nonnegative(),
+        effect: z.string().optional(),
+        sound: z.string().optional(),
+        nodeId: z.string().optional(),
+        suppressed: z.literal(true).optional(),
+      }),
+    )
+    .max(MAX_PROTOTYPE_FEEDBACK_LOG_ENTRIES)
+    .optional()
+    .describe(
+      "inspect: the last haptic (effect) and sound calls this prototype made, oldest first, at most 64, each with the owning nodeId when one node made the call and suppressed when a system setting or the ringer stopped it. Reported by a device advertising prototype_platform_haptics_v1 or prototype_platform_sound_v1; absent when none were made",
+    ),
   success: z.boolean(),
   error: z.string().optional(),
   totalTimeMs: z.number().optional(),

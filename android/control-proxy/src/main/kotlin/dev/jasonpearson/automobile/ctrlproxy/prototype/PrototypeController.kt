@@ -1043,6 +1043,7 @@ class PrototypeController(
       timers = runtime.timerReports(),
       degradedEffects =
         prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
+      feedbackLog = runtime.feedbackLog.snapshot(),
     )
   }
 

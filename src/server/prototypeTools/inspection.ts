@@ -1,5 +1,6 @@
 import { performPrototypeSimulate } from "../prototypeSimulateAction";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import { parsePrototypeFeedbackLog } from "../../features/prototype/prototypeFeedbackLog";
 import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
 import { z } from "zod/v4";
 import {
@@ -55,6 +56,7 @@ const devicePrototypeEntrySchema = z.object({
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
+  feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
 });
 
 function parseReportedPrototypes(
@@ -241,6 +243,7 @@ const iosAgentStatusSchema = z.object({
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
+  feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
 });
 
 /**
@@ -283,8 +286,19 @@ async function inspectIosAgent(
       error: "Prototype inspect failed: the agent returned a malformed status.",
     };
   }
-  const { shown, id, pages, stacks, state, data, lastSequence, appearance, storage, timers } =
-    status.data;
+  const {
+    shown,
+    id,
+    pages,
+    stacks,
+    state,
+    data,
+    lastSequence,
+    appearance,
+    storage,
+    timers,
+    feedbackLog,
+  } = status.data;
   const reported =
     shown && id !== null
       ? [
@@ -299,6 +313,7 @@ async function inspectIosAgent(
             appearance,
             storage,
             timers,
+            feedbackLog,
           },
         ]
       : [];

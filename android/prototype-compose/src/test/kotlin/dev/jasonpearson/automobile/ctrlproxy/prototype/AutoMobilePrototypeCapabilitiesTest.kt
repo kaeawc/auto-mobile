@@ -30,8 +30,8 @@ class AutoMobilePrototypeCapabilitiesTest {
   }
 
   /**
-   * The test module is a placeholder no production runtime advertises. The haptics and sound
-   * platform modules (#14329) have a validated contract and no runtime yet.
+   * The test module is a placeholder no production runtime advertises. CtrlProxy registers the
+   * haptics and sound platform modules (#14329); the embedded renderer leaves them to the app.
    */
   private val exclusions =
     setOf(

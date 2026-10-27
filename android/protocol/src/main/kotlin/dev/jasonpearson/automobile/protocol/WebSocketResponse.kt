@@ -1064,6 +1064,27 @@ data class PrototypeStatusEntry(
   /** Effects not drawn right now (`prototype_effects_v1`); absent when every effect renders. */
   @EncodeDefault(EncodeDefault.Mode.NEVER)
   val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
+  /**
+   * The last haptic and sound calls this prototype made, oldest first, at most 64
+   * (`prototype_platform_haptics_v1`, `prototype_platform_sound_v1`); absent when it made none.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val feedbackLog: List<PrototypeFeedbackEntry> = emptyList(),
+)
+
+/**
+ * One `haptics.perform` or `sound.play` call. Exactly one of [effect] and [sound] is set; [nodeId]
+ * is the node whose action made the call, null for a platform handler or when no single node
+ * owns it; [timeMs] is the device clock; [suppressed] is true when a system setting or the
+ * ringer state stopped the feedback from being produced.
+ */
+@Serializable
+data class PrototypeFeedbackEntry(
+  val timeMs: Long,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val effect: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val sound: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val nodeId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val suppressed: Boolean? = null,
 )
 
 /** Input validation vocabulary understood by this protocol version. */

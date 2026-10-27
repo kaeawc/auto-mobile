@@ -1,6 +1,7 @@
 import {
   type Implementation,
   McpServer,
+  type McpServerOptions,
   ProtocolError,
   ProtocolErrorCode,
   SdkError,
@@ -52,8 +53,12 @@ const INVALID_TOOLS_CALL_RESULT = "Invalid tools/call result: ";
 export function createSdkMcpServer(
   info: Implementation,
   capabilities: ServerCapabilities,
+  cacheHints?: McpServerOptions["cacheHints"],
 ): McpServer {
-  const server = new McpServer(info, { capabilities: { ...capabilities, prompts: undefined } });
+  const server = new McpServer(info, {
+    capabilities: { ...capabilities, prompts: undefined },
+    ...(cacheHints && { cacheHints }),
+  });
   if (capabilities.prompts) {
     server.server.registerCapabilities({ prompts: capabilities.prompts });
   }

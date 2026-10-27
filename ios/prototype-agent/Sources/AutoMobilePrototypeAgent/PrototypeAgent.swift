@@ -123,7 +123,10 @@ final class PrototypeAgent: NSObject {
         let server = PrototypeServer(
             configuration: PrototypeAgentConfiguration(port: 0, token: publisher.token),
             capabilities: PrototypeViewerHostCapabilities.advertised(
-                model.mode.advertising(PrototypeTestHooks.capabilities(enabled: false))
+                model.mode.advertising(PrototypeTestHooks.capabilities(
+                    enabled: false,
+                    registryCapabilities: model.platformRegistry.capabilities
+                ))
             ),
             maxAuthenticatedClients: 1,
             onReady: { [weak agent] port in
@@ -167,8 +170,9 @@ final class PrototypeAgent: NSObject {
     let model: PrototypeModel
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
-    init(mode: PrototypeLifecycleMode = .session) {
-        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked())
+    init(mode: PrototypeLifecycleMode = .session, registry: PrototypePlatformRegistry = .empty) {
+        // No concrete permission-needing modules are approved for injection yet (#14289).
+        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked(), registry: registry)
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
@@ -230,7 +234,10 @@ final class PrototypeAgent: NSObject {
         )
         let server = PrototypeServer(
             configuration: configuration,
-            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(enabled: testHooksEnabled))
+            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(
+                enabled: testHooksEnabled,
+                registryCapabilities: model.platformRegistry.capabilities
+            ))
         ) { [weak self] message, reply in
             self?.handle(message, reply: reply)
         }

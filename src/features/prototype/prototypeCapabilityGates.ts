@@ -14,6 +14,7 @@ import {
   prototypeStackTransitionsUnsupportedMessage,
 } from "./prototypeStackTransitions";
 import {
+  PROTOTYPE_PAGER_STATE_KEY_CAPABILITY,
   PROTOTYPE_TIMERS_CAPABILITY,
   PROTOTYPE_EFFECTS_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
@@ -222,6 +223,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_FLOW_GRID_CAPABILITY,
     fields: prototypeFlowGridFields,
     unsupportedMessage: prototypeFlowGridUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_PAGER_STATE_KEY_CAPABILITY,
+    fields: (spec) => prototypePagerOptionFields(spec, ["stateKey"]),
+    unsupportedMessage: (fields, platform) =>
+      `The connected ${platform === "ios" ? "iOS prototype agent" : "CtrlProxy"} does not advertise prototype_pager_state_key_v1 required by ${fields[0]}. Nothing was shown. ${platform === "ios" ? "Relaunch with launchApp prototype: true" : "Update CtrlProxy"}, or remove pager.stateKey.`,
   },
   {
     capability: PROTOTYPE_PAGER_OPTIONS_CAPABILITY,

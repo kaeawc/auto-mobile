@@ -115,7 +115,7 @@ enum PrototypeStateValidator {
             ) : nil
         case "radioGroup", "segmentedButton", "select":
             return radioGroupError(node, stored)
-        case "tabBar", "bottomNav":
+        case "pager", "tabBar", "bottomNav":
             guard let number = stored?.numberValue, number.isFinite, number >= 0,
                   number.truncatingRemainder(dividingBy: 1) == 0
             else { return .init(field: "stateKey", message: "Selection requires a nonnegative integer state key")

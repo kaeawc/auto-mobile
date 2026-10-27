@@ -187,6 +187,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLazyList.validate(root: raw, data: data, state: menuState)
         let rawDerive = try derive.map { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode($0)) }
         try PrototypeDerivedValidator.validate(derive: rawDerive, root: raw, data: data)
+        try PrototypePagerOptions.validateStateKeys(raw, state: menuState)
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeRequestValidator.validate(raw, state: menuState)

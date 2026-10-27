@@ -9486,6 +9486,12 @@
               },
               "optional": true
             },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "onAppear": {
               "optional": true,
               "rule": {

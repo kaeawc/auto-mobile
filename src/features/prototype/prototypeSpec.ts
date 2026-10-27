@@ -602,6 +602,7 @@ const pagerBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["pager"]),
+    stateKey: stateKeySchema.optional(),
     id: z.string().min(1),
     axis: z.enum(["horizontal", "vertical"]).optional(),
     pageSpacing: pagerDpSchema.optional(),

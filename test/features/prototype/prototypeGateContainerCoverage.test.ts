@@ -64,6 +64,7 @@ const fixtures: Record<string, Node> = {
     leadingIcon: "search",
   },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
+  prototype_pager_state_key_v1: { type: "pager", stateKey: "page", children: [label] },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
   prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },

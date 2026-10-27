@@ -470,11 +470,11 @@ class PrototypeRuntime(
       } catch (error: Exception) {
         return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
       }
-    val changed =
-      (before.state.keys + spec.state.orEmpty().keys).filter {
-        before.state[it] != spec.state.orEmpty()[it]
-      }
     val next = replacementSnapshot(spec)
+    val changed =
+      (before.state.keys + next.state.keys).filter {
+        before.state[it] != next.state[it]
+      }
     // Validate Compose sizes with a disposable mapper so rejected candidates cannot alter the
     // runtime's resolve cache, cached model or renderMappingPasses before the snapshot is
     // committed.
@@ -535,6 +535,7 @@ class PrototypeRuntime(
 
   /** Every accepted state write in one interaction shares a revision, even if a key is restored. */
   private fun writeInteractionSpec(spec: PrototypeSpec) {
+    val spec = normalizePagerState(spec)
     val changed =
       (current.state.keys + spec.state.orEmpty().keys).filter {
         current.state[it] != spec.state.orEmpty()[it]
@@ -546,6 +547,7 @@ class PrototypeRuntime(
     mutableSnapshot.value =
       current.copy(
         spec = current.spec.copy(state = spec.state),
+        pages = boundPages(spec, current.pages),
         revision = revision,
         stateRevisions = current.stateRevisions + changed.associateWith { revision },
       )
@@ -822,9 +824,16 @@ class PrototypeRuntime(
     val count = pagerCounts(current.spec.root)[id] ?: return
     val page = requested.coerceIn(0, count - 1)
     if (current.pages[id] == page) return
+    val key = pagerNodes(current.spec.root)[id]?.stateKey
+    val changed = key != null && current.state[key] != PrototypeScalar.Numeric(page.toDouble())
+    if (key != null && changed)
+      writeInteractionSpec(
+        validated(current.spec, mapOf(key to PrototypeScalar.Numeric(page.toDouble()))),
+      )
     mutableSnapshot.value = current.copy(pages = current.pages + (id to page))
     // Names the pager that moved and its new page, as the iOS agent does (#11409).
     emit(kind = PrototypeEventKind.PAGE_CHANGED, name = id, payload = JsonPrimitive(page))
+    if (key != null && changed) emitStateChange(listOf(key))
   }
 
   private suspend fun deadTap(tap: PrototypeInteraction.DeadTap) {
@@ -932,7 +941,7 @@ class PrototypeRuntime(
   /** [from] with [values] written, or [IllegalArgumentException] when the result is not valid. */
   private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec =
     PrototypeTrace.section(PrototypeTrace.VALIDATE_STATE_WRITE) {
-      val spec = from.copy(state = from.state.orEmpty() + values)
+      val spec = normalizePagerState(from.copy(state = from.state.orEmpty() + values))
       val validator =
         stateWriteValidator
           ?: PrototypeTrace.section(PrototypeTrace.PREPARE_STATE_WRITES) {
@@ -1668,10 +1677,8 @@ class PrototypeRuntime(
     previousStacks: Map<String, PrototypeStackSnapshot>,
   ) =
     PrototypeRuntimeSnapshot(
-      spec,
-      pagerCounts(spec.root).mapValues { (id, count) ->
-        (previous[id] ?: 0).coerceIn(0, count - 1)
-      },
+      normalizePagerState(spec),
+      boundPages(spec, previous),
       stacks =
         stackNodes(spec.root).mapValues { (id, node) ->
           val path =
@@ -1687,6 +1694,33 @@ class PrototypeRuntime(
   init {
     platform.registry.modules.forEach { publishModuleState(it.name, it.state.value) }
   }
+}
+
+private fun pagerNodes(root: PrototypeNode): Map<String, PrototypePagerNode> = buildMap {
+  fun visit(node: PrototypeNode) {
+    if (node is PrototypePagerNode) put(node.id, node)
+    prototypeDescendants(node).forEach(::visit)
+  }
+  visit(root)
+}
+
+private fun boundPages(spec: PrototypeSpec, previous: Map<String, Int>): Map<String, Int> =
+  pagerNodes(spec.root).mapValues { (id, node) ->
+    val value = node.stateKey?.let { (spec.state?.get(it) as? PrototypeScalar.Numeric)?.value }
+    (value?.coerceIn(0.0, (node.children.size - 1).toDouble())?.toInt() ?: previous[id] ?: 0)
+      .coerceIn(0, node.children.size - 1)
+  }
+
+private fun normalizePagerState(spec: PrototypeSpec): PrototypeSpec {
+  val original = spec.state ?: return spec
+  val state = original.toMutableMap()
+  for ((_, node) in pagerNodes(spec.root)) {
+    val key = node.stateKey ?: continue
+    val value = (state[key] as? PrototypeScalar.Numeric)?.value ?: continue
+    if (value.isFinite() && value % 1.0 == 0.0)
+      state[key] = PrototypeScalar.Numeric(value.coerceIn(0.0, (node.children.size - 1).toDouble()))
+  }
+  return if (state == original) spec else spec.copy(state = state)
 }
 
 private val runtimeJson = Json { classDiscriminator = "type" }

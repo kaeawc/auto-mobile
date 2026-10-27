@@ -21,6 +21,8 @@ internal object PrototypeBundleCapabilities {
     )
       caps.add("prototype_theme_modes_v1")
     for (node in PrototypeBundleSpec.nodes(spec)) {
+      if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
+        caps.add("prototype_pager_state_key_v1")
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
       fields(node, caps)

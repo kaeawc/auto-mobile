@@ -664,6 +664,17 @@ Grid is non-lazy, keeps every child in the hierarchy and never scrolls (authors 
 Row-major placement starts a new row when a span doesn't fit. Optional integer `span >= 1` is valid only
 on a direct grid child and cannot exceed fixed columns; the renderer clamps to the runtime count.
 
+### Pager state binding
+
+`pager.stateKey` requires `prototype_pager_state_key_v1` and a declared nonnegative integer
+number key. Initial and same-id replacing-show state wins over a retained page; indices clamp
+to the page range. Swipes write the key and emit `page_changed` and `change` once; state
+writes, patches, `setPage`, and pager-bound navigation share the selection, animated unless
+`motion: "none"`. Repeated settled reports are silent. A tab bar can share the key; two
+pagers sharing it and pager bindings inside repeat templates are refused. Indicator rows and
+conditional styles outside the pager can read the key (see the Android prototype UX example).
+Observe continues to expose the current page's nodes.
+
 ### Optional pager layout
 
 Shared contract #12071 adds `axis` (default horizontal), `pageSpacing` (0), strict `peek: {start?, end?}`

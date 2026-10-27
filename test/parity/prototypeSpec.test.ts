@@ -237,10 +237,7 @@ test("worked documentation examples match the shared fixture files", () => {
   const examples = parseDocumentExamples(document);
   expect(examples.length).toBe(4);
   for (let index = 0; index < examples.length; index++) {
-    const fixture = valid.find(
-      (entry) =>
-        entry.name === (index === 3 ? "list-paging.json" : `doc-example-${index + 1}.json`),
-    );
+    const fixture = valid.find((entry) => JSON.parse(entry.json).id === examples[index]?.id);
     expect(fixture).toBeDefined();
     if (!fixture) {
       throw new Error("Missing document fixture");

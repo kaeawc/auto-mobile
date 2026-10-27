@@ -154,6 +154,7 @@ internal object PrototypeSpecInput {
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
       ?: gridSpanErrors(context)
       ?: PrototypeDerivedRules.error(value, context)
+      ?: PrototypeContainerRules.pagerStateKeyErrors(context)
       ?: PrototypeLazyListRules.error(context)
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder

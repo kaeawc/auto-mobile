@@ -66,6 +66,7 @@ enum PrototypeAgentProtocol {
         bottomSheetDragCapability,
         clearStorageRequest,
         storageCapability,
+        "prototype_pager_state_key_v1",
         timersCapability,
         "prototype_platform_v1",
         "prototype_platform_device_v1",

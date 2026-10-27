@@ -339,7 +339,7 @@ function selectionErrors(
 ): PrototypeValidationError | undefined {
   if (
     typeof value.stateKey !== "string" ||
-    (value.type !== "tabBar" && value.type !== "bottomNav")
+    (value.type !== "tabBar" && value.type !== "bottomNav" && value.type !== "pager")
   ) {
     return undefined;
   }

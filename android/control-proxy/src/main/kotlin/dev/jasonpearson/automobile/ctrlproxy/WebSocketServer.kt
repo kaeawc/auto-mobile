@@ -419,6 +419,7 @@ class WebSocketServer(
     // A spec's storage block is kept across shows, inspect reports the stored keys and
     // clear_prototype_storage wipes them (#12522). Hosts refuse storage without this flag.
     add("prototype_storage_v1")
+    add("prototype_pager_state_key_v1")
     add("prototype_timers_v1")
   }
 

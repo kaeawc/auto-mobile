@@ -91,7 +91,10 @@ extension JSONValue {
 struct PrototypeSession {
     private(set) var spec: PrototypeSpec?
     private(set) var state: [String: JSONValue] = [:] {
-        didSet { if tracksStateRevisions { noteStateWrites(since: oldValue) } }
+        didSet {
+            syncBoundPages()
+            if tracksStateRevisions { noteStateWrites(since: oldValue) }
+        }
     }
 
     /// Off while a show or patch assigns `state` itself: neither is a device write (#11675).
@@ -108,6 +111,7 @@ struct PrototypeSession {
     private var stackRevision = 0
     private var nextStackEntry = 0
     private var stackNodes: [String: PrototypeNode] = [:]
+    private var pagerKeys: [String: String] = [:]
     private(set) var pageCounts: [String: Int] = [:]
     /// Keys whose errors have been revealed by change, blur or a failed guard.
     private(set) var shownErrors: Set<String> = []
@@ -245,7 +249,7 @@ struct PrototypeSession {
         // Stored values (#12526) arrive already applied by `PrototypeStorageCoordinator.prepare`, before
         // the first draw; restoring is not a change, so no event is emitted and no revision moves.
         tracksStateRevisions = false
-        state = restoredState ?? spec.state ?? [:]
+        state = clampedPagerState(restoredState ?? spec.state ?? [:])
         tracksStateRevisions = true
         // Every show is one device revision, as on Android's `PrototypeController.nextRevision` (#13040,
         // #11675): the first show reports 1, a re-show moves it on and none rewinds it. The spec's own
@@ -297,9 +301,27 @@ struct PrototypeSession {
                 stackChanges[id] = PrototypeStackChange(direction: .reset, transition: .none, revision: stackRevision)
             }
         }
+        pagerKeys = root.pagerStateKeys()
         pageCounts = root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
             result[entry.key] = min(max(previous[entry.key] ?? 0, 0), max(entry.value - 1, 0))
+        }
+    }
+
+    private func clampedPagerState(_ values: [String: JSONValue]) -> [String: JSONValue] {
+        var values = values
+        for (pager, key) in pagerKeys {
+            guard let value = values[key]?.numberValue, value.isFinite,
+                  value.rounded(.towardZero) == value, let count = pageCounts[pager] else { continue }
+            values[key] = .number(min(max(value, 0), Double(max(count - 1, 0))))
+        }
+        return values
+    }
+
+    private mutating func syncBoundPages() {
+        for (pager, key) in pagerKeys {
+            guard let value = state[key]?.numberValue, value.isFinite, let count = pageCounts[pager] else { continue }
+            pages[pager] = Int(min(max(value, 0), Double(max(count - 1, 0))))
         }
     }
 
@@ -424,6 +446,7 @@ struct PrototypeSession {
     private func applying(_ own: [(String, JSONValue)]) -> (state: [String: JSONValue], moved: [String]) {
         var written = state
         own.forEach { written[$0.0] = $0.1 }
+        written = clampedPagerState(written)
         var seen = Set<String>()
         let moved = own.map(\.0).filter { state[$0] != written[$0] && seen.insert($0).inserted }
         return (written, moved)
@@ -446,8 +469,9 @@ struct PrototypeSession {
             if action.type == "dismiss" { break }
             guard let write = stateWrite(action, in: planned) else { continue }
             planned[write.key] = write.value
+            planned = clampedPagerState(planned)
             guard accepts(planned) else { return nil }
-            writes[index] = write
+            writes[index] = (write.key, planned[write.key] ?? write.value)
         }
         return writes
     }
@@ -619,11 +643,14 @@ struct PrototypeSession {
         case let .success(result): (patched, newState) = result
         case let .failure(refusal): return (.rejected(message: refusal.message, revision: current), [])
         }
-        let changed = Set(state.keys).union(newState.keys).filter { state[$0] != newState[$0] }.sorted()
+        let beforeState = state
+        rebuildNavigation(for: patched.root, keepingPages: pages, keepingStacks: stacks)
+        let finalState = clampedPagerState(newState)
+        let changed = Set(beforeState.keys).union(finalState.keys).filter { beforeState[$0] != finalState[$0] }.sorted()
         let revision = current + 1
         revisions[id] = revision
         tracksStateRevisions = false
-        state = newState
+        state = finalState
         tracksStateRevisions = true
         for key in changed {
             stateRevisions[key] = revision
@@ -634,8 +661,7 @@ struct PrototypeSession {
         nonStateBytes = max(0, nonStateBytes + structureDelta)
         self.spec = patched
         structureRevision += 1
-        rebuildNavigation(for: patched.root, keepingPages: pages, keepingStacks: stacks)
-        return (.applied(revision: revision), emitStateChange(changed.filter { newState[$0] != nil }))
+        return (.applied(revision: revision), emitStateChange(changed.filter { finalState[$0] != nil }))
     }
 
     /// A `setPage` action: `next`/`prev` step from the current page, a number jumps to it.
@@ -715,8 +741,12 @@ struct PrototypeSession {
         guard isShown, let pageCount = pageCounts[pager], pageCount >= 1 else { return [] }
         let clamped = min(max(target, 0), pageCount - 1)
         guard pages[pager] != clamped else { return [] }
+        let key = pagerKeys[pager]
+        let changed = key.map { state[$0] != .number(Double(clamped)) } ?? false
+        if let key, changed { state[key] = .number(Double(clamped)) }
         pages[pager] = clamped
-        return emit(kind: "page_changed", name: pager, payload: .number(Double(clamped)))
+        let events = emit(kind: "page_changed", name: pager, payload: .number(Double(clamped)))
+        return events + (changed ? emitStateChange(key.map { [$0] } ?? []) : [])
     }
 
     /// The navigation fields shared by show and inspect/status results.
@@ -950,6 +980,19 @@ struct PrototypeSession {
 }
 
 extension PrototypeNode {
+    /// Pager bindings collected through the same child slots as pager counts.
+    func pagerStateKeys() -> [String: String] {
+        var keys: [String: String] = [:]
+        func visit(_ node: PrototypeNode) {
+            if node.type == "pager", let id = node.id, let key = node.stateKey { keys[id] = key }
+            node.children?.forEach(visit)
+            if let child = node.child { visit(child) }
+            node.screens?.values.forEach(visit)
+        }
+        visit(self)
+        return keys
+    }
+
     /// Pager ids and their page counts, so `setPage` can clamp without consulting the view tree.
     func pagerCounts() -> [String: Int] {
         var counts: [String: Int] = [:]

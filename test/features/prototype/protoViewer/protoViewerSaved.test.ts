@@ -373,3 +373,126 @@ test("platform-neutral transport preserves save/open budgets and cancellation", 
     { timeoutMs: 15000, signal: controller.signal },
   ]);
 });
+
+describe("viewer.display on a multi-screen device", () => {
+  const duo = {
+    panels: [
+      { key: "Cover", role: "cover" as const, sizePx: { width: 1206, height: 2622 } },
+      { key: "Inner", role: "inner" as const, sizePx: { width: 1902, height: 1338 } },
+    ],
+    postures: ["closed" as const, "opened" as const],
+  };
+
+  test("names the panel a save and an open landed on from the app's reported screen", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.importResult = {
+      status: "imported",
+      request: "r",
+      libraryId: LIBRARY_ID,
+      label: "Demo",
+      screen: "1338x1902",
+    };
+    device.openResult = {
+      status: "opened",
+      request: "r",
+      libraryId: LIBRARY_ID,
+      label: "Demo",
+      screen: "1206x2622",
+    };
+    const saved = await routeToProtoViewer(
+      { action: "save", spec },
+      { ...deps(device), displays: duo },
+    );
+    expect(saved?.viewer?.display).toEqual({ key: "Inner", role: "inner" });
+    const opened = await routeToProtoViewer(
+      { action: "open", id: LIBRARY_ID },
+      { ...deps(device), displays: duo },
+    );
+    expect(opened?.viewer?.display).toEqual({ key: "Cover", role: "cover" });
+  });
+
+  test("omits display for a single-screen device, an old app, or an ambiguous size", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.importResult = {
+      status: "imported",
+      request: "r",
+      libraryId: LIBRARY_ID,
+      label: "Demo",
+      screen: "1206x2622",
+    };
+    const single = { panels: [duo.panels[0]], postures: ["unknown" as const] };
+    const twins = {
+      panels: [duo.panels[0], { ...duo.panels[0], key: "Other" }],
+      postures: ["unknown" as const],
+    };
+    for (const displays of [undefined, single, twins]) {
+      const output = await routeToProtoViewer(
+        { action: "save", spec },
+        { ...deps(device), displays },
+      );
+      expect(output?.success).toBe(true);
+      expect(output?.viewer).toEqual({ app: "protoviewer", libraryId: LIBRARY_ID, label: "Demo" });
+    }
+    device.importResult = {
+      status: "imported",
+      request: "r",
+      libraryId: LIBRARY_ID,
+      label: "Demo",
+    };
+    const old = await routeToProtoViewer(
+      { action: "save", spec },
+      { ...deps(device), displays: duo },
+    );
+    expect(old?.viewer?.display).toBeUndefined();
+  });
+});
+
+describe("requested display on a multi-screen device", () => {
+  const duo = {
+    panels: [
+      { key: "Cover", role: "cover" as const, sizePx: { width: 1206, height: 2622 } },
+      { key: "Inner", role: "inner" as const, sizePx: { width: 1902, height: 1338 } },
+    ],
+    postures: ["closed" as const, "opened" as const],
+  };
+  const openedOn = (screen?: string) => {
+    const device = new FakeProtoViewerDevice();
+    device.openResult = {
+      status: "opened",
+      request: "r",
+      libraryId: LIBRARY_ID,
+      label: "Demo",
+      ...(screen ? { screen } : {}),
+    };
+    return device;
+  };
+
+  test("warns when the panel it landed on is not the requested one", async () => {
+    const out = await routeToProtoViewer(
+      { action: "open", id: LIBRARY_ID, display: "inner" },
+      { ...deps(openedOn("1206x2622")), displays: duo },
+    );
+    expect(out?.success).toBe(true);
+    expect(out?.warning).toContain(PROTOVIEWER_IMPORTED_WARNING);
+    expect(out?.warning).toContain('display "inner" was not applied');
+    expect(out?.warning).toContain("cover panel (Cover)");
+  });
+
+  test("stays quiet when the requested panel matches by role or key, or is active", async () => {
+    for (const display of ["cover", "Cover", "active", undefined]) {
+      const out = await routeToProtoViewer(
+        { action: "open", id: LIBRARY_ID, display },
+        { ...deps(openedOn("1206x2622")), displays: duo },
+      );
+      expect(out?.warning).toBe(PROTOVIEWER_IMPORTED_WARNING);
+    }
+  });
+
+  test("says the panel was unconfirmed when the app did not report one", async () => {
+    const out = await routeToProtoViewer(
+      { action: "open", id: LIBRARY_ID, display: "inner" },
+      { ...deps(openedOn()), displays: duo },
+    );
+    expect(out?.warning).toContain("did not report which one");
+  });
+});

@@ -6,8 +6,8 @@ import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import type { Clock } from "../attestationSchema";
 import { parseEnvelope } from "../attestationSchema";
 import { GitTreeProbe } from "../gitTreeProbe";
-import { arch, platform } from "node:os";
 import { LaneInputHasher } from "../produceAttestations";
+import { CI_TARGET_ENV, CI_TARGET_PLATFORM } from "../tier1InputHash";
 import { GitHubAppTokenProvider, type AppAuthOptions } from "../transport/appAuth";
 import { loadTransportConfigFromEnv } from "../transport/config";
 import { AttestationServiceClient } from "../transport/serviceClient";
@@ -166,9 +166,13 @@ export function gitTreeInputHasher(exec: Exec = execFileAsync): InputHasher {
         repoRoot,
       );
       const lane = ({ 1: "node", 2: "android", 3: "ios" } as const)[tier];
+      const target = CI_TARGET_PLATFORM[lane];
+      // The target job's platform and declared variables, not the gate's own: a gate on a Linux
+      // runner hashes for the macOS iOS jobs as those jobs would, and Bun's version is the one the
+      // jobs install from the same setup, which the gate shares.
       const input = await new LaneInputHasher(
-        { os: platform(), arch: arch(), bunVersion: process.versions.bun ?? null },
-        process.env,
+        { ...target, bunVersion: process.versions.bun ?? null },
+        CI_TARGET_ENV[lane],
       ).hash(lane, probe);
       return { treeHash, inputHash: input.hash };
     },

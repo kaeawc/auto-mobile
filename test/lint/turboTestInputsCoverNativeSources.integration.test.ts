@@ -719,6 +719,22 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       "same xcodegen drift fixture, copied into a temp repo",
     ],
     [
+      "android/build.gradle.kts",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
+    ],
+    [
+      "android/gradle/libs.versions.toml",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
+    ],
+    [
+      "android/gradle/wrapper/gradle-wrapper.properties",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
+    ],
+    [
+      "ios/Playground/project.yml",
+      "attestation input-hash fixture entry (a path string hashed with a fake blob id), not read from disk",
+    ],
+    [
       "ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Plans/launch-reminders-app.yaml",
       "plan contract reads a YAML fixture; no native source tree is read",
     ],

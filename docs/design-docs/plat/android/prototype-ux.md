@@ -60,7 +60,7 @@ blanket focusability proposal).
 | `window`  | Required window configuration below.                                                                                   |
 | `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
 | `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
-| `motion`  | Optional `none` or `standard` (default). See Motion below.                                                             |
+| `motion`  | Optional `none`, `reduced` or `standard` (default). See Motion below.                                                  |
 | `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
 | `root`    | Required single node.                                                                                                  |
 
@@ -371,6 +371,7 @@ Every node has required `type`. All other common properties are optional:
 | `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
 | `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
 | `transition`         | Except on stacks (see Stack transitions), optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
+| `sharedKey`          | Optional opaque key naming this `visibleWhen` node as the same element as one other node. See Shared element morphs.                         |
 | `anchor`             | Bounds or app-element anchor below.                                                                                                          |
 | `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
@@ -798,6 +799,66 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Motion profiles (#15115, `prototype_reduced_motion_v1`)
+
+Motion runs in one of three profiles, decided identically on both platforms from the spec's
+`motion` and the system setting:
+
+| Profile   | Chosen when                                                                                                            | Behaviour                                                                                                                                                                                                                                     |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `full`    | Neither of the rows below applies.                                                                                     | Every animation described in this section.                                                                                                                                                                                                    |
+| `reduced` | `motion: "reduced"`, or on iOS system Reduce Motion.                                                                   | Spatial animations (slide, expand and shrink, scale, container size, `pressScale`, swipe-row and stack slides, shared element morphs) become crossfades or snap. Loops (shimmer, indeterminate progress) rest. Color and alpha still animate. |
+| `off`     | `motion: "none"`, or on Android animator duration scale 0 or transition animation scale 0 (read from Settings.Global). | Everything is instant.                                                                                                                                                                                                                        |
+
+`none` wins over `reduced`, and a system `off` wins over both. Android has no system reduced
+setting, so there `reduced` comes from the spec alone; both scales are observed while the prototype
+is shown. On iOS the system Reduce Motion setting selects `reduced` rather than `off`, so a Reduce
+Motion run shows crossfades; `motion: "none"` is still fully instant. `motion: "reduced"` needs
+`prototype_reduced_motion_v1`, which the host checks before showing.
+
+### Shared element morphs (#15115, `prototype_shared_element_v1`)
+
+`sharedKey` names two `visibleWhen` nodes as one element, so swapping them morphs the first into
+the second (a list row into a detail card, a thumbnail into a viewer):
+
+```json
+{
+  "state": { "open": false },
+  "root": {
+    "type": "box",
+    "children": [
+      {
+        "type": "row",
+        "sharedKey": "album",
+        "visibleWhen": { "key": "open", "equals": false },
+        "onTap": [{ "type": "setState", "key": "open", "value": true }],
+        "children": [{ "type": "text", "text": "Album" }]
+      },
+      {
+        "type": "card",
+        "sharedKey": "album",
+        "visibleWhen": { "key": "open", "equals": true },
+        "onTap": [{ "type": "setState", "key": "open", "value": false }],
+        "children": [{ "type": "text", "text": "Album" }]
+      }
+    ]
+  }
+}
+```
+
+Rules, enforced by every validator with exact paths: `sharedKey` is a key (same grammar as state
+keys) and is allowed only on a node that also has `visibleWhen`; each key is used by exactly two
+nodes, neither inside the other; a spec has at most 16 distinct keys; keys are rejected on a
+`repeat` node and anywhere inside its template. Shared elements across pager pages and `stack`
+screens are not supported.
+
+Under `full`, bounds, size and crossfaded content animate from one node to the other. Android wraps
+the prototype in a `SharedTransitionLayout` only when a spec has a key and applies `sharedBounds`
+(not `sharedElement`: the two nodes differ in content); the morph runs on the `visibleWhen`
+transition, so it counts in the motion-active signal. Under `reduced` the pair crossfades in place
+and under `off` it swaps instantly. A pair that is visible at the same time does not morph.
+`sharedKey` needs `prototype_shared_element_v1`, which the host checks before showing.
+
 ### Motion-active signal (#15114)
 
 Fades and scales change no node, so two identical hierarchy reads do not prove a
@@ -839,8 +900,8 @@ is validated by both agents, and both advertise the capability.
 
 Android slides enter from the end edge with 30% outgoing parallax, mirrored in RTL; pop and
 popToRoot reverse that direction. Platform replace crossfades. Animations finish within 300 ms.
-`motion: "none"` and animator duration scale 0 snap immediately. The reduced-motion composition
-hook changes slides to crossfades; system preference wiring is deferred to #15115.
+`motion: "none"` and animator duration scale 0 snap immediately. The reduced profile (see Motion
+profiles) changes slides to crossfades.
 
 Activity hosts scrub the pop with predictive back on API 34+, settle on commit, and restore the
 current screen on cancellation. Earlier APIs pop with the ordinary animation. Overlay windows

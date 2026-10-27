@@ -182,6 +182,7 @@
         let layer: PrototypeHostLayer
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.layoutDirection) private var layoutDirection
+        @Namespace private var sharedNamespace
         @State private var swipe = PrototypeStackSwipeState()
         @GestureState private var swipeActive = false
 
@@ -261,6 +262,7 @@
             }
             // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
             .environment(\.colorScheme, palette.dark ? .dark : .light)
+            .environment(\.prototypeSharedNamespace, sharedNamespace)
             .environment(\.prototypePalette, palette)
             .environment(\.prototypeTypography, PrototypeTypography(theme: model.spec?.theme?.typography))
             .environment(\.prototypeShapes, PrototypeShapes(theme: model.spec?.theme?.shapes))
@@ -313,7 +315,10 @@
         private func cancelEdgeSwipe() {
             swipe.cancel()
             guard model.stackDrag?.settling != true else { return }
-            withAnimation(.easeOut(duration: 0.2)) { model.stackDrag = nil }
+            withAnimation(
+                PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
+                    ? .easeOut(duration: 0.2) : nil
+            ) { model.stackDrag = nil }
         }
 
         private func edgeSwipeEnded(_ value: DragGesture.Value) {

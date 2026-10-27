@@ -4789,6 +4789,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -4865,6 +4871,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -4957,6 +4969,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -5103,6 +5121,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5191,6 +5215,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -5313,6 +5343,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5395,6 +5431,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -5503,6 +5545,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5607,6 +5655,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5707,6 +5761,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -5821,6 +5881,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5909,6 +5975,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -8657,6 +8729,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -8773,6 +8851,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -8879,6 +8963,12 @@
       {
         "name": "span",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -9003,6 +9093,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9115,6 +9211,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9211,6 +9313,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -9319,6 +9427,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9401,6 +9515,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -9505,6 +9625,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -9635,6 +9761,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9745,6 +9877,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9827,6 +9965,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -10001,6 +10145,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10117,6 +10267,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -10333,6 +10489,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10427,6 +10589,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -10573,6 +10741,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10695,6 +10869,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10777,6 +10957,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -10929,6 +11115,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11051,6 +11243,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11149,6 +11347,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11219,6 +11423,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -11349,6 +11559,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11459,6 +11675,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11547,6 +11769,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -11733,6 +11961,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11881,6 +12115,12 @@
         "hasDefault": true
       },
       {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "text",
         "type": "string",
         "nullable": false,
@@ -11957,6 +12197,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       },

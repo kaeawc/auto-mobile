@@ -181,6 +181,7 @@ export const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
+  sharedKey: keySchema.optional(),
   ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -851,7 +852,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
-    motion: z.enum(["none", "standard"]).optional(),
+    motion: z.enum(["none", "standard", "reduced"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),

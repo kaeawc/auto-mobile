@@ -382,8 +382,8 @@ transition as a real tap, including on part identifiers.
   `platform`; push/replace overrides take precedence. Platform and slide pushes enter from trailing
   over a 30% parallax-shifted outgoing screen; pop and pop-to-root reverse this, mirrored for RTL.
   Platform replace crossfades; explicit fade crossfades and none is instant. Animations use a
-  deterministic 0.35-second ease-out. Spec `motion: "none"` is instant; system Reduce Motion maps
-  slide to crossfade. Session-only change direction, transition and stable entry identities leave
+  deterministic 0.35-second ease-out. Spec `motion: "none"` is instant; the reduced profile (Reduce Motion
+  or `motion: "reduced"`) maps slide to crossfade. Session-only change direction, transition and stable entry identities leave
   wire stack snapshots unchanged. Reload resets presentation without animation.
   A simultaneous drag beginning within 20 points of the leading window edge scrubs eligible slides,
   including parallax and dimming. Release commits past half width or when predicted end translation
@@ -397,8 +397,21 @@ transition as a real tap, including on part identifiers.
 - **Motion** matches Android (#10442, #10439): `visibleWhen` nodes fade/expand, `transition`
   (`none`, `fade`, `expand`, `slide`) picks the animation, pager changes animate. `box`/`row`/`column`
   animate size (`animateContentSize`) when a direct child appears, disappears or resolves a new
-  width/height, scoped to `PrototypeNode.containerLayoutSignature` so typing does not animate. Spec
-  `motion: "none"` or Reduce Motion makes changes instant.
+  width/height, scoped to `PrototypeNode.containerLayoutSignature` so typing does not animate. Motion runs
+  in the three profiles of the Android design (`PrototypeMotion.profile`: `full`, `reduced`, `off`).
+  Spec `motion: "none"` is instant. System Reduce Motion (`UIAccessibility.isReduceMotionEnabled`), the cross-fade preference
+  (`prefersCrossFadeTransitions`, iOS 14+) and spec `motion: "reduced"` select
+  `reduced`, never `off` (#15244; read through `PrototypeAccessibilityProviding`, faked in tests): `visibleWhen` transitions other than `none` become crossfades, container size, press
+  scale and swipe-row settles snap, and progress indicators and shimmer rest, while alpha and color
+  animations continue (`prototype_reduced_motion_v1`).
+- **Shared elements** (`prototype_shared_element_v1`, #15115): the two `visibleWhen` nodes sharing a
+  `sharedKey` use `matchedGeometryEffect(id:in:isSource:)` with one `@Namespace` per hosting root,
+  under `full` only; `PrototypeSharedElementPlan` decides per node. `reduced` crossfades the pair
+  and `off` swaps it. A pair split across hosting roots (for example a node anchored to another
+  window layer) does not match geometry.
+  The row-to-card spec in `prototype-ux.md` (Shared element morphs) is the worked example for both
+  platforms. Turning Reduce Motion on in the simulator (the `reduceMotion` display setting) gives
+  its crossfade; Android animation scales of 0 give the instant swap.
 
 ### Dismiss control
 

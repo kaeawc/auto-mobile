@@ -48,7 +48,7 @@ enum PrototypeKeyboardLift {
     /// Seconds to animate a lift change: the keyboard's own duration, or nil (instant) under spec
     /// `motion: "none"` or Reduce Motion, or when the keyboard reports none.
     static func animationDuration(keyboardDuration: Double?, motion: PrototypeMotion) -> Double? {
-        guard motion.enabled, let keyboardDuration, keyboardDuration > 0 else { return nil }
+        guard motion.spatial, let keyboardDuration, keyboardDuration > 0 else { return nil }
         return keyboardDuration
     }
 }

@@ -100,7 +100,9 @@ private fun Modifier.animatedTransform(
   scale: Float,
   rotation: Float,
 ): Modifier {
-  val spec = prototypeStyleAnimation<Float>(animate)
+  val spec =
+    if (LocalPrototypeMotionProfile.current != PrototypeMotionProfile.FULL) snap<Float>()
+    else prototypeStyleAnimation<Float>(animate)
   val animatedX = animateFloatAsState(x, spec, label = "prototypeX")
   val animatedY = animateFloatAsState(y, spec, label = "prototypeY")
   val animatedScale = animateFloatAsState(scale, spec, label = "prototypeScale")

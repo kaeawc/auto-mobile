@@ -1,4 +1,5 @@
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
+import { prototypeSharedElementError } from "./prototypeSharedElement";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -858,6 +859,7 @@ function validateValue(
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
+    prototypeSharedElementError(context.nodes) ??
     layoutErrors(value, context, repeats) ??
     behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {

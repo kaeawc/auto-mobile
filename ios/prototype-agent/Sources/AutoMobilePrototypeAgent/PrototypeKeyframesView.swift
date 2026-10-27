@@ -96,10 +96,16 @@
         {
             // A trigger during a play resets from zero, rather than continuing the interrupted phase.
             MoveKeyframe(initial(name))
+            // KeyframeTrackContentBuilder has no `for`: the contract allows at most 8 points (7 segments).
             if let track = tracks[name] {
-                for index in 1 ..< PrototypeKeyframes.points(track).count {
-                    segment(track, index)
-                }
+                let count = PrototypeKeyframes.points(track).count
+                if count > 1 { segment(track, 1) }
+                if count > 2 { segment(track, 2) }
+                if count > 3 { segment(track, 3) }
+                if count > 4 { segment(track, 4) }
+                if count > 5 { segment(track, 5) }
+                if count > 6 { segment(track, 6) }
+                if count > 7 { segment(track, 7) }
             } else {
                 MoveKeyframe(0)
             }

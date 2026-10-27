@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import type { LockOwnerGenerationVerdict } from "../utils/fileLock";
 import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -18,6 +19,8 @@ export interface DeviceClaim {
   /** The owning process's generation token, so a reused PID is not mistaken for the owner. */
   processGenerationToken?: string;
   sessionUuid?: string;
+  /** The owner's control-socket record, in the claim files' format, for liveness probes. */
+  metadata?: string;
   claimedAtMs: number;
   updatedAtMs: number;
 }
@@ -48,12 +51,17 @@ export interface DeviceClaims {
  */
 export interface DeviceClaimMirror {
   /**
+   * The table's row for `deviceId`, when one exists and its owner is not a reused PID. Undefined
+   * when no registry is open: readers then fall back to the claim files.
+   */
+  read?(deviceId: string): Promise<DeviceClaim | undefined>;
+  /**
    * `stillHeld` re-checks the claim file before any later write of this claim (a retry, a backfill):
    * a daemon whose claim another daemon took over is never told, and must not write it back.
    */
   claimed(
     deviceId: string,
-    owner: { pid: number; ownerToken: string },
+    owner: { pid: number; ownerToken: string; metadata?: string },
     stillHeld?: () => boolean,
   ): void;
   released(deviceId: string, owner: { pid: number; ownerToken: string }): void;
@@ -66,6 +74,8 @@ export interface StoreDeviceClaimMirrorOptions {
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   daemonSessionId?: string;
   generationOf?: (pid: number) => string | undefined;
+  /** Whether `recorded` still names `pid`'s process generation; a reused PID reads "different". */
+  generationVerdict?: (pid: number, recorded: string) => LockOwnerGenerationVerdict;
   /** Delay before the nth retry of a device's write; its length bounds the retries. */
   retryDelaysMs?: readonly number[];
 }
@@ -75,7 +85,7 @@ export const DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS: readonly number[] = [
   1_000, 5_000, 30_000, 120_000, 300_000,
 ];
 
-type MirrorOwner = { pid: number; ownerToken: string };
+type MirrorOwner = { pid: number; ownerToken: string; metadata?: string };
 
 interface MirrorIntent {
   kind: "claim" | "release";
@@ -126,6 +136,22 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
 
   released(deviceId: string, owner: MirrorOwner): void {
     this.record(deviceId, { kind: "release", owner, claimedAtMs: this.options.timer.now() });
+  }
+
+  async read(deviceId: string): Promise<DeviceClaim | undefined> {
+    const row = await this.options.store()?.get(this.options.platform, deviceId);
+    if (!row) {
+      return undefined;
+    }
+    if (row.processGenerationToken !== undefined) {
+      const verdict =
+        this.options.generationVerdict?.(row.pid, row.processGenerationToken) ??
+        defaultLockOwnerGenerationProbe.compare(row.pid, row.processGenerationToken);
+      if (verdict === "different") {
+        return undefined;
+      }
+    }
+    return row;
   }
 
   /**
@@ -252,6 +278,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
       pid: intent.owner.pid,
       ownerToken: intent.owner.ownerToken,
       ...(processGenerationToken === undefined ? {} : { processGenerationToken }),
+      ...(intent.owner.metadata === undefined ? {} : { metadata: intent.owner.metadata }),
       claimedAtMs: intent.claimedAtMs,
       updatedAtMs: nowMs,
     });

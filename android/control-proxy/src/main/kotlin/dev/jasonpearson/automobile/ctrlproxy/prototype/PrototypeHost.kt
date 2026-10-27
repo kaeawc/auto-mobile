@@ -177,6 +177,8 @@ interface PrototypeHost {
   /** Changes Back focusability without changing text-field or keyboard state. */
   suspend fun setStackBackEnabled(enabled: Boolean): Boolean
 
+  suspend fun <T> readClipboard(read: () -> T): T = read()
+
   /**
    * Removes immediately, allowing the app to regain focus. A window already detached counts as
    * removed; other failed removals are retryable.
@@ -292,6 +294,7 @@ class DefaultPrototypeHost(
   private var destroyed = false
   private val gestureMutex = Mutex()
   private val captureMutex = Mutex()
+  private val clipboardMutex = Mutex()
 
   override val isHiddenForCapture: Boolean
     get() = window?.view?.visibility == View.INVISIBLE
@@ -565,6 +568,33 @@ class DefaultPrototypeHost(
     val applied = relayoutOnMain(current)
     if (applied) current.back.sync(current.request.focusable) else current.request = previous
     applied
+  }
+
+  override suspend fun <T> readClipboard(read: () -> T): T = clipboardMutex.withLock {
+    val current = mainThread.onMain { window } ?: throw SecurityException("No foreground prototype")
+    val previous = current.request.hasStackBack
+    val wasFocusable = mainThread.onMain { current.view.isFocusableInTouchMode }
+    try {
+      if (!setStackBackEnabled(true)) throw SecurityException("Clipboard focus unavailable")
+      mainThread.onMain {
+        if (!current.view.hasWindowFocus()) {
+          current.view.isFocusableInTouchMode = true
+          current.view.requestFocus()
+        }
+      }
+      frames.awaitFrames(2)
+      mainThread.onMain {
+        if (!current.view.hasWindowFocus()) throw SecurityException("Clipboard focus unavailable")
+        read()
+      }
+    } finally {
+      kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+        if (mainThread.onMain { window === current }) {
+          setStackBackEnabled(previous)
+          mainThread.onMain { current.view.isFocusableInTouchMode = wasFocusable }
+        }
+      }
+    }
   }
 
   /** Still focused here: ask the keyboard to go before the window stops being focusable. */

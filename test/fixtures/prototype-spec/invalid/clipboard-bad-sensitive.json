@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "clipboard",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Clipboard",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "clipboard.copy",
+          "args": {
+            "text": {
+              "value": "ok"
+            },
+            "sensitive": {
+              "value": "yes"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.sensitive.value",
+  "expectedMessage": "Invalid boolean value"
+}

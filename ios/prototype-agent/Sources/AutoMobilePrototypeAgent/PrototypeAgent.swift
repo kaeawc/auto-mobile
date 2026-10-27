@@ -170,7 +170,7 @@ final class PrototypeAgent: NSObject {
     let model: PrototypeModel
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
-    init(mode: PrototypeLifecycleMode = .session, registry: PrototypePlatformRegistry = .empty) {
+    init(mode: PrototypeLifecycleMode = .session, registry: PrototypePlatformRegistry = .system) {
         // No concrete permission-needing modules are approved for injection yet (#14289).
         model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked(), registry: registry)
         outbox = PrototypeEventOutbox(mode: mode)

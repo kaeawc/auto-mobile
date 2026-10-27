@@ -18,6 +18,10 @@ import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
  * per module). Runtime dispatch lives on the devices (#14295, #14296).
  */
 
+/** Maximum UTF-8 bytes copied to or returned from the clipboard. */
+export const MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES =
+  contract.limits.MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES;
+
 /** The emit-kind event name a finished platform call is reported under. */
 export const PROTOTYPE_PLATFORM_EVENT_NAME = "prototype_platform";
 /** The emit-kind event name a delivered platform event is reported under. */
@@ -159,6 +163,13 @@ const OPAQUE_KEYS = new Set(["payload", "repeat"]);
 
 /** The constructs `object` is itself: a call, a `{platform}` read or an `{event}` binding. */
 function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+  if (object.type === "pasteButton") {
+    uses.push({
+      kind: "call",
+      path,
+      action: { type: "platform", call: "clipboard.paste", into: object.into },
+    });
+  }
   if (object.type === "platform" && typeof object.call === "string") {
     uses.push({ kind: "call", path, action: object });
   }

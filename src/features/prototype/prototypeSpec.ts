@@ -343,6 +343,13 @@ const checkboxBaseSchema = z
     label: z.string().min(1).optional(),
   })
   .strict();
+const pasteButtonBaseSchema = z
+  .object({
+    ...z.object(commonNodeShape).omit({ onTap: true }).shape,
+    type: z.enum(["pasteButton"]),
+    into: pointerSchema,
+  })
+  .strict();
 const buttonBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -680,6 +687,7 @@ export type PrototypeNode =
   | (z.infer<typeof searchBarBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
+  | z.infer<typeof pasteButtonBaseSchema>
   | z.infer<typeof buttonBaseSchema>
   | z.infer<typeof radioGroupBaseSchema>
   | z.infer<typeof selectBaseSchema>
@@ -759,6 +767,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       searchBarBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       switchBaseSchema,
       checkboxBaseSchema,
+      pasteButtonBaseSchema,
       buttonBaseSchema,
       radioGroupBaseSchema,
       selectBaseSchema,
@@ -876,6 +885,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "switch",
   "checkbox",
   "button",
+  "pasteButton",
   "radioGroup",
   "select",
   "listItem",

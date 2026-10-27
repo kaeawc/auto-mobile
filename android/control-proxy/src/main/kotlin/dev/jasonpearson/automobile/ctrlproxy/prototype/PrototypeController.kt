@@ -278,7 +278,15 @@ class PrototypeController(
 
   // Mutations run under mutex; readers and capture use an immutable ordered snapshot.
   @Volatile private var surfaces: Map<String, Surface> = emptyMap()
+
   // Retained for existing single-surface callers/tests, now a view of the most recent surface.
+  internal suspend fun <T> readClipboard(read: () -> T): T {
+    val surface =
+      surfaces.values.lastOrNull { it.runtime.current.active && !it.foreground.suspended }
+        ?: throw SecurityException("No foreground prototype")
+    return surface.host.readClipboard(read)
+  }
+
   internal val activeRuntime: PrototypeRuntime?
     get() = surfaces.values.lastOrNull { it.runtime.current.active }?.runtime
 

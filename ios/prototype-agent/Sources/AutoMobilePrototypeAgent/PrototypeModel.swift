@@ -244,7 +244,7 @@
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
             storage: PrototypeStorageCoordinator? = nil,
-            registry: PrototypePlatformRegistry = .empty
+            registry: PrototypePlatformRegistry = .system
         ) {
             platformRegistry = registry
             self.clock = clock
@@ -432,6 +432,10 @@
 
         func swipeClosed(_ node: PrototypeNode) {
             swipe.closed(ObjectIdentifier(node))
+        }
+
+        func paste(_ text: String, into: String) {
+            apply { $0.pasteClipboard(text, into: into) }
         }
 
         func run(_ actions: [PrototypeAction]) {

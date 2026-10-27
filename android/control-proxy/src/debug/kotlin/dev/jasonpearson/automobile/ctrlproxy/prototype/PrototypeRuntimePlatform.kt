@@ -1,7 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.prototype.PrototypePlatform
+import dev.jasonpearson.automobile.prototype.*
 
-/** No permission-needing integrations are registered in the overlay. */
-internal fun prototypeRuntimePlatform(): PrototypePlatform =
-  PrototypePlatform(listOf(dev.jasonpearson.automobile.prototype.TestPlatformModule()))
+internal fun prototypeRuntimePlatform(clipboard: PrototypeClipboard? = null): PrototypePlatform =
+  PrototypePlatform(
+    listOfNotNull(TestPlatformModule(), clipboard?.let { PrototypeClipboardModule(it) }),
+  )

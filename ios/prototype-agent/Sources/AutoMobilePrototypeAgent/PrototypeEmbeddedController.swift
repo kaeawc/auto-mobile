@@ -14,7 +14,7 @@
         init(
             spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption,
             network: PrototypeNetworkConfiguration,
-            registry: PrototypePlatformRegistry = .empty,
+            registry: PrototypePlatformRegistry = .system,
             onEvent: @escaping @MainActor (PrototypeEvent) -> Void,
             onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void,
             onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void

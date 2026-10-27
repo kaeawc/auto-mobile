@@ -9,6 +9,8 @@ enum PrototypePlatformValidator {
     /// A literal `{value}` argument's rule, from the contract's `platformModules` table.
     enum Rule: Equatable {
         case json(maxBytes: Int)
+        case string(empty: Bool, maxBytes: Int)
+        case boolean
         case integer(min: Double, max: Double)
     }
 
@@ -42,9 +44,7 @@ enum PrototypePlatformValidator {
                     let rule = arg["value"]?.objectFields ?? [:]
                     return Argument(
                         optional: arg["optional"] == .bool(true),
-                        rule: rule["kind"] == .string("json")
-                            ? .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
-                            : .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+                        rule: argumentRule(rule)
                     )
                 }
                 func strings(_ key: String) -> [String] {
@@ -60,6 +60,16 @@ enum PrototypePlatformValidator {
                 state: fields["state"]?.objectFields.map { Set($0.keys) }
             )
         }
+
+    private static func argumentRule(_ rule: [String: JSONValue]) -> Rule {
+        switch rule["kind"]?.stringValue {
+        case "json": .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
+        case "string": .string(empty: rule["empty"] == .bool(true),
+                               maxBytes: Int(rule["maxBytes"]?.numberValue ?? Double(Int.max / 2)))
+        case "boolean": .boolean
+        default: .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        }
+    }
 
     static let permissionNames: Set<String> = [
         "camera", "microphone", "location", "locationBackground", "notifications", "photos",
@@ -223,6 +233,14 @@ enum PrototypePlatformValidator {
             }
         case let .object(fields):
             if fields.count == 1, fields["value"] != nil { return }
+            if fields["type"] == .string("pasteButton") {
+                try validateCall(
+                    ["type": .string("platform"), "call": .string("clipboard.paste"), "into": fields["into"] ?? .null],
+                    path: path,
+                    declared: declared,
+                    state: state
+                )
+            }
             if fields["type"] == .string("platform") {
                 try validateCall(fields, path: path, declared: declared, state: state)
             }
@@ -354,6 +372,12 @@ enum PrototypePlatformValidator {
             guard let bytes = try? encoder.encode(literal), bytes.count <= maxBytes else {
                 throw fail(path, "Invalid json value")
             }
+        case let .string(empty, maxBytes):
+            guard let text = literal.stringValue, empty || !text.isEmpty, text.utf8.count <= maxBytes else {
+                throw fail(path, "Invalid string value")
+            }
+        case .boolean:
+            guard literal.boolValue != nil else { throw fail(path, "Invalid boolean value") }
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")

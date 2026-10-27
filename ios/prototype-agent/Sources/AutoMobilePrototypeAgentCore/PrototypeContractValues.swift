@@ -34,6 +34,7 @@ extension PrototypeContractValidator {
                 && (rule["nonblank"] != .bool(true) || !matches("blankText", text))
                 && Double(text.utf16.count) >= (rule["min"]?.numberValue ?? 0)
                 && Double(text.utf16.count) <= (rule["max"]?.numberValue ?? .infinity)
+                && Double(text.utf8.count) <= (rule["maxBytes"]?.numberValue ?? .infinity)
         default: return false
         }
     }

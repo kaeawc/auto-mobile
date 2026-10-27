@@ -735,6 +735,7 @@ struct PrototypeOption: Decodable, Equatable {
 
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
 final class PrototypeNode: Decodable {
+    let into: String?
     let type: String
     let id: String?
     let testTag: String?
@@ -872,7 +873,7 @@ final class PrototypeNode: Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
+        case into, type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -896,6 +897,7 @@ final class PrototypeNode: Decodable {
         type = decodedType
         id = try container.decodeIfPresent(String.self, forKey: .id)
         testTag = try container.decodeIfPresent(String.self, forKey: .testTag)
+        into = try container.decodeIfPresent(String.self, forKey: .into)
         onTap = try container.decodeIfPresent([PrototypeAction].self, forKey: .onTap)
         style = try container.decodeIfPresent(Style.self, forKey: .style)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)

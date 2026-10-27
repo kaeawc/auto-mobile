@@ -68,6 +68,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_storage_v1",
             "prototype_timers_v1",
             "prototype_platform_v1",
+            "prototype_platform_clipboard_v1",
             "prototype_platform_device_v1",
             "advance_prototype_clock",
         ])

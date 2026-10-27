@@ -51,6 +51,7 @@ class CommandAdvertisementTest {
       "prototype_network_device_v1",
       "prototype_platform_v1",
       "prototype_platform_test_v1",
+      "prototype_platform_clipboard_v1",
       "prototype_platform_device_v1",
       "prototype_text_field_options_v1",
       "prototype_gestures_v1",

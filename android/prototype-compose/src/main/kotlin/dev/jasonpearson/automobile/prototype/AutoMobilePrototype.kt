@@ -78,6 +78,16 @@ fun AutoMobilePrototype(
   handleBack: Boolean = false,
   onError: @Composable (PrototypeLoadError) -> Unit = { DefaultPrototypeError(it) },
 ) {
+  val clipboardContext = androidx.compose.ui.platform.LocalContext.current
+  val runtimePlatform =
+    remember(platform, clipboardContext) {
+      if (platform.registry.modules.any { it.name == "clipboard" }) platform
+      else
+        PrototypePlatform(
+          platform.registry.modules +
+            PrototypeClipboardModule(AndroidPrototypeClipboard(clipboardContext)),
+        )
+    }
   val validation = remember(spec) { PrototypeSpecValidator.validate(spec) }
   Box(modifier) {
     when (validation) {
@@ -85,7 +95,7 @@ fun AutoMobilePrototype(
         onError(PrototypeLoadError.Invalid(validation.error.path, validation.error.message))
       is PrototypeSpecValidation.Success ->
         EmbeddedPrototype(
-          EmbeddedInput(spec, validation.spec, assets, storage, network, platform),
+          EmbeddedInput(spec, validation.spec, assets, storage, network, runtimePlatform),
           EmbeddedCallbacks(onEvent, onDismiss),
           handleBack,
           onError,

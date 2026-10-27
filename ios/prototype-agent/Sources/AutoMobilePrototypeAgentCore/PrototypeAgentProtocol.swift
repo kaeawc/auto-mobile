@@ -63,6 +63,7 @@ enum PrototypeAgentProtocol {
         storageCapability,
         timersCapability,
         "prototype_platform_v1",
+        "prototype_platform_clipboard_v1",
         "prototype_platform_device_v1",
         advanceClockRequest,
     ]

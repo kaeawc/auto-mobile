@@ -53,7 +53,8 @@
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
     "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
     "MAX_PROTOTYPE_EFFECTS": 64,
-    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8
+    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8,
+    "MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES": 65536
   },
   "definitions": {
     "offset": {
@@ -10237,6 +10238,149 @@
               "optional": true
             }
           }
+        },
+        "pasteButton": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pasteButton"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "into": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -14702,41 +14846,127 @@
       "state": {
         "os": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["android", "ios"] }
+          "value": {
+            "kind": "enum",
+            "values": ["android", "ios"]
+          }
         },
-        "osVersion": { "platforms": ["android", "ios"], "value": { "kind": "string", "max": 64 } },
+        "osVersion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "max": 64
+          }
+        },
         "idiom": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["phone", "tablet", "foldable", "desktop"] }
+          "value": {
+            "kind": "enum",
+            "values": ["phone", "tablet", "foldable", "desktop"]
+          }
         },
         "widthClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [600, 840]
         },
         "heightClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [480, 900]
         },
         "sizeClass": {
           "platforms": ["ios"],
-          "value": { "kind": "enum", "values": ["compact", "regular"] }
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "regular"]
+          }
         },
         "windowWidth": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "windowHeight": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "posture": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["flat", "tabletop", "book"] }
+          "value": {
+            "kind": "enum",
+            "values": ["flat", "tabletop", "book"]
+          }
         },
-        "pointer": { "platforms": ["android", "ios"], "value": { "kind": "boolean" } }
+        "pointer": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
       }
+    },
+    "clipboard": {
+      "capability": "prototype_platform_clipboard_v1",
+      "calls": {
+        "copy": {
+          "args": {
+            "text": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 65536
+              }
+            },
+            "sensitive": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            },
+            "label": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "empty": true
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        },
+        "paste": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        },
+        "hasText": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "checkControls": {

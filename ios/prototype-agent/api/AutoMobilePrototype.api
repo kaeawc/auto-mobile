@@ -1,10 +1,40 @@
-AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, registry: PrototypePlatformRegistry = .empty, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, registry: PrototypePlatformRegistry = .system, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
 AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public struct AutoMobilePrototypeView: View
 AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public var body: some View
 AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStart()
 AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStartStandalone()
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public final class UIPasteboardPrototypeClipboard: PrototypeClipboard
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public func copy(text: String, sensitive: Bool, label _: String?)
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public func paste() async throws -> String
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public init(pasteboard: UIPasteboard = .general, now: @escaping () -> Date = Date.init)
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public static let system =
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public var hasText: Bool
 AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public enum AutoMobilePrototypeCapabilities
 AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public static let supported: [String] = PrototypeAgentProtocol.advertisedCapabilities()
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: [PrototypeClipboard] func copy(text: String, sensitive: Bool, label: String?)
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: [PrototypeClipboard] func paste() async throws -> String
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: [PrototypeClipboard] var hasText: Bool
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public enum PrototypeClipboardError: Error
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public final class FakePrototypeClipboard: PrototypeClipboard
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public final class PrototypeClipboardModule: PrototypePlatformModule
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func copy(text: String, sensitive: Bool, label: String?)
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func paste() async throws -> String
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public init(clipboard: any PrototypeClipboard)
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public init(text: String = "")
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public let capability = "prototype_platform_clipboard_v1"
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public let maxPrototypeClipboardTextBytes = 65536
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public let name = "clipboard"
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public private(set) var label: String?
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public private(set) var platformCalls: [JSONValue] = []
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public private(set) var sensitive = false
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public protocol PrototypeClipboard
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var denied = false
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var events: AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var hasText: Bool
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var state: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var text: String
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case change
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case dataWrite
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case dismissed

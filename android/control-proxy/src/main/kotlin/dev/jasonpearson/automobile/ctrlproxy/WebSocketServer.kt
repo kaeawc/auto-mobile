@@ -365,6 +365,7 @@ class WebSocketServer(
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
     add("prototype_platform_v1")
+    add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
     addAll(platform.registry.capabilities)
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.

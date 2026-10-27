@@ -16,6 +16,7 @@ exports[`finalizeToolResponse serialization bytes oversized payload preserves co
   ],
   "wire": [
     "{"success":true,"artifact":{"path":"/fixture/tool-output.json","format":"json","payload":"ToolResponse","bytes":66036,"tool":"fixture","resourceUri":"automobile:tool-output/fixture"}}",
+    undefined,
   ],
 }
 `;

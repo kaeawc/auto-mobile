@@ -82,7 +82,7 @@
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
             .chartLegend(.hidden)
-            .frame(height: chartHeight)
+            .frame(minHeight: 0, idealHeight: chartHeight, maxHeight: chartHeight)
         }
 
         @ChartContentBuilder
@@ -130,7 +130,7 @@
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
             .chartLegend(.hidden)
-            .frame(height: chartHeight)
+            .frame(minHeight: 0, idealHeight: chartHeight, maxHeight: chartHeight)
         }
 
         @ChartContentBuilder

@@ -50,6 +50,7 @@ function zodNodeShapes(): Map<string, string[]> {
 
 // Every node carries these; a node type added without one is the #10557 crossing again.
 const COMMON_NODE_FIELDS = [
+  "semantics",
   "span",
   "id",
   "testTag",
@@ -60,6 +61,7 @@ const COMMON_NODE_FIELDS = [
   "visibleWhen",
   "transition",
   "animate",
+  "press",
   "anchor",
   "safeAreaPadding",
 ];
@@ -105,7 +107,11 @@ describe("prototype node contract parity", () => {
   test("style has the same fields in Zod and the contract", () => {
     const box = zodNodeOptions()[0];
     const style = expectSchema(
-      expectSchema(box.shape.style, z.ZodOptional, "the style field").unwrap(),
+      expectSchema(
+        expectSchema(box.shape.style, z.ZodOptional, "the style field").unwrap(),
+        z.ZodEffects,
+        "the refined style schema",
+      ).innerType(),
       z.ZodObject,
       "the style schema",
     );
@@ -262,5 +268,29 @@ test("emit context Zod and record contract agree on binding forms and entry limi
   ]) {
     expect(prototypeSpecSchema.safeParse(candidate(context)).success).toBe(false);
     expect(validatePrototypeSpec(candidate(context)).success).toBe(false);
+  }
+});
+
+test("list path-only keyed repeat, row count and defaults agree in both validators", () => {
+  const root = {
+    type: "list",
+    repeat: { items: { path: "/rows" }, as: "row", key: "id" },
+    children: [{ type: "text", text: "{row.id}" }],
+  };
+  const candidate = { ...spec(root), data: { rows: [] } };
+  const parsed = prototypeSpecSchema.safeParse(candidate);
+  expect(parsed.success && parsed.data.root.type === "list" && parsed.data.root.axis).toBe(
+    "vertical",
+  );
+  expect(validatePrototypeSpec(candidate).success).toBe(true);
+  for (const invalidRoot of [
+    { ...root, repeat: { items: [{ id: 1 }], as: "row", key: "id" } },
+    { ...root, repeat: { items: { path: "/rows" }, as: "row" } },
+    { ...root, children: [] },
+    { ...root, children: [...root.children, ...root.children] },
+  ]) {
+    const invalid = { ...candidate, root: invalidRoot };
+    expect(prototypeSpecSchema.safeParse(invalid).success).toBe(false);
+    expect(validatePrototypeSpec(invalid).success).toBe(false);
   }
 });

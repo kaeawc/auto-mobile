@@ -24,6 +24,8 @@ export const PROTOTYPE_PLATFORM_EVENT_NAME = "prototype_platform";
 export const PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME = "prototype_platform_event";
 /** Authored emit names cannot start with this; the runtime reports its own events under it. */
 export const PROTOTYPE_RESERVED_EMIT_PREFIX = "prototype_";
+/** Authored `testTag`s cannot start with this; host controls own the namespace (#15120). */
+export const PROTOTYPE_RESERVED_TEST_TAG_PREFIX = "automobile-";
 /** Typed outcomes a call writes to `<into>__meta.error` and reports in `prototype_platform`. */
 export const PROTOTYPE_PLATFORM_ERROR_CODES = [
   "unsupported",
@@ -49,12 +51,29 @@ export interface PrototypePlatformCall {
   /** Calls and events touching personal data, for the threat model (#14293). */
   sensitive: boolean;
 }
+/** One key of a module's read-only `/platform/<module>` state (#15245). */
+export interface PrototypePlatformStateEntry {
+  /** The platforms that report the key; elsewhere it is absent and compares as missing. */
+  platforms: string[];
+  /** The default contract rule; valueByPlatform overrides it on a named platform. */
+  value: Rule;
+  /** Platform overrides; portable spec comparisons accept the union with value. */
+  valueByPlatform?: Record<string, Rule>;
+  /** Android-only ascending lower bounds of the second and later Material classes, in dp. */
+  breakpoints?: number[];
+}
 export interface PrototypePlatformModule {
   capability: string;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   calls: Record<string, PrototypePlatformCall>;
-  events: Record<string, { sensitive: boolean }>;
+  /** `debounceMs` coalesces bursts of the event into one delivery. */
+  events: Record<string, { sensitive: boolean; debounceMs?: number }>;
+  /**
+   * The keys `/platform/<module>/<key>` can read. A module without this table (the placeholder
+   * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
+   */
+  state?: Record<string, PrototypePlatformStateEntry>;
 }
 
 /** The shared `platformModules` table: each module's calls, events and capability. */
@@ -105,6 +124,14 @@ export function prototypePlatformEventModule(event: unknown): string | undefined
   return name && owner && Object.hasOwn(owner.events, name.member) ? name.module : undefined;
 }
 
+/** The state key a `/platform` pointer reads when it is exactly `/<module>/<key>`, else undefined. */
+export function prototypePlatformPointerKey(pointer: string): string | undefined {
+  const tokens = pointer.slice(1).split("/");
+  return tokens.length === 2 && tokens[1]
+    ? tokens[1].replaceAll("~1", "/").replaceAll("~0", "~")
+    : undefined;
+}
+
 /** The module a `/platform` pointer reads: its first segment. */
 export function prototypePlatformPointerModule(pointer: string): string {
   const segment = pointer.slice(1).split("/", 1)[0] ?? "";
@@ -128,7 +155,7 @@ export type PrototypePlatformUse =
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string }
   | { kind: "call"; path: string; action: Raw }
-  | { kind: "read"; path: string; pointer: string }
+  | { kind: "read"; path: string; pointer: string; condition?: Raw }
   | { kind: "event"; path: string; inHandler: boolean };
 
 // Opaque JSON: an emit payload, literal repeat items and a literal binding's value are data.
@@ -143,7 +170,12 @@ function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypeP
     return;
   }
   if (typeof object.platform === "string") {
-    uses.push({ kind: "read", path: `${path}.platform`, pointer: object.platform });
+    uses.push({
+      kind: "read",
+      path: `${path}.platform`,
+      pointer: object.platform,
+      condition: object,
+    });
   }
   if (typeof object.event === "string") {
     uses.push({ kind: "event", path: `${path}.event`, inHandler });
@@ -326,6 +358,51 @@ function strings(value: unknown): Set<string> {
   return new Set(Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : []);
 }
 
+function readError(
+  use: { path: string; pointer: string },
+  declared: Set<string>,
+): PrototypePlatformError | undefined {
+  const name = prototypePlatformPointerModule(use.pointer);
+  if (!module(name)) {
+    return { path: use.path, message: `Unknown platform module ${name}` };
+  }
+  if (!declared.has(name)) {
+    return notDeclared(use.path, name);
+  }
+  const state = module(name)?.state;
+  const key = prototypePlatformPointerKey(use.pointer);
+  return state && (key === undefined || !Object.hasOwn(state, key))
+    ? { path: use.path, message: `Unknown platform state ${use.pointer}` }
+    : undefined;
+}
+
+/** Check portable comparisons against the union of platform-native state rules. */
+function comparisonError(
+  use: Extract<PrototypePlatformUse, { kind: "read" }>,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  const entry = module(prototypePlatformPointerModule(use.pointer))?.state?.[
+    prototypePlatformPointerKey(use.pointer) ?? ""
+  ];
+  // Specs have no target platform and can branch on device.os: accept every native rule.
+  if (!entry?.valueByPlatform || !use.condition) {
+    return undefined;
+  }
+  const rule: Rule = {
+    kind: "choice",
+    options: [entry.value, ...Object.values(entry.valueByPlatform)],
+  };
+  for (const op of ["equals", "notEquals"]) {
+    if (Object.hasOwn(use.condition, op)) {
+      const found = check(use.condition[op], rule, use.path.replace(/\.platform$/, `.${op}`));
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return undefined;
+}
+
 function useError(
   use: PrototypePlatformUse,
   context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
@@ -341,13 +418,8 @@ function useError(
     }
     case "call":
       return callError(use.action, use.path, context, check);
-    case "read": {
-      const name = prototypePlatformPointerModule(use.pointer);
-      if (!module(name)) {
-        return { path: use.path, message: `Unknown platform module ${name}` };
-      }
-      return context.declared.has(name) ? undefined : notDeclared(use.path, name);
-    }
+    case "read":
+      return readError(use, context.declared) ?? comparisonError(use, check);
     case "event":
       return use.inHandler
         ? undefined
@@ -368,6 +440,23 @@ function emitNameError(action: Raw, path: string): PrototypePlatformError | unde
         message: `Emit names starting with ${PROTOTYPE_RESERVED_EMIT_PREFIX} are reserved for runtime events`,
       }
     : undefined;
+}
+
+/** The first authored node whose `testTag` takes the host-reserved `automobile-` namespace. */
+export function prototypeReservedTestTagError(
+  nodes: readonly { value: Raw; path: string }[],
+): PrototypePlatformError | undefined {
+  const node = nodes.find(
+    ({ value }) =>
+      typeof value.testTag === "string" &&
+      value.testTag.startsWith(PROTOTYPE_RESERVED_TEST_TAG_PREFIX),
+  );
+  return node === undefined
+    ? undefined
+    : {
+        path: `${node.path}.testTag`,
+        message: `testTag values starting with ${PROTOTYPE_RESERVED_TEST_TAG_PREFIX} are reserved for host controls`,
+      };
 }
 
 /**

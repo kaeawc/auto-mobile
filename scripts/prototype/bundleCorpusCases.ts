@@ -530,3 +530,36 @@ export function boundaryCases(): BundleCorpusCase[] {
   );
   return cases;
 }
+
+/** AGSL is deliberately excluded from the unprivileged portable bundle contract. */
+export function shaderCases(): BundleCorpusCase[] {
+  const spec = Buffer.from(
+    JSON.stringify({
+      id: "shader",
+      window: { placement: { type: "fullscreen" } },
+      root: { type: "text", text: "Effect", style: { shader: { asset: "effect" } } },
+    }),
+  );
+  const source = Buffer.from("uniform shader content; uniform float strength;");
+  const asset = assetRecord("effect", "application/vnd.automobile.agsl", source);
+  return [
+    makeCorpusCase(
+      "custom-shader-spec-refused",
+      fixtureEntries(spec),
+      "custom_shaders_unsupported",
+      "spec.json",
+    ),
+    makeCorpusCase(
+      "custom-shader-entry-refused",
+      fixtureEntries(minimalSpec, [asset]),
+      "custom_shaders_unsupported",
+      asset.entry.name,
+    ),
+    makeCorpusCase(
+      "custom-shader-mime-refused",
+      fixtureEntries(minimalSpec, [asset]).filter((entry) => entry.name !== asset.entry.name),
+      "custom_shaders_unsupported",
+      "bundle.json",
+    ),
+  ];
+}

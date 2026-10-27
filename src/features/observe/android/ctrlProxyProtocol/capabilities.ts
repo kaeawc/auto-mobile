@@ -48,7 +48,18 @@ export const PROTOTYPE_WINDOW_OPTIONS_CAPABILITY = "prototype_window_options_v1"
  * fullscreen prototype without the host dismiss bar by default and offers a two-finger long-press
  * escape. A device without it always draws the dismiss bar on a fullscreen prototype.
  */
+export const PROTOTYPE_PLATFORM_NAMESPACE_CAPABILITY = "prototype_platform_namespace_v1";
 export const PROTOTYPE_WINDOW_CHROME_CAPABILITY = "prototype_window_chrome_v1";
+
+/**
+ * Advertised by a CtrlProxy or iOS prototype agent that honours spec `window.deadTaps` and reports
+ * a tap landing on no tappable or input node as an `emit` event named `prototype_dead_tap`
+ * (payload `{stack, screen, x, y}`, dp or points). A device without it would ignore the field.
+ */
+export const PROTOTYPE_DEAD_TAP_CAPABILITY = "prototype_dead_tap_v1";
+
+/** Honours `theme.design`; a renderer without it falls back to the Material drawing. */
+export const PROTOTYPE_DESIGN_PLATFORM_CAPABILITY = "prototype_design_platform_v1";
 
 /** Buffers a device-persistent prototype's events while no host is connected; answers inspect. */
 export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_replay_v1";
@@ -79,7 +90,7 @@ export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
 export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
 export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
-/** setData/appendData/removeData on `/data`, each write reported as a `change` event. */
+/** setData/appendData/prependData/removeData on `/data`, each write reported as a `change` event. */
 export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
 /** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
 export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
@@ -94,16 +105,38 @@ export const PROTOTYPE_PLATFORM_CAPABILITY = "prototype_platform_v1";
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 /** `{data, empty}` conditions and style `shimmer` (#14207). */
 export const PROTOTYPE_LOADING_STATES_CAPABILITY = "prototype_loading_states_v1";
+/** State-key string comparisons and textField forced error presentation. */
+export const PROTOTYPE_STRING_CONDITIONS_CAPABILITY = "prototype_string_conditions_v1";
+/**
+ * Spec `window.backdrop` {material, blur?, tint?} (#15126): blurs what is behind the prototype
+ * window, or draws a solid tint dim where the platform cannot. A device without it would ignore the
+ * field and draw a plain window, so the host refuses the show.
+ */
+export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
+/**
+ * Spec-language gate (#14192): an `image` `asset` (or tab item `image`) of the form
+ * `{data: "/pointer"}` resolving to a device media item id. Not a platform module, so it needs no
+ * `requires.platform` entry.
+ */
+export const PROTOTYPE_MEDIA_ITEMS_CAPABILITY = "prototype_platform_media_items_v1";
 /** Node `animate`, style `scale`/`rotation`, horizontal and scale transitions, zoomable images (#14208). */
+export const PROTOTYPE_MOTION_V3_CAPABILITY = "prototype_motion_v3";
+export const PROTOTYPE_WINDOW_MOTION_CAPABILITY = "prototype_window_motion_v1";
 export const PROTOTYPE_MOTION_V2_CAPABILITY = "prototype_motion_v2";
 /** Transition `delayMs`, container `stagger` and the `blurReplace` transition (#15247). */
 export const PROTOTYPE_CHOREOGRAPHY_CAPABILITY = "prototype_choreography_v1";
+/** Draws `style.effects`: closed, paint-only looks such as noise, glow and blur (#15128). */
+export const PROTOTYPE_EFFECTS_CAPABILITY = "prototype_effects_v1";
+/** Lazy list nodes and request.append; advertised together with the data model capability. */
+export const PROTOTYPE_LAZY_LIST_CAPABILITY = "prototype_lazy_list_v1";
 /** The `chart` node (#14209): line, area, bar and ring charts over `/data` arrays. */
 export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
+export const PROTOTYPE_ROUTES_CAPABILITY = "prototype_routes_v1";
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
+export const PROTOTYPE_SCROLL_MOTION_CAPABILITY = "prototype_scroll_motion_v1";
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
 
 /** Draws `swipeActions` on a row or listItem and exposes them as accessibility actions. */
@@ -121,7 +154,13 @@ export const PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY = "prototype_text_fiel
 /** Draws pull-to-refresh on a vertical prototype `scroll` bound to a boolean state key. */
 export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";
 
+export const PROTOTYPE_REDUCED_MOTION_CAPABILITY = "prototype_reduced_motion_v1";
+export const PROTOTYPE_SHARED_ELEMENT_CAPABILITY = "prototype_shared_element_v1";
+export const PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY = "prototype_shared_element_v2";
+
 /** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_PATTERNS_CAPABILITY = "prototype_stack_patterns_v1";
+export const PROTOTYPE_STACK_TRANSITIONS_CAPABILITY = "prototype_stack_transitions_v1";
 export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
 
 /**
@@ -130,6 +169,7 @@ export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
  * `theme.colors.light` / `theme.colors.dark`, and `{light, dark}` image assets. A device without it
  * rejects or misdraws those forms, so the host refuses the show before sending.
  */
+export const PROTOTYPE_CUSTOM_SHADERS_CAPABILITY = "prototype_custom_shaders_v1";
 export const PROTOTYPE_FLOW_GRID_CAPABILITY = "prototype_flow_grid_v1";
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
 
@@ -195,6 +235,19 @@ export const SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY = "screenshot_hide_prototype_v
 export const MULTI_FINGER_GESTURE_CAPABILITY = "multi_finger_gesture_v1";
 
 /**
+ * The runner can inject stylus pointers (tool type, pressure) through a route other than
+ * accessibility `dispatchGesture`, which cannot produce them (#13098). A runner without it is never
+ * sent a stylus request; hosts refuse before dispatch instead of degrading to a finger touch.
+ */
+export const STYLUS_INPUT_CAPABILITY = "stylus_input_v1";
+
+/**
+ * The runner can inject hover enter/move/exit with no contact (#13098), which `dispatchGesture`
+ * cannot produce either. Gates `hoverAt`.
+ */
+export const HOVER_INPUT_CAPABILITY = "hover_input_v1";
+
+/**
  * request_action honours the semantic accessibility actions (expand, collapse, dismiss, select,
  * scroll and page directions, press_and_hold, set_progress with `progress`, custom with
  * `customAction`) and its refusal lists the node's available actions (#14077). An older service
@@ -233,11 +286,14 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "gesture_display_id_v1",
   "tap_double_v1",
   MULTI_FINGER_GESTURE_CAPABILITY,
+  STYLUS_INPUT_CAPABILITY,
+  HOVER_INPUT_CAPABILITY,
   PROTOTYPE_SAVED_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
@@ -422,4 +478,19 @@ export const KNOWN_REQUEST_TYPES: readonly CtrlProxyRequestType[] = Object.keys(
   REQUEST_TYPE_REGISTRY,
 ) as CtrlProxyRequestType[];
 
+export const PROTOTYPE_PAGER_STATE_KEY_CAPABILITY = "prototype_pager_state_key_v1";
+
+export const PROTOTYPE_BAR_SCROLL_CAPABILITY = "prototype_bar_scroll_v1";
 export const PROTOTYPE_PAGER_OPTIONS_CAPABILITY = "prototype_pager_options_v1";
+
+export const PROTOTYPE_STYLE_POLISH_V2_CAPABILITY = "prototype_style_polish_v2";
+
+export const PROTOTYPE_TOOLTIP_CAPABILITY = "prototype_tooltip_v1";
+
+export const PROTOTYPE_DRAWER_CAPABILITY = "prototype_drawer_v1";
+
+export const PROTOTYPE_STRINGS_CAPABILITY = "prototype_strings_v1";
+
+export const PROTOTYPE_SEMANTICS_CAPABILITY = "prototype_semantics_v1";
+
+export const PROTOTYPE_FORMAT_CAPABILITY = "prototype_format_v1";

@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "id": "strings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{t:title}",
+      "semantics": {
+        "heading": true,
+        "label": "{t:title}",
+        "hint": "{t:hint}",
+        "traits": ["selected"]
+      }
+    },
+    "strings": {
+      "default": {},
+      "en-00": {},
+      "en-01": {},
+      "en-02": {},
+      "en-03": {},
+      "en-04": {},
+      "en-05": {},
+      "en-06": {},
+      "en-07": {},
+      "en-08": {},
+      "en-09": {},
+      "en-10": {},
+      "en-11": {},
+      "en-12": {},
+      "en-13": {},
+      "en-14": {},
+      "en-15": {}
+    }
+  },
+  "expectedPath": "strings",
+  "expectedMessage": "String locale limit exceeded"
+}

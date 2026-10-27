@@ -66,6 +66,44 @@ session nothing can expire, so that detection and replay
 assert there is none. Device-control transport recovery went with the loopback hop
 in slice L.
 
+## Opt-in modern daemon HTTP routing
+
+`AUTOMOBILE_MCP_MODERN_ERA` defaults off; `1`, `true`, `yes`, or `on` (case-insensitive,
+trimmed) enables MCP 2026-07-28 on the daemon HTTP endpoint. Disabled requests use the
+existing 2025 serving path without SDK classification or handler construction. When enabled,
+`StatelessMcpHttpEndpoint` classifies the already size-limited parsed body: modern requests
+use `createMcpHandler` with `legacy: 'reject'` and SSE responses; other outcomes retain the
+existing path. The parsed body is passed to the handler so the ingress body limit applies.
+
+The SDK factory reuses `createStatelessMcpServer`, carrying the era and request scope through
+an isolated async context. Modern discovery advertises the Tasks extension; legacy initialize
+advertisement remains conditional on the client's declaration. Both paths share cancellation
+indexing, request-scope execution cancellation, keyless binding cleanup, and shutdown tracking.
+
+Modern HTTP requests validate W3C version `00` trace context from `params._meta` using the
+SDK's trace keys. For batches, the first message carrying `_meta` selects the request context.
+`mcpTraceContext` installs it inside the detached async root around SDK dispatch, so concurrent
+requests stay isolated and work started by a request inherits its context. Invalid traceparents
+give no context; malformed tracestate or baggage is dropped independently, with limits of 512
+and 8192 characters respectively. Daemon logger wiring reads only the active trace id and adds
+`trace=<traceId>` to messages. Private tracestate and baggage values are never added to logs;
+requests without a trace and the 2025 path retain their existing log format.
+
+Modern discovery advertises `tools.listChanged`, `resources.listChanged` and `resources.subscribe`. Each endpoint
+lazily creates one in-memory event bus on its first modern request and bridges the process-wide
+list-change and resource-update broadcasters onto it. All per-request SDK handlers share that bus, so
+`subscriptions/listen` can acknowledge and filter tools/resources list changes and resource updates across requests.
+Resource-update resolvers receive the union of exact URIs on open listen streams, including page URIs;
+the bridge publishes each affected subscribed URI once and the SDK filters delivery per stream.
+Tracking is limited to 256 distinct URIs per stream and 4,096 URI memberships across streams
+(shared URIs count once per stream). Over-limit streams receive HTTP 429 before acknowledgement,
+with one warning per endpoint bridge lifetime; stream closure releases their memberships.
+The bridge detaches once admission stops and all requests close, or when the endpoint is cleared.
+Listen streams use the same cancellation index, shutdown snapshot, disconnect abort, and
+endpoint keepalive as other modern requests; SDK keepalive is disabled. Cache hints remain private,
+with a 5s tools-list TTL for clients without a listen stream. The stdio proxy keeps its existing
+hand-built server and does not read this flag.
+
 ## Control-socket forwards in process (slice L, #11820)
 
 The socket server no longer reaches the tools over its own HTTP endpoint. Each forward gets
@@ -190,7 +228,8 @@ extension. They ship the 2025-11-25 core task vocabulary (`ttl`, `pollInterval`,
 know the `tasks/*` method names for `Mcp-Name` header routing, and lift the per-request
 `_meta` envelope (`io.modelcontextprotocol/clientCapabilities`) into `ctx.mcpReq.envelope` and
 a request's top-level `inputResponses` into `ctx.mcpReq.inputResponses`. `server/discover` is
-installed only on a server serving the 2026-07-28 era; ours serve the 2025 era. The separate
+installed only on a server serving the 2026-07-28 era, which the daemon HTTP endpoint can
+serve with `AUTOMOBILE_MCP_MODERN_ERA`. The separate
 `@modelcontextprotocol/ext-tasks` package is client-side and not a dependency. The wire is
 therefore implemented on our own handlers, per the extension specification (revision
 2026-07-28 of modelcontextprotocol/ext-tasks).
@@ -200,15 +239,12 @@ declarations are never remembered. A `tools/call` that did not declare it never 
 and `tasks/get`, `tasks/update` and `tasks/cancel` without it answer `-32021`. Because there is
 no `server/discover` on the 2025 era, the server advertises the extension in its `initialize`
 result, and only to a client whose `initialize` declared it; every other client sees the
-`initialize` result unchanged.
+`initialize` result unchanged. Modern HTTP servers advertise it in `server/discover`.
 
-This is a deliberate AutoMobile extension of the spec (owner decision, 2026-10-20, #13143).
-SEP-2663's backward-compatibility rules leave the extension undefined on `2025-11-25` and
-negotiate it only on a compatible protocol version. Gating on that version today would leave
-no client able to negotiate Tasks, because the server has no 2026-era `server/discover` path.
-So the advertisement is not gated on the client's `protocolVersion`. Two alternatives were
-rejected for now: gating on a 2026-era `protocolVersion` plus adding `server/discover` (new
-protocol work), and implementing the legacy 2025-11-25 core task flow.
+The legacy advertisement is a deliberate AutoMobile extension of the spec (#13143).
+SEP-2663 leaves the extension undefined on `2025-11-25`; retaining the conditional
+`initialize` advertisement lets existing clients negotiate Tasks while modern HTTP serving
+is opt-in. It is not gated on the legacy client's `protocolVersion`.
 
 **Pieces** (`src/server/tasks/`):
 
@@ -280,7 +316,7 @@ skip the socket's admission queue: a poll never waits behind a long call on the 
 lost daemon connection is reconnected and the request asked once more; a daemon that stays
 unreachable is an error, never an invented status. Device-binding tools are not relayed as
 declared until the proxy binds the session from a completed task's result.
-`notifications/tasks` push and `subscriptions/listen` are out of scope (polling only).
+`notifications/tasks` push is out of scope (task polling only).
 
 ## Open questions and resolutions
 
@@ -291,7 +327,7 @@ declared until the proxy binds the session from a completed task's result.
 | 3   | Where do `InMemoryTransport`, `StreamableHTTPError`, the ping request schema and `toJsonSchemaCompat` live in v2?          | Resolved in step 1: handlers use method strings, the ping shim is gone, `toJsonSchemaCompat` is replaced by `zod-to-json-schema` called directly, loopback errors are mapped in `LoopbackMcpClient`.                    |
 | 4   | CJS to ESM interop risk from the spike.                                                                                    | Resolved: current version is 2.3.1, both packages ship CommonJS builds, and the repo bundles them at build time.                                                                                                        |
 | 5   | Do direct desktop HTTP clients lose implicit device binding?                                                               | Resolved by owner decision (2026-10-17): desktop sends one generated id per app session in the session-key header (slice K, #13046).                                                                                    |
-| 6   | `subscriptions/listen` support across hosts.                                                                               | Pending, out of scope: the internal push plus polling stands.                                                                                                                                                           |
+| 6   | `subscriptions/listen` support across hosts.                                                                               | Opt-in modern daemon HTTP clients receive tools/resources list changes on a shared endpoint bus; the stdio proxy retains internal push plus polling.                                                                    |
 
 ## Appendix: original spike assessment (2026-07-29)
 
@@ -338,3 +374,7 @@ superseded by the decisions above. What still explains the design:
 - A serverless/edge redeployment: AutoMobile binds to local ADB/simctl and is
   intentionally stateful on its host; the stateless _protocol_ is served over a
   factory, but device state stays on the daemon.
+
+The trace id appears only in logger file/stream records written while the request's own async
+context is active; MCP logging notifications, sink-stall records and direct `console` output do not
+carry it, and the JSON format embeds it in `message` rather than as its own field (follow-up).

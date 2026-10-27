@@ -10,7 +10,12 @@ internal object PrototypeRepeatTokens {
     if (inner == "index") return PrototypeRepeatSegment.Index
     val prefix = "$alias."
     val field = inner.removePrefix(prefix)
-    return if (inner.startsWith(prefix) && isFieldName(field)) PrototypeRepeatSegment.Field(field)
+    return if (
+      inner.startsWith(prefix) &&
+        (if (alias == "route") PrototypeSpecContract.pathKeyPattern.matches(field)
+        else isFieldName(field))
+    )
+      PrototypeRepeatSegment.Field(field)
     else null
   }
 
@@ -32,7 +37,11 @@ internal object PrototypeRepeatTokens {
   fun isPlaceholder(inner: String): Boolean {
     if (inner == "index") return true
     val dot = inner.indexOf('.')
-    return dot > 0 && isFieldName(inner.substring(0, dot)) && isFieldName(inner.substring(dot + 1))
+    return dot > 0 &&
+      isFieldName(inner.substring(0, dot)) &&
+      (if (inner.substring(0, dot) == "route")
+        PrototypeSpecContract.pathKeyPattern.matches(inner.substring(dot + 1))
+      else isFieldName(inner.substring(dot + 1)))
   }
 
   fun isKeyCharacter(character: Char): Boolean =

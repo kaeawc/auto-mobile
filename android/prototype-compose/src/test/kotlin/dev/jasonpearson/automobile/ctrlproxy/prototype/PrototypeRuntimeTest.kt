@@ -45,6 +45,92 @@ class PrototypeRuntimeTest {
     )
 
   @Test
+  fun `dead tap requires opt in and an active runtime`() = runTest {
+    for (enabled in listOf(null, false, true)) {
+      val spec = spec().let { it.copy(window = it.window.copy(deadTaps = enabled)) }
+      val runtime = runtime(spec)
+      runtime.handle(PrototypeInteraction.DeadTap(1f, 2f))
+      runtime.close()
+      runtime.handle(PrototypeInteraction.DeadTap(3f, 4f))
+    }
+    assertEquals(1, events.size)
+    assertEquals(1L, sequence)
+  }
+
+  @Test
+  fun `dead tap rounds coordinates and preserves normal event context and sequence`() = runTest {
+    val spec = spec(state = mapOf("label" to PrototypeScalar.Text("private text")))
+    val runtime = runtime(spec.copy(window = spec.window.copy(deadTaps = true)))
+    runtime.handle(PrototypeInteraction.DeadTap(12.34f, 56.78f))
+    runtime.handle(PrototypeInteraction.DeadTap(0f, 1.01f))
+    val first = events.first()
+    assertEquals(PrototypeEventKind.EMIT, first.kind)
+    assertEquals(PrototypeDeadTaps.EVENT_NAME, first.name)
+    assertEquals(
+      buildJsonObject {
+        put("stack", JsonNull)
+        put("screen", JsonNull)
+        put("x", 12.3)
+        put("y", 56.8)
+      },
+      first.payload,
+    )
+    assertEquals(listOf(1L, 2L), events.map { it.sequence })
+    assertEquals(42L, first.timestamp)
+    assertEquals(runtime.current.state, first.state)
+    assertEquals(runtime.current.pages, first.pages)
+    assertEquals(runtime.current.stacks, first.stacks)
+    assertEquals(setOf("stack", "screen", "x", "y"), first.payload!!.jsonObject.keys)
+  }
+
+  @Test
+  fun `dead tap rounds exact halves up like iOS`() = runTest {
+    val spec = spec()
+    val runtime = runtime(spec.copy(window = spec.window.copy(deadTaps = true)))
+    runtime.handle(PrototypeInteraction.DeadTap(0.25f, 2.75f))
+    val payload = events.single().payload!!.jsonObject
+    assertEquals(JsonPrimitive(0.3), payload["x"])
+    assertEquals(JsonPrimitive(2.8), payload["y"])
+  }
+
+  @Test
+  fun `dead tap names the single stack top screen`() = runTest {
+    val spec = spec(stack())
+    val runtime = runtime(spec.copy(window = spec.window.copy(deadTaps = true)))
+    runtime.handle(tap(PrototypePushAction("nav", "detail")))
+    events.clear()
+    runtime.handle(PrototypeInteraction.DeadTap(1f, 2f))
+    assertEquals(JsonPrimitive("nav"), events.single().payload!!.jsonObject["stack"])
+    assertEquals(JsonPrimitive("detail"), events.single().payload!!.jsonObject["screen"])
+    assertEquals(2L, events.single().sequence)
+  }
+
+  @Test
+  fun `dead tap selects deepest stack then lowest lexical id regardless of render order`() =
+    runTest {
+      val spec = spec(PrototypeColumnNode(children = listOf(stack("z"), stack("a"))))
+      val runtime = runtime(spec.copy(window = spec.window.copy(deadTaps = true)))
+      runtime.handle(PrototypeInteraction.DeadTap(1f, 2f))
+      runtime.handle(tap(PrototypePushAction("z", "detail")))
+      runtime.handle(PrototypeInteraction.DeadTap(1f, 2f))
+      runtime.handle(tap(PrototypePushAction("a", "third")))
+      runtime.handle(PrototypeInteraction.DeadTap(1f, 2f))
+      val dead = events.filter { it.name == PrototypeDeadTaps.EVENT_NAME }
+      assertEquals(
+        listOf("a", "z", "a"),
+        dead.map {
+          it.payload!!.jsonObject.getValue("stack").jsonPrimitive.content
+        },
+      )
+      assertEquals(
+        listOf("home", "detail", "third"),
+        dead.map {
+          it.payload!!.jsonObject.getValue("screen").jsonPrimitive.content
+        },
+      )
+    }
+
+  @Test
   fun `stack actions change only navigation and emit top or depth changes with full context`() =
     runTest {
       val runtime =

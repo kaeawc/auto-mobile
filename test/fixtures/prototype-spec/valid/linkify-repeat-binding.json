@@ -1,0 +1,39 @@
+{
+  "id": "a",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "id": "1"
+        }
+      ],
+      "as": "item"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "@ana",
+        "linkify": {
+          "kinds": ["mention"],
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "x",
+              "context": {
+                "id": {
+                  "item": "id"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -320,6 +320,7 @@ export const ctrlProxyRequests = {
     reset?: boolean;
     replaceOthers?: boolean;
     appearance?: PrototypeAppearanceOverride;
+    locale?: string;
   }): ShowPrototypeMessage {
     return {
       type: "show_prototype",
@@ -328,6 +329,7 @@ export const ctrlProxyRequests = {
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       ...(args.reset === true ? { reset: true as const } : {}),
       ...(args.replaceOthers === false ? { replaceOthers: false as const } : {}),
+      ...(args.spec.strings && args.locale !== undefined ? { locale: args.locale } : {}),
       ...(args.appearance === undefined ? {} : { appearance: args.appearance }),
     };
   },

@@ -14,6 +14,7 @@ enum PrototypeSavedLayout {
 struct PrototypeSavedLayoutLimits {
     var maxImageBytes = 4_194_304
     var maxFontBytes = 2_097_152
+    var maxShaderBytes = 16384
     var maxAssetCount = 32
     var maxTotalBytes = 16_777_216
     var maxIdLength = 256
@@ -141,6 +142,7 @@ struct PrototypeSavedLayoutReader {
         var ids = Set<String>()
         for record in records {
             guard !record.id.isEmpty, record.id.utf16.count <= limits.maxIdLength,
+                  !PrototypeMediaItems.isMediaId(record.id),
                   ids.insert(record.id).inserted,
                   let ext = PrototypeSavedLayout.extensions[record.mediaType],
                   record.sha256.utf8.count == 64,

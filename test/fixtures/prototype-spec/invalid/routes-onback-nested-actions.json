@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      },
+      "routes": {
+        "detail": {
+          "onBack": [
+            {
+              "type": "startTimer",
+              "id": "back",
+              "afterMs": 1000,
+              "actions": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "state": {
+      "status": "idle"
+    }
+  },
+  "expectedPath": "root.routes.detail.onBack[0].actions[0]",
+  "expectedMessage": "Direct onBack pop requires force: true"
+}

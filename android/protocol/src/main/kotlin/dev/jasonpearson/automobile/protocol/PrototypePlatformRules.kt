@@ -18,7 +18,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** The platform vocabulary's reserved names (#14294). */
 object PrototypePlatform {
@@ -30,6 +32,9 @@ object PrototypePlatform {
 
   /** Authored emit names cannot start with this; the runtime reports its own events under it. */
   const val RESERVED_EMIT_PREFIX = "prototype_"
+
+  /** Authored `testTag`s cannot start with this; host controls own the namespace (#15120). */
+  const val RESERVED_TEST_TAG_PREFIX = "automobile-"
 }
 
 /**
@@ -53,6 +58,9 @@ internal object PrototypePlatformRules {
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val root = value as? JsonObject ?: return null
     val declared = Declared(root)
+    reservedTestTagError(context)?.let {
+      return it
+    }
     requiresError(root)?.let {
       return it
     }
@@ -100,18 +108,47 @@ internal object PrototypePlatformRules {
         }
       }
       is Use.Call -> callError(use.action, use.path, declared)
-      is Use.Read -> {
-        val name = pointerModule(use.pointer)
-        when {
-          module(name) == null -> fail(use.path, "Unknown platform module $name")
-          name !in declared.modules -> notDeclared(use.path, name)
-          else -> null
-        }
-      }
+      is Use.Read -> readError(use, declared)
       is Use.Event ->
         if (use.inHandler) null
         else fail(use.path, "{event} is only available inside a platform.on handler")
     }
+
+  private fun readError(use: Use.Read, declared: Declared): PrototypeSpecError? {
+    val name = pointerModule(use.pointer)
+    return when {
+      module(name) == null -> fail(use.path, "Unknown platform module $name")
+      name !in declared.modules -> notDeclared(use.path, name)
+      module(name)?.member("state")?.let { state ->
+        val tokens = PrototypeDataPointer.tokens(use.pointer)
+        tokens.size != 2 || tokens[1] !in state
+      } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
+      else -> comparisonError(use)
+    }
+  }
+
+  private fun comparisonError(use: Use.Read): PrototypeSpecError? {
+    val tokens = PrototypeDataPointer.tokens(use.pointer)
+    val entry =
+      module(tokens.firstOrNull().orEmpty())?.member("state")?.member(tokens.lastOrNull().orEmpty())
+        ?: return null
+    val overrides = entry.member("valueByPlatform") ?: return null
+    // A portable spec may branch on device.os; validation has no target platform.
+    val rule =
+      JsonObject(
+        mapOf(
+          "kind" to JsonPrimitive("choice"),
+          "options" to JsonArray(listOf(entry.getValue("value")) + overrides.values),
+        ),
+      )
+    for (op in listOf("equals", "notEquals")) {
+      val literal = use.condition?.get(op) ?: continue
+      walk(literal, rule, use.path.removeSuffix(".platform") + ".$op", Context(), 0)?.let {
+        return it
+      }
+    }
+    return null
+  }
 
   private fun callError(action: JsonObject, path: String, declared: Declared): PrototypeSpecError? {
     val call = action.text("call")
@@ -139,7 +176,7 @@ internal object PrototypePlatformRules {
     return action.text("into")?.let(::intoError)?.let { fail("$path.into", it) }
   }
 
-  private fun argumentsError(
+  internal fun argumentsError(
     action: JsonObject,
     path: String,
     definition: JsonObject,
@@ -167,6 +204,18 @@ internal object PrototypePlatformRules {
       "/platform is read-only: write a platform call result into /data"
     else PrototypeRequestRules.requestIntoError(into)?.replaceFirst("request into", "platform into")
 
+  private fun reservedTestTagError(context: Context): PrototypeSpecError? =
+    context.nodes
+      .firstOrNull {
+        it.value.text("testTag")?.startsWith(PrototypePlatform.RESERVED_TEST_TAG_PREFIX) == true
+      }
+      ?.let {
+        fail(
+          "${it.path}.testTag",
+          "testTag values starting with ${PrototypePlatform.RESERVED_TEST_TAG_PREFIX} are reserved for host controls",
+        )
+      }
+
   private fun emitNameError(action: JsonObject, path: String): PrototypeSpecError? {
     val name = action.text("name") ?: return null
     return if (
@@ -179,5 +228,28 @@ internal object PrototypePlatformRules {
         "Emit names starting with ${PrototypePlatform.RESERVED_EMIT_PREFIX} are reserved for runtime events",
       )
     else null
+  }
+}
+
+/** Checks resolved runtime arguments against the same contract rules as literal arguments. */
+object PrototypePlatformCalls {
+  val maxInFlight: Int =
+    PrototypeSpecContract.limits
+      .getValue("MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT")
+      .jsonPrimitive
+      .int
+  val defaultTimeoutMs: Int =
+    PrototypeSpecContract.limits.getValue("DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS").jsonPrimitive.int
+
+  fun eventOwner(name: String): String? = eventModule(name)
+
+  fun argumentsError(call: String, args: JsonObject): PrototypeSpecError? {
+    val definition = callDefinition(call)?.second ?: return fail("call", "Unknown platform call")
+    val bound = JsonObject(args.mapValues { JsonObject(mapOf("value" to it.value)) })
+    return PrototypePlatformRules.argumentsError(
+      JsonObject(mapOf("args" to bound)),
+      "platform",
+      definition,
+    )
   }
 }

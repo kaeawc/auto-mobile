@@ -303,6 +303,7 @@ class CtrlProxyMessageHandler(
       request.reset,
       request.appearance,
       request.replaceOthers,
+      request.locale,
     )
 
     return null

@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "appear",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "type": "column",
+      "onAppear": [
+        {
+          "type": "unknown"
+        }
+      ],
+      "children": [
+        {
+          "type": "text",
+          "text": "Splash",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "onAppear": [
+            {
+              "type": "emit",
+              "name": "appeared"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Content",
+          "visibleWhen": {
+            "key": "show",
+            "equals": false
+          },
+          "onAppear": [
+            {
+              "type": "emit",
+              "name": "appeared"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onAppear[0].type"
+}

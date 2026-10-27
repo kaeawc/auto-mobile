@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "window-dead-taps-text",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "deadTaps": "yes"
+    },
+    "root": {
+      "type": "text",
+      "text": "Hello"
+    }
+  },
+  "expectedPath": "window.deadTaps"
+}

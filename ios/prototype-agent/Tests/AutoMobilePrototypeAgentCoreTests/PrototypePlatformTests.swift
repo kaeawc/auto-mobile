@@ -26,6 +26,7 @@ final class PrototypePlatformTests: XCTestCase {
         for (name, entry) in table {
             let module = try XCTUnwrap(PrototypePlatformValidator.modules[name])
             XCTAssertEqual(module.capability, entry["capability"] as? String, name)
+            XCTAssertEqual(module.state, (entry["state"] as? [String: Any]).map { Set($0.keys) }, name)
             let events = try XCTUnwrap(entry["events"] as? [String: Any])
             XCTAssertEqual(module.events, Set(events.keys), name)
             let calls = try XCTUnwrap(entry["calls"] as? [String: [String: Any]])
@@ -49,6 +50,9 @@ final class PrototypePlatformTests: XCTestCase {
                         XCTAssertEqual(rule["integer"] as? Bool, true, arg)
                         XCTAssertEqual(rule["min"] as? Double, min, arg)
                         XCTAssertEqual(rule["max"] as? Double, max, arg)
+                    case let .enumeration(values):
+                        XCTAssertEqual(rule["kind"] as? String, "enum", arg)
+                        XCTAssertEqual(Set(rule["values"] as? [String] ?? []), values, arg)
                     }
                 }
             }
@@ -97,6 +101,16 @@ final class PrototypePlatformTests: XCTestCase {
                     "\(name): \(context.debugDescription)"
                 )
             }
+        }
+    }
+
+    func testStrictValidatorRejectsUnknownRepeatPlatformArgument() throws {
+        let file = PrototypeSpecFixtures.directory.appendingPathComponent("invalid/platform-repeat-unknown-item.json")
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file))
+        let spec = try XCTUnwrap(raw.objectFields?["spec"])
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(spec))) { error in
+            guard case let PrototypeLoadError.invalidSpec(path, _) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(path, "root.children[0].onTap[0].args.message")
         }
     }
 

@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "stack-patterns",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "transition": "zoom",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home",
+          "onTap": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "detail",
+              "source": "hero"
+            },
+            {
+              "type": "replace",
+              "stack": "nav",
+              "screen": "detail",
+              "transition": "zoom",
+              "source": "hero"
+            }
+          ],
+          "sharedKey": "hero"
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail",
+          "sharedKey": "hero"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"home\"].onTap[0].source"
+}

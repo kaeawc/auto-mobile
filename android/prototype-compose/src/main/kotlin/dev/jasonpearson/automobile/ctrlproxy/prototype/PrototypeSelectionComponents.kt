@@ -87,7 +87,9 @@ internal fun RenderPrototypeRadioGroup(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        RadioButton(selected, onClick = null, enabled = node.enabled)
+        PrototypeInstantControl(selected to node.enabled) {
+          RadioButton(selected, onClick = null, enabled = node.enabled)
+        }
         Text(option.label, Modifier.clearAndSetSemantics {}, color = prototypeForeground(node))
       }
     }
@@ -155,8 +157,14 @@ private fun PrototypeListItemTrailingContent(
   enabled: Boolean,
 ) {
   when (trailing) {
-    is PrototypeListItemSwitch -> Switch(checked, onCheckedChange = null, enabled = enabled)
-    is PrototypeListItemCheckbox -> Checkbox(checked, onCheckedChange = null, enabled = enabled)
+    is PrototypeListItemSwitch ->
+      PrototypeInstantControl(checked to enabled) {
+        Switch(checked, onCheckedChange = null, enabled = enabled)
+      }
+    is PrototypeListItemCheckbox ->
+      PrototypeInstantControl(checked to enabled) {
+        Checkbox(checked, onCheckedChange = null, enabled = enabled)
+      }
     is PrototypeListItemIcon ->
       prototypeIcon(trailing.name)?.let { Icon(it, contentDescription = null) }
   }

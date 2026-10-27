@@ -4,6 +4,7 @@ import {
   broadcastListChanged,
   broadcastResourceUpdated,
   broadcastSessionReleased,
+  broadcastSessionDeviceRebound,
   pushProgressNotification,
   type NotificationTransport,
 } from "../../../src/daemon/socketServer/notificationFanOut";
@@ -81,6 +82,33 @@ describe("notificationFanOut", () => {
       reason: "idle",
       recordingIds: ["rec"],
     });
+    expect(pending.size).toBe(1);
+    transport.flushes[0]();
+    expect(pending.size).toBe(0);
+  });
+
+  test("rebound reaches only live subscribed sockets and drains its writes", () => {
+    const transport = new FakeTransport(new Set(["subscribed", "not-subscribed"]));
+    const pending = new Set<Promise<void>>();
+    const event = {
+      sessionId: "s",
+      previousDeviceId: "a",
+      deviceId: "b",
+      stableDeviceId: "Pixel",
+      avdName: "Pixel",
+      generation: 1,
+    };
+    broadcastSessionDeviceRebound(["subscribed", "gone"], transport, pending, event);
+    expect(transport.writes).toEqual([
+      {
+        sessionId: "subscribed",
+        frame: {
+          type: "daemon_notification",
+          method: "notifications/automobile/sessionDeviceRebound",
+          ...event,
+        },
+      },
+    ]);
     expect(pending.size).toBe(1);
     transport.flushes[0]();
     expect(pending.size).toBe(0);

@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "blur",
+            "radius": 25.5
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].radius",
+  "expectedMessage": "Invalid number value"
+}

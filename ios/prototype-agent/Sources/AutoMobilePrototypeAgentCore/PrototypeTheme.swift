@@ -151,20 +151,27 @@ struct PrototypeThemeShapes: Decodable, Equatable {
     let corner: String?
 }
 
-/// The spec's `theme`: colours via `PrototypePalette`, type scale via `PrototypeTypography`, corner
-/// scale via `PrototypeShapes`.
+enum PrototypeDesign: String, Decodable {
+    case material, platform
+}
+
+/// The spec's `theme`: design, colours via `PrototypePalette`, type scale via `PrototypeTypography`,
+/// and corner scale via `PrototypeShapes`.
 struct PrototypeTheme: Decodable, Equatable {
+    let design: PrototypeDesign?
     let mode: String?
     let colors: PrototypeThemeColors?
     let typography: PrototypeThemeTypography?
     let shapes: PrototypeThemeShapes?
 
     init(
+        design: PrototypeDesign? = nil,
         mode: String? = nil,
         colors: PrototypeThemeColors? = nil,
         typography: PrototypeThemeTypography? = nil,
         shapes: PrototypeThemeShapes? = nil
     ) {
+        self.design = design
         self.mode = mode
         self.colors = colors
         self.typography = typography

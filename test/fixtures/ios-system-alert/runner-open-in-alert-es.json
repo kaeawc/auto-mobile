@@ -1,0 +1,580 @@
+{
+  "data": {
+    "fallbackToSpringboard": true,
+    "hierarchy": {
+      "bounds": {
+        "bottom": 874,
+        "left": 0,
+        "right": 402,
+        "top": 0
+      },
+      "className": "XCUIApplication",
+      "node": [
+        {
+          "bounds": {
+            "bottom": 514,
+            "left": 41,
+            "right": 361,
+            "top": 388
+          },
+          "className": "UIAlertController",
+          "clickable": "true",
+          "node": [
+            {
+              "bounds": {
+                "bottom": 514,
+                "left": 41,
+                "right": 361,
+                "top": 388
+              },
+              "className": "UIView",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 514,
+                    "left": 41,
+                    "right": 361,
+                    "top": 388
+                  },
+                  "className": "UIView",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 514,
+                        "left": 41,
+                        "right": 361,
+                        "top": 388
+                      },
+                      "className": "UIView",
+                      "view-id": "342868ed-9339-afb1-fd68-304ce1141cae"
+                    },
+                    {
+                      "bounds": {
+                        "bottom": 514,
+                        "left": 41,
+                        "right": 361,
+                        "top": 388
+                      },
+                      "className": "UIView",
+                      "node": [
+                        {
+                          "bounds": {
+                            "bottom": 434,
+                            "left": 41,
+                            "right": 361,
+                            "top": 388
+                          },
+                          "className": "UIScrollView",
+                          "node": [
+                            {
+                              "bounds": {
+                                "bottom": 434,
+                                "left": 41,
+                                "right": 361,
+                                "top": 388
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 430,
+                                    "left": 71,
+                                    "right": 331,
+                                    "top": 409
+                                  },
+                                  "className": "UILabel",
+                                  "role": "text",
+                                  "text": "¿Abrir en ProtoViewer?",
+                                  "view-id": "21f3726d-2ccd-b06f-2586-983ee7032c0f"
+                                }
+                              ],
+                              "view-id": "3fe87394-0710-af6f-528f-5a148004c24f"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 434,
+                                "left": 41,
+                                "right": 361,
+                                "top": 432
+                              },
+                              "className": "UIView",
+                              "view-id": "3b3407ec-b61c-3a6f-aac1-8ec83bb5a9e0"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 434,
+                                "left": 328,
+                                "right": 358,
+                                "top": 388
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 385,
+                                    "left": 355,
+                                    "right": 358,
+                                    "top": 349
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "46d26ab8-a9cc-77e1-5a2d-14b6793fcfdc"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento vertical, 2 páginas",
+                              "view-id": "18ec3d65-0bf9-18e6-194b-a7b28c3440af"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 431,
+                                "left": 41,
+                                "right": 361,
+                                "top": 408
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 431,
+                                    "left": 2,
+                                    "right": 38,
+                                    "top": 428
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "a347026c-12f0-63e4-2622-0901d34ba9fc"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento horizontal, 1 página",
+                              "view-id": "217b345a-f8d9-c5e4-e85b-f1511c18d747"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 434,
+                                "left": 328,
+                                "right": 358,
+                                "top": 388
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 385,
+                                    "left": 355,
+                                    "right": 358,
+                                    "top": 349
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "a638c8ed-87eb-36a8-99c6-f302d44fc03a"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento vertical, 2 páginas",
+                              "view-id": "e2479a65-4b26-39d2-d4ce-8a4cc258f5c0"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 431,
+                                "left": 41,
+                                "right": 361,
+                                "top": 408
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 431,
+                                    "left": 2,
+                                    "right": 38,
+                                    "top": 428
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "388f7605-5d2b-172f-c4f9-4a6a3773fa7e"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento horizontal, 1 página",
+                              "view-id": "8c729b5d-8e26-1045-4cd3-b965df312087"
+                            }
+                          ],
+                          "scrollable": "true",
+                          "view-id": "584a6f9a-efff-0619-dee4-817fac521a19"
+                        },
+                        {
+                          "bounds": {
+                            "bottom": 514,
+                            "left": 41,
+                            "right": 361,
+                            "top": 434
+                          },
+                          "className": "UIScrollView",
+                          "node": [
+                            {
+                              "bounds": {
+                                "bottom": 514,
+                                "left": 41,
+                                "right": 361,
+                                "top": 434
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 498,
+                                    "left": 57,
+                                    "right": 345,
+                                    "top": 450
+                                  },
+                                  "className": "UIView",
+                                  "node": [
+                                    {
+                                      "bounds": {
+                                        "bottom": 498,
+                                        "left": 57,
+                                        "right": 197,
+                                        "top": 450
+                                      },
+                                      "className": "UIButton",
+                                      "clickable": "true",
+                                      "role": "button",
+                                      "text": "Cancelar",
+                                      "view-id": "8ae4f4e9-b253-f641-81a9-f4645613e017"
+                                    },
+                                    {
+                                      "bounds": {
+                                        "bottom": 498,
+                                        "left": 205,
+                                        "right": 345,
+                                        "top": 450
+                                      },
+                                      "className": "UIButton",
+                                      "clickable": "true",
+                                      "role": "button",
+                                      "text": "Abrir",
+                                      "view-id": "cb9ee209-4e32-b0b6-6cb7-3db442b12206"
+                                    }
+                                  ],
+                                  "view-id": "f38b60c8-8a50-87ea-845c-743d64660780"
+                                }
+                              ],
+                              "view-id": "516f0e1a-8eab-2b6c-9d53-ef6e19babc4d"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 514,
+                                "left": 328,
+                                "right": 358,
+                                "top": 434
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 531,
+                                    "left": 355,
+                                    "right": 358,
+                                    "top": 524
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "96eb482b-da36-9157-58d6-dae0518e21ac"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento vertical, 1 página",
+                              "view-id": "20816566-4e95-814e-b78c-2fdad1c645ea"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 511,
+                                "left": 41,
+                                "right": 361,
+                                "top": 481
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 511,
+                                    "left": 131,
+                                    "right": 138,
+                                    "top": 508
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "2a456ee6-7a9a-7d96-e2e9-132a3e19c064"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento horizontal, 1 página",
+                              "view-id": "cfd49604-4645-8e66-1ced-40e97d91e47c"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 514,
+                                "left": 328,
+                                "right": 358,
+                                "top": 434
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 531,
+                                    "left": 355,
+                                    "right": 358,
+                                    "top": 524
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "5e93bb01-7692-0fd7-e0ed-56d51cc553a2"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento vertical, 1 página",
+                              "view-id": "d85b69a9-6761-a7ae-9dde-4046a8ee5b94"
+                            },
+                            {
+                              "bounds": {
+                                "bottom": 511,
+                                "left": 41,
+                                "right": 361,
+                                "top": 481
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 511,
+                                    "left": 131,
+                                    "right": 138,
+                                    "top": 508
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "1368eb41-9664-b632-123e-133addf42d5f"
+                                }
+                              ],
+                              "text": "Barra de desplazamiento horizontal, 1 página",
+                              "view-id": "1cac2f2f-37dd-5df6-b972-c5b54c317982"
+                            }
+                          ],
+                          "scrollable": "true",
+                          "view-id": "cdd1b052-a62b-c8a0-2d9b-7658ad477984"
+                        }
+                      ],
+                      "view-id": "2412c882-e8c0-acbf-3dd4-f5311e6c36b7"
+                    }
+                  ],
+                  "view-id": "54b54709-d08c-3814-4e4f-c66bf50820d8"
+                }
+              ],
+              "view-id": "5513e3ea-bba6-d754-02c1-c34c7365c6fa"
+            },
+            {
+              "bounds": {
+                "bottom": 514,
+                "left": 41,
+                "right": 361,
+                "top": 388
+              },
+              "className": "UIView",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 514,
+                    "left": 41,
+                    "right": 361,
+                    "top": 388
+                  },
+                  "className": "UIView",
+                  "node": [
+                    {
+                      "bounds": {
+                        "bottom": 514,
+                        "left": 41,
+                        "right": 361,
+                        "top": 388
+                      },
+                      "className": "UIView",
+                      "node": [
+                        {
+                          "bounds": {
+                            "bottom": 514,
+                            "left": 41,
+                            "right": 361,
+                            "top": 388
+                          },
+                          "className": "UIView",
+                          "node": [
+                            {
+                              "bounds": {
+                                "bottom": 514,
+                                "left": 41,
+                                "right": 361,
+                                "top": 388
+                              },
+                              "className": "UIView",
+                              "node": [
+                                {
+                                  "bounds": {
+                                    "bottom": 1262,
+                                    "left": 41,
+                                    "right": 443,
+                                    "top": 388
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "b94a4f74-07d0-954c-b5c9-49ecf8564369"
+                                }
+                              ],
+                              "view-id": "ccf7f96d-5223-f9b6-3dac-29ca820d4eee"
+                            }
+                          ],
+                          "view-id": "d6150d07-c843-92d6-49bc-050b8aeadca6"
+                        },
+                        {
+                          "bounds": {
+                            "bottom": 514,
+                            "left": 41,
+                            "right": 361,
+                            "top": 388
+                          },
+                          "className": "UIView",
+                          "node": [
+                            {
+                              "bounds": {
+                                "bottom": 1262,
+                                "left": 41,
+                                "right": 443,
+                                "top": 388
+                              },
+                              "className": "UIView",
+                              "view-id": "c5575c62-c56a-92d3-580f-9e2152a24b3a"
+                            }
+                          ],
+                          "view-id": "dc7157c3-c610-6027-6ae1-7063620b43a3"
+                        }
+                      ],
+                      "view-id": "a6f7ab36-0370-ca20-607e-156fd36990fc"
+                    }
+                  ],
+                  "view-id": "57c3ab1a-1e0f-5dde-ba9d-ab04aabc1133"
+                }
+              ],
+              "view-id": "a93875fe-509a-c2fa-e0e0-939d3ec71c4d"
+            }
+          ],
+          "text": "¿Abrir en ProtoViewer?",
+          "view-id": "5feceb66-ffc8-6f38-d952-786c6d696c79"
+        }
+      ],
+      "text": " "
+    },
+    "insets": {
+      "available": false,
+      "displayCutoutInfo": {
+        "classification": "unknown"
+      },
+      "source": "unavailable",
+      "units": "unknown"
+    },
+    "nativeScale": 3,
+    "packageName": "com.apple.springboard",
+    "pixelHeight": 2622,
+    "pixelWidth": 1206,
+    "screenHeight": 874,
+    "screenScale": 3,
+    "screenWidth": 402,
+    "updatedAt": 1793031770161,
+    "windowInfo": {
+      "bounds": {
+        "bottom": 874,
+        "left": 0,
+        "right": 402,
+        "top": 0
+      },
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    },
+    "windows": [
+      {
+        "bounds": {
+          "bottom": 874,
+          "left": 0,
+          "right": 402,
+          "top": 0
+        },
+        "id": 0,
+        "isActive": true,
+        "isFocused": true,
+        "type": 1
+      }
+    ]
+  },
+  "frameContext": "3CBFD690-81FA-418A-A7AD-5BDD49114522:1:9191f2ed6a5cd5d7",
+  "perfTiming": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "durationMs": 1,
+                    "name": "checkState"
+                  },
+                  {
+                    "children": [
+                      {
+                        "durationMs": 37,
+                        "name": "springboardSnapshot"
+                      },
+                      {
+                        "durationMs": 0,
+                        "name": "checkCandidates"
+                      },
+                      {
+                        "durationMs": 0,
+                        "name": "checkObserved"
+                      },
+                      {
+                        "durationMs": 14,
+                        "name": "checkSystemApps"
+                      }
+                    ],
+                    "durationMs": 52,
+                    "name": "detectForeground"
+                  }
+                ],
+                "durationMs": 53,
+                "name": "ensureForegroundApp"
+              },
+              {
+                "durationMs": 30,
+                "name": "snapshot"
+              },
+              {
+                "durationMs": 0,
+                "name": "buildHierarchy"
+              },
+              {
+                "durationMs": 0,
+                "name": "mergeTypedTextInputs"
+              },
+              {
+                "durationMs": 0,
+                "name": "optimize"
+              },
+              {
+                "durationMs": 5,
+                "name": "systemAlerts"
+              }
+            ],
+            "durationMs": 92,
+            "name": "getViewHierarchy"
+          }
+        ],
+        "durationMs": 92,
+        "name": "extraction"
+      }
+    ],
+    "durationMs": 92,
+    "name": "handleRequestHierarchy"
+  },
+  "requestId": "cap-1",
+  "servedFromCache": false,
+  "timestamp": 1793031770162,
+  "type": "hierarchy_update"
+}

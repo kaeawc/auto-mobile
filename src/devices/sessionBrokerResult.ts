@@ -14,7 +14,13 @@ export interface SessionBrokerAcquisitionTiming {
   totalMs: number;
 }
 
-export type SessionBrokerResetMode = "keep-booted" | "erase" | "snapshot" | "wipe-data" | "none";
+export type SessionBrokerResetMode =
+  | "keep-booted"
+  | "minimal"
+  | "erase"
+  | "snapshot"
+  | "wipe-data"
+  | "none";
 
 export interface SessionBrokerResetTiming {
   mode: SessionBrokerResetMode;

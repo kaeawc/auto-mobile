@@ -503,6 +503,8 @@ internal object PrototypeBindableFields {
             ?: objects(node, "onDismiss", path).firstNotNullOfOrNull { (entry, at) ->
               visitor.action(entry, at)
             }
+        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)

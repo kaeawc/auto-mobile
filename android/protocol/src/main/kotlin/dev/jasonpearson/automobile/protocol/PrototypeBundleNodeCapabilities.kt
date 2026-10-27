@@ -37,6 +37,7 @@ internal object PrototypeBundleNodeCapabilities {
     mark("semantics_v1", "semantics" in n)
     mark("platform_namespace_v1", "ios" in n || "android" in n)
     mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
+    mark("platform_media_items_v1", PrototypeMediaItemBindings.usedBy(n))
     mark("shared_element_v1", "sharedKey" in n)
     mark("shared_element_v2", "shared" in n)
     mark("flow_grid_v1", "span" in n)
@@ -103,14 +104,18 @@ internal object PrototypeBundleNodeCapabilities {
       caps.add("prototype_$capability")
   }
 
+  /** `{data: "/pointer"}` is a media item binding (#14192), not a per-mode pair. */
+  private fun pair(value: JsonElement?) = value is JsonObject && !value.containsKey("data")
+
+  private fun pairedImages(n: JsonObject, type: String?): Boolean =
+    (type == "image" && pair(n["asset"])) ||
+      (n["items"] as? JsonArray).orEmpty().any { pair((it as? JsonObject)?.get("image")) }
+
   private fun appearance(n: JsonObject, type: String?, caps: MutableSet<String>) {
     if ((n["filter"] as? JsonObject)?.get("tint") is JsonObject)
       caps.add("prototype_theme_modes_v1")
-    val pairedImage = type == "image" && n["asset"] is JsonObject
     val scrim = type in setOf("bottomSheet", "drawer") && themed(n["scrim"])
-    val items =
-      (n["items"] as? JsonArray).orEmpty().any { (it as? JsonObject)?.get("image") is JsonObject }
-    if (pairedImage || scrim || items) caps.add("prototype_theme_modes_v1")
+    if (pairedImages(n, type) || scrim) caps.add("prototype_theme_modes_v1")
     val styles =
       listOfNotNull(n["style"] as? JsonObject) +
         (n["styleWhen"] as? JsonArray).orEmpty().mapNotNull {

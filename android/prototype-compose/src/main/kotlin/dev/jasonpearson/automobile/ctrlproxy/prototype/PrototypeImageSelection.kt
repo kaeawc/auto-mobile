@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.layout.ContentScale
+import dev.jasonpearson.automobile.protocol.PrototypeAssetContract
 import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
 import dev.jasonpearson.automobile.protocol.PrototypeFontFamily
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
@@ -78,7 +79,8 @@ fun prototypeAssetReferences(root: PrototypeNode): List<String> {
     prototypeDescendants(node).forEach(::visit)
   }
   visit(root)
-  return ids.toList()
+  // A `media:` id is minted on the device (#14192): never an upload, never reported missing.
+  return ids.filterNot(PrototypeAssetContract::isMediaId)
 }
 
 /** Includes inactive style alternatives and hidden descendants, before a spec can be shown. */

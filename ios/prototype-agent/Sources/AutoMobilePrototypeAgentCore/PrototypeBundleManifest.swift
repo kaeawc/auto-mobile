@@ -64,6 +64,7 @@ struct PrototypeBundleManifest {
 
     static func validID(_ id: String) -> Bool {
         !id.isEmpty && id.utf16.count <= PrototypeBundle.assetLimits.maxIdLength
+            && !PrototypeMediaItems.isMediaId(id)
     }
 
     private static func validHash(_ hash: String) -> Bool {

@@ -235,10 +235,14 @@ export const colorValueSchema = z.union([
   z.object({ light: colorTokenSchema, dark: colorTokenSchema }).strict(),
 ]);
 
-/** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
+/**
+ * An uploaded image asset id, a `{light, dark}` pair of ids (#11218), or `{data: "/pointer"}`
+ * naming a device media item id in `/data` (#14192).
+ */
 export const imageAssetSchema = z.union([
   z.string().min(1),
   z.object({ light: z.string().min(1), dark: z.string().min(1) }).strict(),
+  z.object({ data: z.string().regex(prototypeContractPatterns.pointer) }).strict(),
 ]);
 
 export const gradientStopSchema = z

@@ -439,6 +439,8 @@ function mapPart(part: Raw, path: string, visit: FieldVisitor): Raw {
 
 /** Component fields that take placeholders besides a text node's `text`. */
 const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVisitor) => void> = {
+  // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+  image: (node, path, visit) => mapField(node, "asset", path, "text", visit),
   button: (node, path, visit) => mapField(node, "label", path, "text", visit),
   fab: (node, path, visit) => mapField(node, "label", path, "text", visit),
   segmentedButton: (node, path, visit) =>

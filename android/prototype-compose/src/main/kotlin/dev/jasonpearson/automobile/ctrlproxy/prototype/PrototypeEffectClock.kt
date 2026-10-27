@@ -3,8 +3,10 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.InfiniteAnimationPolicy
 import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /** A source of frame timestamps in nanoseconds; null when no more frames will come. */
 internal fun interface PrototypeFrameSource {
@@ -104,15 +106,24 @@ internal fun prototypeEffectPhase(base: Float, periodMs: Int?, elapsedNanos: Lon
  */
 @InternalAutoMobilePrototypeApi
 class PrototypeEffectHealth {
-  private val frozen = ConcurrentHashMap<String, PrototypeDegradedEffect>()
+  private val frozen = MutableStateFlow<List<PrototypeDegradedEffect>>(emptyList())
+
+  /** Current budget degradations, including changes after the first render. */
+  val reports = frozen.asStateFlow()
 
   internal fun markBudget(path: String, type: String) {
-    frozen.putIfAbsent(path, PrototypeDegradedEffect(path, type, PROTOTYPE_DEGRADED_BUDGET))
+    frozen.update { entries ->
+      if (entries.any { it.path == path }) entries
+      else
+        (entries + PrototypeDegradedEffect(path, type, PROTOTYPE_DEGRADED_BUDGET)).sortedBy {
+          it.path
+        }
+    }
   }
 
-  fun snapshot(): List<PrototypeDegradedEffect> = frozen.values.sortedBy { it.path }
+  fun snapshot(): List<PrototypeDegradedEffect> = reports.value
 
   internal fun clear(path: String) {
-    frozen.remove(path)
+    frozen.update { entries -> entries.filterNot { it.path == path } }
   }
 }

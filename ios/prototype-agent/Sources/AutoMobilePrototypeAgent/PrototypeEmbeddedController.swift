@@ -15,7 +15,7 @@
             spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption,
             network: PrototypeNetworkConfiguration,
             options: PrototypeEmbeddedOptions = PrototypeEmbeddedOptions(),
-            registry: PrototypePlatformRegistry = .empty,
+            registry: PrototypePlatformRegistry = .system,
             onEvent: @escaping @MainActor (PrototypeEvent) -> Void,
             onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void,
             onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void

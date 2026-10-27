@@ -33,6 +33,7 @@ internal class PrototypePlatformDispatcher(
     /** The resolved arguments, kept so the feedback log can name the effect or sound. */
     val args: JsonObject? = null,
   ) {
+    var clipboardBytes: Int = 0
     lateinit var job: Job
   }
 
@@ -73,6 +74,11 @@ internal class PrototypePlatformDispatcher(
   ) {
     val call = Pending(newId(), action, clock(), eventContext, nodeId, args)
     if (closed) return
+    call.clipboardBytes =
+      (args?.get("text") as? kotlinx.serialization.json.JsonPrimitive)
+        ?.content
+        ?.toByteArray(Charsets.UTF_8)
+        ?.size ?: 0
     val refusal = refusal(action, args, invalid)
     if (refusal != null) {
       complete(call, refusal)
@@ -155,6 +161,13 @@ internal class PrototypePlatformDispatcher(
   }
 
   private suspend fun settle(call: Pending, result: PlatformCallResult) {
+    if (call.action.call == "clipboard.paste" && result is PlatformCallResult.Success) {
+      call.clipboardBytes =
+        ((result.value as? JsonObject)?.get("text") as? kotlinx.serialization.json.JsonPrimitive)
+          ?.content
+          ?.toByteArray(Charsets.UTF_8)
+          ?.size ?: 0
+    }
     if (synchronized(pending) { pending.remove(call.id) } != null) {
       limiter.release()
       if (!closed) complete(call, result)

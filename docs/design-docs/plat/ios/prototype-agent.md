@@ -44,6 +44,7 @@ use native controls. No rendering changes accompany this default.
 | listItem        | material | material | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |
+| pasteButton     | native   | material | —     |
 | progress        | material | material | —     |
 | radioGroup      | material | material | —     |
 | row             | neutral  | neutral  | —     |

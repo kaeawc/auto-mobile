@@ -496,3 +496,5 @@ export const PROTOTYPE_STRINGS_CAPABILITY = "prototype_strings_v1";
 export const PROTOTYPE_SEMANTICS_CAPABILITY = "prototype_semantics_v1";
 
 export const PROTOTYPE_FORMAT_CAPABILITY = "prototype_format_v1";
+
+export const PROTOTYPE_PLATFORM_CLIPBOARD_CAPABILITY = "prototype_platform_clipboard_v1";

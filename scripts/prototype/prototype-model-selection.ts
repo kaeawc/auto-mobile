@@ -28,6 +28,8 @@ export interface ModelOptions {
     readonly docs?: Readonly<Record<string, string>>;
   };
   readonly kotlinStringOverloads?: readonly string[];
+  /** Variants implemented by hand, whose fields still participate in the Kotlin base. */
+  readonly kotlinHandWrittenVariants?: readonly string[];
   readonly validators?: TypeRefs;
 }
 export type ModelSelection = Readonly<Record<string, ModelOptions>>;

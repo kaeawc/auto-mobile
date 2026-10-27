@@ -153,12 +153,18 @@ data class PrototypeRequest(
   }
 }
 
+/** The clipboard read seam, split out so [PrototypeHost] stays within the function-count limit. */
+interface PrototypeClipboardHost {
+  /** Runs [read] while the host owns input focus; the default reads directly. */
+  suspend fun <T> readClipboard(read: () -> T): T = read()
+}
+
 /**
  * Mutations suspend until executed on main (inline if already there, posted otherwise). Boolean
  * results report platform success; show/replace return false after destroy. Replace without a
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
-interface PrototypeHost : PrototypeHostLifecycle {
+interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
   /** Best synchronous baseline; the Compose window size corrects it after attachment. */
   @InternalAutoMobilePrototypeApi
   fun initialDeviceState(request: PrototypeRequest): kotlinx.serialization.json.JsonObject =
@@ -297,6 +303,7 @@ class DefaultPrototypeHost(
   private var destroyed = false
   private val gestureMutex = Mutex()
   private val captureMutex = Mutex()
+  private val clipboardMutex = Mutex()
 
   override val isHiddenForCapture: Boolean
     get() = window?.view?.visibility == View.INVISIBLE
@@ -591,6 +598,33 @@ class DefaultPrototypeHost(
     val applied = relayoutOnMain(current)
     if (applied) current.back.sync(current.request.focusable) else current.request = previous
     applied
+  }
+
+  override suspend fun <T> readClipboard(read: () -> T): T = clipboardMutex.withLock {
+    val current = mainThread.onMain { window } ?: throw SecurityException("No foreground prototype")
+    val previous = current.request.hasStackBack
+    val wasFocusable = mainThread.onMain { current.view.isFocusableInTouchMode }
+    try {
+      if (!setStackBackEnabled(true)) throw SecurityException("Clipboard focus unavailable")
+      mainThread.onMain {
+        if (!current.view.hasWindowFocus()) {
+          current.view.isFocusableInTouchMode = true
+          current.view.requestFocus()
+        }
+      }
+      frames.awaitFrames(2)
+      mainThread.onMain {
+        if (!current.view.hasWindowFocus()) throw SecurityException("Clipboard focus unavailable")
+        read()
+      }
+    } finally {
+      kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+        if (mainThread.onMain { window === current }) {
+          setStackBackEnabled(previous)
+          mainThread.onMain { current.view.isFocusableInTouchMode = wasFocusable }
+        }
+      }
+    }
   }
 
   /** Still focused here: ask the keyboard to go before the window stops being focusable. */

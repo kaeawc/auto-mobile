@@ -1228,6 +1228,10 @@ class PrototypeRuntime(
     error: PlatformError?,
     durationMs: Long,
   ) = buildJsonObject {
+    if (call.action.call.startsWith("clipboard.")) {
+      put("op", call.action.call.substringAfter('.'))
+      put("bytes", call.clipboardBytes)
+    }
     put("callId", call.id)
     put("call", call.action.call)
     put("outcome", if (error == null) "success" else "error")

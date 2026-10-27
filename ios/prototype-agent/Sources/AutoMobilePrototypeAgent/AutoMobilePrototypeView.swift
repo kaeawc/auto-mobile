@@ -19,7 +19,7 @@
             storage: PrototypeStorageOption = .none,
             network: PrototypeNetworkConfiguration = .default,
             options: PrototypeEmbeddedOptions = PrototypeEmbeddedOptions(),
-            registry: PrototypePlatformRegistry = .empty,
+            registry: PrototypePlatformRegistry = .system,
             onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in },
             onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in },
             onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in }

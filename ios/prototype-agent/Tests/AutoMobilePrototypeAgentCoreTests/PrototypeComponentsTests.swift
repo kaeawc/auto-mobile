@@ -290,6 +290,47 @@ final class PrototypeComponentsTests: XCTestCase {
         XCTAssertEqual(root.openModals(state: state, pages: [:]).map(\.id), ["page0", "outer", "inner"])
     }
 
+    func testBottomSheetIsCollectedOnlyWhenOpenAndVisible() throws {
+        let root = try spec("""
+        {"id":"s","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"bottomSheet","id":"sheet","openWhen":{"key":"open","equals":true},
+          "visibleWhen":{"key":"visible","equals":true},
+          "child":{"type":"snackbar","id":"nested","text":"Saved",
+                   "openWhen":{"key":"notice","equals":true}}}}
+        """).root
+        let open: [String: JSONValue] = ["open": .bool(true), "visible": .bool(true), "notice": .bool(true)]
+        XCTAssertEqual(root.openModals(state: open, pages: [:]).map(\.id), ["sheet", "nested"])
+        XCTAssertTrue(root.openModals(state: open.merging(["open": .bool(false)]) { _, value in value }, pages: [:])
+            .isEmpty)
+        XCTAssertTrue(root.openModals(state: open.merging(["visible": .bool(false)]) { _, value in value }, pages: [:])
+            .isEmpty)
+        XCTAssertTrue(root.openModals(state: [:], pages: [:]).isEmpty)
+        XCTAssertFalse(root.drawsInPlace { $0.holds(open) })
+        XCTAssertFalse(root.blocksPage(state: open, pages: [:]))
+        XCTAssertEqual(root.layerAccessibility(state: open, pages: [:]), .container)
+    }
+
+    func testOpenModalsCollectBottomSheetsNestedInRepeatedRowsOnce() throws {
+        let root = try spec("""
+        {"id":"r","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"column","repeat":{"as":"item","items":[{"id":1},{"id":2}]},"children":[
+          {"type":"row","children":[
+           {"type":"text","text":"Item {item.id}"},
+           {"type":"bottomSheet","openWhen":{"key":"open_{item.id}","equals":true},
+            "child":{"type":"text","text":"Sheet {item.id}"}}]}]}}
+        """).root
+        let open: [String: JSONValue] = ["open_1": .bool(true), "open_2": .bool(true)]
+        let modals = root.openModals(state: open, pages: [:])
+        XCTAssertEqual(modals.map { $0.openCondition?.key }, ["open_1", "open_2"])
+        XCTAssertEqual(Set(modals.map(ObjectIdentifier.init)).count, 2)
+        XCTAssertEqual(
+            root.openModals(state: ["open_2": .bool(true)], pages: [:]).map { $0.openCondition?.key }, ["open_2"]
+        )
+        for row in root.children ?? [] {
+            XCTAssertEqual(row.drawnChildren { $0.holds(open) }.map(\.offset), [0])
+        }
+    }
+
     // MARK: Pickers and sliders
 
     func testTimeChangeStoresBothKeysInOneEvent() throws {

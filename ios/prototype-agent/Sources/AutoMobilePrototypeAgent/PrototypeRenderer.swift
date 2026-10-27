@@ -165,7 +165,7 @@
     struct NodeView: View {
         let node: PrototypeNode
         let model: PrototypeModel
-        /// Dialogs and snackbars draw nothing in place; `PrototypeModalLayer` draws them with this set.
+        /// Modals, including bottom sheets, draw nothing in place; `PrototypeModalLayer` draws them with this set.
         var presentedAsModal = false
         /// Anchored nodes draw nothing in place; `PrototypeAnchorLayer` draws them with this set (#10803).
         var anchorPlaced = false
@@ -469,8 +469,11 @@
                 PrototypeZoomStackHost(node: node, model: model)
             case "pager":
                 PagerView(node: node, model: model)
-            case "tabBar", "bottomNav":
+            case "tabBar":
                 navBar
+                    .modifier(PrototypeBarClip(fraction: node.onScroll == "hide" ? barFraction : 0))
+            case "bottomNav":
+                bottomNavBar
                     .modifier(PrototypeBarClip(fraction: node.onScroll == "hide" ? barFraction : 0))
             case "bottomSheet":
                 sheet
@@ -866,6 +869,45 @@
             if let pagerId = node.pager { return model.pages[pagerId] ?? 0 }
             if let key = node.stateKey { return model.state[key]?.intValue ?? 0 }
             return 0
+        }
+
+        private var bottomNavBar: some View {
+            let items = node.items ?? []
+            let showsLabel = PrototypeBarScroll.showsNavigationLabel(behavior: node.onScroll, fraction: barFraction)
+            let sizing = PrototypeBarScroll.navigationSizing(showsLabel: showsLabel)
+            return HStack(spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    let selected = index == navSelection
+                    Button {
+                        model.select(index: index, pager: node.pager, key: node.stateKey, then: node.onTap ?? [])
+                    } label: {
+                        VStack(spacing: 4) {
+                            navVisual(item)
+                                .frame(width: 64, height: 32)
+                                .background(
+                                    Capsule().fill(selected ? palette.navIndicator.map { Color($0) } ?? .clear : .clear)
+                                )
+                            if showsLabel {
+                                Text(item.label)
+                                    .font(.caption.weight(selected ? .semibold : .medium))
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: sizing.itemMinHeight)
+                        .foregroundColor(navForeground(selected: selected))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel(item.label)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, sizing.topPadding)
+            .padding(.bottom, sizing.bottomPadding)
+            .frame(maxWidth: .infinity, minHeight: sizing.containerMinHeight)
+            .background(palette.navContainer.map { Color($0) } ?? Color(uiColor: .secondarySystemBackground))
         }
 
         private var navBar: some View {
@@ -1269,10 +1311,12 @@
             let gestures = plan.layers.reduce(AnyView(content)) { view, layer in
                 switch layer {
                 case .longPress:
-                    AnyView(view.onLongPressGesture {
-                        guard model.isEnabled(node) else { return }
-                        model.run(longPress ?? [])
-                    })
+                    AnyView(view.simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.5, maximumDistance: 10).onEnded { _ in
+                            guard model.isEnabled(node) else { return }
+                            model.run(longPress ?? [])
+                        }
+                    ))
                 case .doubleTap:
                     AnyView(view.onTapGesture(count: 2) {
                         guard model.isEnabled(node) else { return }

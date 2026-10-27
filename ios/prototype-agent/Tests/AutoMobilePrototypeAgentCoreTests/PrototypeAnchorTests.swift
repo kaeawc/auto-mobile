@@ -193,7 +193,7 @@ final class PrototypeAnchorTests: XCTestCase {
         XCTAssertTrue(plain.windowAnchorLayer(state: [:], pages: [:]).isEmpty)
     }
 
-    func testModalAndClosedSheetContentIsNotInTheWindowLayer() throws {
+    func testModalAndSheetContentIsOnlyInTheModalLayer() throws {
         let root = try node("""
         {"type": "column", "children": [
           {"type": "dialog", "title": "d", "openWhen": {"key": "open", "equals": true},
@@ -207,14 +207,22 @@ final class PrototypeAnchorTests: XCTestCase {
         XCTAssertTrue(root.layeredAnchors(state: [:], pages: [:]).isEmpty)
         XCTAssertEqual(
             root.layeredAnchors(state: ["open": .bool(true)], pages: [:]).compactMap { $0.node.id },
-            ["s"],
-            "an open dialog's body is layered by the modal layer above it, not here"
+            [],
+            "open dialog and sheet bodies are layered by their modal layers, not here"
         )
-        let dialog = try XCTUnwrap(root.openModals(state: ["open": .bool(true)], pages: [:]).first)
+        let modals = root.openModals(state: ["open": .bool(true)], pages: [:])
+        XCTAssertEqual(modals.map(\.type), ["dialog", "bottomSheet"])
+        let dialog = try XCTUnwrap(modals.first)
         XCTAssertEqual(
             PrototypeNode.layeredAnchors(in: dialog.childEntries(path: "modal0"), state: [:], pages: [:]).map(\.path),
             ["modal0.child"]
         )
+        let sheet = try XCTUnwrap(modals.last)
+        let sheetAnchors = PrototypeNode.layeredAnchors(
+            in: sheet.childEntries(path: "modal1"), state: [:], pages: [:]
+        )
+        XCTAssertEqual(sheetAnchors.map(\.path), ["modal1.child"])
+        XCTAssertEqual(sheetAnchors.compactMap { $0.node.id }, ["s"])
     }
 
     // MARK: Anchor fade and sheet clip (#10912)

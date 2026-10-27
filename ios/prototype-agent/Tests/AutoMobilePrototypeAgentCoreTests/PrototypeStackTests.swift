@@ -210,7 +210,7 @@ final class PrototypeStackTests: XCTestCase {
         XCTAssertTrue(session.popTopmostStack().isEmpty)
     }
 
-    func testBackPrefersModalStacksIncludingInlineBottomSheet() throws {
+    func testBackPrefersModalStacksIncludingBottomSheet() throws {
         for type in ["dialog", "bottomSheet"] {
             let modal: JSONValue = .object([
                 "type": .string(type), "openWhen": .object(["key": .string("open"), "equals": .bool(true)]),

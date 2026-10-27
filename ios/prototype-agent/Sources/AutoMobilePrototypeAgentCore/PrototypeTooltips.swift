@@ -74,7 +74,7 @@ extension PrototypeNode {
         -> PrototypeNode?
     {
         guard visibleWhen?.holds(state) ?? true else { return nil }
-        if prototypeModalTypes.contains(type) || type == "bottomSheet",
+        if prototypeModalTypes.contains(type),
            !(openWhen?.holds(state) ?? false) { return nil }
         if id == wanted { return self }
         for entry in currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) {

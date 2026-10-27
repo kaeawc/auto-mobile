@@ -25,7 +25,7 @@ const KINDS: FaultKind[] = ["reject", "hang-until-released", "delay", "crash-aft
 const SCENARIOS = [
   "terminal release",
   "non-terminal release",
-  "terminal superseded by rebind and lift (volatile journal)",
+  "terminal overtaken after its row statement (volatile journal)",
   "terminal declined at the final fence",
   "forced stuck release",
   "create after lift with parked terminal",
@@ -187,6 +187,26 @@ class Run {
     };
   }
 
+  /**
+   * A volatile release whose row statement is parked past the deadline while a newer confirmation
+   * arrives: the final fence is dropped, so the release has won (#11799 W5).
+   */
+  async overtaken(): Promise<void> {
+    this.parkTerminal();
+    let current = true;
+    const release = this.manager.releaseSessionUnlessSuperseded(
+      UUID,
+      `device-disconnected:${DEVICE}`,
+      { commitFence: () => current },
+    );
+    await flush();
+    current = false;
+    await this.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS + 1);
+    await this.complete(() => release);
+    this.parked!.resolve();
+    await flush();
+  }
+
   async supersede(recreate: boolean): Promise<void> {
     this.parkTerminal();
     let current = true;
@@ -219,7 +239,17 @@ class Run {
       { commitFence: () => ++calls < 2 },
     );
     await this.complete(() => release);
-    await this.complete(() => this.manager.rebindSession(UUID, "fake-rebound", "android"));
+    if (!this.intentDegraded()) {
+      await this.complete(() => this.manager.rebindSession(UUID, "fake-rebound", "android"));
+    }
+  }
+
+  /**
+   * A faulted journal write reports `volatile`, so the release takes the write-first order and,
+   * with no final fence after its row, wins (#11799 W5).
+   */
+  intentDegraded(): boolean {
+    return this.effects.includes(`record:device-disconnected:${DEVICE}:volatile`);
   }
 
   async force(reason: SessionReleaseReason = "heartbeat-timeout"): Promise<void> {
@@ -315,8 +345,7 @@ class Run {
     const row = await this.persistence.getSession(UUID);
     const live = this.manager.findSession(UUID);
     const liveScenario =
-      scenario.includes("superseded") ||
-      scenario.includes("declined") ||
+      (scenario.includes("declined") && !this.intentDegraded()) ||
       scenario.includes("create after");
     if (liveScenario) {
       if (
@@ -335,7 +364,10 @@ class Run {
           ? "plan-auto-release"
           : scenario === "forced stuck release"
             ? "heartbeat-timeout"
-            : "explicit-release";
+            : scenario === "terminal overtaken after its row statement (volatile journal)" ||
+                scenario === "terminal declined at the final fence"
+              ? `device-disconnected:${DEVICE}`
+              : "explicit-release";
       if (live || row?.release_reason !== reason || row.status === "active") {
         this.violations.push(
           `ended oracle expected ${reason}: ${row?.status}/${row?.release_reason}`,
@@ -367,7 +399,7 @@ async function simulate(scenario: Scenario, at?: number, kind?: FaultKind): Prom
     at,
     kind,
     undefined,
-    scenario === "terminal superseded by rebind and lift (volatile journal)",
+    scenario === "terminal overtaken after its row statement (volatile journal)",
   );
   await run.create();
   run.persistence.faultPlan = run.plan;
@@ -382,8 +414,8 @@ async function simulate(scenario: Scenario, at?: number, kind?: FaultKind): Prom
       case "non-terminal release":
         await run.complete(() => run.manager.releaseSession(UUID, "plan-auto-release"));
         break;
-      case "terminal superseded by rebind and lift (volatile journal)":
-        await run.supersede(false);
+      case "terminal overtaken after its row statement (volatile journal)":
+        await run.overtaken();
         break;
       case "terminal declined at the final fence":
         await run.declineAtCommit();

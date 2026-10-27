@@ -164,7 +164,6 @@ export type SessionManagerCollaboratorActions = Pick<
   | "releaseHeartbeatTimeoutMs"
   | "persistTerminalReleaseWithinDeadline"
   | "fenceTerminalRelease"
-  | "abandonReleaseSupersededAfterPersist"
   | "commitReleaseRemoval"
   | "commitReplacedDeviceTeardown"
   | "restoreNonTerminalRowOverSupersededReleaseLater"

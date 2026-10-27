@@ -643,12 +643,14 @@ is refused: the release already won) and deleting `supersededRows.ts`' release-d
 rebind and activity overlap repair stays and is re-modelled as the writer replacing an unwritten
 `live` desire.
 
-W5 trial (not landed): dropping the volatile final fence is a behaviour change, not a dead-code
-removal. It ends a live session on a device-loss observation that a newer confirmation would have
-overruled, and 50 tests across `supersededRowReassertRetry`, `releaseRowRetry`,
-`rowWritesRemainingCases`, `terminalReleaseReasonOnNotFoundWires` and the fault matrix encode the
-old order. W5 should be taken only with an owner decision to accept that change for volatile
-(Windows/no-journal) daemons, then rewrite those tests around rebind/activity overlap triggers.
+W5a (decided by the owner, 2026-10-26, #11799): the final supersede fence is dropped for every
+intent, volatile included. This is a behaviour change, not a dead-code removal: a volatile release
+whose row statement was issued has won, so a newer identity confirmation that arrives during that
+write is too late, where before it ended with the live session rewritten over the terminal row. A
+durable release still declines at the fence before its row exists. `abandonReleaseSupersededAfterPersist`
+is deleted. The release-driven rewrite chain (`reassertSupersededLiveRow` and the owed-retry
+machinery) is now unreachable from a release; it stays until the next slice, whose tests drive it
+directly, and the rebind/activity overlap repair keeps using it.
 
 ## 7. Risks
 

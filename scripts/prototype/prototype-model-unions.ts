@@ -74,7 +74,9 @@ export function renderUnion(
   if (context.language === "kotlin") {
     context.output.push(...renderKotlinBase(type, variants, options));
     for (const variant of variants) {
-      if (options.kotlinHandWrittenVariants?.includes(variant.name)) continue;
+      if (options.kotlinHandWrittenVariants?.includes(variant.name)) {
+        continue;
+      }
       const variantType =
         options.variantNames?.[variant.name] ??
         `Prototype${capitalized(variant.name)}${capitalized(name)}`;

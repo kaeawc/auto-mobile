@@ -648,6 +648,50 @@ capture(
 capture("backdrop-tint-invalid", backdropSpec({ material: "thick", tint: "not-a-colour" }));
 capture("backdrop-unknown-key", backdropSpec({ material: "thick", radius: 4 }));
 capture("backdrop-not-object", backdropSpec("thin"));
+// Device media items (#14192): imageAsset {data} bindings and the reserved media: id prefix.
+const mediaSpec = (root: unknown, extra: Record<string, unknown> = {}) => ({
+  id: "media",
+  window: { placement: { type: "fullscreen" } },
+  data: { photo: "media:5b1f", picked: [{ id: 1, thumbnail: "media:5b1f/thumb" }] },
+  root,
+  ...extra,
+});
+const mediaImage = (asset: unknown) => ({ type: "image", asset, contentDescription: "Photo" });
+capture("media-image-data", mediaSpec(mediaImage({ data: "/photo" })));
+capture(
+  "media-tab-item-data",
+  mediaSpec(
+    {
+      type: "tabBar",
+      stateKey: "tab",
+      items: [
+        { label: "Photo", image: { data: "/photo" } },
+        { label: "Other", image: "uploaded-icon" },
+      ],
+    },
+    { state: { tab: 0 } },
+  ),
+);
+capture(
+  "media-repeat-asset",
+  mediaSpec({
+    type: "grid",
+    columns: 2,
+    repeat: { items: { path: "/picked" }, as: "item", key: "id" },
+    children: [mediaImage("{item.thumbnail}")],
+  }),
+);
+capture("media-image-data-no-root-data", {
+  id: "media",
+  window: { placement: { type: "fullscreen" } },
+  root: mediaImage({ data: "/photo" }),
+});
+capture("media-literal-id", mediaSpec(mediaImage("media:5b1f")));
+capture("media-data-not-pointer", mediaSpec(mediaImage({ data: "photo" })));
+capture("media-data-not-string", mediaSpec(mediaImage({ data: 1 })));
+capture("media-data-with-pair", mediaSpec(mediaImage({ data: "/photo", light: "a", dark: "b" })));
+capture("media-data-empty-object", mediaSpec(mediaImage({})));
+capture("media-data-unknown-key", mediaSpec(mediaImage({ data: "/photo", fallback: "x" })));
 const capabilityExamples = new Map<string, unknown>();
 for (const name of readdirSync(join(directory, "valid"))
   .filter((file) => file.endsWith(".json"))

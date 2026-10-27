@@ -751,6 +751,12 @@ final class PrototypeAgent: NSObject {
         if message["mimeType"] as? String == PrototypeCustomShaders.mimeType {
             return result(false, PrototypeCustomShaders.refusal)
         }
+        if let id = message["id"] as? String, PrototypeMediaItems.isMediaId(id) {
+            return result(
+                false,
+                "Asset ids cannot start with \(PrototypeMediaItems.idPrefix); the device mints those for its media items"
+            )
+        }
         guard let id = message["id"] as? String,
               let base64 = message["dataBase64"] as? String,
               let data = Data(base64Encoded: base64),

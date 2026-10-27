@@ -1002,7 +1002,8 @@ struct PrototypeSession {
         guard let spec else { return [] }
         var ids = Set<String>()
         spec.root.collectAssets(into: &ids)
-        return ids.subtracting(available).sorted()
+        // A `media:` id is minted on the device (#14192): never an upload, never reported missing.
+        return ids.subtracting(available).filter { !PrototypeMediaItems.isMediaId($0) }.sorted()
     }
 }
 

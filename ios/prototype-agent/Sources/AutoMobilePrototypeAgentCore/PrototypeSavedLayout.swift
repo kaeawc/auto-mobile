@@ -142,6 +142,7 @@ struct PrototypeSavedLayoutReader {
         var ids = Set<String>()
         for record in records {
             guard !record.id.isEmpty, record.id.utf16.count <= limits.maxIdLength,
+                  !PrototypeMediaItems.isMediaId(record.id),
                   ids.insert(record.id).inserted,
                   let ext = PrototypeSavedLayout.extensions[record.mediaType],
                   record.sha256.utf8.count == 64,

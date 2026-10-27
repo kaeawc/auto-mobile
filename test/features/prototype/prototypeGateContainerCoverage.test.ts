@@ -37,6 +37,7 @@ const soundCall = {
     },
   ],
 };
+const mediaImage = { type: "image", asset: { data: "/photo" }, contentDescription: "Photo" };
 const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
@@ -178,6 +179,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,
+  prototype_platform_media_items_v1: mediaImage,
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.

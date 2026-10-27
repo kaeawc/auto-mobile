@@ -22,6 +22,11 @@
     "MAX_PROTOTYPE_NODES": 2000,
     "MAX_PROTOTYPE_DEPTH": 24,
     "MAX_PROTOTYPE_IMAGES": 32,
+    "MAX_PROTOTYPE_MEDIA_ITEMS": 64,
+    "MAX_PROTOTYPE_MEDIA_TOTAL_BYTES": 536870912,
+    "MAX_PROTOTYPE_MEDIA_IMAGE_BYTES": 33554432,
+    "MAX_PROTOTYPE_MEDIA_VIDEO_BYTES": 268435456,
+    "MAX_PROTOTYPE_MEDIA_AUDIO_BYTES": 33554432,
     "MAX_PROTOTYPE_SPEC_BYTES": 1048576,
     "MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES": 4096,
     "MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH": 24,
@@ -660,6 +665,17 @@
             "dark": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
               },
               "optional": false
             }

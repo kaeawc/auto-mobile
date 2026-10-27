@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "media",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "photo": "media:5b1f",
+      "picked": [
+        {
+          "id": 1,
+          "thumbnail": "media:5b1f/thumb"
+        }
+      ]
+    },
+    "root": {
+      "type": "image",
+      "asset": {
+        "data": "photo"
+      },
+      "contentDescription": "Photo"
+    }
+  },
+  "expectedPath": "root.asset.dark"
+}

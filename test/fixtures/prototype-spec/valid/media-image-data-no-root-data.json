@@ -1,0 +1,15 @@
+{
+  "id": "media",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "image",
+    "asset": {
+      "data": "/photo"
+    },
+    "contentDescription": "Photo"
+  }
+}

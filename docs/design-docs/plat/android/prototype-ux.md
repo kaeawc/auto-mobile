@@ -962,6 +962,47 @@ The wire protocol has no host opt-in channel. The existing host gate `AUTOMOBILE
 
 `needs-device-verify`: real API 33+ compilation and rendering, procedural sources with an unused content input, isolation of each node's sampled content and uniforms, shader output clipped to node bounds, lifecycle/background and capture-hide sampling gaps, frame-budget fallback under sustained and spaced load, and status/inspect reporting after a real rendering failure remain unverified on a device. JVM tests use fake compilers and frame clocks and establish no GPU/rendering proof.
 
+### Device media items (#14192, contract only)
+
+Camera, picker and recorder producers write a media item (or an array of them) to an `into`
+pointer in `/data`, under the rules of `applyPrototypeDataWrite` and with no nulls. The device
+mints its ids with the reserved `media:` prefix and keeps the bytes in its own store, so an `image`
+can show something the device produced:
+
+```json
+{
+  "asset": "media:5b1f…",
+  "kind": "image",
+  "mimeType": "image/jpeg",
+  "width": 3024,
+  "height": 4032,
+  "bytes": 2481152,
+  "source": "camera",
+  "createdAt": "2026-10-21T10:00:00Z",
+  "thumbnail": "media:5b1f…/thumb"
+}
+```
+
+`kind` is `image`, `video` or `audio` (`durationMs` for the last two); `source` is `camera`,
+`library`, `microphone` or `injected`; `thumbnail` is a JPEG of at most 512 px.
+
+- **`imageAsset` gains `{data: "/pointer"}`**, a pointer into `/data` that resolves to a media id,
+  on an `image` `asset` and on a tab or bottom-nav item `image`. It is exactly one key, a pointer
+  string. A repeat placeholder also binds in a string `asset` (`"asset": "{item.thumbnail}"`), so a
+  gallery is a `grid` plus `repeat` over `/data/picked`.
+- **`media:` is reserved.** Host `put_prototype_asset`, `show.assets`, bundles and saved layouts
+  refuse an asset id that starts with it, and a `media:` id is never listed in `missingAssets`
+  (an unknown or deleted one draws the broken-image placeholder).
+- **No image budget.** A `{data}` slot names no uploaded asset and costs 0 against
+  `MAX_PROTOTYPE_IMAGES` (an `image` node still counts 1).
+- **Limits** in the contract: `MAX_PROTOTYPE_MEDIA_ITEMS` 64, `MAX_PROTOTYPE_MEDIA_TOTAL_BYTES`
+  512 MiB, and per item 32 MiB for an image, 256 MiB for a video and 32 MiB for audio.
+- **Capability.** `prototype_platform_media_items_v1` gates `imageAsset.data`. It is a spec-language
+  gate, not a platform module, so it needs no `requires.platform` entry. The validators, gate and
+  shared corpus (`media-*` fixtures) are in; the device stores, EXIF handling, the read-only
+  `prototype {action: "media"}` host action and the `mediaItems.inject` simulation follow, so no
+  renderer advertises it yet and the host refuses a show that uses it.
+
 ### Rendering assets (#9301, second slice)
 
 An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the box and clips, `fill` stretches. Bytes are decoded off the main thread with `BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (screen size when an axis wraps) and never above 4 Mi pixels. The decoded-bitmap cache keys on asset id and a power-of-two size bucket, evicts least recently used first and holds at most 32 MiB of decoded pixels (a larger single bitmap is drawn but not retained). A replaced, removed or cleared asset drops its decoded copies immediately and showing nodes reload; uploading a previously missing id fills the placeholder.

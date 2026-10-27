@@ -976,6 +976,7 @@ final class PrototypeNode: Decodable {
     let filter: ImageFilter?
     let fadeEdges: FadeEdges?
     let contentScale: String?
+    let effect: IconEffect?
     let name: String?
     /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
     let label: String?
@@ -1096,7 +1097,7 @@ final class PrototypeNode: Decodable {
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
-        case name, label, variant, stateKey, placeholder, axis, items, pager
+        case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
         case onScroll, scroll
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
@@ -1151,6 +1152,7 @@ final class PrototypeNode: Decodable {
         filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
         fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
+        effect = try container.decodeIfPresent(IconEffect.self, forKey: .effect)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)
         variant = try container.decodeIfPresent(String.self, forKey: .variant)

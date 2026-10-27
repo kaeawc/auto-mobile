@@ -7891,6 +7891,40 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeIconEffect": [
+      {
+        "name": "type",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "trigger",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIconEffectTrigger",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "repeat",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeIconEffectTrigger": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "data",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeImageFilter": [
       {
         "name": "saturation",
@@ -10655,6 +10689,12 @@
       {
         "name": "semantics",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "effect",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIconEffect",
         "nullable": true,
         "hasDefault": true
       },

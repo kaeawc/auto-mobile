@@ -16,6 +16,9 @@ struct PrototypeEffectUses {
     init() {}
 
     init(node: [String: JSONValue]) {
+        if node["type"] == .string("icon"), node["effect"]?.objectFields?["repeat"] != nil {
+            animated = 1
+        }
         let when = PrototypeStrictBindings.array(node["styleWhen"]).map { $0.objectFields?["style"] }
         for style in [node["style"]] + when {
             let effects = PrototypeStrictBindings.array(style?.objectFields?["effects"]).prefix(Self.maxPerList)

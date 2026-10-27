@@ -37,6 +37,7 @@ import {
 import * as lazyList from "./prototypeLazyListSchema";
 import { prototypeBackdropSchema } from "./prototypeBackdropSchema";
 import { prototypeChartShape } from "./prototypeChartSchema";
+import { prototypeIconShape } from "./prototypeIconEffects";
 import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -48,7 +49,6 @@ import {
   conditionSchema,
   detentSchema,
   iconNameSchema,
-  iconVariantSchema,
   itemSchema,
   placementSchema,
   type PrototypeData,
@@ -310,9 +310,7 @@ const iconBaseSchema = z
   .object({
     ...commonNodeShape,
     ...gestureNodeShape,
-    type: z.enum(["icon"]),
-    name: iconNameSchema,
-    variant: iconVariantSchema.optional(),
+    ...prototypeIconShape,
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();

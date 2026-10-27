@@ -46,6 +46,8 @@ export const prototypeModelSelection = {
   },
   channelReconnect: { languages: ["kotlin"] },
   channelRoute: { languages: ["kotlin"], fieldTypes: { when: { kotlin: "JsonElement" } } },
+  iconEffectTrigger: {},
+  iconEffect: {},
   press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
@@ -186,6 +188,7 @@ export const prototypeModelSelection = {
 export const prototypeTypeRefs = {
   routeParams: { kotlin: "Map<String, JsonElement>" },
   ...nodeActionTypeRefs,
+  iconEffectRepeat: { kotlin: "PrototypeIconEffectRepeat", swift: "PrototypeIconEffectRepeat" },
   colorValue: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   action: { kotlin: "PrototypeAction", swift: "PrototypeAction" },
   condition: { kotlin: "PrototypeCondition" },

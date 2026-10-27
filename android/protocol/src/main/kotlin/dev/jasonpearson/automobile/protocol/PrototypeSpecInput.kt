@@ -34,6 +34,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -198,6 +199,13 @@ internal object PrototypeSpecInput {
         JsonArray(
           (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) },
         )
+      "choice" -> {
+        val option =
+          rule.getValue("options").jsonArray.first {
+            walk(value, it.jsonObject, "", Context(), 0) == null
+          }
+        normalizeIntegers(value, option.jsonObject)
+      }
       "number" ->
         if (rule.flag("integer")) JsonPrimitive(value.jsonPrimitive.double.toInt()) else value
       else -> value

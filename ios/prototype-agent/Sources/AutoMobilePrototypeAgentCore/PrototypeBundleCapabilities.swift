@@ -56,6 +56,9 @@ enum PrototypeBundleCapabilities {
             if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
             if PrototypeStringConditions.uses(node) { need("string_conditions") }
+            if type == "icon", node["effect"] != nil { need("icon_effects") }
+            if type == "icon",
+               node["effect"]?.objectFields?["trigger"]?.objectFields?["data"] != nil { need("data_model") }
             let featureTypes = [
                 "flow": "flow_grid",
                 "grid": "flow_grid",

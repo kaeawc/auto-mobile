@@ -9,6 +9,7 @@ import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../daemon/ambiguousDeviceTargetRef
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { DeclineMemory, elicitationEnabled } from "./elicitationPolicy";
 import {
   classifyElicitationDeclaration,
   defaultElicitationRecorder,
@@ -30,6 +31,10 @@ export interface AmbiguousDeviceElicitationOptions {
   readonly timeoutMs?: number;
   /** Where each ambiguous-device refusal and its outcome is recorded (#15588). */
   readonly recorder?: ElicitationRecorder;
+  /** Whether the question may be asked at all; defaults to `AUTOMOBILE_ELICITATION` (#15590). */
+  readonly enabled?: () => boolean;
+  /** Declined candidate sets of this connection; absent means every call may ask again. */
+  readonly declines?: DeclineMemory;
 }
 
 interface DeviceCandidate {
@@ -243,25 +248,39 @@ export function withAmbiguousDeviceElicitation<
   const recorder = options.recorder ?? defaultElicitationRecorder;
   const declarationOf = (): ElicitationDeclared =>
     peer.declaration?.() ?? (peer.declaresElicitation() ? "form" : "none");
+  const enabled = options.enabled ?? (() => elicitationEnabled());
+  const skipped = (call: ToolCall<Extra>, count: number, outcome: ElicitationOutcome) =>
+    recorder.record({
+      toolName: call.name,
+      era: "legacy",
+      declared: declarationOf(),
+      outcome,
+      candidateCount: count,
+      atMs: timer.now(),
+    });
+  /** The reason this ambiguity is not put to the client, or undefined when it should be. */
+  const reasonNotToAsk = (deviceIds: readonly string[]): ElicitationOutcome | undefined => {
+    if (!enabled()) {
+      return "disabled";
+    }
+    if (!peer.declaresElicitation()) {
+      return "not_offered";
+    }
+    return options.declines?.remembers(deviceIds) ? "remembered" : undefined;
+  };
   return {
     ...backend,
     execute: async (call: ToolCall<Extra>) => {
       const result = await backend.execute(call);
-      if (call.args.deviceId !== undefined) {
-        return result;
-      }
-      const candidates = ambiguousDeviceCandidates(result);
+      const candidates =
+        call.args.deviceId === undefined ? ambiguousDeviceCandidates(result) : undefined;
       if (!candidates) {
         return result;
       }
-      const base = {
-        toolName: call.name,
-        era: "legacy",
-        declared: declarationOf(),
-        candidateCount: candidates.length,
-      } as const;
-      if (!peer.declaresElicitation()) {
-        recorder.record({ ...base, outcome: "not_offered", atMs: timer.now() });
+      const deviceIds = candidates.map(({ deviceId }) => deviceId);
+      const reason = reasonNotToAsk(deviceIds);
+      if (reason) {
+        skipped(call, candidates.length, reason);
         return result;
       }
       const started = timer.now();
@@ -272,11 +291,17 @@ export function withAmbiguousDeviceElicitation<
       });
       const finished = timer.now();
       recorder.record({
-        ...base,
+        toolName: call.name,
+        era: "legacy",
+        declared: declarationOf(),
         outcome: answer.outcome,
+        candidateCount: candidates.length,
         atMs: finished,
         latencyMs: finished - started,
       });
+      if (answer.outcome === "decline" || answer.outcome === "cancel") {
+        options.declines?.remember(deviceIds);
+      }
       return answer.deviceId === undefined
         ? result
         : backend.execute({ ...call, args: { ...call.args, deviceId: answer.deviceId } });

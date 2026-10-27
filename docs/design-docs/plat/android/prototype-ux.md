@@ -915,6 +915,47 @@ uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage`
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
 stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
 
+## Icon effects
+
+An `icon` accepts `effect: {type, trigger?, repeat?}` under
+`prototype_icon_effects_v1`. `trigger` is exactly `{key: "stateKey"}` or
+`{data: "/pointer"}` and replays once when that value changes. Keys are literal
+state keys. Omit both controls for one play on appearance. `repeat` is
+`"infinite"` or an integer 1–20; trigger and repeat cannot coexist. `replace`
+reacts to `name` changes. Scale holds at 1.15 while its trigger is truthy
+(false, null, missing, zero and empty string are false).
+
+| Type          | iOS native effect and minimum OS | Android approximation                  |
+| ------------- | -------------------------------- | -------------------------------------- |
+| bounce        | bounce, 17                       | scale 1 → 1.2 → 1                      |
+| pulse         | pulse, 17                        | alpha 1 → 0.4 → 1                      |
+| scale         | scale.up, 17                     | scale to 1.15 while trigger is truthy  |
+| variableColor | variableColor, 17                | alpha sweep                            |
+| wiggle        | wiggle, 18; bounce on 17         | rotation ±10°                          |
+| rotate        | rotate, 18; no effect on 17      | rotation 0 → 360°                      |
+| breathe       | breathe, 18; pulse on 17         | scale 1 → 1.06 with alpha              |
+| replace       | symbol replace, 17               | crossfade with scale when name changes |
+| drawOn        | drawOn, 26; replace on older OS  | crossfade                              |
+
+Reduced and off profiles keep icons at rest, except reduced `replace` uses a
+plain crossfade. Repeated effects count as loops in the motion signal and share
+the eight animated-effect budget, including expanded repeat instances. During
+Android capture, repeated effects rest so successive captures use the same pose.
+Successful shows report Android approximations and iOS version fallbacks in
+`platformNotes` at the icon's `.effect` path; when discovery has no OS version,
+notes describe the conditional fallback explicitly.
+
+The iOS `hide_for_capture` hold removes repeated symbol modifiers, returning icons to
+rest until the last capture token releases or expires. Restoring restarts native
+repeats. Local `PrototypeIconMotionActivity` tracks mounted repeated effects and
+masks activity during capture; finite native repeats remain conservatively active
+until unmounted because SF Symbols provides no completion callback. iOS has no
+shared motion-active wire signal or shimmer reporter yet; this local signal is
+not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
+
+Android currently uses a self-contained Compose animation with 600 ms cycles;
+this should move onto the #15249 keyframes engine when it is available.
+
 ## Icons and images
 
 Built-in names are the 2,075 icons of `material-icons-extended` in snake_case (`home`, `alarm_add`); the

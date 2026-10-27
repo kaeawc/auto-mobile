@@ -120,12 +120,6 @@ Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optiona
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
 Any explicit value needs \`prototype_stack_transitions_v1\`; pop/popToRoot take no override.
-The additional \`sharedAxisX\`, \`sharedAxisY\`, \`fadeThrough\`, \`zoom\` values and push/replace
-\`source\` require \`prototype_stack_patterns_v1\`. Zoom requires source naming exactly one
-node sharedKey or literal shared.key (that source is exempt from the visibility-pair rule).
-Android currently falls back to fadeThrough; iOS falls back to platform push, without interactive pop. Only platform has iOS
-interactive pop; composed patterns pop non-interactively. Fixed movement timing is 300 ms and fade
-timing is 150 ms; motion tokens are not yet available.
 Transitions snap under \`motion: "none"\` or Android animator/transition scale 0, and fade under
 \`motion: "reduced"\` or iOS Reduce Motion. A stack's
 \`transition\` accepts only those navigation values and no longer animates the stack's own visibility
@@ -267,13 +261,12 @@ other ambient/attention loops stop at rest and report no loop; color, alpha and 
 Off makes every change instant.
 
 \`shared: {key, as: "element" | "bounds"}\` requires \`prototype_shared_element_v2\` and
-\`visibleWhen\` on the same node for visibility morphs. A literal key referenced as a zoom source
-instead labels exactly one node without the visibility or pair requirement. Element shares identical
-content (a hero image); bounds shares a container with changing content and crossfades both sides. \`sharedKey\` remains the
+\`visibleWhen\` on the same node (zoom sources exempt). Element shares identical content (a hero image); bounds shares
+a container with changing content and crossfades both sides. \`sharedKey\` remains the
 \`prototype_shared_element_v1\` bounds alias; a node cannot set both. Literal v2 keys allow
 letters, digits, underscore and hyphen, starting with a letter or underscore (1-64 characters).
-A spec has at most 16 resolved keys for visibility morphs, including unmatched feed items.
-Literal visibility morph keys pair exactly two nodes, neither nested in the other. Inside repeat children, use \`shared: {key: "story-{item.id}", as: "bounds"}\` with
+A spec has at most 16 resolved keys, including unmatched feed items. Literal keys pair exactly two nodes, neither nested in the
+other. Inside repeat children, use \`shared: {key: "story-{item.id}", as: "bounds"}\` with
 \`repeat.key: "id"\`: placeholders must name that same field; index and constant keys are refused.
 Each item resolves a distinct key, used at most twice; unmatched feed items remain ordinary cards.
 The pair must use the same as value and cannot cross a dialog or bottomSheet boundary.

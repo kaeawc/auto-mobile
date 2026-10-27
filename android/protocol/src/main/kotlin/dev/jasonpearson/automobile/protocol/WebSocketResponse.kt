@@ -1053,6 +1053,8 @@ data class PrototypeStatusEntry(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val storage: PrototypeStorageReport? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val timers: List<PrototypeTimerReport> = emptyList(),
+  /** Node identity to permanent shader fallback reason; omitted when every shader is healthy. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shaderFailures: Map<String, String> = emptyMap(),
 )
 
 /** Input validation vocabulary understood by this protocol version. */

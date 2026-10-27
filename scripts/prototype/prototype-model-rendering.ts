@@ -187,6 +187,13 @@ function fieldType(
       renderObject(nestedName, rule, {}, context, visiting);
       return modelName(nestedName, {}, context.language);
     }
+    case "record": {
+      if (!rule.item) {
+        break;
+      }
+      const item = fieldType(rule.item, path, nestedName, context, visiting);
+      return context.language === "kotlin" ? `Map<String, ${item}>` : `[String: ${item}]`;
+    }
     case "array": {
       if (!rule.item || rule.item.kind === "array") {
         break;

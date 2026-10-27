@@ -159,6 +159,9 @@ import {
 
 import { prototypeBackdropFields, prototypeBackdropUnsupportedMessage } from "./prototypeBackdrop";
 
+import { prototypeShaderFields, prototypeShadersUnsupportedMessage } from "./prototypeShaders";
+import { PROTOTYPE_CUSTOM_SHADERS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown) => string[];
@@ -167,6 +170,11 @@ interface PrototypeSpecCapabilityGate {
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
 export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGate[] = [
+  {
+    capability: PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
+    fields: prototypeShaderFields,
+    unsupportedMessage: prototypeShadersUnsupportedMessage,
+  },
   {
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
     fields: prototypeStylePolishV2Fields,

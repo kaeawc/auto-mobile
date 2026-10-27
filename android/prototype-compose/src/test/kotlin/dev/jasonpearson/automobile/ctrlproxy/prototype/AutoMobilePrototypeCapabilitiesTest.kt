@@ -48,8 +48,18 @@ class AutoMobilePrototypeCapabilitiesTest {
       "Remove exclusions once supported",
       exclusions.none { it in AutoMobilePrototype.capabilities },
     )
-    val missing = requiredCapabilities - AutoMobilePrototype.capabilities - exclusions
+    val missing = requiredCapabilities - AutoMobilePrototype.capabilitiesForSdk(33) - exclusions
     assertTrue("Renderer is missing spec capabilities: $missing", missing.isEmpty())
+  }
+
+  @Test
+  fun `production getter delegates to the sdk gated capabilities set`() {
+    assertEquals(
+      AutoMobilePrototype.capabilitiesForSdk(android.os.Build.VERSION.SDK_INT),
+      AutoMobilePrototype.capabilities,
+    )
+    assertTrue("prototype_custom_shaders_v1" !in AutoMobilePrototype.capabilitiesForSdk(32))
+    assertTrue("prototype_custom_shaders_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
   }
 
   @Test

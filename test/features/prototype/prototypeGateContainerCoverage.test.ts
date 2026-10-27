@@ -63,6 +63,7 @@ const fixtures: Record<string, Node> = {
     stateKey: "name",
     leadingIcon: "search",
   },
+  prototype_custom_shaders_v1: { ...label, style: { shader: { asset: "effect" } } },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
   prototype_pager_state_key_v1: { type: "pager", stateKey: "page", children: [label] },
   prototype_bar_scroll_v1: { type: "topAppBar", title: "Feed", onScroll: "pinned" },

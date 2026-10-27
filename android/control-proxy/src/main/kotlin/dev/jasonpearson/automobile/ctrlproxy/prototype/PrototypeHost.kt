@@ -709,6 +709,7 @@ class DefaultPrototypeHost(
   /** The view hidden for a capture, or null when no window is showing. */
   private fun hideForCaptureOnMain(): View? {
     val current = window ?: return null
+    current.owner.pause()
     current.view.visibility = View.INVISIBLE
     return current.view
   }
@@ -733,9 +734,10 @@ class DefaultPrototypeHost(
   private suspend fun restoreAfterCapture(view: View) {
     try {
       mainThread.onMain {
-        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true)
+        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true) {
           view.visibility = View.VISIBLE
-        else if (window?.view === view) dismissOnMain()
+          if (window?.view === view) window?.owner?.resume()
+        } else if (window?.view === view) dismissOnMain()
       }
     } catch (error: Exception) {
       Log.e(TAG, "Failed to restore prototype after capture", error)

@@ -131,6 +131,7 @@ enum PrototypeStrictCapabilities {
                 {
                     need("choreography")
                 }
+                if key == "style", child.objectFields?["shader"] != nil { need("custom_shaders") }
                 if key == "data", child.stringValue != nil { need("data_model") }
                 if key == "light" || key == "dark", !field.isEmpty { need("theme_modes") }
                 // An effect's own `animate`, colours and params are not spec features of their own.

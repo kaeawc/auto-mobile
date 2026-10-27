@@ -161,7 +161,11 @@ internal fun PrototypeRetainedVisibility(
     modifier = visibilityModifier,
     content = {
       if (history.shown) {
-        CompositionLocalProvider(LocalPrototypeShowEpoch provides epoch, content = content)
+        CompositionLocalProvider(
+          LocalPrototypeShowEpoch provides epoch,
+          LocalPrototypeShadersVisible provides (LocalPrototypeShadersVisible.current && !hidden),
+          content = content,
+        )
       }
     },
   ) { measurables, constraints ->

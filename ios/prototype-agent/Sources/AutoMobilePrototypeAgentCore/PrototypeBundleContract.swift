@@ -16,9 +16,11 @@ enum PrototypeBundleCode: String, CaseIterable, Sendable {
     case fontMissing = "font_missing", manifestEntryMissing = "manifest_entry_missing"
     case unreferencedAsset = "unreferenced_asset", assetTypeMismatch = "asset_type_mismatch",
          requiresInvalid = "requires_invalid"
+    case customShadersUnsupported = "custom_shaders_unsupported"
 }
 
-struct PrototypeBundleFailure: Error, Equatable {
+struct PrototypeBundleFailure: Error, Equatable, LocalizedError {
+    var errorDescription: String? { code == .customShadersUnsupported ? PrototypeCustomShaders.refusal : code.rawValue }
     let code: PrototypeBundleCode
     let path: String?
     init(_ code: PrototypeBundleCode, _ path: String? = nil) {

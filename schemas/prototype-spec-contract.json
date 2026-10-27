@@ -1061,6 +1061,13 @@
           },
           "optional": true
         },
+        "shader": {
+          "rule": {
+            "kind": "ref",
+            "name": "shader"
+          },
+          "optional": true
+        },
         "shadows": {
           "rule": {
             "kind": "array",
@@ -16123,6 +16130,32 @@
     "stackTransition": {
       "kind": "enum",
       "values": ["platform", "slide", "fade", "none"]
+    },
+    "shader": {
+      "kind": "object",
+      "fields": {
+        "asset": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": false
+        },
+        "uniforms": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 16,
+            "keyPattern": "pathKey",
+            "item": {
+              "kind": "number",
+              "integer": false,
+              "min": -1000000,
+              "max": 1000000
+            }
+          },
+          "optional": true
+        }
+      }
     },
     "scrollEdge": {
       "kind": "object",

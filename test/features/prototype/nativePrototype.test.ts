@@ -296,3 +296,24 @@ describe("native host file templates", () => {
     expect(renderSwiftUiHostFile(bare)).toContain("storage: .none,");
   });
 });
+
+test.each(["android", "ios"] as const)(
+  "%s native export explicitly refuses shader specs",
+  async (platform) => {
+    for (const root of [
+      { type: "text", text: "Effect", style: { shader: { asset: "effect" } } },
+      {
+        type: "text",
+        text: "Effect",
+        styleWhen: [
+          { when: { key: "status", equals: "idle" }, style: { shader: { asset: "effect" } } },
+        ],
+      },
+    ]) {
+      const spec = { ...checkout, root };
+      await expect(
+        readNativePrototype({ id: "checkout", platform }, sources({ shown: { device: spec } })),
+      ).rejects.toThrow(platform === "ios" ? "Android only" : "no custom shader runtime");
+    }
+  },
+);

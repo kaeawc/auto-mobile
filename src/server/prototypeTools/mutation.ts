@@ -1,4 +1,6 @@
 import { shownBackdrop } from "../../features/prototype/prototypeBackdrop";
+import { cachedPrototypeShaderAssetProblem } from "../../features/prototype/prototypeShaders";
+import { defaultPrototypeAssetCache } from "../../features/prototype/prototypeAssetCache";
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
@@ -45,7 +47,6 @@ import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./prefl
 import { prototypeSchema } from "./schemas";
 import type {
   AnchorStage,
-  AssetReaders,
   AssetStage,
   PreflightStage,
   PrototypeHandlerDependencies,
@@ -114,14 +115,20 @@ function shownOnDevice(
 /** A refused display ends the call before any asset is uploaded. */
 async function stageUnlessRefused(
   failure: PrototypeResult | undefined,
-  target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
-  readers: AssetReaders,
+  dependencies: PrototypeHandlerDependencies,
+  device: BootedDevice,
   signal: AbortSignal | undefined,
 ): Promise<AssetStage> {
   return failure
     ? { uploaded: [], prepared: [], failure }
-    : stageAssets(target, args, readers, signal);
+    : stageAssets(
+        dependencies.target,
+        args,
+        dependencies.assetReaders,
+        signal,
+        shaderCacheContext(dependencies, device.deviceId),
+      );
 }
 
 export async function performPrototypeAction(
@@ -145,7 +152,13 @@ export async function performPrototypeAction(
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
         // A patched node may add or drop a via "device" localhost request (#12530): staged here.
         specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal))?.error ?? patchReverse.stage(spec),
+          (await specCapabilityRefusal(target, spec, signal, undefined, dependencies.env))?.error ??
+          (await cachedPrototypeShaderAssetProblem(
+            spec,
+            device.deviceId,
+            dependencies.shaderAssetCache ?? defaultPrototypeAssetCache(),
+          )) ??
+          patchReverse.stage(spec),
         settleSpec: patchReverse.settle,
         platform: device.platform === "android" ? "android" : "ios",
         queue,
@@ -166,12 +179,11 @@ async function performMutation(
   scope: PrototypeScope,
   signal?: AbortSignal,
 ): Promise<PrototypeOutput> {
-  const { store, events, target: prototypeTarget, assetReaders, commits } = dependencies;
+  const { store, events, target: prototypeTarget, commits } = dependencies;
   const target = mutationTarget(args);
   const source = prototypeEventSource(prototypeTarget.transport);
   // The device holds one active prototype, so presence is device-wide, not per session.
   const shown = shownOnDevice(store, scope, target);
-  const previouslyShown = shown !== undefined;
   const inPlace = args.action === "show" && shown !== undefined && args.reset !== true;
   // An older CtrlProxy re-shows a same-id prototype fresh on the display it is sent, so its pages
   // restart. It still validates before replacing, so a refused show leaves the old prototype and its
@@ -213,7 +225,7 @@ async function performMutation(
     const stage = await withdrawOnAbort(
       ordering,
       signal,
-      stageUnlessRefused(resolved.failure, prototypeTarget, sendArgs, assetReaders, signal),
+      stageUnlessRefused(resolved.failure, sendArgs, dependencies, device, signal),
     );
     // A failed upload ends the call unsent, like a refusal: it must not supersede a valid show.
     if (stage.failure) {
@@ -224,6 +236,7 @@ async function performMutation(
       ordering,
       undefined,
       sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
+        env: dependencies.env,
         superseded: () => isSuperseded(commits, scope, target, generation),
         beforeSend: async () => {
           // Last abort check before the grant, the event epoch and the device send.
@@ -269,7 +282,7 @@ async function performMutation(
         all: sendArgs.all,
       },
     );
-    await reversing.settle(result.success, previouslyShown, isIndeterminate(result));
+    await reversing.settle(result.success, shown !== undefined, isIndeterminate(result));
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
       chrome: resolved.chrome,
@@ -282,7 +295,7 @@ async function performMutation(
           result,
           placed,
           inPlace,
-          previouslyShown,
+          previouslyShown: shown !== undefined,
           startedFreshEvents: ordering.startedFreshEvents,
         });
     const { warning: visibilityWarning, ...visibility } = await prototypeAppLayerVisibilityOutput({
@@ -702,4 +715,11 @@ function missingAssetsOutput(
       : {}),
     ...(warning ? { warning } : {}),
   };
+}
+
+function shaderCacheContext(
+  dependencies: PrototypeHandlerDependencies,
+  serial: string,
+): NonNullable<Parameters<typeof stageAssets>[4]> {
+  return { serial, cache: dependencies.shaderAssetCache ?? defaultPrototypeAssetCache() };
 }

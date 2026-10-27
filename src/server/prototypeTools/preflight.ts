@@ -27,6 +27,11 @@ import {
   prototypeAppearanceOverride,
   prototypeAppearanceUnsupportedMessage,
 } from "../../features/prototype/prototypeAppearance";
+import {
+  prototypeShaderOptInProblem,
+  prototypeShaderFields,
+  PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR,
+} from "../../features/prototype/prototypeShaders";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_IOS_MINIMUM_OS,
@@ -193,7 +198,15 @@ export async function specCapabilityRefusal(
   spec: unknown,
   signal: AbortSignal | undefined,
   iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
+  env?: NodeJS.ProcessEnv,
 ): Promise<PrototypeResult | undefined> {
+  if (!target.android && prototypeShaderFields(spec).length) {
+    return { success: false, error: PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR };
+  }
+  const optIn = prototypeShaderOptInProblem(spec, env);
+  if (optIn) {
+    return { success: false, error: optIn };
+  }
   for (const gate of prototypeRequiredCapabilities(spec)) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)
@@ -453,7 +466,7 @@ export async function preflightMutation(
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<
     PrototypeToolDependencies,
-    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "env"
   >,
   signal: AbortSignal | undefined,
 ): Promise<PreflightStage> {
@@ -479,7 +492,7 @@ export async function preflightMutation(
   const failure =
     iosResetRefusal(target, args) ??
     (args.action === "show" && args.spec !== undefined
-      ? await specCapabilityRefusal(target, args.spec, signal)
+      ? await specCapabilityRefusal(target, args.spec, signal, undefined, dependencies.env)
       : undefined) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));

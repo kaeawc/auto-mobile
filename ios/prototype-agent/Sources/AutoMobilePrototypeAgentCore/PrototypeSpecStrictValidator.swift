@@ -64,6 +64,12 @@ public enum PrototypeSpecStrictValidator {
                     "Unsupported capabilities: " + missing.joined(separator: ", ")
                 )
             }
+            if library, PrototypeCustomShaders.uses(fields) {
+                throw PrototypeContractValidator.invalid(
+                    "$",
+                    "ProtoViewer bundles refuse custom AGSL shaders"
+                )
+            }
             if library, let window = fields["window"]?.objectFields {
                 if window["layer"] ==
                     .string("system") { throw PrototypeContractValidator.invalid("window.layer", "Privileged window") }

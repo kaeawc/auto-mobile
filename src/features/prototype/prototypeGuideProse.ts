@@ -230,6 +230,16 @@ across the expanded tree; each field counts once per instance. These effects cha
 not layout, hit targets or observed bounds. \`motion: "reduced"\` keeps alpha only;
 \`motion: "none"\` keeps all scroll-driven outputs. Android blur requires Android 12 or later.
 
+## Style effects
+
+(needs \`prototype_effects_v1\`; no connected device advertises it yet, so the host refuses a spec
+with \`style.effects\` until a renderer ships) \`style.effects\` is 1 to 4 paint-only looks drawn in
+order inside the node's own bounds: \`noise\`, \`gradientMesh\`, \`shimmer\`, \`glow\`,
+\`vignette\`, \`blur\`, \`pixelate\`, \`chromaticAberration\`, \`wave\` and \`ripple\`, each with typed,
+bounded params. Shader source is never accepted. Any effect may loop with \`animate:
+{periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
+across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
+
 ## Motion v2
 
 (needs \`prototype_motion_v2\`) A node's \`animate: {durationMs?, easing?}\` (0-2000 ms, default

@@ -188,6 +188,7 @@ struct PrototypeSpec: Decodable {
         let rawDerive = try derive.map { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode($0)) }
         try PrototypeDerivedValidator.validate(derive: rawDerive, root: raw, data: data)
         try PrototypePagerOptions.validateStateKeys(raw, state: menuState)
+        try PrototypeCustomShaders.refuse(["root": raw])
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeScrollMotion.validate(raw, data: data)

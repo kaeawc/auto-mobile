@@ -1529,6 +1529,12 @@ data class PrototypeSelector(
 )
 
 @Serializable
+data class PrototypeShader(
+  val asset: String,
+  val uniforms: Map<String, Double>? = null,
+)
+
+@Serializable
 data class PrototypeStyleWhen(
   val `when`: PrototypeCondition,
   val style: PrototypeStyle,
@@ -1747,6 +1753,7 @@ data class PrototypeStyle(
   val scale: Double? = null,
   /** A drawn rotation in degrees (-360..360) about the node's centre (#14208). */
   val rotation: Double? = null,
+  val shader: PrototypeShader? = null,
   val shadows: List<PrototypeShadow>? = null,
   val cornerStyle: String? = null,
   val effects: List<JsonObject>? = null,

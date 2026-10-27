@@ -151,6 +151,7 @@ export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
  * `theme.colors.light` / `theme.colors.dark`, and `{light, dark}` image assets. A device without it
  * rejects or misdraws those forms, so the host refuses the show before sending.
  */
+export const PROTOTYPE_CUSTOM_SHADERS_CAPABILITY = "prototype_custom_shaders_v1";
 export const PROTOTYPE_FLOW_GRID_CAPABILITY = "prototype_flow_grid_v1";
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
 
@@ -259,6 +260,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,

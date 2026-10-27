@@ -42,6 +42,13 @@ function collect(
   return [...ids].sort().map((id) => {
     const asset = lookup(id);
     bundleAssert(asset, "asset_missing", id);
+    if (asset.mediaType === "application/vnd.automobile.agsl") {
+      throw new BundleFailure(
+        "custom_shaders_unsupported",
+        id,
+        "ProtoViewer bundles refuse AGSL assets; remove custom shaders.",
+      );
+    }
     bundleAssert(prototypeAssetIdProblem(id) === null, "manifest_invalid", id);
     bundleAssert(
       asset.mediaType.startsWith("font/") === font &&

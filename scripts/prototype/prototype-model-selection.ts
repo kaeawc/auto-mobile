@@ -75,6 +75,7 @@ export const prototypeModelSelection = {
   },
   container: { languages: ["kotlin"] },
   selector: { languages: ["kotlin"] },
+  shader: { kotlinName: "PrototypeShader", swiftName: "PrototypeShader" },
   styleWhenEntry: { languages: ["kotlin"], kotlinName: "PrototypeStyleWhen" },
   appBarAction: {
     swiftName: "PrototypeAppBarAction",

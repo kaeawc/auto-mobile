@@ -1,3 +1,8 @@
+import {
+  cachedPrototypeShaderAssetProblem,
+  prototypeShaderAssetProblem,
+  prototypeShaderOptInProblem,
+} from "../../features/prototype/prototypeShaders";
 import { z } from "zod/v4";
 import type {
   PrototypeDismiss,
@@ -51,22 +56,49 @@ export async function stageAssets(
   args: z.infer<typeof prototypeSchema>,
   readers: AssetReaders,
   signal: AbortSignal | undefined,
+  cached?: {
+    serial: string;
+    cache: Pick<import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache, "get">;
+  },
 ): Promise<AssetStage> {
+  const optIn = prototypeShaderOptInProblem(args.spec, readers.env);
+  if (optIn) {
+    return { uploaded: [], prepared: [], failure: { success: false, error: optIn } };
+  }
   if (args.assets === undefined) {
-    return { uploaded: [], prepared: [] };
+    const problem = cached
+      ? await cachedPrototypeShaderAssetProblem(args.spec, cached.serial, cached.cache)
+      : undefined;
+    return {
+      uploaded: [],
+      prepared: [],
+      ...(problem ? { failure: { success: false, error: problem } } : {}),
+    };
   }
   const prepared = await preparePrototypeAssets(
     args.assets,
     readers.assetFileReader,
     readers.observationScreenshotReader,
+    readers.env,
   );
   if ("error" in prepared) {
     return { uploaded: [], prepared: [], failure: { success: false, error: prepared.error } };
   }
+  const shaderProblem = cached
+    ? await cachedPrototypeShaderAssetProblem(
+        args.spec,
+        cached.serial,
+        cached.cache,
+        prepared.assets,
+      )
+    : prototypeShaderAssetProblem(args.spec, prepared.assets);
+  if (shaderProblem) {
+    return { uploaded: [], prepared: [], failure: { success: false, error: shaderProblem } };
+  }
   const outcome = await uploadPrototypeAssets(
     prototypeAssetPutClient(target.transport),
     prepared.assets,
-    { signal, action: args.action === "save" ? "save" : "show" },
+    { signal, action: args.action === "save" ? "save" : "show", env: readers.env },
   );
   return {
     uploaded: outcome.uploaded,
@@ -103,11 +135,13 @@ async function reuploadAfterSend(
   target: PrototypeTarget,
   assets: Parameters<typeof uploadPrototypeAssets>[1],
   signal: AbortSignal | undefined,
+  env: NodeJS.ProcessEnv | undefined,
 ): Promise<Awaited<ReturnType<typeof uploadPrototypeAssets>>> {
   try {
     return await uploadPrototypeAssets(prototypeAssetPutClient(target.transport), assets, {
       signal,
       action: "resend",
+      env,
     });
   } catch (error) {
     logger.warn("[prototype] Asset re-upload failed after the show was sent", error);
@@ -135,7 +169,7 @@ async function retryMissingAssets(
   stage: AssetStage,
   first: PrototypeResult,
   signal: AbortSignal | undefined,
-  displayId: number | undefined,
+  { displayId, env }: { displayId: number | undefined; env?: NodeJS.ProcessEnv },
 ): Promise<MissingAssetRetry | undefined> {
   const missing = new Set(first.missingAssets);
   const again = stage.prepared.filter((asset) => missing.has(asset.id));
@@ -149,7 +183,7 @@ async function retryMissingAssets(
   if (signal?.aborted) {
     return fail("the request was cancelled");
   }
-  const upload = await reuploadAfterSend(target, again, signal);
+  const upload = await reuploadAfterSend(target, again, signal, env);
   if (!upload.success) {
     return fail(upload.error ?? "upload failed");
   }
@@ -192,7 +226,11 @@ export async function sendPrototype(
   stage: AssetStage,
   signal: AbortSignal | undefined,
   displayId: number | undefined,
-  hooks: { superseded?: () => boolean; beforeSend?: () => Promise<void> } = {},
+  hooks: {
+    superseded?: () => boolean;
+    beforeSend?: () => Promise<void>;
+    env?: NodeJS.ProcessEnv;
+  } = {},
 ): Promise<MutationOutcome> {
   const superseded = hooks.superseded ?? (() => false);
   const { beforeSend } = hooks;
@@ -207,7 +245,10 @@ export async function sendPrototype(
   if (!needsAssetResend(first, superseded)) {
     return { result: first };
   }
-  const retry = await retryMissingAssets(target, args, stage, first, signal, displayId);
+  const retry = await retryMissingAssets(target, args, stage, first, signal, {
+    displayId,
+    env: hooks.env,
+  });
   const result = retry?.result ?? first;
   if (!result.missingAssets?.length) {
     return { result };

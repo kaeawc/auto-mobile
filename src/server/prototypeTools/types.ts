@@ -51,6 +51,12 @@ export interface PrototypeTarget {
 export interface PrototypeToolDependencies {
   testSessionStore?: PrototypeTestSessionStore;
   idGenerator?: IdGenerator;
+  /** Host feature gates; tests supply an isolated environment. */
+  env?: NodeJS.ProcessEnv;
+  shaderAssetCache?: Pick<
+    import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
+    "get"
+  >;
   /** Saved iOS actions use the host installer without an agent connection; created lazily by default. */
   iosSavedPrototypeInstaller?: IosSavedPrototypeInstaller;
   /** ProtoViewer on Android or an iOS simulator for saved `save`/`open` (#13621). */
@@ -95,6 +101,7 @@ export interface AssetStage {
 }
 
 export interface AssetReaders {
+  env?: NodeJS.ProcessEnv;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
 }
@@ -111,6 +118,10 @@ export type PrototypeHandlerDependencies = {
   timer?: Timer;
 } & Pick<
   PrototypeToolDependencies,
-  "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+  | "adbFactory"
+  | "lastRenderedObservation"
+  | "anchorHierarchyCaptureFactory"
+  | "shaderAssetCache"
+  | "env"
 >;
 export type PrototypeOutput = z.infer<typeof prototypeOutputSchema>;

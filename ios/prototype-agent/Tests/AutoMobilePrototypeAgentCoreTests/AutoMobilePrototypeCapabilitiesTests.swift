@@ -20,6 +20,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // no renderer yet.
         let exclusions: Set<String> = [
             "prototype_platform_test_v1",
+            // #15131: custom AGSL shaders are Android-only by owner decision.
+            "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1",
         ]

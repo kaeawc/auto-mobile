@@ -48,6 +48,9 @@ extension PrototypeContractValidator {
             if key.isEmpty, kind != "map" {
                 throw Self.invalid(childPath, kind == "screenMap" ? "Empty screen name" : "Invalid context name")
             }
+            if let pattern = rule["keyPattern"]?.stringValue, !Self.matches(pattern, key) {
+                throw Self.invalid(childPath, "Invalid record key")
+            }
             if let child = fields[key] { try walk(child, rule: itemRule, path: childPath, depth: depth) }
         }
     }

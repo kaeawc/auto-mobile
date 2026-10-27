@@ -34,6 +34,7 @@ struct PrototypeBundleZipDirectory {
         try bundleRequire(position == end, .headerMismatch)
         for index in entries.indices {
             let path = entries[index].name
+            try bundleRequire(!path.hasSuffix(".agsl"), .customShadersUnsupported, path)
             try bundleRequire(
                 path.range(
                     of: #"^(bundle\.json|spec\.json|assets/[0-9a-f]{64}\.(png|jpg|webp)|fonts/[0-9a-f]{64}\.(ttf|otf))$"#,

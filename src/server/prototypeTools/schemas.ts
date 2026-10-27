@@ -211,7 +211,7 @@ const assetsInput = z
           .min(1)
           .optional()
           .describe(
-            "Absolute path of a PNG, JPEG or WebP image, or a TTF/OTF font (up to 2 MiB), the daemon can read",
+            "Absolute path the daemon can read: PNG/JPEG/WebP, a TTF/OTF font (2 MiB), or Android-only AGSL .agsl source (16 KiB; AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 required)",
           ),
         observation: z
           .string()
@@ -682,6 +682,7 @@ const lastResultSchema = z.object({
       "The light or dark mode the prototype is drawn in, as the device last reported it: in lastResult what a successful show resolved to, and per prototype in inspect that value, and in status its mode and source as refreshed by inspect and by appearance_changed events (status never carries deviceDark; after a show crossed by an appearance_changed event, its status entry has no appearance until a later event or inspect states it). Absent when the device does not advertise prototype_appearance_v1, on dismiss and on a failed show",
     ),
   storage: prototypeStorageOutputField,
+  shaderFailures: z.record(z.string(), z.string()).optional(),
   timers: z
     .array(
       z.object({

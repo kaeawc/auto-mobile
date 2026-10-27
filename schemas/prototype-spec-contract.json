@@ -53,7 +53,9 @@
     "MAX_PROTOTYPE_CHECK_QUANTIFIER_BOUND": 100,
     "MAX_PROTOTYPE_CHECK_VARIABLE_QUANTIFIERS": 2,
     "MAX_PROTOTYPE_EFFECTS": 64,
-    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8
+    "MAX_PROTOTYPE_ANIMATED_EFFECTS": 8,
+    "MAX_PROTOTYPE_UPLOAD_BYTES": 10485760,
+    "MAX_PROTOTYPE_UPLOAD_PARTS": 16
   },
   "definitions": {
     "offset": {
@@ -347,7 +349,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -690,7 +692,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 10000
           },
           "optional": true
@@ -786,7 +788,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 10000
           },
           "optional": true
@@ -868,7 +870,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -909,7 +911,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -1199,7 +1201,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -2074,6 +2076,116 @@
                         "optional": false
                       }
                     }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "multipart": {
+                        "rule": {
+                          "kind": "array",
+                          "min": 0,
+                          "max": 16,
+                          "item": {
+                            "kind": "ref",
+                            "name": "requestUploadPart"
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "form": {
+                        "rule": {
+                          "kind": "record",
+                          "maxEntries": 16,
+                          "item": {
+                            "kind": "choice",
+                            "options": [
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "state": {
+                                    "rule": {
+                                      "kind": "boundKey"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "item": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "index": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "data": {
+                                    "rule": {
+                                      "kind": "pointer"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "value": {
+                                    "rule": {
+                                      "kind": "json",
+                                      "maxDepth": 24
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "file": {
+                        "rule": {
+                          "kind": "ref",
+                          "name": "requestUploadFile"
+                        },
+                        "optional": false
+                      },
+                      "contentType": {
+                        "rule": {
+                          "kind": "string",
+                          "max": 256
+                        },
+                        "optional": false
+                      }
+                    }
                   }
                 ]
               },
@@ -2129,6 +2241,12 @@
                   "kind": "ref",
                   "name": "action"
                 }
+              },
+              "optional": true
+            },
+            "progressKey": {
+              "rule": {
+                "kind": "key"
               },
               "optional": true
             }
@@ -3539,7 +3657,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -13668,7 +13786,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -13714,7 +13832,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -14890,6 +15008,121 @@
     "drawerEdge": {
       "kind": "enum",
       "values": ["start", "end"]
+    },
+    "requestUploadFile": {
+      "kind": "object",
+      "fields": {
+        "asset": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": false
+        }
+      }
+    },
+    "requestUploadPart": {
+      "kind": "object",
+      "exactlyOne": ["value", "file"],
+      "fields": {
+        "name": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": false
+        },
+        "value": {
+          "rule": {
+            "kind": "ref",
+            "name": "requestUploadValue"
+          },
+          "optional": true
+        },
+        "file": {
+          "rule": {
+            "kind": "ref",
+            "name": "requestUploadFile"
+          },
+          "optional": true
+        },
+        "filename": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "contentType": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        }
+      }
+    },
+    "requestUploadValue": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "object",
+          "fields": {
+            "state": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "item": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "index": {
+              "rule": {
+                "kind": "enum",
+                "values": [true]
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "value": {
+              "rule": {
+                "kind": "json",
+                "maxDepth": 24
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
     }
   },
   "eventKinds": [
@@ -14954,40 +15187,79 @@
       "state": {
         "os": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["android", "ios"] }
+          "value": {
+            "kind": "enum",
+            "values": ["android", "ios"]
+          }
         },
-        "osVersion": { "platforms": ["android", "ios"], "value": { "kind": "string", "max": 64 } },
+        "osVersion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "max": 64
+          }
+        },
         "idiom": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["phone", "tablet", "foldable", "desktop"] }
+          "value": {
+            "kind": "enum",
+            "values": ["phone", "tablet", "foldable", "desktop"]
+          }
         },
         "widthClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [600, 840]
         },
         "heightClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [480, 900]
         },
         "sizeClass": {
           "platforms": ["ios"],
-          "value": { "kind": "enum", "values": ["compact", "regular"] }
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "regular"]
+          }
         },
         "windowWidth": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "windowHeight": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "posture": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["flat", "tabletop", "book"] }
+          "value": {
+            "kind": "enum",
+            "values": ["flat", "tabletop", "book"]
+          }
         },
-        "pointer": { "platforms": ["android", "ios"], "value": { "kind": "boolean" } }
+        "pointer": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
       }
     }
   },

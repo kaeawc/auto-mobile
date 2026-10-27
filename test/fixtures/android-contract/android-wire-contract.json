@@ -10397,6 +10397,12 @@
         "hasDefault": true
       },
       {
+        "name": "progressKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "into",
         "type": "string",
         "nullable": true,

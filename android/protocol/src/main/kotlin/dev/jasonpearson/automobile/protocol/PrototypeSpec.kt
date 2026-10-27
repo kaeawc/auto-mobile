@@ -286,6 +286,7 @@ data class PrototypeRequestAction(
   val headers: Map<String, JsonElement>? = null,
   val query: Map<String, JsonElement>? = null,
   val body: EmitContextBinding? = null,
+  val progressKey: String? = null,
   val into: String? = null,
   val statusKey: String? = null,
   val via: String? = null,

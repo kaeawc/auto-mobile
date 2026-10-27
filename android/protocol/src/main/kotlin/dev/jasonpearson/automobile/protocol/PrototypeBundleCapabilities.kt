@@ -34,6 +34,12 @@ internal object PrototypeBundleCapabilities {
     when (text(action["type"])) {
       "request" -> {
         caps.add("prototype_network_v1")
+        val body = action["body"] as? JsonObject
+        if (
+          action["progressKey"] != null ||
+            listOf("multipart", "form", "file").any { body?.containsKey(it) == true }
+        )
+          caps.add("prototype_network_upload_v1")
         if (text(action["via"]) == "device") caps.add("prototype_network_device_v1")
       }
       "setData",

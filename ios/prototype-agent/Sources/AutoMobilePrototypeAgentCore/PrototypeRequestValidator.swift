@@ -99,7 +99,11 @@ enum PrototypeRequestValidator {
             guard PrototypeRequestMethod(rawValue: method)?.allowsBody == true else {
                 throw fail("\(path).body", "A GET or HEAD request cannot have a body")
             }
-            try binding(body, path: "\(path).body")
+            if body.objectFields?.keys.contains(where: { ["multipart", "form", "file"].contains($0) }) != true {
+                try binding(body, path: "\(path).body")
+            } else {
+                try PrototypeContractValidator.validateRequestBody(body, path: "\(path).body")
+            }
         }
         if let into = action["into"] { try self.into(into, path: "\(path).into") }
         if let via = action["via"], via != .string("host"), via != .string("device") {
@@ -113,6 +117,7 @@ enum PrototypeRequestValidator {
                 "Expected an integer from 1 to \(PrototypeLimits.maxRequestTimeoutMs)"
             ) }
         }
+        try progressKey(action["progressKey"], path: "\(path).progressKey", state: state)
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
         try entries(action["headers"], path: "\(path).headers", isHeader: true)
         try entries(action["query"], path: "\(path).query", isHeader: false)
@@ -165,6 +170,13 @@ enum PrototypeRequestValidator {
         guard !key.contains("{") else { return }
         guard let stored = state[key] else { throw fail(path, "statusKey must name a declared state key") }
         guard stored.stringValue != nil else { throw fail(path, "statusKey requires a string state key") }
+    }
+
+    private static func progressKey(_ raw: JSONValue?, path: String, state: [String: JSONValue]) throws {
+        guard let raw else { return }
+        guard case let .string(key) = raw, case let .number(value)? = state[key], value.isFinite,
+              (0 ... 100).contains(value)
+        else { throw fail(path, "progressKey requires a declared number state key from 0 to 100") }
     }
 
     private static func entries(_ raw: JSONValue?, path: String, isHeader: Bool) throws {

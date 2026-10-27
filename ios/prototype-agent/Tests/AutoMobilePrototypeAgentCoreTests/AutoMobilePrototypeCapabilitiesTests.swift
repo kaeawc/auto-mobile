@@ -19,7 +19,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // transition choreography (#15247). Style effects (#15128) have a validated contract and
         // no renderer yet.
         let exclusions: Set<String> = [
-            "prototype_platform_test_v1",
+            "prototype_platform_test_v1", "prototype_network_upload_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1",
         ]

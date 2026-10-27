@@ -198,5 +198,16 @@
       "dark": "#445566"
     },
     "position": 0.5
+  },
+  "requestUploadFile": {
+    "asset": "hero"
+  },
+  "requestUploadPart": {
+    "name": "photo",
+    "file": {
+      "asset": "hero"
+    },
+    "filename": "photo.png",
+    "contentType": "image/png"
   }
 }

@@ -145,12 +145,28 @@ internal object PrototypeStateBindings {
     path: String,
     state: JsonObject,
   ): PrototypeSpecError? {
+    requestProgressKeyError(action, path, state)?.let {
+      return it
+    }
     val key = action.text("statusKey") ?: return null
     if (!state.containsKey(key))
       return fail("$path.statusKey", "statusKey must name a declared state key")
     val stored = state.getValue(key) as? JsonPrimitive
     return if (stored != null && stored.isString) null
     else fail("$path.statusKey", "statusKey requires a string state key")
+  }
+
+  private fun requestProgressKeyError(
+    action: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    if (action.text("type") != "request") return null
+    val key = action.text("progressKey") ?: return null
+    val stored = state[key] as? JsonPrimitive
+    val number = stored?.takeUnless { it.isString }?.doubleOrNull
+    return if (number != null && number.isFinite() && number in 0.0..100.0) null
+    else fail("$path.progressKey", "progressKey requires a declared number state key from 0 to 100")
   }
 
   fun stateActionErrors(context: Context, data: JsonObject): PrototypeSpecError? {

@@ -77,6 +77,11 @@ enum PrototypeStrictCapabilities {
                .contains(where: { fields[$0] != nil }) { need("chat_scroll") }
             if type == "request" {
                 need("network")
+                for part in PrototypeStrictBindings.array(fields["body"]?.objectFields?["multipart"]) {
+                    if let binding = part.objectFields?["value"] { scan(binding) }
+                }
+                if fields["progressKey"] != nil || fields["body"]?.objectFields?.keys
+                    .contains(where: { ["multipart", "form", "file"].contains($0) }) == true { need("network_upload") }
                 if fields["via"] == .string("device") { need("network_device") }
                 if let url = fields["url"]?.stringValue { textBinding(url) }
                 for key in ["headers", "query"] {

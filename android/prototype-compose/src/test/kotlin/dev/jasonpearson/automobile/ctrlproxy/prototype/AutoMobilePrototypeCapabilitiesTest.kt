@@ -30,7 +30,7 @@ class AutoMobilePrototypeCapabilitiesTest {
   }
 
   /** The test module is a placeholder no production runtime advertises. */
-  private val exclusions = setOf("prototype_platform_test_v1")
+  private val exclusions = setOf("prototype_platform_test_v1", "prototype_network_upload_v1")
 
   @Test
   fun `shared spec capabilities are supported`() {

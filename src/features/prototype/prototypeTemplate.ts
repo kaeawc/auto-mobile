@@ -147,6 +147,7 @@ export type FieldKind =
   | "requestInto"
   | "request"
   | "deviceRequest"
+  | "uploadRequest"
   | "scrollTo"
   | "timer"
   | "stackTransition";
@@ -329,17 +330,55 @@ function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void 
   if (action.via === "device") {
     visit(action, path, "deviceRequest");
   }
+  const body = record(action.body);
+  if (
+    action.progressKey !== undefined ||
+    (body && ["multipart", "form", "file"].some((key) => Object.hasOwn(body, key)))
+  ) {
+    visit(action, path, "uploadRequest");
+  }
   mapField(action, "url", path, "text", visit);
   mapRequestEntries(action, "headers", path, visit);
   mapRequestEntries(action, "query", path, visit);
   if (action.body !== undefined) {
-    action.body = mapBinding(action.body, `${path}.body`, visit);
+    action.body = mapRequestBody(action.body, `${path}.body`, visit);
   }
   mapField(action, "into", path, "requestInto", visit);
   mapField(action, "statusKey", path, "key", visit);
   for (const field of ["onSuccess", "onError"]) {
     mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   }
+}
+
+function mapRequestBody(value: unknown, path: string, visit: FieldVisitor): unknown {
+  const body = record(value);
+  if (Array.isArray(body?.multipart)) {
+    return {
+      ...body,
+      multipart: body.multipart.map((part, index) => {
+        const fields = record(part);
+        return fields?.value === undefined
+          ? part
+          : {
+              ...fields,
+              value: mapBinding(fields.value, `${path}.multipart[${index}].value`, visit),
+            };
+      }),
+    };
+  }
+  const form = record(body?.form);
+  if (form) {
+    return {
+      ...body,
+      form: Object.fromEntries(
+        Object.entries(form).map(([name, binding]) => [
+          name,
+          mapBinding(binding, memberPath(`${path}.form`, name), visit),
+        ]),
+      ),
+    };
+  }
+  return body?.file === undefined ? mapBinding(value, path, visit) : value;
 }
 
 /** A `platform` call (#14294): each argument is a value binding, `into` the request grammar. */

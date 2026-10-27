@@ -325,6 +325,29 @@ internal object PrototypeBindableFields {
       return actionLists(action, followUpLists, path)
     }
 
+    private fun requestBody(value: JsonElement?, path: String): T? {
+      val body = value as? JsonObject ?: return null
+      val parts = body["multipart"] as? JsonArray
+      if (parts != null) {
+        for ((index, part) in parts.withIndex()) {
+          binding((part as? JsonObject)?.get("value"), "$path.multipart[$index].value")?.let {
+            return it
+          }
+        }
+        return null
+      }
+      val form = body["form"] as? JsonObject
+      if (form != null) {
+        for ((name, entry) in form) {
+          binding(entry, memberPath("$path.form", name))?.let {
+            return it
+          }
+        }
+        return null
+      }
+      return if (body.containsKey("file")) null else binding(value, path)
+    }
+
     /** Mirrors `mapRequestAction`: url, headers, query, body, into, statusKey, then follow-ups. */
     fun request(action: JsonObject, path: String): T? {
       field(action, "url", path, PrototypeBindableKind.REQUEST_TEXT)?.let {
@@ -335,7 +358,7 @@ internal object PrototypeBindableFields {
           return it
         }
       }
-      binding(action["body"], "$path.body")?.let {
+      requestBody(action["body"], "$path.body")?.let {
         return it
       }
       field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {

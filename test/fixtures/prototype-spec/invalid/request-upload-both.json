@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "POST",
+          "url": "https://example.com/upload",
+          "body": {
+            "multipart": [
+              {
+                "name": "x",
+                "value": {
+                  "value": "a"
+                },
+                "file": {
+                  "asset": "hero"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].body.multipart"
+}

@@ -6,6 +6,8 @@ import type { ModelSelection, TypeRefs } from "./generate-prototype-spec-models"
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  requestUploadFile: {},
+  requestUploadPart: {},
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},
   imageFilter: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
@@ -83,6 +85,7 @@ export const prototypeModelSelection = {
 } as const satisfies ModelSelection;
 
 export const prototypeTypeRefs = {
+  requestUploadValue: { kotlin: "kotlinx.serialization.json.JsonObject", swift: "JSONValue" },
   colorValue: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   action: { kotlin: "PrototypeAction", swift: "PrototypeAction" },
   condition: { kotlin: "PrototypeCondition" },

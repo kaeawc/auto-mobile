@@ -6,6 +6,20 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class PrototypeRequestUploadFile(
+  val asset: String,
+)
+
+@Serializable
+data class PrototypeRequestUploadPart(
+  val name: String,
+  val value: kotlinx.serialization.json.JsonObject? = null,
+  val file: PrototypeRequestUploadFile? = null,
+  val filename: String? = null,
+  val contentType: String? = null,
+)
+
+@Serializable
 data class PrototypeShadowOffset(
   val x: Double,
   val y: Double,

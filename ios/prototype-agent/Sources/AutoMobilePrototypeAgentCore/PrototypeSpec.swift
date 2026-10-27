@@ -549,6 +549,7 @@ struct PrototypeAction: Decodable, Sendable {
     let url: String?
     let headers: [String: JSONValue]?
     let query: [String: JSONValue]?
+    let progressKey: String?
     let body: JSONValue?
     let into: String?
     let statusKey: String?
@@ -566,7 +567,8 @@ struct PrototypeAction: Decodable, Sendable {
         case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, call, args
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
-        case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
+        case requireValid, method, url, headers, query, progressKey, body, into, statusKey, via, timeoutMs, onSuccess,
+             onError
     }
 
     init(
@@ -574,7 +576,8 @@ struct PrototypeAction: Decodable, Sendable {
         page: JSONValue?, stack: String?, screen: String?, path: String?, key: String?, value: JSONValue?,
         by incrementAmount: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
         headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
-        into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
+        into: String? = nil, statusKey: String? = nil, progressKey: String? = nil, via: String? = nil,
+        timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
         actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
@@ -605,6 +608,7 @@ struct PrototypeAction: Decodable, Sendable {
         self.url = url
         self.headers = headers
         self.query = query
+        self.progressKey = progressKey
         self.body = body
         self.into = into
         self.statusKey = statusKey

@@ -97,7 +97,7 @@ internal object PrototypeStrictPolicy {
 
   private fun inRequest(path: String, requests: List<String>): Boolean = requests.any { at ->
     path == "$at.url" ||
-      path == "$at.body.state" ||
+      path.startsWith("$at.body.") ||
       listOf("headers", "query").any { path.startsWith("$at.$it.") || path.startsWith("$at.$it[") }
   }
 
@@ -303,6 +303,14 @@ internal object PrototypeStrictPolicy {
         if (keys.any { fields[it] != null }) need(feature)
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
+      if (type == "request") {
+        val body = fields["body"] as? JsonObject
+        if (
+          fields["progressKey"] != null ||
+            listOf("multipart", "form", "file").any { body?.containsKey(it) == true }
+        )
+          need("network_upload")
+      }
     }
 
     private fun repeatFeatures(child: JsonElement) {

@@ -20048,7 +20048,94 @@
                               }
                             },
                             "body": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/headers/additionalProperties/anyOf/1"
+                              "anyOf": [
+                                {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/headers/additionalProperties/anyOf/1"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "multipart": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256
+                                          },
+                                          "value": {
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/headers/additionalProperties/anyOf/1"
+                                          },
+                                          "file": {
+                                            "type": "object",
+                                            "properties": {
+                                              "asset": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 256
+                                              }
+                                            },
+                                            "required": ["asset"],
+                                            "additionalProperties": false
+                                          },
+                                          "filename": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256
+                                          },
+                                          "contentType": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 256
+                                          }
+                                        },
+                                        "required": ["name"],
+                                        "additionalProperties": false
+                                      },
+                                      "minItems": 0,
+                                      "maxItems": 16
+                                    }
+                                  },
+                                  "required": ["multipart"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "form": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/headers/additionalProperties/anyOf/1"
+                                      },
+                                      "propertyNames": {
+                                        "minLength": 1
+                                      }
+                                    }
+                                  },
+                                  "required": ["form"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "file": {
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/body/anyOf/1/properties/multipart/items/properties/file"
+                                    },
+                                    "contentType": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256
+                                    }
+                                  },
+                                  "required": ["file", "contentType"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "progressKey": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                             },
                             "into": {
                               "type": "string",

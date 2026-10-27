@@ -12,6 +12,7 @@ export interface DeviceClaimTables {
     owner_token: string;
     process_generation_token: string | null;
     session_uuid: string | null;
+    metadata: string | null;
     claimed_at_ms: number;
     updated_at_ms: number;
   };
@@ -30,6 +31,7 @@ export class SqliteDeviceClaims implements DeviceClaims {
       owner_token: claim.ownerToken,
       process_generation_token: claim.processGenerationToken ?? null,
       session_uuid: claim.sessionUuid ?? null,
+      metadata: claim.metadata ?? null,
       claimed_at_ms: claim.claimedAtMs,
       updated_at_ms: claim.updatedAtMs,
     };
@@ -102,6 +104,7 @@ function toClaim(row: DeviceClaimTables["device_claims"]): DeviceClaim {
       ? {}
       : { processGenerationToken: row.process_generation_token }),
     ...(row.session_uuid === null ? {} : { sessionUuid: row.session_uuid }),
+    ...(row.metadata === null ? {} : { metadata: row.metadata }),
     claimedAtMs: row.claimed_at_ms,
     updatedAtMs: row.updated_at_ms,
   };

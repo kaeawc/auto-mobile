@@ -8,6 +8,8 @@ import {
 } from "../../utils/android-cmdline-tools/deviceTraits";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 
 /**
  * Rotary controller input for Android Automotive (#14920), reached through `pressButton`.
@@ -96,38 +98,60 @@ export class RotaryInput {
     private readonly traits: DeviceTraits = defaultDeviceTraits,
   ) {}
 
-  async press(
-    button: RotaryButton,
-    steps: number | undefined,
-    signal?: AbortSignal,
-  ): Promise<PressButtonResult> {
-    throwIfAborted(signal);
+  /**
+   * Refuse before anything is observed or sent: bad steps, a non-Android device, or a device that
+   * is not Android Automotive. Returns the validated step count.
+   */
+  async prepare(button: RotaryButton, steps: number | undefined): Promise<number> {
     const count = validateRotarySteps(button, steps);
-    await this.assertAutomotive();
-    const result = await this.adb.execute(["shell", ...rotaryCommand(button, count)], {
-      noRetry: true,
-      signal: combineWithAmbientAbort(signal),
-    });
-    const action = ROTARY_ACTIONS[button];
-    const keyCode = action.kind === "key" ? action.keyCode : -1;
-    const output = `${result.stdout}\n${result.stderr}`.trim();
-    if (result.error || COMMAND_FAILURE.test(output)) {
-      return {
-        success: false,
-        button,
-        keyCode,
-        error: `Rotary ${button} failed: ${result.error ?? output.split("\n")[0]}`,
-      };
+    if (this.device.platform !== "android") {
+      throw new ActionableError(
+        `${button} is Android Automotive only; this is not an Android device.`,
+      );
     }
-    return { success: true, button, keyCode };
-  }
-
-  private async assertAutomotive(): Promise<void> {
     const traits = await this.traits.read(this.adb, this.device.deviceId);
     if (!isAutomotive(traits)) {
       throw new ActionableError(
         `Rotary input needs an Android Automotive device; ${this.device.deviceId} is not one.`,
       );
     }
+    return count;
+  }
+
+  /** Send a prepared press; a failed command is a typed failure result, never a raw rejection. */
+  async press(
+    button: RotaryButton,
+    steps: number,
+    signal?: AbortSignal,
+  ): Promise<PressButtonResult> {
+    throwIfAborted(signal);
+    const action = ROTARY_ACTIONS[button];
+    const keyCode = action.kind === "key" ? action.keyCode : -1;
+    try {
+      const result = await this.adb.execute(["shell", ...rotaryCommand(button, steps)], {
+        noRetry: true,
+        signal: combineWithAmbientAbort(signal),
+      });
+      const output = `${result.stdout}\n${result.stderr}`.trim();
+      if (result.error || COMMAND_FAILURE.test(output)) {
+        return this.failure(button, keyCode, result.error ?? output.split("\n")[0]);
+      }
+      return { success: true, button, keyCode };
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Rotary ${button} failed: ${errorMessage(error)}`, error);
+      return this.failure(button, keyCode, errorMessage(error));
+    }
+  }
+
+  private failure(button: RotaryButton, keyCode: number, reason: string): PressButtonResult {
+    return {
+      success: false,
+      button,
+      keyCode,
+      code: "press_failed",
+      retryable: false,
+      error: `Rotary ${button} failed: ${reason}`,
+    };
   }
 }

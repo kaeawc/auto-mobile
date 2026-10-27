@@ -77,9 +77,10 @@ describe("rotary commands (#14920)", () => {
 describe("RotaryInput", () => {
   test("runs the command on an automotive device", async () => {
     const adb = new FakeAdbExecutor();
-    const result = await new RotaryInput(device, adb, traitsOf("automotive")).press(
+    const rotary = new RotaryInput(device, adb, traitsOf("automotive"));
+    const result = await rotary.press(
       "rotary_rotate_cw",
-      3,
+      await rotary.prepare("rotary_rotate_cw", 3),
     );
     expect(result).toMatchObject({ success: true, button: "rotary_rotate_cw" });
     expect(adb.getExecutedCommands()).toEqual([
@@ -90,7 +91,7 @@ describe("RotaryInput", () => {
   test("a phone is refused with no command", async () => {
     const adb = new FakeAdbExecutor();
     await expect(
-      new RotaryInput(device, adb, traitsOf(null)).press("rotary_select", undefined),
+      new RotaryInput(device, adb, traitsOf(null)).prepare("rotary_select", undefined),
     ).rejects.toThrow(/Android Automotive/);
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -104,6 +105,25 @@ describe("RotaryInput", () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("Unknown command");
+  });
+
+  test("a non-zero adb exit is a typed failure, not a rejection", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.execute = () => Promise.reject(new Error("exit status 255"));
+    const result = await new RotaryInput(device, adb, traitsOf("automotive")).press(
+      "rotary_select",
+      1,
+    );
+    expect(result).toMatchObject({ success: false, code: "press_failed", retryable: false });
+  });
+
+  test("an iOS device is refused before any command", async () => {
+    const adb = new FakeAdbExecutor();
+    const ios: BootedDevice = { name: "sim", platform: "ios", deviceId: "UDID" };
+    await expect(
+      new RotaryInput(ios, adb, traitsOf("automotive")).prepare("rotary_select", undefined),
+    ).rejects.toThrow(/not an Android device/);
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   test("pressButton routes a rotary button and its steps through execute", async () => {
@@ -135,5 +155,16 @@ describe("RotaryInput", () => {
     const result = await action.execute("rotary_rotate_ccw", { steps: 2 });
     expect(result.success).toBe(true);
     expect(adb.wasCommandExecuted("inject-rotary -c false,false")).toBe(true);
+  });
+
+  test("pressButton refuses a phone and stray steps before sending anything", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const phone = new PressButton(device, adb, timer, undefined, undefined, {
+      deviceTraits: traitsOf(null),
+    });
+    await expect(phone.execute("rotary_select")).rejects.toThrow(/Android Automotive/);
+    await expect(phone.execute("home", { steps: 3 })).rejects.toThrow(/rotary_rotate/);
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 });

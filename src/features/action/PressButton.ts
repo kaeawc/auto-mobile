@@ -31,7 +31,7 @@ import { HomeScreen } from "./HomeScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
-import { isRotaryButton, RotaryInput } from "./RotaryInput";
+import { isRotaryButton, RotaryInput, type RotaryButton } from "./RotaryInput";
 import type { DeviceTraits } from "../../utils/android-cmdline-tools/deviceTraits";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
@@ -61,6 +61,18 @@ export interface PressButtonCtrlProxyOverrides {
   systemActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction" | "supportsCommand">;
   /** Build-characteristics read the rotary gate uses (#14920). */
   deviceTraits?: DeviceTraits;
+}
+
+/** `steps` only counts rotary detents; passing it with another button is a mistake worth refusing. */
+function rejectStepsOnPlainButton(button: string, call: unknown): undefined {
+  const steps =
+    typeof call === "object" && call !== null ? (call as PressButtonCall).steps : undefined;
+  if (steps !== undefined) {
+    throw new ActionableError(
+      `steps applies to rotary_rotate_cw and rotary_rotate_ccw only, not ${button}.`,
+    );
+  }
+  return undefined;
 }
 
 /** `ActionCall` for pressButton: also carries the rotary step count (#14920). */
@@ -249,7 +261,14 @@ export class PressButton extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
-    const steps = typeof progressOrCall === "object" ? progressOrCall?.steps : undefined;
+    const rotary = isRotaryButton(button) ? this.rotaryInput() : undefined;
+    // Refuse a bad rotary call before observing; `steps` means nothing on any other button.
+    const rotarySteps = isRotaryButton(button)
+      ? await rotary?.prepare(
+          button,
+          typeof progressOrCall === "object" ? progressOrCall?.steps : undefined,
+        )
+      : rejectStepsOnPlainButton(button, progressOrCall);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("pressButton");
@@ -281,8 +300,8 @@ export class PressButton extends BaseVisualChange {
         previousObservation,
       );
       const pressed = await perf.track("buttonPress", () =>
-        isRotaryButton(button)
-          ? this.pressRotary(button, steps, signal)
+        rotary && isRotaryButton(button)
+          ? this.pressRotary(rotary, button, rotarySteps ?? 1, signal)
           : this.press(button, undefined, undefined, signal),
       );
       pressSucceeded = pressed.success;
@@ -297,15 +316,23 @@ export class PressButton extends BaseVisualChange {
     return result;
   }
 
-  private pressRotary(
-    button: Parameters<RotaryInput["press"]>[0],
-    steps: number | undefined,
+  private async pressRotary(
+    rotary: RotaryInput,
+    button: RotaryButton,
+    steps: number,
     signal?: AbortSignal,
   ): Promise<PressButtonResult> {
-    if (this.device.platform !== "android") {
-      throw new ActionableError(`${button} is Android Automotive only; this is an iOS device.`);
+    try {
+      return await rotary.press(button, steps, signal);
+    } finally {
+      if (isNavigationPressButton(button)) {
+        this.windowCacheInvalidator.invalidate(this.device, true);
+      }
     }
-    return new RotaryInput(this.device, this.adb, this.deviceTraits).press(button, steps, signal);
+  }
+
+  private rotaryInput(): RotaryInput {
+    return new RotaryInput(this.device, this.adb, this.deviceTraits);
   }
 
   /**

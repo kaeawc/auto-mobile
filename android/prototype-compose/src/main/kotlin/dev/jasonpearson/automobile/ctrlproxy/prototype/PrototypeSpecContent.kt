@@ -215,6 +215,52 @@ fun PrototypeRuntimeContent(
   }
 }
 
+/** The open dropdown's options, closed again when a newly opened modal hides its select. */
+@Composable
+private fun PrototypeExpandedSelect(
+  root: PrototypeRenderNode,
+  modals: List<PrototypeRenderNode>,
+  menuLayers: PrototypeMenuLayers,
+  interact: (PrototypeInteraction) -> Unit,
+) {
+  val expanded = menuLayers.expandedSelect
+  val select = expanded?.let { identity ->
+    visiblePrototypeSelect(root, identity)?.takeIf {
+      // A newly opened modal closes a dropdown on the page behind it.
+      modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
+        modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+    }
+  }
+  if (select != null) RenderPrototypeSelectOptions(select, interact)
+  else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
+}
+
+@Composable
+private fun prototypeContentLocals(
+  root: PrototypeRenderNode,
+  scrollOffsets: PrototypeScrollOffsets,
+  anchorLocals: PrototypeAnchorLocals,
+  menuLayers: PrototypeMenuLayers,
+  gestureTaps: PrototypeGestureTaps,
+): Array<ProvidedValue<*>> =
+  arrayOf(
+    LocalPrototypeListEndTriggers provides
+      (LocalPrototypeListEndTriggers.current
+        ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
+    LocalPrototypeScrollOffsets provides scrollOffsets,
+    LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
+    LocalPrototypeAnchorLocals provides anchorLocals,
+    LocalPrototypeShaderSession provides
+      (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
+    LocalPrototypeGestureTaps provides gestureTaps,
+    LocalPrototypeMenuLayers provides menuLayers,
+    LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
+    LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
+    LocalPrototypeTargetFocus provides remember { mutableMapOf() },
+    LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+    LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
+  )
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 @InternalAutoMobilePrototypeApi
@@ -235,21 +281,7 @@ fun PrototypeSpecContent(
       val menuLayers = remember { PrototypeMenuLayers() }
       val menuParents = remember(root) { prototypeMenuParents(root) }
       CompositionLocalProvider(
-        LocalPrototypeListEndTriggers provides
-          (LocalPrototypeListEndTriggers.current
-            ?: remember(LocalPrototypeShowEpoch.current) { PrototypeListEndTriggers() }),
-        LocalPrototypeScrollOffsets provides scrollOffsets,
-        LocalPrototypeBarScroll provides rememberPrototypeBarScroll(root),
-        LocalPrototypeAnchorLocals provides anchorLocals,
-        LocalPrototypeShaderSession provides
-          (LocalPrototypeShaderSession.current ?: remember { PrototypeShaderSession() }),
-        LocalPrototypeGestureTaps provides gestureTaps,
-        LocalPrototypeMenuLayers provides menuLayers,
-        LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
-        LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
-        LocalPrototypeTargetFocus provides remember { mutableMapOf() },
-        LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
-        LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
+        *prototypeContentLocals(root, scrollOffsets, anchorLocals, menuLayers, gestureTaps),
       ) {
         PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
         Box(
@@ -285,16 +317,7 @@ fun PrototypeSpecContent(
               )
             }
           }
-          val expanded = menuLayers.expandedSelect
-          val select = expanded?.let { identity ->
-            visiblePrototypeSelect(root, identity)?.takeIf {
-              // A newly opened modal closes a dropdown on the page behind it.
-              modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
-                modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
-            }
-          }
-          if (select != null) RenderPrototypeSelectOptions(select, interact)
-          else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
+          PrototypeExpandedSelect(root, modals, menuLayers, interact)
         }
       }
     }
@@ -1762,28 +1785,21 @@ private val VISUAL_TEXT_ROLES = setOf("text", "icon", "image")
 private val MERGEABLE_TAP_CONTAINERS =
   setOf("box", "row", "column", "flow", "grid", "carousel", "card")
 
+private fun hasTargetableIdentity(child: PrototypeRenderNode): Boolean =
+  child.semantics != null || child.testTag != null || !child.contentDescription.isNullOrEmpty()
+
+private fun hasTargetableBehavior(child: PrototypeRenderNode): Boolean =
+  child.spans?.any { it.onTap != null } == true ||
+    prototypeNodeTappable(child) ||
+    child.source?.let { it.visibleWhen != null || it.anchor != null } == true
+
 /** Preserve exact text selectors and every independently targetable descendant. */
 internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {
-  if (
-    node.semantics != null ||
-      !tappable ||
-      node.role !in MERGEABLE_TAP_CONTAINERS ||
-      node.text.isNotEmpty() ||
-      !node.contentDescription.isNullOrEmpty()
-  )
-    return null
+  if (node.semantics != null || !tappable || node.role !in MERGEABLE_TAP_CONTAINERS) return null
+  if (node.text.isNotEmpty() || !node.contentDescription.isNullOrEmpty()) return null
   var label: String? = null
   fun visit(child: PrototypeRenderNode): Boolean {
-    if (
-      child.semantics != null ||
-        child.testTag != null ||
-        child.spans?.any { it.onTap != null } == true ||
-        !child.contentDescription.isNullOrEmpty() ||
-        prototypeNodeTappable(child) ||
-        child.source?.visibleWhen != null ||
-        child.source?.anchor != null
-    )
-      return false
+    if (hasTargetableIdentity(child) || hasTargetableBehavior(child)) return false
     when {
       child.role == "text" -> {
         if (label != null || child.text.isEmpty()) return false

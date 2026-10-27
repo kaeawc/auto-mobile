@@ -250,26 +250,13 @@ internal object PrototypeStrictPolicy {
     }
 
     fun envelope(spec: JsonObject) {
-      if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text })
-        need("strings")
-      for (key in listOf("window", "theme")) {
-        val block = spec[key] as? JsonObject ?: continue
-        if ("ios" in block || "android" in block) need("platform_namespace")
-      }
-      if (spec.text("motion") == "reduced") need("reduced_motion")
-      if (spec["data"] != null) need("data_model")
-      if (spec["storage"] != null) need("storage")
+      PrototypeEnvelopeFeatures.collect(spec).forEach(::need)
       if (
         ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().any {
           it.jsonPrimitive.content.startsWith("stack:")
         }
       )
         need("routes")
-      if ("derive" in spec) need("format")
-      if ((spec["window"] as? JsonObject)?.get("backdrop") != null) need("backdrop")
-      if ((spec["theme"] as? JsonObject)?.text("design") == "platform") need("design_platform")
-      val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
-      if (colors?.get("light") != null || colors?.get("dark") != null) need("theme_modes")
     }
 
     fun platform(spec: JsonObject) {
@@ -368,6 +355,10 @@ internal object PrototypeStrictPolicy {
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }
+      listAndRequestFeatures(type, fields)
+    }
+
+    private fun listAndRequestFeatures(type: String, fields: JsonObject) {
       if (type == "prependData") need("lazy_list")
       if (type == "list" || (type == "request" && fields.containsKey("append"))) {
         need("lazy_list")
@@ -415,4 +406,33 @@ private object PrototypeMotionFeatures {
 
   fun transitionType(child: JsonElement): String? =
     ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
+}
+
+/**
+ * The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary.
+ */
+internal object PrototypeEnvelopeFeatures {
+  fun collect(spec: JsonObject): List<String> = buildList {
+    content(spec)
+    presentation(spec)
+  }
+
+  private fun MutableList<String>.content(spec: JsonObject) {
+    if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text }) add("strings")
+    if (spec["data"] != null) add("data_model")
+    if (spec["storage"] != null) add("storage")
+    if ("derive" in spec) add("format")
+  }
+
+  private fun MutableList<String>.presentation(spec: JsonObject) {
+    for (key in listOf("window", "theme")) {
+      val block = spec[key] as? JsonObject ?: continue
+      if ("ios" in block || "android" in block) add("platform_namespace")
+    }
+    if (spec.text("motion") == "reduced") add("reduced_motion")
+    if ((spec["window"] as? JsonObject)?.get("backdrop") != null) add("backdrop")
+    if ((spec["theme"] as? JsonObject)?.text("design") == "platform") add("design_platform")
+    val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
+    if (colors?.get("light") != null || colors?.get("dark") != null) add("theme_modes")
+  }
 }

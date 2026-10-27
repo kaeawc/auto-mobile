@@ -253,8 +253,8 @@ struct PrototypeSpec: Decodable {
             throw PrototypeLimits.violation("platform", "Platform state exceeds limit")
         }
         let rebuilt = try Self.buildRoot(
-            authoredRoot, data: data, menuState: state ?? [:], strings: strings,
-            locales: locales, platform: platform, derive: derive
+            authoredRoot, data: data, menuState: state ?? [:], strings: strings, locales: locales,
+            platform: platform, derive: derive
         )
         var next = PrototypeSpec(replacing: self, data: data, root: rebuilt)
         next.platformState = platform

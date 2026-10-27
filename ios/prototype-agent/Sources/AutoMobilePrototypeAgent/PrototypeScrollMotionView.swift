@@ -22,8 +22,8 @@
         var body: some View {
             PrototypeFadingScroll(axis: node.axis, spec: node.fadeEdges) {
                 PrototypeBarScrollContent(node: node, model: model) {
-                    if inner != nil || node.child != nil {
-                        (inner ?? AnyView(NodeView(node: node.child!, model: model)))
+                    if let content = inner ?? node.child.map({ AnyView(NodeView(node: $0, model: model)) }) {
+                        content
                             .background(GeometryReader { geometry in
                                 let origin = geometry.frame(in: .named(coordinate)).origin
                                 Color.clear.preference(

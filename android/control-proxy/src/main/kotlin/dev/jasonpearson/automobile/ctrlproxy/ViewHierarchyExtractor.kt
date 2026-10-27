@@ -1526,6 +1526,9 @@ internal constructor(
       }
     }
 
+    private fun headingValue(): String? =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isHeading) "true" else null
+
     fun build(bounds: Rect, currentPath: String, children: List<UIElementInfo>): UIElementInfo {
       // Check if this node has accessibility focus
       val hasAccessibilityFocus =
@@ -1565,8 +1568,7 @@ internal constructor(
         errorMessage = errorMessage,
         tooltipText = tooltipText,
         paneTitle = paneTitle,
-        heading =
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && node.isHeading) "true" else null,
+        heading = headingValue(),
         liveRegion = liveRegion,
         collectionInfo = collectionInfo,
         collectionItemInfo = collectionItemInfo,

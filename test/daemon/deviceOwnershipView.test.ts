@@ -10,6 +10,7 @@ import {
 import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { createBindingExecOwnerLiveness } from "../../src/daemon/sessionBroker/registry/ownerLiveness";
 import { ctrlProxyForwardLeaseFileName } from "../../src/features/observe/android/CtrlProxyForwardLease";
+import { FakeDeviceClaims } from "../fakes/FakeDeviceClaims";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 
@@ -244,5 +245,72 @@ describe("claim / release / crash interleavings", () => {
     const ownership = await new DeviceOwnershipView(sources).ownershipOf(phone);
     expect(ownership.liveOwnerPids).toEqual([a, b]);
     expect(ownership.disagreements[0]?.kind).toBe("conflicting_live_pids");
+  });
+});
+
+describe("default sources: the host-wide claims table (#11811 b)", () => {
+  const row = {
+    platform: "android" as const,
+    deviceId: "Pixel_8",
+    kind: "allocation" as const,
+    pid: 77,
+    ownerToken: "t",
+    processGenerationToken: "linux:1",
+    claimedAtMs: 1,
+    updatedAtMs: 1,
+  };
+  const claim = ctrlProxyForwardLeaseFileName("Pixel_8");
+  const sourcesFor = (
+    running: boolean,
+    verdict: "same" | "different" | "unknown",
+    filePid?: number,
+  ) => {
+    const claims = new FakeDeviceClaims();
+    void claims.upsert(row);
+    return createDefaultDeviceOwnershipSources({
+      claims,
+      readers: {
+        readLock: (path) =>
+          filePid !== undefined && path.endsWith(claim) ? { pid: filePid, token: "t" } : undefined,
+        isProcessRunning: () => running,
+        listFiles: () => [],
+        generationVerdict: () => verdict,
+      },
+    });
+  };
+  const device: DeviceRef = { platform: "android", deviceId: "Pixel_8" };
+
+  test("a row is a record with its owner and liveness, and its device is listed", async () => {
+    const sources = sourcesFor(true, "same");
+    expect(await sources.tableClaim?.(device)).toEqual({
+      source: "device_claims",
+      pid: 77,
+      alive: true,
+    });
+    expect(await sources.listDevices()).toEqual([device]);
+  });
+
+  test("a reused PID or a gone process is not a live owner", async () => {
+    expect((await sourcesFor(true, "different").tableClaim?.(device))?.alive).toBe(false);
+    expect((await sourcesFor(false, "same").tableClaim?.(device))?.alive).toBe(false);
+  });
+
+  test("a row naming a live owner other than the claim file's is a disagreement", async () => {
+    const view = new DeviceOwnershipView(sourcesFor(true, "same", 88));
+    const ownership = await view.ownershipOf(device);
+    expect(ownership.liveOwnerPids).toEqual([77, 88]);
+    expect(ownership.disagreements.map((d) => d.kind)).toEqual(["conflicting_live_pids"]);
+  });
+
+  test("a row that matches the claim file agrees", async () => {
+    const view = new DeviceOwnershipView(sourcesFor(true, "same", 77));
+    expect((await view.ownershipOf(device)).disagreements).toEqual([]);
+  });
+
+  test("no table means no table records", async () => {
+    const sources = createDefaultDeviceOwnershipSources({
+      readers: { readLock: () => undefined, isProcessRunning: () => false, listFiles: () => [] },
+    });
+    expect(await sources.tableClaim?.(device)).toBeUndefined();
   });
 });

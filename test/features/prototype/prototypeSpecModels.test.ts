@@ -530,10 +530,14 @@ struct Mixed: Codable, Equatable, Sendable {
   test("filled fixtures cover every contract field, with a separate semantic condition tree", () => {
     for (const [definition, value] of [
       [contract.definitions.condition, fixture.conditionFilled],
-      [contract.definitions.style, fixture.styleFilled],
+      [contract.definitions.style, fixture.style],
       [contract.definitions.item, fixture.item],
     ] as const) {
-      expect(Object.keys(value).sort()).toEqual(Object.keys(definition.fields).sort());
+      // `style.shadows` is exclusive with `elevation`/`shadowColor`, so no single valid style fills both.
+      const fields = Object.keys(definition.fields).filter(
+        (field) => field !== "shadows" || definition !== contract.definitions.style,
+      );
+      expect(Object.keys(value).sort()).toEqual(fields.sort());
     }
     // The contract allows one condition selector/comparator at a time, unlike the wire model.
     expect(presentation.conditionSchema.safeParse(fixture.conditionFilled).success).toBe(false);

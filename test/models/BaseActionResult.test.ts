@@ -62,6 +62,7 @@ const EXTENDS_TYPES: Record<string, string> = {
   DragAndDropResult: "distance",
   DragPathResult: "points",
   ExitDialogResult: "elementFound",
+  HoverAtResult: "points",
   InstallAppResult: "artifactPath",
   LaunchAppResult: "packageName",
   OpenURLResult: "url",

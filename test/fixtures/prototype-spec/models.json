@@ -275,10 +275,10 @@
     "data": "/items",
     "valid": ["name", "email"],
     "platform": "/os",
-    "contains": "Text",
-    "startsWith": "T",
-    "lengthGt": 0,
-    "lengthLt": 10
+    "contains": "a",
+    "startsWith": "b",
+    "lengthGt": 1,
+    "lengthLt": 9
   },
   "style": {
     "width": {
@@ -306,6 +306,11 @@
     "border": {
       "width": 2.5,
       "color": "#112233"
+    },
+    "elevation": 2,
+    "shadowColor": {
+      "light": "#112233",
+      "dark": "#445566"
     },
     "gradient": {
       "type": "linear",
@@ -353,12 +358,6 @@
     "scale": 1.2,
     "rotation": 15,
     "cornerStyle": "continuous",
-    "shadows": [
-      {
-        "color": "#000000",
-        "radius": 4
-      }
-    ],
     "effects": [
       {
         "type": "noise"
@@ -574,35 +573,43 @@
       "items": {
         "path": "/items"
       },
-      "as": "row",
+      "as": "post",
       "key": "id"
     },
     "children": [
       {
-        "type": "text",
-        "text": "{row.id}"
+        "type": "spacer"
       }
     ]
   },
   "nodeTooltip": {
     "type": "tooltip",
+    "text": "Hint",
     "openWhen": {
       "key": "enabled",
       "equals": true
     },
-    "text": "Help",
-    "anchorTo": "targetPager"
+    "anchor": {
+      "type": "element",
+      "selector": {
+        "testTag": "buy"
+      },
+      "alignment": "cover"
+    },
+    "caret": "bottom",
+    "spotlight": {}
   },
   "nodeDrawer": {
     "type": "drawer",
-    "edge": "start",
+    "edge": "end",
     "openWhen": {
       "key": "enabled",
       "equals": true
     },
     "child": {
       "type": "spacer"
-    }
+    },
+    "dismissOnSwipe": false
   },
   "nodePager": {
     "type": "pager",
@@ -840,33 +847,15 @@
       "ms": 20,
       "order": "forward"
     },
+    "semantics": {
+      "heading": true
+    },
     "onAppear": [
       {
         "type": "emit",
         "name": "appear"
       }
-    ],
-    "scrollTransition": {
-      "axis": "vertical",
-      "edge": {
-        "alpha": 0
-      }
-    },
-    "scrollLinked": {
-      "source": "targetScroll",
-      "range": [0, 100],
-      "alpha": [0, 1]
-    },
-    "semantics": {
-      "heading": true
-    },
-    "android": {
-      "indication": "ripple"
-    },
-    "ios": {
-      "hover": "lift"
-    },
-    "sharedKey": "paired"
+    ]
   },
   "actionRequestFilled": {
     "type": "request",
@@ -940,103 +929,6 @@
     "path": [
       {
         "screen": "home"
-      }
-    ]
-  },
-  "styleFilled": {
-    "width": {
-      "dp": 240
-    },
-    "height": "wrap",
-    "weight": 1,
-    "minWidth": 10,
-    "maxWidth": 300,
-    "minHeight": 20,
-    "maxHeight": 400,
-    "padding": {
-      "top": 1.5,
-      "bottom": 2.5,
-      "start": 3.5,
-      "end": 4.5
-    },
-    "background": "#112233",
-    "cornerRadius": {
-      "topStart": 1,
-      "topEnd": 2,
-      "bottomStart": 3,
-      "bottomEnd": 4
-    },
-    "border": {
-      "width": 2.5,
-      "color": "#112233"
-    },
-    "elevation": 2,
-    "shadowColor": {
-      "light": "#112233",
-      "dark": "#445566"
-    },
-    "gradient": {
-      "type": "linear",
-      "angle": 45,
-      "stops": [
-        {
-          "color": "#112233",
-          "position": 0
-        },
-        {
-          "color": {
-            "light": "#112233",
-            "dark": "#445566"
-          },
-          "position": 1
-        }
-      ]
-    },
-    "aspectRatio": 1.5,
-    "offset": {
-      "x": -12.5,
-      "y": 24.25
-    },
-    "alpha": 0.8,
-    "pressScale": 0.9,
-    "shimmer": true,
-    "alignment": "center",
-    "arrangement": "spaceBetween",
-    "spacing": 4,
-    "runSpacing": 5,
-    "textSize": 16,
-    "fontWeight": 500,
-    "color": "#112233",
-    "textAlign": "start",
-    "maxLines": 2,
-    "lineHeight": 22,
-    "letterSpacing": 0.5,
-    "textDecoration": "underline",
-    "fontStyle": "italic",
-    "overflow": "ellipsis",
-    "fontFamily": {
-      "asset": "body-font"
-    },
-    "textStyle": "bodyLarge",
-    "scale": 1.2,
-    "rotation": 15,
-    "shader": {
-      "asset": "shader",
-      "uniforms": {
-        "strength": 1
-      }
-    },
-    "shadows": [
-      {
-        "color": "#112233",
-        "radius": 2
-      }
-    ],
-    "cornerStyle": "continuous",
-    "effects": [
-      {
-        "type": "noise",
-        "amount": 0.1
       }
     ]
   }

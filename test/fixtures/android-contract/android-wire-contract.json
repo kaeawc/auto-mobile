@@ -3807,6 +3807,12 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "degradedEffects",
+          "type": "list",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -7061,6 +7067,26 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeDialogButton": [
       {
         "name": "label",
@@ -7856,6 +7882,12 @@
       },
       {
         "name": "timers",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "degradedEffects",
         "type": "list",
         "nullable": false,
         "hasDefault": true

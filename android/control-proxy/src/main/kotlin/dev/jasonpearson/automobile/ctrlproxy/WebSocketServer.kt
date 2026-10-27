@@ -381,6 +381,10 @@ class WebSocketServer(
     addAll(listOf("prototype_loading_states_v1", "prototype_style_polish_v2"))
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
+    // style.effects (#15129): noise, gradientMesh, shimmer, glow, vignette, blur, pixelate,
+    // chromaticAberration, wave and ripple. Every effect renders on its API floor or is omitted and
+    // reported in degradedEffects, so a host may send the list to any APK that advertises this.
+    add("prototype_effects_v1")
     // Transition delayMs, container stagger and the blurReplace transition (#15247).
     add("prototype_choreography_v1")
     add("prototype_stack_transitions_v1")

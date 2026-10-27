@@ -8,6 +8,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLoadResult
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.After
 import org.junit.Assert.*
@@ -60,6 +63,35 @@ class ViewerActivityTest {
     launch()
     compose.onNodeWithText("Prototype content").assertIsDisplayed()
     assertEquals(listOf(FIRST), repository.opened)
+  }
+
+  @Test
+  fun chromelessFullscreenContentHasNoHostBarInset() {
+    assertWindowChromeContentStartsAtViewerTop("none")
+  }
+
+  @Test
+  fun fullscreenBarDoesNotDuplicateViewerActions() {
+    assertWindowChromeContentStartsAtViewerTop("bar")
+  }
+
+  private fun assertWindowChromeContentStartsAtViewerTop(chrome: String) {
+    val specJson =
+      """{"id":"chrome","window":{"placement":{"type":"fullscreen"},"chrome":"$chrome"},"root":{"type":"text","text":"Prototype content"}}"""
+    val spec = (PrototypeSpecValidator.validate(specJson) as PrototypeSpecValidation.Success).spec
+    repository.prototypes[FIRST] =
+      LibraryPrototype(
+        Fixtures.entry(),
+        SavedPrototypeLoadResult.Loaded(FIRST, "Example", "slug", 10, spec, specJson, emptyMap()),
+      )
+    launch()
+    val actions = compose.onNodeWithTag("viewer-actions").getUnclippedBoundsInRoot()
+    val content = compose.onNodeWithTag("viewer-content").getUnclippedBoundsInRoot()
+    val text =
+      compose.onNodeWithText("Prototype content").assertIsDisplayed().getUnclippedBoundsInRoot()
+    assertTrue(actions.bottom > actions.top)
+    assertEquals(actions.bottom.value, content.top.value, 0.01f)
+    assertEquals(0f, text.top.value, 0.01f)
   }
 
   @Test

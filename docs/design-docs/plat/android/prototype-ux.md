@@ -1271,6 +1271,35 @@ and its spec path. A `pop` targets `back` (the previous screen is runtime state)
 `next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
 state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
 
+### Route contract
+
+`prototype_routes_v1` gates stack `routes`, push/replace `params`, pop `force`, `setStack`,
+route placeholders and `stack:<id>` storage keys. Android and iOS intentionally do not advertise
+it until runtime support is implemented. `screens` remains a map of bare nodes; the optional
+sibling `routes` map may contain only screen names of that stack. Each route has optional
+`params: {name: "string"|"number"|"boolean"}` (at most 16, path-key names), `onEnter` and
+`onBack` (1–32 actions each, with the existing action nesting budget). The start screen cannot
+declare params because initial display and popToRoot cannot supply them. Param names use the
+uncapped path-key identifier grammar; bound state keys are checked by the runtime.
+
+Push and replace accept up to 16 scalar literals or existing state/data/item/index value bindings
+in `params`. All declared params are required; unknown names and incorrectly typed literals are
+rejected at the action. `setStack {stack, path:[{screen,params?}]}` validates each entry the same way
+and requires 1–MAX_PROTOTYPE_STACK_DEPTH entries. A non-forced pop of the owning stack in
+its screen's onBack list, including nested timer and request follow-ups, is rejected; `force:true`
+bypasses that guard. Pops in dialog actions are independent. An onEnter list cannot push or replace
+its own screen, including through nested action lists. Cross-screen lifecycle cycles, including
+push/pop ping-pong, require runtime navigation-state guards. `{route.name}` uses the repeat tokenizer
+and bindable fields, condition operands and whole data-pointer segments. Its name must be declared by the enclosing screen; lifecycle actions
+use their named screen's scope. A nested stack's screen establishes its own scope. The `route` repeat
+alias remains valid in specs without route features; route-enabled specs reserve it for params.
+
+Storage accepts `stack:<id>` only for declared stacks. Navigation, param binding, lifecycle execution,
+persistence/restore precedence and event emission are owed by the runtime slice. Status and inspect
+reserve optional `stacks.<id>.params: object[]` parallel to the existing `path: string[]`;
+`screen_changed` reserves optional scalar `params` alongside `screen` and `depth`. No new fields
+are emitted by the current runtimes.
+
 ### Stack transitions
 
 `prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace

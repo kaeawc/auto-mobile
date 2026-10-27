@@ -1,3 +1,4 @@
+import { prototypeRoutesError } from "./prototypeRoutes";
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
 import { prototypeDerivedError } from "./prototypeDerivedValidation";
 import { prototypeScrollMotionError } from "./prototypeScrollMotion";
@@ -26,6 +27,7 @@ import { prototypePlatformError, prototypeReservedTestTagError } from "./prototy
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
+import { routeBoundKeys } from "./prototypeRoutes";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { effectUses } from "./prototypeEffects";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
@@ -733,8 +735,12 @@ function stateTypeErrors(
   repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   const checked: Checked = {
-    nodes: repeatKeyInstances(value, context.nodes, repeats).map(bound),
-    actions: repeatKeyInstances(value, context.actions, repeats).map(bound),
+    nodes: repeatKeyInstances(value, context.nodes, repeats)
+      .map(bound)
+      .filter((entry) => !routeBoundKeys(entry.value)),
+    actions: repeatKeyInstances(value, context.actions, repeats)
+      .map(bound)
+      .filter((entry) => !routeBoundKeys(entry.value)),
   };
   return (
     bindingErrors(checked, data) ??
@@ -875,6 +881,7 @@ function validateValue(
   const error =
     prototypeLazyListLimitError(value) ??
     walk(value, definitions.spec, "", context, 0) ??
+    prototypeRoutesError(value, context.nodes, context.actions) ??
     prototypeSharedElementError(context.nodes, repeats) ??
     layoutErrors(value, context, repeats) ??
     prototypeScrollMotionError(value, context.nodes) ??

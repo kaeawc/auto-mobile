@@ -110,6 +110,7 @@ final class PrototypeContractValidatorTests: XCTestCase {
             "exact-selector-depth.json",
             "floating-element-anchor.json",
             "tooltip-element-anchor.json",
+            "routes-literal-anchor-selector.json",
         ]
         let inventory = try JSONDecoder().decode(
             Inventory.self,
@@ -121,7 +122,7 @@ final class PrototypeContractValidatorTests: XCTestCase {
         XCTAssertFalse(valid.isEmpty)
         for url in valid {
             let data = try Data(contentsOf: url)
-            if url.lastPathComponent.contains("shader") {
+            if inventory.validCapabilities[url.lastPathComponent]?.contains("prototype_custom_shaders_v1") == true {
                 XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
                 XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(data: data, supported: supported))
                 continue

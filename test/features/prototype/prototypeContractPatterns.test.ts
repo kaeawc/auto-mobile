@@ -32,3 +32,10 @@ for (const name of Object.keys(fixture) as (keyof typeof fixture)[]) {
     }
   }
 }
+
+test("bound keys reject long invalid route placeholder runs without backtracking", () => {
+  const value = "{route.a}".repeat(40) + "-";
+  const started = performance.now();
+  expect(prototypeContractPatterns.boundKey.test(value)).toBe(false);
+  expect(performance.now() - started).toBeLessThan(50);
+});

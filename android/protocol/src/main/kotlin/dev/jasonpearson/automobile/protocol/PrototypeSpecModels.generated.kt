@@ -117,11 +117,15 @@ data class PrototypePushAction(
   val stack: String,
   val screen: String,
   val transition: String? = null,
+  val params: Map<String, JsonElement>? = null,
 ) : PrototypeAction()
 
 @SerialName("pop")
 @Serializable
-data class PrototypePopAction(val stack: String) : PrototypeAction()
+data class PrototypePopAction(
+  val stack: String,
+  val force: Boolean? = null,
+) : PrototypeAction()
 
 @SerialName("popToRoot")
 @Serializable
@@ -133,6 +137,7 @@ data class PrototypeReplaceAction(
   val stack: String,
   val screen: String,
   val transition: String? = null,
+  val params: Map<String, JsonElement>? = null,
 ) : PrototypeAction()
 
 /**
@@ -233,6 +238,13 @@ data class PrototypeScrollToAction(
 data class PrototypePrependDataAction(
   val path: String,
   val value: EmitContextBinding,
+) : PrototypeAction()
+
+@SerialName("setStack")
+@Serializable
+data class PrototypeSetStackAction(
+  val stack: String,
+  val path: List<PrototypeRouteEntry>,
 ) : PrototypeAction()
 
 @Serializable
@@ -1395,6 +1407,7 @@ data class PrototypeStackNode(
   override val semantics: PrototypeSemantics? = null,
   val start: String,
   val screens: Map<String, PrototypeNode>,
+  val routes: Map<String, PrototypeRoute>? = null,
 ) : PrototypeNode()
 
 /**
@@ -1520,6 +1533,19 @@ data class PrototypeListNode(
   val endThreshold: Int = 3,
   val maxItems: Int? = null,
 ) : PrototypeNode()
+
+@Serializable
+data class PrototypeRouteEntry(
+  val screen: String,
+  val params: Map<String, JsonElement>? = null,
+)
+
+@Serializable
+data class PrototypeRoute(
+  val params: Map<String, String>? = null,
+  val onEnter: List<PrototypeAction>? = null,
+  val onBack: List<PrototypeAction>? = null,
+)
 
 @Serializable
 data class PrototypeScrollEdge(

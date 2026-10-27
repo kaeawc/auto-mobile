@@ -926,5 +926,14 @@
   "nodePasteButton": {
     "type": "pasteButton",
     "into": "/data/pasted"
+  },
+  "actionSetStack": {
+    "type": "setStack",
+    "stack": "targetStack",
+    "path": [
+      {
+        "screen": "home"
+      }
+    ]
   }
 }

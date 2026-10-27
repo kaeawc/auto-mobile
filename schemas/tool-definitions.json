@@ -19952,7 +19952,7 @@
                                         "properties": {
                                           "state": {
                                             "type": "string",
-                                            "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])"
+                                            "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])"
                                           }
                                         },
                                         "required": ["state"],
@@ -20502,6 +20502,41 @@
                               "type": "string",
                               "minLength": 1
                             },
+                            "params": {
+                              "allOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                      }
+                                    ]
+                                  },
+                                  "propertyNames": {
+                                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])"
+                                  }
+                                }
+                              ]
+                            },
                             "transition": {
                               "type": "string",
                               "enum": ["platform", "slide", "fade", "none"]
@@ -20520,9 +20555,46 @@
                             "stack": {
                               "type": "string",
                               "minLength": 1
+                            },
+                            "force": {
+                              "type": "boolean"
                             }
                           },
                           "required": ["type", "stack"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["setStack"]
+                            },
+                            "stack": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "path": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "screen": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "params": {
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/params"
+                                  }
+                                },
+                                "required": ["screen"],
+                                "additionalProperties": false
+                              },
+                              "minItems": 1,
+                              "maxItems": 32
+                            }
+                          },
+                          "required": ["type", "stack", "path"],
                           "additionalProperties": false
                         },
                         {
@@ -20600,6 +20672,9 @@
                             "screen": {
                               "type": "string",
                               "minLength": 1
+                            },
+                            "params": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/params"
                             },
                             "transition": {
                               "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/transition"
@@ -20946,12 +21021,7 @@
                       "minLength": 1
                     },
                     "onTap": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
-                      },
-                      "minItems": 1,
-                      "maxItems": 32
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "style": {
                       "type": "object",
@@ -22219,20 +22289,10 @@
                       "additionalProperties": false
                     },
                     "onLongPress": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
-                      },
-                      "minItems": 1,
-                      "maxItems": 32
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "onDoubleTap": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
-                      },
-                      "minItems": 1,
-                      "maxItems": 32
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "repeat": {
                       "type": "object",
@@ -23015,12 +23075,7 @@
                           "$ref": "#/properties/spec/properties/root/anyOf/6/properties/spans/items/properties/style"
                         },
                         "onTap": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
-                          },
-                          "minItems": 1,
-                          "maxItems": 32
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                         }
                       },
                       "required": ["kinds", "onTap"],
@@ -23577,12 +23632,7 @@
                           "minLength": 1
                         },
                         "onTap": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
-                          },
-                          "minItems": 1,
-                          "maxItems": 32
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                         }
                       },
                       "required": ["icon", "label"],
@@ -23593,7 +23643,7 @@
                       "enum": ["done", "next", "search", "send", "go"]
                     },
                     "onSubmit": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon/properties/onTap"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -23691,7 +23741,7 @@
                       "enum": ["bar", "docked"]
                     },
                     "onSubmit": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon/properties/onTap"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -25444,7 +25494,7 @@
                           "minLength": 1
                         },
                         "onTap": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon/properties/onTap"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                         }
                       },
                       "required": ["label"],
@@ -26300,12 +26350,7 @@
                       "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "onStartReached": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
-                      },
-                      "minItems": 1,
-                      "maxItems": 32
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -26510,6 +26555,44 @@
                     "start": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "routes": {
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "params": {
+                                "allOf": [
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string",
+                                      "enum": ["string", "number", "boolean"]
+                                    },
+                                    "propertyNames": {
+                                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])"
+                                    }
+                                  }
+                                ]
+                              },
+                              "onEnter": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                                },
+                                "minItems": 1,
+                                "maxItems": 32
+                              },
+                              "onBack": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/40/properties/routes/allOf/0/additionalProperties/properties/onEnter"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      ]
                     },
                     "screens": {}
                   },
@@ -27498,6 +27581,35 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 32
+                    },
+                    "params": {
+                      "minItems": 1,
+                      "maxItems": 32,
+                      "type": "array",
+                      "items": {
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          },
+                          {}
+                        ]
+                      }
                     }
                   },
                   "required": ["path", "depth"],
@@ -27849,6 +27961,35 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 32
+                  },
+                  "params": {
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "type": "array",
+                    "items": {
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          }
+                        },
+                        {}
+                      ]
+                    }
                   }
                 },
                 "required": ["path", "depth"],

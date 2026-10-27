@@ -34,5 +34,5 @@
       ]
     }
   },
-  "expectedPath": "root.onTap[0].body.multipart"
+  "expectedPath": "root.onTap[0].body.multipart[0].filename"
 }

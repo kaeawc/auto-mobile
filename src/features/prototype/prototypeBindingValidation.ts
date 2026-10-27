@@ -10,6 +10,8 @@ export interface Rule {
   pattern?: string;
   exclusive?: string[];
   exactlyOne?: string[];
+  exactlyOneAtObject?: boolean;
+  preferMatchingFields?: boolean;
   dependents?: Record<string, string[]>;
   integer?: boolean;
   min?: number;
@@ -22,6 +24,7 @@ export interface Rule {
   item?: Rule;
   options?: Rule[];
   values?: (string | boolean)[];
+  minEntries?: number;
   maxEntries?: number;
   fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;
   variants?: Record<string, Rule>;

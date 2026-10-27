@@ -61,7 +61,7 @@ export const requestActionSchema = z
           .object({
             multipart: z
               .array(prototypeUploadPartSchema)
-              .min(0)
+              .min(1)
               .max(contract.limits.MAX_PROTOTYPE_UPLOAD_PARTS),
           })
           .strict(),
@@ -71,6 +71,7 @@ export const requestActionSchema = z
               .record(z.string().min(1), prototypeDataActionValueSchema)
               .refine(
                 (entries) =>
+                  Object.keys(entries).length >= 1 &&
                   Object.keys(entries).length <= contract.limits.MAX_PROTOTYPE_UPLOAD_PARTS,
               ),
           })

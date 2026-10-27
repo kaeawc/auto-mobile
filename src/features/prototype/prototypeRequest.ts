@@ -276,6 +276,10 @@ function prototypeRequestProgressKeyError(
   if (action.type !== "request" || typeof action.progressKey !== "string") {
     return undefined;
   }
+  const body = typeof action.body === "object" && action.body !== null ? action.body : undefined;
+  if (!body || !["multipart", "form", "file"].some((key) => Object.hasOwn(body, key))) {
+    return { path: `${at}.progressKey`, message: "progressKey requires an upload body" };
+  }
   const value = state[action.progressKey];
   return Object.hasOwn(state, action.progressKey) &&
     typeof value === "number" &&

@@ -263,6 +263,10 @@ internal object PrototypeStrictPolicy {
     private fun scanFields(fields: JsonObject, field: String) {
       val type = fields.text("type") ?: ""
       for ((key, child) in fields) {
+        if (key == "form" && field == "body") {
+          (child as? JsonObject)?.values?.forEach { scan(it) }
+          continue
+        }
         if (skipsScan(key, type)) continue
         if (key == "repeat") {
           repeatFeatures(child)

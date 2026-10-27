@@ -89,6 +89,7 @@
     "request-upload-form.json",
     "request-upload-progress-only.json",
     "request-upload-progress.json",
+    "request-upload-review-form-data-keys.json",
     "request-upload.json",
     "row-weight-size-bounds.json",
     "scroll-refresh.json",
@@ -701,6 +702,17 @@
     "request-upload-progress-string.json",
     "request-upload-progress-undeclared.json",
     "request-upload-progress-under.json",
+    "request-upload-review-empty-file-asset.json",
+    "request-upload-review-empty-form.json",
+    "request-upload-review-empty-multipart.json",
+    "request-upload-review-empty-part-name.json",
+    "request-upload-review-form-effects-invalid-binding.json",
+    "request-upload-review-form-payload-data-gate.json",
+    "request-upload-review-form-value-data-gate.json",
+    "request-upload-review-part-both-sources.json",
+    "request-upload-review-progress-get.json",
+    "request-upload-review-progress-json.json",
+    "request-upload-review-unknown-part-key.json",
     "request-upload-secure-form.json",
     "request-upload-secure-multipart.json",
     "request-upload-unknown-part.json",
@@ -1571,6 +1583,10 @@
     "z-effects-all-types.json": ["prototype_effects_v1"],
     "z-effects-animated-phase.json": ["prototype_effects_v1"],
     "z-effects-at-limits.json": ["prototype_effects_v1"],
-    "z-effects-style-when.json": ["prototype_effects_v1"]
+    "z-effects-style-when.json": ["prototype_effects_v1"],
+    "request-upload-review-form-data-keys.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ]
   }
 }

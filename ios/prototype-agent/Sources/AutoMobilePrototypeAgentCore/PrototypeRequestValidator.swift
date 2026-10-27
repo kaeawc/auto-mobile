@@ -117,6 +117,11 @@ enum PrototypeRequestValidator {
                 "Expected an integer from 1 to \(PrototypeLimits.maxRequestTimeoutMs)"
             ) }
         }
+        if action["progressKey"] != nil,
+           action["body"]?.objectFields?.keys.contains(where: { ["multipart", "form", "file"].contains($0) }) != true
+        {
+            throw fail("\(path).progressKey", "progressKey requires an upload body")
+        }
         try progressKey(action["progressKey"], path: "\(path).progressKey", state: state)
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
         try entries(action["headers"], path: "\(path).headers", isHeader: true)

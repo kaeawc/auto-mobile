@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "request-upload",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "progress": 0,
+      "caption": "hello"
+    },
+    "root": {
+      "type": "button",
+      "label": "Upload",
+      "onTap": [
+        {
+          "type": "request",
+          "method": "GET",
+          "url": "https://example.com/upload",
+          "progressKey": "progress"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].progressKey"
+}

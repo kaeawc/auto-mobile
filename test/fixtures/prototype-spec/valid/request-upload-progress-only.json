@@ -18,7 +18,11 @@
         "method": "POST",
         "url": "https://example.com/upload",
         "body": {
-          "value": "hello"
+          "form": {
+            "caption": {
+              "value": "hello"
+            }
+          }
         },
         "progressKey": "progress"
       }

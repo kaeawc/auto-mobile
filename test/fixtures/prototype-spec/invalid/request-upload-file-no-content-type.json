@@ -27,5 +27,5 @@
       ]
     }
   },
-  "expectedPath": "root.onTap[0].body.file"
+  "expectedPath": "root.onTap[0].body.contentType"
 }

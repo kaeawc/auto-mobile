@@ -163,6 +163,9 @@ internal object PrototypeStateBindings {
   ): PrototypeSpecError? {
     if (action.text("type") != "request") return null
     val key = action.text("progressKey") ?: return null
+    val body = action["body"] as? JsonObject
+    if (listOf("multipart", "form", "file").none { body?.containsKey(it) == true })
+      return fail("$path.progressKey", "progressKey requires an upload body")
     val stored = state[key] as? JsonPrimitive
     val number = stored?.takeUnless { it.isString }?.doubleOrNull
     return if (number != null && number.isFinite() && number in 0.0..100.0) null

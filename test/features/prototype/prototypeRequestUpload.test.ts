@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
-import { prototypeRequiredCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
+import {
+  prototypeGateCapabilities,
+  prototypeRequiredCapabilities,
+} from "../../../src/features/prototype/prototypeCapabilityGates";
 import { prototypeRequestEventOf } from "../../../src/features/prototype/prototypeRequestEvent";
 import {
   MAX_PROTOTYPE_UPLOAD_BYTES,
   MAX_PROTOTYPE_UPLOAD_PARTS,
 } from "../../../src/features/prototype/prototypeRequestLimits";
+import type { PrototypeStrictOptions } from "../../../src/features/prototype/prototypeStrictPolicy";
 import { requestActionSchema } from "../../../src/features/prototype/prototypeRequestSchema";
 import patterns from "../../fixtures/prototype-spec/patterns.json";
 import corpus from "../../fixtures/prototype-spec/corpus.json";
@@ -26,7 +30,7 @@ const invalid = corpus.invalid
     entry: fixture("invalid", name) as {
       spec: unknown;
       expectedPath: string;
-      options?: { library?: boolean };
+      options?: PrototypeStrictOptions;
     },
   }));
 
@@ -41,7 +45,10 @@ describe("upload request contract", () => {
   }
   for (const { name, entry } of invalid) {
     test(name, () => {
-      const result = validatePrototypeSpec(entry.spec, entry.options);
+      const result = validatePrototypeSpec(entry.spec, {
+        ...entry.options,
+        requiredCapabilities: prototypeGateCapabilities,
+      });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.path).toBe(entry.expectedPath);

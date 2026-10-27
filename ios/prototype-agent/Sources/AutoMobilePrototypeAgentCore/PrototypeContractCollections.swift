@@ -34,6 +34,9 @@ extension PrototypeContractValidator {
         if kind == "screenMap", !(1 ... PrototypeLimits.maxStackScreens).contains(fields.count) {
             throw Self.invalid(path, "Screen count out of range")
         }
+        if kind == "record", Double(fields.count) < (rule["minEntries"]?.numberValue ?? 0) {
+            throw Self.invalid(path, "Record entry minimum not met")
+        }
         if kind == "record", Double(fields.count) > (rule["maxEntries"]?.numberValue ?? .infinity) {
             throw Self.invalid(path, "Record entry limit exceeded")
         }
@@ -54,7 +57,16 @@ extension PrototypeContractValidator {
             throw Self.invalid(path, "Invalid union value")
         }
         var first: PrototypeLoadError?
-        for option in options where Self.candidate(value, kind: option.objectFields?["kind"]?.stringValue) {
+        let ranked = options.enumerated().sorted { left, right in
+            func matches(_ option: JSONValue) -> Int {
+                (option.objectFields?["fields"]?.objectFields ?? [:]).keys
+                    .filter { value.objectFields?[$0] != nil }.count
+            }
+            let a = matches(left.element), b = matches(right.element)
+            return a == b ? left.offset < right.offset : a > b
+        }.map(\.element)
+        let candidates = rule["preferMatchingFields"] == .bool(true) ? ranked : options
+        for option in candidates where Self.candidate(value, kind: option.objectFields?["kind"]?.stringValue) {
             // Union probing must not consume node/image budgets for an unsuccessful branch.
             var trial = self
             do {

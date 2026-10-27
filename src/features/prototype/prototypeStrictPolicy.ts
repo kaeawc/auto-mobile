@@ -40,19 +40,26 @@ export function prototypeStrictPolicyError(
     if (host) {
       return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
     }
-    // An explicit host channel is refused like an explicit host request (#14261).
-    const hostChannel = Object.entries(object(object(spec)?.channels) ?? {})
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .find(([, channel]) => object(channel)?.via === "host");
-    if (hostChannel) {
-      return {
-        path: `channels.${hostChannel[0]}.via`,
-        message: "Host channels are unavailable in a library",
-      };
+    const channel = hostChannelError(spec);
+    if (channel) {
+      return channel;
     }
     return secureLibraryError(spec);
   }
   return undefined;
+}
+
+/** An explicit host channel is refused like an explicit host request (#14261). */
+function hostChannelError(spec: unknown): PrototypeValidationError | undefined {
+  const hostChannel = Object.entries(object(object(spec)?.channels) ?? {})
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .find(([, channel]) => object(channel)?.via === "host");
+  return hostChannel
+    ? {
+        path: `channels.${hostChannel[0]}.via`,
+        message: "Host channels are unavailable in a library",
+      }
+    : undefined;
 }
 
 /** A secure value bound into a channel's url or headers would reach the server like a request's. */

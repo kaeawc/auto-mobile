@@ -4801,6 +4801,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -4907,6 +4913,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -5041,6 +5053,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -5217,6 +5235,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -5335,6 +5359,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -5487,6 +5517,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -5599,6 +5635,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -5737,6 +5779,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -5871,6 +5919,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -6001,6 +6055,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -6145,6 +6205,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -6263,6 +6329,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -8049,6 +8121,20 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeShared": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "as",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeSheetCondition": [
       {
         "name": "key",
@@ -9341,6 +9427,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -9487,6 +9579,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -9593,6 +9691,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -9777,6 +9881,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -9919,6 +10029,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -10045,6 +10161,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -10183,6 +10305,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -10295,6 +10423,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -10429,6 +10563,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -10585,6 +10725,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -10759,6 +10905,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -10899,6 +11051,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -11011,6 +11169,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -11235,6 +11399,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -11381,6 +11551,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -11633,6 +11809,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -11757,6 +11939,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -11933,6 +12121,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -12085,6 +12279,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -12197,6 +12397,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -12379,6 +12585,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -12531,6 +12743,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -12659,6 +12877,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -12759,6 +12983,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -12919,6 +13149,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -13071,6 +13307,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -13189,6 +13431,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },
@@ -13417,6 +13665,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -13565,6 +13819,12 @@
         "hasDefault": true
       },
       {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "sharedKey",
         "type": "string",
         "nullable": true,
@@ -13701,6 +13961,12 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
         "nullable": true,
         "hasDefault": true
       },

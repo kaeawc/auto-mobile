@@ -129,10 +129,8 @@ nav:
       - "Keystore test state": using/keystore-test-state.md
       - "Keystore metadata": using/keystore-metadata.md
       - "SDK capabilities": using/sdk-capabilities.md
-      - "Live device acceptance": using/live-device-acceptance.md
-      - "Manual-test harness": using/manual-test-harness.md
-      - "Agent benchmarks": using/agent-benchmarks.md
       - "Embedding prototypes in an app": using/prototype-embedding.md
+      - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md

@@ -1,3 +1,4 @@
+import { SessionDeviceReboundBroadcaster } from "./sessionDeviceReboundBroadcast";
 import { registerPrototypeDaemonPort } from "../features/prototype/prototypeDaemonPorts";
 import { daemonToolRegistry } from "./toolRegistryPort";
 import {} from "./networkStateSessionCleanup";
@@ -343,7 +344,9 @@ export class Daemon {
       configureDeviceDataStreamServer: () => this.streams.configureDeviceDataStreamServer(),
     });
     this.deviceSessionRepository = deviceSessionRepository;
-    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository, {
+      sessionDeviceReboundEmitter: SessionDeviceReboundBroadcaster,
+    });
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
     // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
     // restart incumbent whose pid file this daemon replaced is not listed, so it is added while
@@ -643,6 +646,7 @@ export class Daemon {
       identity,
       lifecycle,
       bindingRegistry: () => daemon.runtime.bindingRegistry,
+      deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       setBindingRegistry: (value) => {
         daemon.runtime.bindingRegistry = value;
       },
@@ -663,6 +667,8 @@ export class Daemon {
       identity,
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      bindingRegistry: () => daemon.runtime.bindingRegistry,
+      deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,
       deviceStateChangeNotifier: () => daemon.deviceStateChangeNotifier,
       observerSessionRegistry: () => daemon.observerSessionRegistry,

@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "prepend",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "rows": []
+    },
+    "root": {
+      "type": "text",
+      "text": "Add",
+      "onTap": [
+        {
+          "type": "prependData",
+          "path": "/data/row{index}",
+          "value": {
+            "value": {
+              "id": 2
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].path"
+}

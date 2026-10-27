@@ -64,6 +64,74 @@ private final class TimerTestHarness {
 }
 
 final class PrototypeTimersTests: XCTestCase {
+    private func appearSpec() throws -> PrototypeSpec {
+        try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
+        {"id":"appear","state":{"show":true,"count":0},"window":{"placement":{"type":"fullscreen"}},
+        "root":{"type":"column","onAppear":[{"type":"startTimer","id":"splash","afterMs":200,
+        "actions":[{"type":"setState","key":"show","value":false}]}],"children":[
+        {"type":"text","text":"Splash","visibleWhen":{"key":"show","equals":true},
+        "onAppear":[{"type":"increment","key":"count"}]}]}}
+        """.utf8))
+    }
+
+    func testOnAppearFirstShowEdgesPreservingAndResetShow() throws {
+        var session = PrototypeSession()
+        let spec = try appearSpec()
+        session.show(spec)
+        _ = session.transition { _ in [] }
+        XCTAssertEqual(session.state["count"], .number(1))
+        _ = session.transition { _ in [] }
+        XCTAssertEqual(session.state["count"], .number(1))
+        let hide = try action("{\"type\":\"setState\",\"key\":\"show\",\"value\":false}")
+        let reveal = try action("{\"type\":\"setState\",\"key\":\"show\",\"value\":true}")
+        _ = session.transition { $0.run([hide]) }
+        _ = session.transition { $0.run([reveal]) }
+        XCTAssertEqual(session.state["count"], .number(2))
+        let keptState = session.state
+        session.show(spec, restoredState: keptState)
+        _ = session.transition { _ in [] }
+        XCTAssertEqual(session.state["count"], .number(2))
+        session.show(spec, reset: true)
+        _ = session.transition { _ in [] }
+        XCTAssertEqual(session.state["count"], .number(1))
+    }
+
+    func testOnAppearTimersReportAdvanceDismissAndDoNotExtendIdle() throws {
+        let harness = TimerTestHarness()
+        try harness.session.show(appearSpec())
+        harness.events += harness.session.transition { _ in [] }
+        harness.timers.perform(harness.session.takeTimerCommands())
+        harness.idle.arm()
+        XCTAssertEqual(harness.timers.snapshot().map(\.id), ["splash"])
+        _ = harness.timers.advance(200)
+        XCTAssertEqual(harness.session.state["show"], .bool(false))
+        harness.clock.elapse(1000)
+        XCTAssertFalse(harness.session.isShown)
+        XCTAssertTrue(harness.timers.snapshot().isEmpty)
+        try harness.session.show(appearSpec(), reset: true)
+        _ = harness.session.transition { _ in [] }
+        harness.timers.perform(harness.session.takeTimerCommands())
+        _ = harness.session.dismiss(reason: .agent)
+        harness.timers.perform(harness.session.takeTimerCommands())
+        XCTAssertTrue(harness.timers.snapshot().isEmpty)
+    }
+
+    func testOnAppearLoopGuardRunsEachHandlerOnce() throws {
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
+        {"id":"loop","state":{"flag":true,"n":0},"window":{"placement":{"type":"fullscreen"}},
+        "root":{"type":"column","children":[
+        {"type":"text","text":"A","visibleWhen":{"key":"flag","equals":true},"onAppear":[
+        {"type":"increment","key":"n"},{"type":"setState","key":"flag","value":false}]},
+        {"type":"text","text":"B","visibleWhen":{"key":"flag","equals":false},"onAppear":[
+        {"type":"setState","key":"flag","value":true}]}]}}
+        """.utf8))
+        var session = PrototypeSession()
+        session.show(spec)
+        let events = session.transition { _ in [] }
+        XCTAssertEqual(session.state["n"], .number(1))
+        XCTAssertEqual(events.filter { $0.name == "change" }.count, 2)
+    }
+
     private func action(_ json: String) throws -> PrototypeAction {
         try JSONDecoder().decode(PrototypeAction.self, from: Data(json.utf8))
     }

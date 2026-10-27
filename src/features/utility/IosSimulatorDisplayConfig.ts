@@ -136,6 +136,11 @@ export class IosSimulatorDisplayConfig {
     private readonly baselines: ContentSizeBaselineStore = defaultContentSizeBaselines,
   ) {}
 
+  /** Forget the recorded text size baseline, so a later reset does not undo a factory reset. */
+  clearBaseline(): void {
+    this.baselines.delete(this.device.deviceId);
+  }
+
   /** Current theme and text size. Throws when the appearance is unreadable. */
   async read(): Promise<IosSimulatorDisplayValues> {
     const [theme, contentSize] = await Promise.all([

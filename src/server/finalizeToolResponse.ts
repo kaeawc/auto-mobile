@@ -1,6 +1,7 @@
 import { ToolResponseSerialization } from "./ToolResponseSerialization";
 import { ObservationDisplayRenderer, isObserveResult } from "./ObservationDisplayRenderer";
 import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/toolEnvelopePayload";
+import { appendArtifactResourceLinks } from "./finalizeToolResponse/artifactResourceLinks";
 import type { FinalizeToolResponseContext } from "./finalizeToolResponse/contracts";
 import {
   createFinalizationState,
@@ -107,6 +108,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload,
     envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
   );
+  appendArtifactResourceLinks(envelopeView.envelope, sanitizedPayload, ctx.internal === true);
   commitDeliveredActionMetadata(ctx, payload, sanitizedPayload);
   commitDeliveredBaseline(ctx, state.pendingBaselineUpdate, renderedDisplay);
 

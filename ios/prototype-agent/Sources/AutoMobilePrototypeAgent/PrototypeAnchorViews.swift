@@ -68,7 +68,7 @@
             let cover = entry.anchor.covers
                 ? entry.anchor.bounds.map { CGSize(width: $0.width, height: $0.height) }
                 : nil
-            let fade = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).containerSizeDuration
+            let fade = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).fadeDuration
             return PrototypeAnchorPlacement(
                 anchor: entry.anchor,
                 layerOrigin: layerOrigin,

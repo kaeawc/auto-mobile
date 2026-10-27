@@ -27,6 +27,7 @@ const extensions: Record<PrototypeAssetMimeType, string> = {
   "image/webp": "webp",
   "font/ttf": "ttf",
   "font/otf": "otf",
+  "application/vnd.automobile.agsl": "agsl",
 };
 export function savedPrototypeAssetPath(mediaType: PrototypeAssetMimeType, sha256: string): string {
   return `${isPrototypeFontMimeType(mediaType) ? "fonts" : "assets"}/${sha256}.${extensions[mediaType]}`;

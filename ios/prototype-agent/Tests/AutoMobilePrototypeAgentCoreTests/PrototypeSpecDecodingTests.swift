@@ -12,6 +12,17 @@ final class PrototypeSpecDecodingTests: XCTestCase {
         }
     }
 
+    func testWindowDeadTapsDecodesAndRejectsNonBoolean() throws {
+        for value in [true, false] {
+            let data = Data("{\"placement\":{\"type\":\"fullscreen\"},\"deadTaps\":\(value)}".utf8)
+            XCTAssertEqual(try JSONDecoder().decode(WindowSpec.self, from: data).deadTaps, value)
+        }
+        for value in ["1", "\"true\""] {
+            let data = Data("{\"placement\":{\"type\":\"fullscreen\"},\"deadTaps\":\(value)}".utf8)
+            XCTAssertThrowsError(try JSONDecoder().decode(WindowSpec.self, from: data))
+        }
+    }
+
     func testWindowChromeDecodesOrNamesTheInvalidField() throws {
         for placement in ["fullscreen", "sheet", "floating"] {
             for value: String? in [nil, "none", "bar"] {
@@ -94,6 +105,11 @@ final class PrototypeSpecDecodingTests: XCTestCase {
             XCTAssertTrue(names.contains("\(name).json"))
         }
         for file in files {
+            let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file))
+            if PrototypeCustomShaders.uses(raw.objectFields ?? [:]) {
+                XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: file)))
+                continue
+            }
             XCTAssertNoThrow(
                 try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: file)),
                 file.lastPathComponent

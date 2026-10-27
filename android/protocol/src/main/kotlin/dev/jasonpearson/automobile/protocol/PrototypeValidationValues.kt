@@ -42,7 +42,10 @@ internal object PrototypeValidationValues {
     if (text == null) return false
     return (rule.flag("empty") || text.isNotEmpty()) &&
       (!rule.flag("nonblank") || !blankTextPattern.matches(text)) &&
-      text.length <= rule.number("max", Double.POSITIVE_INFINITY)
+      text.length <= rule.number("max", Double.POSITIVE_INFINITY) &&
+      (rule.text("pattern")?.let {
+        PrototypeSpecContract.patterns.getValue(it).containsMatchIn(text)
+      } ?: true)
   }
 
   fun isScalarPrimitive(value: JsonPrimitive?): Boolean =

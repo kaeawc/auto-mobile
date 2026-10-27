@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "filter": {
+        "saturation": 1
+      }
+    }
+  },
+  "expectedPath": "root.filter",
+  "expectedMessage": "Unknown property"
+}

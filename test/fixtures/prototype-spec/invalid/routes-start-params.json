@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "routes-review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      },
+      "routes": {
+        "detail": {},
+        "home": {
+          "params": {
+            "x": "string"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.routes.home.params",
+  "expectedMessage": "Start screen cannot declare route params"
+}

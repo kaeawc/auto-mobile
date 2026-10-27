@@ -10,20 +10,36 @@ import org.junit.Test
 class PrototypeStackTransitionTest {
   @Test
   fun `resolution honors overrides motion and reduced motion`() {
-    for (declared in listOf(null) + PrototypeStackTransition.entries) {
-      for (override in listOf(null) + PrototypeStackTransition.entries) {
-        for (motion in listOf(false, true)) {
-          for (reduced in listOf(false, true)) {
-            val chosen = override ?: declared ?: PrototypeStackTransition.PLATFORM
-            val expected =
-              when {
-                !motion || chosen == PrototypeStackTransition.NONE -> StackTransitionKind.None
-                chosen == PrototypeStackTransition.FADE || reduced -> StackTransitionKind.Fade
-                else -> StackTransitionKind.Slide
-              }
-            assertEquals(expected, resolveStackTransition(declared, override, motion, reduced))
-          }
+    val transitions = listOf(null) + PrototypeStackTransition.entries
+    val flags = listOf(false, true)
+    val cases = transitions.flatMap { declared ->
+      transitions.flatMap { override ->
+        flags.flatMap { motion ->
+          flags.map { reduced -> ResolutionCase(declared, override, motion, reduced) }
         }
+      }
+    }
+    cases.forEach { assertEquals(it.expected(), it.resolve()) }
+  }
+
+  private data class ResolutionCase(
+    val declared: PrototypeStackTransition?,
+    val override: PrototypeStackTransition?,
+    val motion: Boolean,
+    val reduced: Boolean,
+  ) {
+    fun resolve() = resolveStackTransition(declared, override, motion, reduced)
+
+    fun expected(): StackTransitionKind {
+      val chosen = override ?: declared ?: PrototypeStackTransition.PLATFORM
+      return when {
+        !motion || chosen == PrototypeStackTransition.NONE -> StackTransitionKind.None
+        chosen == PrototypeStackTransition.FADE || reduced -> StackTransitionKind.Fade
+        chosen == PrototypeStackTransition.SHARED_AXIS_X -> StackTransitionKind.SharedAxisX
+        chosen == PrototypeStackTransition.SHARED_AXIS_Y -> StackTransitionKind.SharedAxisY
+        chosen in setOf(PrototypeStackTransition.FADE_THROUGH, PrototypeStackTransition.ZOOM) ->
+          StackTransitionKind.FadeThrough
+        else -> StackTransitionKind.Slide
       }
     }
   }

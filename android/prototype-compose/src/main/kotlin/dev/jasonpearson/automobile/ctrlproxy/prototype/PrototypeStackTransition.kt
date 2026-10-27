@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import androidx.compose.runtime.compositionLocalOf
 import dev.jasonpearson.automobile.protocol.PrototypeStackTransition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -8,6 +7,9 @@ import kotlinx.coroutines.flow.Flow
 internal enum class StackTransitionKind {
   Slide,
   Fade,
+  SharedAxisX,
+  SharedAxisY,
+  FadeThrough,
   None,
 }
 
@@ -18,9 +20,6 @@ data class PrototypeStackChange(
   val override: PrototypeStackTransition? = null,
   val sequence: Long = 0,
 )
-
-/** Reduced-motion hook; system preference integration belongs to #15115. */
-internal val LocalPrototypeReducedMotion = compositionLocalOf { false }
 
 internal fun resolveStackTransition(
   declared: PrototypeStackTransition?,
@@ -33,6 +32,13 @@ internal fun resolveStackTransition(
     (perAction ?: declared) == PrototypeStackTransition.NONE -> StackTransitionKind.None
     (perAction ?: declared) == PrototypeStackTransition.FADE || reducedMotion ->
       StackTransitionKind.Fade
+    (perAction ?: declared) == PrototypeStackTransition.SHARED_AXIS_X ->
+      StackTransitionKind.SharedAxisX
+    (perAction ?: declared) == PrototypeStackTransition.SHARED_AXIS_Y ->
+      StackTransitionKind.SharedAxisY
+    (perAction ?: declared) in
+      setOf(PrototypeStackTransition.FADE_THROUGH, PrototypeStackTransition.ZOOM) ->
+      StackTransitionKind.FadeThrough
     else -> StackTransitionKind.Slide
   }
 
@@ -74,11 +80,20 @@ internal class PrototypeStackScrollStore {
 
   private var path: List<String> = emptyList()
   private val values = mutableMapOf<Key, Int>()
+  private val lists = mutableMapOf<Key, PrototypeListAnchor>()
 
   fun retain(next: List<String>) {
     val common = path.zip(next).takeWhile { (before, after) -> before == after }.size
     values.keys.removeAll { it.position >= common }
+    lists.keys.removeAll { it.position >= common }
     path = next.toList()
+  }
+
+  fun readList(position: Int, screen: String, node: String): PrototypeListAnchor? =
+    lists[Key(position, screen, node)]
+
+  fun saveList(position: Int, screen: String, node: String, anchor: PrototypeListAnchor) {
+    if (path.getOrNull(position) == screen) lists[Key(position, screen, node)] = anchor
   }
 
   fun read(position: Int, screen: String, node: String): Int =

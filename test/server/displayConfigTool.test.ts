@@ -24,6 +24,14 @@ function structured(response: unknown): unknown {
   return (response as { structuredContent?: unknown }).structuredContent;
 }
 
+describe("displayConfig reset factory schema (#15337)", () => {
+  test("accepts reset factory alone and rejects it beside an explicit field", () => {
+    expect(displayConfigSchema.safeParse({ reset: "factory" }).success).toBe(true);
+    expect(displayConfigSchema.safeParse({ reset: "factory", theme: "dark" }).success).toBe(false);
+    expect(displayConfigSchema.safeParse({ reset: "other" }).success).toBe(false);
+  });
+});
+
 describe("displayConfig geometry schema (#14101)", () => {
   test("accepts size, navigation mode, cutout and display", () => {
     expect(

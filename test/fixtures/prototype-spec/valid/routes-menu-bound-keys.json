@@ -1,0 +1,63 @@
+{
+  "id": "routes-review",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "text",
+        "text": "Home"
+      },
+      "detail": {
+        "type": "column",
+        "children": [
+          {
+            "type": "select",
+            "stateKey": "selected_{route.x}",
+            "options": [
+              {
+                "label": "{route.x}",
+                "value": "value"
+              },
+              {
+                "label": "Other",
+                "value": "other"
+              }
+            ]
+          },
+          {
+            "type": "menu",
+            "openWhen": {
+              "key": "open_{route.x}",
+              "equals": true
+            },
+            "items": [
+              {
+                "label": "{route.x}",
+                "onTap": [
+                  {
+                    "type": "toggle",
+                    "key": "open_{route.x}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "routes": {
+      "detail": {
+        "params": {
+          "x": "string"
+        }
+      }
+    }
+  }
+}

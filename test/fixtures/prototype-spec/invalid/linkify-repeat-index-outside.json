@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "linkify-repeat",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked_a": false,
+      "liked_b": false,
+      "handle_a": "",
+      "handle_b": "",
+      "number": 0
+    },
+    "data": {
+      "last": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{post.body}",
+          "linkify": {
+            "kinds": ["mention"],
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "tap",
+                "context": {
+                  "row": {
+                    "index": true
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].linkify.onTap[0].context.row"
+}

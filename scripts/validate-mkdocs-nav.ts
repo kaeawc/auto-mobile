@@ -33,6 +33,7 @@ const EXCLUDED_FILES = new Set([
   "design-docs/plat/android/android17-playground-audit.md",
   "design-docs/plat/android/dependency-injection.md",
   "release/ios-simulator-continuity.md",
+  "release/device-claims-registry-migration.md",
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
   "decisions/ios-user-files-provider.md",
   "decisions/mcp-sdk-v2-split-packages.md",

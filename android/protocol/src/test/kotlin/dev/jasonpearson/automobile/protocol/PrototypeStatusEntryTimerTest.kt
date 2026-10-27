@@ -22,6 +22,15 @@ class PrototypeStatusEntryTimerTest {
   }
 
   @Test
+  fun shaderFallbackReasonsAreOptionalAndRoundTrip() {
+    val status = PrototypeStatusEntry("panel", false, emptyMap(), lastSequence = 0)
+    assertFalse("shaderFailures" in json.encodeToJsonElement(status).jsonObject)
+    val failures = mapOf("root/node" to "Shader draw failed: invalid effect")
+    val encoded = json.encodeToJsonElement(status.copy(shaderFailures = failures))
+    assertEquals(failures, json.decodeFromJsonElement<PrototypeStatusEntry>(encoded).shaderFailures)
+  }
+
+  @Test
   fun clockAdvanceAndFiredResultUseExpectedWireNames() {
     val request =
       json

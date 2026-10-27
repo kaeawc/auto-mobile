@@ -1,0 +1,35 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "id": "target",
+        "label": "Help"
+      },
+      {
+        "type": "tooltip",
+        "text": "Helpful hint",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "anchorTo": "target",
+        "caret": "start",
+        "spotlight": {
+          "padding": 0,
+          "cornerRadius": 64
+        }
+      }
+    ]
+  }
+}

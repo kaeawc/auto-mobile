@@ -57,9 +57,6 @@ export interface SessionRecoveryHost {
     "claimRecoverableSession" | "releaseRecoverableSessionClaim"
   >;
   readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
-  unlessBeingReplaced(
-    release: SessionReleaseSnapshot | undefined,
-  ): SessionReleaseSnapshot | undefined;
   terminalReleaseFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -156,9 +153,7 @@ export class SessionRecovery {
     if (this.host.isLapsedUnownedRestartRecovery(current)) {
       current = await this.host.admitPersistedSession(sessionId, current);
     }
-    const terminalRelease = this.host.unlessBeingReplaced(
-      current && this.host.terminalReleaseFromPersisted(sessionId, current),
-    );
+    const terminalRelease = current && this.host.terminalReleaseFromPersisted(sessionId, current);
     if (terminalRelease) {
       this.host.sessionSlots.setTerminalSnapshot(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);

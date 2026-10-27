@@ -279,7 +279,7 @@ extension PrototypeNode {
         -> [PrototypeAnchoredNode]
     {
         entries.flatMap { entry -> [PrototypeAnchoredNode] in
-            let own = entry.node.anchor.map {
+            let own = (entry.node.type == "tooltip" ? nil : entry.node.anchor).map {
                 [PrototypeAnchoredNode(node: entry.node, path: entry.path, anchor: $0, ancestorsShown: ancestorsShown)]
             } ?? []
             return own + entry.node.layeredAnchors(
@@ -299,7 +299,8 @@ extension PrototypeNode {
     )
         -> [PrototypeAnchoredNode]
     {
-        let own = anchor.map { [PrototypeAnchoredNode(node: self, path: "root", anchor: $0)] } ?? []
+        let own = (type == "tooltip" ? nil : anchor)
+            .map { [PrototypeAnchoredNode(node: self, path: "root", anchor: $0)] } ?? []
         return own + layeredAnchors(state: state, pages: pages, stacks: stacks, retainExiting: retainExiting)
     }
 }

@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +18,7 @@ import org.robolectric.annotation.Config
 class PrototypeMissingAssetsTest {
   private data class Reply(val success: Boolean, val error: String?, val missing: List<String>)
 
+  private val cleanupScope = TestScope()
   private val host = FakePrototypeHost()
   private val store = PrototypeAssetStore(FakePrototypeAssetFiles())
   private val replies = mutableListOf<Reply>()
@@ -40,6 +43,7 @@ class PrototypeMissingAssetsTest {
       sink,
       lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
       displays = PrototypeDisplayProvider { it == 2 },
+      requestScope = cleanupScope,
       clearAssets = { store.clear() },
       hasAsset = { store.lookup(it) != null },
     )
@@ -112,6 +116,7 @@ class PrototypeMissingAssetsTest {
     controller.show("r1", spec("hero"))
     controller.dismiss("r2", "panel", null)
     assertEquals(Reply(true, null, emptyList()), replies.last())
+    cleanupScope.runCurrent()
     assertEquals(0, store.count)
   }
 

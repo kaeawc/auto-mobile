@@ -54,20 +54,21 @@ enum PrototypeRichText {
     }
 
     static func runs(
-        node: PrototypeNode, state: [String: JSONValue], pager: PagerPosition?, nodeKey: String
+        node: PrototypeNode, state: [String: JSONValue], pager: PagerPosition?, nodeKey: String,
+        derived: PrototypeDerivedContext? = nil
     )
         -> [PrototypeTextRun]?
     {
         if let linkify = node.linkify, node.spans == nil {
             return linkifiedRuns(
-                interpolatePrototypeText(node.text ?? "", state: state, pager: pager),
+                interpolatePrototypeText(node.text ?? "", state: state, pager: pager, derived: derived),
                 linkify: linkify,
                 nodeKey: nodeKey
             )
         }
         return node.spans?.enumerated().map { index, span in
             PrototypeTextRun(
-                text: interpolatePrototypeText(span.text, state: state, pager: pager),
+                text: interpolatePrototypeText(span.text, state: state, pager: pager, derived: derived),
                 style: span.style,
                 link: span.onTap == nil ? nil : link(nodeKey: nodeKey, index: index),
                 actions: span.onTap
@@ -113,10 +114,26 @@ enum PrototypeRichText {
 
 extension PrototypeNode {
     /// Resolve each run separately: a placeholder cannot cross a span boundary.
-    func plainText(state: [String: JSONValue], pager: PagerPosition?) -> String {
-        if let spans {
-            return spans.map { interpolatePrototypeText($0.text, state: state, pager: pager) }.joined()
+    func plainText(
+        state: [String: JSONValue],
+        pager: PagerPosition?,
+        derived: PrototypeDerivedContext? = nil
+    )
+        -> String
+    {
+        if type == "button" || type == "fab" {
+            return interpolatePrototypeText(
+                label ?? "",
+                state: state,
+                pager: pager,
+                derived: derived,
+                derivedOnly: true
+            )
         }
-        return interpolatePrototypeText(text ?? "", state: state, pager: pager)
+        if let spans {
+            return spans.map { interpolatePrototypeText($0.text, state: state, pager: pager, derived: derived) }
+                .joined()
+        }
+        return interpolatePrototypeText(text ?? "", state: state, pager: pager, derived: derived)
     }
 }

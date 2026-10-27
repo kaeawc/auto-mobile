@@ -260,6 +260,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         reset?: boolean;
         replaceOthers?: boolean;
         appearance?: PrototypeAppearanceOverride;
+        locale?: string;
       }
     | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
@@ -301,6 +302,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
+      ...(overrides?.locale === undefined ? {} : { locale: overrides.locale }),
       ...(overrides?.appearance === undefined ? {} : { appearance: overrides.appearance }),
       ...(overrides?.replaceOthers === false ? { replaceOthers: false } : {}),
     });

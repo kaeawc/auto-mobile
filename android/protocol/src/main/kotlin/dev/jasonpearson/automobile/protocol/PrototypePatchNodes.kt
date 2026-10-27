@@ -36,6 +36,12 @@ internal object PrototypePatchNodes {
         )
       }
     }
+    for (key in listOf("header", "footer")) {
+      if (text(node["type"]) == "list")
+        (node[key] as? JsonObject)?.let {
+          yieldAll(tree(it, tokens + key, "$path.$key", insideRepeat))
+        }
+    }
     val children = (node["children"] as? JsonArray).orEmpty()
     for ((index, child) in children.withIndex()) {
       if (child is JsonObject) {

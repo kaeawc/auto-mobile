@@ -60,9 +60,10 @@ export function resolvePrototypeDataPointer(data: unknown, pointer: string): unk
 }
 
 /** Plain scan: malformed or unrelated braces stay literal and cannot invalidate text. */
-function* dataPlaceholderSpans(
+export function* dataPlaceholderSpans(
   text: string,
   prefix = "data:",
+  valid: (value: string) => boolean = isPrototypeDataPointer,
 ): Generator<{ pointer: string; start: number; end: number }> {
   let cursor = 0;
   while (cursor < text.length) {
@@ -80,7 +81,7 @@ function* dataPlaceholderSpans(
     }
     const inner = close === end ? "" : text.slice(cursor + 1, close);
     const pointer = inner.startsWith(prefix) ? inner.slice(prefix.length) : "";
-    if (isPrototypeDataPointer(pointer)) {
+    if (valid(pointer)) {
       yield { pointer, start: cursor, end: close + 1 };
       cursor = close + 1;
     } else {
@@ -94,9 +95,13 @@ export function prototypeDataPlaceholders(text: string): string[] {
   return Array.from(dataPlaceholderSpans(text), ({ pointer }) => pointer);
 }
 
-/** Spans of every `{data:/pointer}` and `{platform:/pointer}` placeholder, found by the same scan. */
+/** Data, platform and derived text spans, found by the same plain scan. */
 export function prototypeBindingSpans(text: string): { start: number; end: number }[] {
-  return [...dataPlaceholderSpans(text), ...dataPlaceholderSpans(text, "platform:")]
+  return [
+    ...dataPlaceholderSpans(text),
+    ...dataPlaceholderSpans(text, "platform:"),
+    ...dataPlaceholderSpans(text, "derived:", (name) => STATE_KEY.test(name)),
+  ]
     .map(({ start, end }) => ({ start, end }))
     .sort((a, b) => a.start - b.start);
 }
@@ -199,7 +204,10 @@ export class PrototypeRepeatData {
         (option) => option.kind === "array",
       )?.max ?? Infinity;
     let cells = 0;
-    for (const item of objects.slice(0, maximum)) {
+    for (const item of objects.slice(
+      0,
+      Math.max(maximum, contract.limits.MAX_PROTOTYPE_LIST_ITEMS),
+    )) {
       let members = 0;
       for (const [key, value] of Object.entries(item)) {
         if (projectableMember(key, value)) {
@@ -266,8 +274,18 @@ function usesAtNode(node: Raw, path: string): Set<string> {
     }
     return value;
   });
+  // A `{data: "/pointer"}` image binding reads /data like any other pointer (#14192).
+  if (node.type === "image" && typeof record(node.asset)?.data === "string") {
+    fields.add(`${path}.asset`);
+  }
+  (Array.isArray(node.items) ? node.items : []).forEach((item, index) => {
+    if (typeof record(record(item)?.image)?.data === "string") {
+      fields.add(`${path}.items[${index}].image`);
+    }
+  });
   conditionFields(node.enabledWhen, `${path}.enabledWhen`, fields);
   conditionFields(node.visibleWhen, `${path}.visibleWhen`, fields);
+  conditionFields(node.errorWhen, `${path}.errorWhen`, fields);
   if (Array.isArray(node.styleWhen)) {
     node.styleWhen.forEach((entry, index) =>
       conditionFields(record(entry)?.when, `${path}.styleWhen[${index}].when`, fields),
@@ -294,7 +312,7 @@ function nodeFields(value: unknown, path: string): string[] {
     const children = prototypeNodeChildren(node);
     const next: typeof pending = [];
     for (const [key, child] of Object.entries(node)) {
-      if (["child", "children", "screens"].includes(key)) {
+      if (["child", "children", "screens", "header", "footer"].includes(key)) {
         next.push(
           ...children
             .filter((entry) => entry.suffix === `.${key}` || entry.suffix.startsWith(`.${key}[`))

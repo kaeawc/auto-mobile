@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "scroll-motion",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "motion": "none",
+    "root": {
+      "type": "text",
+      "text": "x",
+      "scrollTransition": {
+        "axis": "vertical",
+        "edge": {
+          "scale": 0.8
+        }
+      }
+    }
+  },
+  "expectedPath": "root.scrollTransition",
+  "expectedMessage": "Expected a scroll, pager, carousel or repeat ancestor"
+}

@@ -17,7 +17,7 @@ final class PrototypeStackPatternsTests: XCTestCase {
                             reduceMotion: false,
                             direction: direction
                         ),
-                    expected
+                    pattern == .zoom && direction == .replace ? .fade : expected
                 )
                 XCTAssertEqual(
                     PrototypeStackNavigation
@@ -52,7 +52,12 @@ final class PrototypeStackPatternsTests: XCTestCase {
     }
 
     func testSharedFixtures() throws {
-        for name in ["stack-patterns", "stack-patterns-zoom"] {
+        for name in [
+            "stack-patterns",
+            "stack-patterns-zoom",
+            "stack-patterns-zoom-idle",
+            "stack-patterns-source-only",
+        ] {
             let data = try Data(
                 contentsOf: PrototypeSpecFixtures.directory
                     .appendingPathComponent("valid/\(name).json")
@@ -60,7 +65,7 @@ final class PrototypeStackPatternsTests: XCTestCase {
             XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
             XCTAssertNoThrow(try JSONDecoder().decode(PrototypeSpec.self, from: data))
         }
-        for name in ["missing", "unresolved", "ambiguous", "no-action"] {
+        for name in ["missing", "unresolved", "ambiguous"] {
             let fixture = try PrototypeSpecFixtures.invalid("stack-patterns-zoom-\(name)")
             XCTAssertThrowsError(
                 try PrototypeSpecStrictValidator

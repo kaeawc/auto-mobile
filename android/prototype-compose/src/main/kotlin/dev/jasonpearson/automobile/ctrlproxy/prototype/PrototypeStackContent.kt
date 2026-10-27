@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 
+private const val STACK_DURATION_MS = 300
+private const val STACK_FADE_THROUGH_MS = STACK_DURATION_MS / 2
 private const val STACK_SPATIAL_DURATION_MS = 300
 private const val STACK_EFFECTS_DURATION_MS = 150
 
@@ -280,14 +282,14 @@ private fun stackTransform(
   fadeThrough: Boolean = false,
   axisDistance: Int = 30,
 ): ContentTransform {
-  val timing = tween<Float>(STACK_EFFECTS_DURATION_MS, easing = LinearOutSlowInEasing)
+  val timing = tween<Float>(STACK_DURATION_MS, easing = LinearOutSlowInEasing)
   return when (kind) {
     StackTransitionKind.None -> EnterTransition.None togetherWith ExitTransition.None
     StackTransitionKind.Fade ->
       if (fadeThrough) {
         fadeIn(
-          tween(STACK_EFFECTS_DURATION_MS, delayMillis = STACK_EFFECTS_DURATION_MS),
-        ) togetherWith fadeOut(tween(STACK_EFFECTS_DURATION_MS))
+          tween(STACK_FADE_THROUGH_MS, delayMillis = STACK_FADE_THROUGH_MS),
+        ) togetherWith fadeOut(tween(STACK_FADE_THROUGH_MS))
       } else fadeIn(timing) togetherWith fadeOut(timing)
     StackTransitionKind.FadeThrough ->
       (fadeIn(tween(STACK_EFFECTS_DURATION_MS, delayMillis = STACK_EFFECTS_DURATION_MS)) +
@@ -302,7 +304,7 @@ private fun stackTransform(
       val pop = direction == "pop"
       val slideTiming =
         tween<androidx.compose.ui.unit.IntOffset>(
-          STACK_SPATIAL_DURATION_MS,
+          STACK_DURATION_MS,
           easing = LinearOutSlowInEasing,
         )
       (slideInHorizontally(slideTiming) { width ->

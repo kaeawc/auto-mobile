@@ -68,7 +68,7 @@ export function prototypeStackPatternFields(spec: unknown): string[] {
       fields.push(`${path}.transition`);
     }
     mapBindableFields(node, path, (value, at, kind) => {
-      if (kind === "stackTransition" && (at.endsWith(".source") || isStackPattern(value))) {
+      if (kind === "stackSource" || (kind === "stackTransition" && isStackPattern(value))) {
         fields.push(at);
       }
       return value;
@@ -85,10 +85,13 @@ export function prototypeStackPatternsUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
 ): string {
-  return prototypeStackTransitionsUnsupportedMessage(fields, platform).replaceAll(
-    "prototype_stack_transitions_v1",
-    "prototype_stack_patterns_v1",
-  );
+  return prototypeStackTransitionsUnsupportedMessage(fields, platform)
+    .replaceAll("prototype_stack_transitions_v1", "prototype_stack_patterns_v1")
+    .replace("stack transition at", "stack pattern or source at")
+    .replace(
+      "omit transition on stacks and push/replace actions.",
+      "omit source on push/replace actions and use platform, slide, fade or none for transitions.",
+    );
 }
 
 export function prototypeZoomSources(
@@ -131,23 +134,6 @@ export function prototypeZoomError(
       return fail(
         `${path}.source`,
         "zoom requires source to resolve to exactly one sharedKey node",
-      );
-    }
-  }
-  for (const { value, path } of nodes) {
-    if (
-      value.type === "stack" &&
-      value.transition === "zoom" &&
-      !actions.some(
-        ({ value: action }) =>
-          ["push", "replace"].includes(String(action.type)) &&
-          action.stack === value.id &&
-          (action.transition ?? value.transition) === "zoom",
-      )
-    ) {
-      return fail(
-        `${path}.transition`,
-        "zoom requires a push/replace action with a resolvable source",
       );
     }
   }

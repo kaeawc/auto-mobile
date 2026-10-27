@@ -6,6 +6,7 @@ import { validatePrototypeSpec } from "../../../src/features/prototype/prototype
 import {
   PROTOTYPE_STACK_TRANSITIONS,
   prototypeStackPatternFields,
+  prototypeStackPatternsUnsupportedMessage,
   prototypeStackTransitionFields,
   prototypeStackTransitionsUnsupportedMessage,
 } from "../../../src/features/prototype/prototypeStackTransitions";
@@ -131,6 +132,47 @@ describe("stack patterns", () => {
         spec(stack({ onTap: [{ ...action("push", "slide"), source: "hero" }] })),
       ),
     ).toEqual(["root.onTap[0].source"]);
+  });
+  test("source-only pushes require patterns but not explicit transitions", () => {
+    const value = spec(stack({ onTap: [{ ...action("push"), source: "hero" }] }));
+    expect(prototypeStackTransitionFields(value)).toEqual([]);
+    expect(prototypeGateCapabilities(value)).toEqual([
+      "prototype_stack_patterns_v1",
+      "prototype_stack_v1",
+    ]);
+    expect(
+      validatePrototypeSpec(value, {
+        supportedCapabilities: ["prototype_stack_v1", "prototype_stack_patterns_v1"],
+        requiredCapabilities: prototypeGateCapabilities,
+      }).success,
+    ).toBe(true);
+    const message = prototypeStackPatternsUnsupportedMessage(["root.onTap[0].source"], "ios");
+    expect(message).toContain("stack pattern or source at root.onTap[0].source");
+    expect(message).toContain("omit source on push/replace actions");
+    expect(message).toContain("prototype_stack_patterns_v1");
+  });
+  test("zoom defaults need sources only on actions resolving to zoom", () => {
+    expect(validatePrototypeSpec(spec(stack({ transition: "zoom" }))).success).toBe(true);
+    expect(
+      validatePrototypeSpec(
+        spec(
+          stack({
+            transition: "zoom",
+            onTap: [action("push", "slide")],
+          }),
+        ),
+      ).success,
+    ).toBe(true);
+    expect(
+      validatePrototypeSpec(
+        spec(
+          stack({
+            transition: "zoom",
+            onTap: [action("push")],
+          }),
+        ),
+      ),
+    ).toMatchObject({ success: false, error: { path: "root.onTap[0].source" } });
   });
   test("only pattern values use the new gate", () => {
     expect(prototypeStackPatternFields(spec(stack({ transition: "platform" })))).toEqual([]);

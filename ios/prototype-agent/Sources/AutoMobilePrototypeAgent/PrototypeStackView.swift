@@ -223,8 +223,11 @@
             }
             FrameWaiter.nextFrame {
                 guard token == generation else { return }
+                let duration = kind == .fadeThrough ? PrototypeStackTiming.effects * 2 : PrototypeStackTiming.spatial
                 withAnimation(
-                    .linear(duration: kind == .fade ? PrototypeStackTiming.effects : PrototypeStackTiming.spatial),
+                    kind == .sharedAxisX || kind == .sharedAxisY || kind == .fadeThrough
+                        ? .linear(duration: duration)
+                        : .easeOut(duration: 0.35),
                     completionCriteria: .removed
                 ) {
                     progress = 1

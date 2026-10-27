@@ -905,11 +905,13 @@ is validated by both agents, and both advertise the capability.
 The four named patterns and push/replace `source` require `prototype_stack_patterns_v1`.
 Zoom requires `source` on each push/replace using it, naming exactly one node's `sharedKey`
 in the spec. A key referenced as a zoom source is exempt from the two-node visibility-pair rule;
-repeat templates remain disallowed. A zoom stack must have a push/replace action using zoom.
+repeat templates remain disallowed.
 Android currently substitutes fadeThrough and iOS substitutes platform push; container transforms
 are follow-up work. iOS reports the fallback and non-interactive pattern pops in `platformNotes`.
-Only platform supports interactive iOS edge pop. Android predictive back scrubs every pattern,
-including zoom's fallback, and restores the current screen on cancellation.
+Platform, slide and zoom support interactive iOS edge pop; only the composed sharedAxisX/Y and
+fadeThrough patterns pop non-interactively. Android `platformNotes` are not currently supported.
+Android predictive back scrubs every pattern, including zoom's fallback, and restores the current
+screen on cancellation.
 Shared-axis pop reverses travel; only X also mirrors for RTL. iOS composes axis movement with
 opacity and fadeThrough removes the outgoing screen visually before revealing the scaled incoming
 screen. Fixed named timings are 300 ms for movement and 150 ms for fade effects (two sequential

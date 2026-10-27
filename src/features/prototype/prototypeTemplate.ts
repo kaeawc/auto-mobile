@@ -149,7 +149,8 @@ export type FieldKind =
   | "deviceRequest"
   | "scrollTo"
   | "timer"
-  | "stackTransition";
+  | "stackTransition"
+  | "stackSource";
 
 /** True for the kinds holding a `/data/...` path with `{index}` segments. */
 export const isDataPathKind = (kind: FieldKind): boolean =>
@@ -299,7 +300,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
 function mapNavigationTransition(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "push" || action.type === "replace") {
     mapField(action, "transition", path, "stackTransition", visit);
-    mapField(action, "source", path, "stackTransition", visit);
+    mapField(action, "source", path, "stackSource", visit);
   }
 }
 

@@ -32,12 +32,14 @@ enum PrototypeStackNavigation {
         let transition = perAction ?? declared
         let motion = PrototypeMotion(specMotion: specMotion, reduceMotion: reduceMotion)
         guard motion.enabled, transition != .none, direction != .reset else { return .none }
-        if motion.fadeOnly || transition == .fade || (transition == .platform && direction == .replace) { return .fade }
+        if motion.fadeOnly || transition == .fade { return .fade }
+        if transition == .platform || transition == .zoom, direction == .replace { return .fade }
         switch transition {
         case .sharedAxisX: return .sharedAxisX
         case .sharedAxisY: return .sharedAxisY
         case .fadeThrough: return .fadeThrough
-        default: return .slide
+        case .platform, .slide, .zoom: return .slide
+        case .fade, .none: return .fade
         }
     }
 }
@@ -123,14 +125,6 @@ enum PrototypeStackPatterns {
                 throw PrototypeContractValidator.invalid(
                     "\(action.path).source",
                     "zoom requires source to resolve to exactly one sharedKey node"
-                )
-            }
-        }
-        for node in nodes where node.value["type"] == .string("stack") && node.value["transition"] == .string("zoom") {
-            guard zooms.contains(where: { $0.value["stack"] == node.value["id"] }) else {
-                throw PrototypeContractValidator.invalid(
-                    "\(node.path).transition",
-                    "zoom requires a push/replace action with a resolvable source"
                 )
             }
         }

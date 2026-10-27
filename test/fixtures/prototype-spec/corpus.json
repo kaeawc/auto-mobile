@@ -97,6 +97,8 @@
     "shared-element.json",
     "sheet-bindings.json",
     "stack-navigation.json",
+    "stack-patterns-source-only.json",
+    "stack-patterns-zoom-idle.json",
     "stack-patterns-zoom.json",
     "stack-patterns.json",
     "stack-transitions.json",
@@ -740,7 +742,6 @@
     "spec-version.json",
     "stack-patterns-zoom-ambiguous.json",
     "stack-patterns-zoom-missing.json",
-    "stack-patterns-zoom-no-action.json",
     "stack-patterns-zoom-unresolved.json",
     "stack-repeat-non-object-children.json",
     "stack-substituted-text-data-limit.json",
@@ -1357,6 +1358,12 @@
     "shared-element.json": ["prototype_shared_element_v1"],
     "sheet-bindings.json": [],
     "stack-navigation.json": ["prototype_stack_v1"],
+    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
+    "stack-patterns-zoom-idle.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
     "stack-patterns-zoom.json": [
       "prototype_shared_element_v1",
       "prototype_stack_patterns_v1",

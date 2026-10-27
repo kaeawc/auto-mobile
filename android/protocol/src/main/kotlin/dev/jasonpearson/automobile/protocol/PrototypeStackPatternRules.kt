@@ -32,17 +32,6 @@ internal object PrototypeStackPatternRules {
       if (source == null || context.nodes.count { it.value.text("sharedKey") == source } != 1)
         return fail("$path.source", "zoom requires source to resolve to exactly one sharedKey node")
     }
-    for ((node, path) in context.nodes) {
-      if (
-        node.text("type") == "stack" &&
-          node.text("transition") == "zoom" &&
-          actions.none { it.value.text("stack") == node.text("id") }
-      )
-        return fail(
-          "$path.transition",
-          "zoom requires a push/replace action with a resolvable source",
-        )
-    }
     return null
   }
 }

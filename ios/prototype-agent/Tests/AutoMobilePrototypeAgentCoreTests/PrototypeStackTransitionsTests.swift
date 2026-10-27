@@ -176,7 +176,7 @@ final class PrototypeStackTransitionsTests: XCTestCase {
                             let expected: PrototypeStackAnimation = specMotion == "none" || chosen == .none ||
                                 direction == .reset
                                 ? .none : reduced || specMotion == "reduced" || chosen == .fade ||
-                                (chosen == .platform && direction == .replace) ?
+                                ((chosen == .platform || chosen == .zoom) && direction == .replace) ?
                                 .fade : [
                                     .sharedAxisX: .sharedAxisX,
                                     .sharedAxisY: .sharedAxisY,

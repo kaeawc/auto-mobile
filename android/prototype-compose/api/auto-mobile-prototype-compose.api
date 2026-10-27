@@ -2,8 +2,8 @@ Compiled from "AutoMobilePrototypeCapabilities.kt"
 public final class dev.jasonpearson.automobile.prototype.AutoMobilePrototype {
   public static final dev.jasonpearson.automobile.prototype.AutoMobilePrototype INSTANCE;
   public static final int $stable;
-  public final java.util.Set<java.lang.String> capabilities(dev.jasonpearson.automobile.prototype.PrototypePlatform);
   public final java.util.Set<java.lang.String> getCapabilities();
+  public final java.util.Set<java.lang.String> capabilities(dev.jasonpearson.automobile.prototype.PrototypePlatform);
   public final java.util.Set<java.lang.String> capabilitiesForSdk$prototype_compose(int);
 }
 Compiled from "AutoMobilePrototype.kt"

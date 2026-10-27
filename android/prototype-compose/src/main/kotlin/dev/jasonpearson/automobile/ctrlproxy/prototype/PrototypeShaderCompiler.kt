@@ -28,7 +28,9 @@ class PrototypeShaderCompileException(val reason: PrototypeAssetRejection, messa
 class AndroidPrototypeShaderCompiler(
   private val apiLevel: () -> Int = { Build.VERSION.SDK_INT },
   private val platformCompile: (String, Set<String>) -> PrototypeCompiledShader =
-    ::compileAndroidPrototypeShader,
+    { source, floats ->
+      compileOnDevice(source, floats)
+    },
 ) : PrototypeShaderCompiler {
   override fun compile(source: String): Result<PrototypeCompiledShader> = runCatching {
     if (apiLevel() < 33) {
@@ -87,3 +89,11 @@ internal fun boundedPrototypeShaderError(message: String): String {
 @InternalAutoMobilePrototypeApi
 fun prototypeShaderCapabilities(apiLevel: Int): Set<String> =
   if (apiLevel >= 33) setOf("prototype_custom_shaders_v1") else emptySet()
+
+private fun compileOnDevice(source: String, floats: Set<String>): PrototypeCompiledShader {
+  if (Build.VERSION.SDK_INT >= 33) return compileAndroidPrototypeShader(source, floats)
+  throw PrototypeShaderCompileException(
+    PrototypeAssetRejection.SHADER_UNSUPPORTED_API,
+    "Custom AGSL shader support needs API 33 or newer.",
+  )
+}

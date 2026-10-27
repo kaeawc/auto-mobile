@@ -245,7 +245,7 @@ fun PrototypeSpecContent(
               val parent = menuParents[node.identity]
               RenderPrototypeMenu(
                 node,
-                prototypeShaderModifier(node).then(prototypeNodeModifier(node, interact)),
+                Modifier.prototypeShader(node).then(prototypeNodeModifier(node, interact)),
                 parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
                 interact,
               )
@@ -405,8 +405,7 @@ private fun RenderPrototypeModal(
   val boundsModifier =
     if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
     else Modifier
-  val modifier =
-    boundsModifier.then(prototypeShaderModifier(node)).then(prototypeNodeModifier(node, interact))
+  val modifier = boundsModifier.prototypeShader(node).then(prototypeNodeModifier(node, interact))
   when (node.role) {
     "dialog" ->
       RenderPrototypeDialog(node, modifier, interact) {
@@ -615,7 +614,7 @@ private fun RenderPrototypeNodeContent(
     (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
       .prototypeScrollAnchor(node.identity)
       .then(boundsModifier)
-      .then(prototypeShaderModifier(node))
+      .prototypeShader(node)
       .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
       .then(focusModifier)
   // Inline layout containers with repeat or a direct visibleWhen child animate and clip their size.

@@ -58,12 +58,12 @@ internal fun PrototypeShaderFrameSampling(session: PrototypeShaderSession) {
 }
 
 @Composable
-internal fun prototypeShaderModifier(
+internal fun Modifier.prototypeShader(
   node: PrototypeRenderNode,
   dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ): Modifier {
-  val shader = node.style.source.shader ?: return Modifier
-  val session = LocalPrototypeShaderSession.current ?: return Modifier
+  val shader = node.style.source.shader ?: return this
+  val session = LocalPrototypeShaderSession.current ?: return this
   // Deliberately not keyed by authored identity: repeat keys need independent failure guards.
   val registration = remember(session) { session.register(node.identity) }
   DisposableEffect(session, registration) { onDispose { session.unregister(registration) } }
@@ -82,17 +82,17 @@ internal fun prototypeShaderModifier(
   val revision by session.revision.collectAsState()
   // Read the revision to subscribe to synchronous node failures and the prototype-wide budget.
   val disabled = remember(revision, state) { state.disabled }
-  if (disabled) return Modifier
+  if (disabled) return this
   if (Build.VERSION.SDK_INT < 33) {
     registration.guard.disable(
       "Custom AGSL shaders need API 33 or newer; content is drawn unshaded.",
     )
-    return Modifier
+    return this
   }
   val effect = rememberPrototypeShaderEffect(shader, dispatcher, state)
   PrototypeShaderActivity(session, registration, effect != null && node.visible)
-  if (effect == null) return Modifier
-  return Modifier.drawWithContent { state.draw { drawContent() } }
+  if (effect == null) return this
+  return drawWithContent { state.draw { drawContent() } }
     .graphicsLayer { prototypeShaderLayer(effect, state.disabled) }
 }
 

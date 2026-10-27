@@ -11,6 +11,7 @@ import {
   PROTOTYPE_ICON_VARIANT_CAPABILITY,
   PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import { prototypeIconEffectNotes } from "./prototypeIconEffectNotes";
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
@@ -22,6 +23,7 @@ export type PrototypePlatformNoteConstruct =
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
+  | "icon.effect"
   | "icon.name"
   | "icon.variant"
   | "textField.variant"
@@ -375,6 +377,7 @@ export function prototypePlatformNotes(
   spec: PrototypeSpec,
   platform: "android" | "ios",
   supports: (capability: string) => boolean,
+  osMajor?: number,
 ): PrototypePlatformNote[] {
   const foreign = platform === "android" ? "ios" : "android";
   const paths = prototypePlatformNamespaceFields(spec, foreign);
@@ -391,7 +394,7 @@ export function prototypePlatformNotes(
       ]
     : [];
   if (platform === "android") {
-    return namespaceNotes;
+    return [...namespaceNotes, ...prototypeIconEffectNotes(spec, platform)];
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
@@ -474,7 +477,12 @@ export function prototypePlatformNotes(
         "These nodes have no native iOS coverage yet and keep the Material drawing (see designCoverage).",
     });
   }
-  return [...notes, ...menus, ...namespaceNotes];
+  return [
+    ...notes,
+    ...menus,
+    ...namespaceNotes,
+    ...prototypeIconEffectNotes(spec, platform, osMajor),
+  ];
 }
 
 export function prototypeStringsFallbackNotes(

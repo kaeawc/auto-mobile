@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "icon-effects",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "flag": false
+    },
+    "data": {
+      "revision": 0
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "as": "item",
+        "items": [{}, {}, {}, {}, {}, {}, {}, {}, {}]
+      },
+      "children": [
+        {
+          "type": "icon",
+          "name": "home",
+          "effect": {
+            "type": "pulse",
+            "repeat": 1
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat",
+  "expectedMessage": "Expanded animated effect limit exceeded"
+}

@@ -23,7 +23,8 @@ const MAX_EFFECTS_PER_LIST = contract.definitions.style.fields.effects.rule.max;
  * drawable, so every one counts.
  */
 export function effectUses(node: Raw): PrototypeEffectUses {
-  const uses = { total: 0, animated: 0 };
+  const repeatedIcon = node.type === "icon" && record(node.effect)?.repeat !== undefined;
+  const uses = { total: 0, animated: repeatedIcon ? 1 : 0 };
   for (const style of stylesOf(node)) {
     const effects = record(style)?.effects;
     // Capped at the list maximum so an over-long list is reported as that, not as a count overflow.

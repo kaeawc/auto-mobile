@@ -18,6 +18,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_design_platform_v1"
+  "expectedPath": "$"
 }

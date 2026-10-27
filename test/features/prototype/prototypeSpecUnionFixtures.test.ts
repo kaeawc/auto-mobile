@@ -5,8 +5,6 @@ import fixtures from "../../fixtures/prototype-spec/models.json";
 
 const unionFixtures = Object.entries(fixtures).filter(([name]) => /^(node|action)/.test(name));
 for (const [name, value] of unionFixtures) {
-  // The all-fields box is a wire specimen: sharedKey and repeat cannot coexist semantically.
-  if (name === "nodeBoxFilled") continue;
   test(`migrated ${name} satisfies the existing contract interpreter`, () => {
     const spec = {
       id: "models",

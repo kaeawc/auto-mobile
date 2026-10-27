@@ -257,6 +257,26 @@ internal object PrototypeBindableFields {
     return null
   }
 
+  private fun <T : Any> Visitor<T>.routeAction(action: JsonObject, path: String): T? =
+    when ((action["type"] as? JsonPrimitive)?.content) {
+      "push",
+      "replace" -> routeParams(action, path)
+      "setStack" ->
+        objects(action, "path", path).firstNotNullOfOrNull { (entry, at) -> routeParams(entry, at) }
+      else -> null
+    }
+
+  private fun <T : Any> Visitor<T>.routeParams(action: JsonObject, path: String): T? {
+    for ((name, value) in (action["params"] as? JsonObject).orEmpty()) {
+      val at = memberPath("$path.params", name)
+      val result =
+        if (value is JsonObject) binding(value, at)
+        else visit(value, at, PrototypeBindableKind.OPERAND)
+      if (result != null) return result
+    }
+    return null
+  }
+
   private class Visitor<T : Any>(
     val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ) {
@@ -310,8 +330,9 @@ internal object PrototypeBindableFields {
       return null
     }
 
-    fun action(action: JsonObject, path: String): T? =
-      when ((action["type"] as? JsonPrimitive)?.content) {
+    fun action(action: JsonObject, path: String): T? {
+      val type = (action["type"] as? JsonPrimitive)?.content
+      return when (type) {
         "setState" ->
           field(action, "key", path, PrototypeBindableKind.KEY)
             ?: field(action, "value", path, PrototypeBindableKind.OPERAND)
@@ -328,27 +349,11 @@ internal object PrototypeBindableFields {
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")
         "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
-        "push",
-        "replace" -> routeParams(action, path)
-        "setStack" ->
-          objects(action, "path", path).firstNotNullOfOrNull { (entry, at) ->
-            routeParams(entry, at)
-          }
         "startTimer" -> actionLists(action, listOf("actions"), path)
         "request" -> request(action, path)
         "platform" -> platform(action, path)
-        else -> null
+        else -> routeAction(action, path)
       }
-
-    fun routeParams(action: JsonObject, path: String): T? {
-      for ((name, value) in (action["params"] as? JsonObject).orEmpty()) {
-        val at = memberPath("$path.params", name)
-        val result =
-          if (value is JsonObject) binding(value, at)
-          else visit(value, at, PrototypeBindableKind.OPERAND)
-        if (result != null) return result
-      }
-      return null
     }
 
     /** Mirrors `mapPlatformAction` (#14294): argument bindings, into, statusKey, follow-ups. */
@@ -440,6 +445,7 @@ internal object PrototypeBindableFields {
           "onTap",
           "onLongPress",
           "onDoubleTap",
+          "onDismiss",
           "onEndReached",
           "onStartReached",
           "onAppear",

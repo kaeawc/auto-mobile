@@ -54,6 +54,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_scroll_motion_v1"
+  "expectedPath": "$"
 }

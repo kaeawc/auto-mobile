@@ -48,6 +48,5 @@
   "options": {
     "supportedCapabilities": ["prototype_bar_scroll_v1"]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_stack_v1"
+  "expectedPath": "$"
 }

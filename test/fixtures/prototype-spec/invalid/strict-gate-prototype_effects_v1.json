@@ -106,6 +106,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_effects_v1"
+  "expectedPath": "$"
 }

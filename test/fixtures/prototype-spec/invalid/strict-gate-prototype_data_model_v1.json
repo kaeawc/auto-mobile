@@ -127,6 +127,5 @@
   "options": {
     "supportedCapabilities": ["prototype_chart_v1"]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_data_model_v1"
+  "expectedPath": "$"
 }

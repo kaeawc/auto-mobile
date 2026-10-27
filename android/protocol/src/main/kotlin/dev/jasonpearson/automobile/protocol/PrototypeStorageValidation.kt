@@ -11,17 +11,7 @@ internal object PrototypeStorageValidation {
   fun error(spec: JsonObject, enforceBytes: Boolean = true): PrototypeSpecError? {
     val storage = spec["storage"] as? JsonObject ?: return null
     val keys = storage["keys"] as? JsonArray ?: return null
-    val context = PrototypeStateChecks.Context()
-    if (keys.any { it.jsonPrimitive.content.startsWith("stack:") }) {
-      // Reuse the contract visitor to collect declared stack nodes.
-      PrototypeStructuralWalk.walk(
-        spec,
-        PrototypeSpecContract.definitions.getValue("spec").jsonObject,
-        "",
-        context,
-        0,
-      )
-    }
+    val context = stackContext(spec, keys)
     val pointers = mutableListOf<String>()
     var bytes = 0
     for ((index, raw) in keys.withIndex()) {
@@ -45,11 +35,7 @@ internal object PrototypeStorageValidation {
               ?: return PrototypeSpecError(path, "Undeclared storage state")
           is PrototypeStorageKey.Data -> {
             val pointer = parsed.pointer
-            if (
-              pointers.any {
-                it == pointer || it.startsWith("$pointer/") || pointer.startsWith("$it/")
-              }
-            )
+            if (overlaps(pointers, pointer))
               return PrototypeSpecError(path, "Overlapping storage pointers")
             pointers.add(pointer)
             PrototypeDataPointer.resolve(spec["data"] as? JsonObject, pointer)
@@ -57,12 +43,34 @@ internal object PrototypeStorageValidation {
         }
       if (value != null) bytes += PrototypeStorageRestorer.entryBytes(key, value)
     }
-    return if (
+    return byteLimitError(bytes, enforceBytes)
+  }
+
+  private fun byteLimitError(bytes: Int, enforceBytes: Boolean): PrototypeSpecError? =
+    if (
       enforceBytes &&
         bytes >
           PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_STORAGE_BYTES").jsonPrimitive.int
     )
       PrototypeSpecError("storage.keys", "Storage byte limit exceeded")
     else null
+
+  private fun overlaps(pointers: List<String>, pointer: String): Boolean = pointers.any {
+    it == pointer || it.startsWith("$pointer/") || pointer.startsWith("$it/")
+  }
+
+  private fun stackContext(spec: JsonObject, keys: JsonArray): PrototypeStateChecks.Context {
+    val context = PrototypeStateChecks.Context()
+    if (keys.any { it.jsonPrimitive.content.startsWith("stack:") }) {
+      // Reuse the contract visitor to collect declared stack nodes.
+      PrototypeStructuralWalk.walk(
+        spec,
+        PrototypeSpecContract.definitions.getValue("spec").jsonObject,
+        "",
+        context,
+        0,
+      )
+    }
+    return context
   }
 }

@@ -320,19 +320,7 @@ internal object PrototypeStrictPolicy {
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
-      if (
-        !routeAlias &&
-          PrototypeBindableFields.first<Boolean>(fields, "", includeRoutePointers = true) {
-            raw,
-            _,
-            _ ->
-            (raw as? JsonPrimitive)
-              ?.takeIf { it.isString }
-              ?.content
-              ?.let { text -> true.takeIf { PrototypeRouteRules.fields(text).isNotEmpty() } }
-          } == true
-      )
-        need("routes")
+      if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
       if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
@@ -345,13 +333,6 @@ internal object PrototypeStrictPolicy {
           .jsonObject
       if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
       typeFeatures[type]?.let(::need)
-      if (
-        (type == "stack" && "routes" in fields) ||
-          (type in listOf("push", "replace") && "params" in fields) ||
-          (type == "pop" && "force" in fields) ||
-          type == "setStack"
-      )
-        need("routes")
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }

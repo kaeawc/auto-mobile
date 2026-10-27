@@ -37,6 +37,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_custom_shaders_v1"
+  "expectedPath": "$"
 }

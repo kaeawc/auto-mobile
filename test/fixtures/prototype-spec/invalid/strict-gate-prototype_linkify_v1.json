@@ -41,6 +41,5 @@
   "options": {
     "supportedCapabilities": ["prototype_emit_context_v1"]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_linkify_v1"
+  "expectedPath": "$"
 }

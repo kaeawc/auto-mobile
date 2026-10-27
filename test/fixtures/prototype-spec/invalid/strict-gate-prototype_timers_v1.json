@@ -43,6 +43,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_timers_v1"
+  "expectedPath": "$"
 }

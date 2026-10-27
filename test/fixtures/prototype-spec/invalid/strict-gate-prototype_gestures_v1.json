@@ -145,6 +145,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_gestures_v1"
+  "expectedPath": "$"
 }

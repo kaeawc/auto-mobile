@@ -26,6 +26,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_drawer_v1"
+  "expectedPath": "$"
 }

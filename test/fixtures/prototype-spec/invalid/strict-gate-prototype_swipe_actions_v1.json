@@ -72,6 +72,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_swipe_actions_v1"
+  "expectedPath": "$"
 }

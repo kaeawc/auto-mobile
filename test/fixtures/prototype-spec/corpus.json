@@ -1686,42 +1686,6 @@
       "prototype_network_device_v1",
       "prototype_network_v1"
     ],
-    "routes-bindings.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1",
-      "prototype_storage_v1"
-    ],
-    "routes-boundaries.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
-    "routes-integration-list-refresh.json": [
-      "prototype_data_model_v1",
-      "prototype_lazy_list_v1",
-      "prototype_refresh_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1"
-    ],
-    "routes-literal-anchor-selector.json": ["prototype_tooltip_v1"],
-    "routes-literal-chart-series.json": ["prototype_chart_v1", "prototype_data_model_v1"],
-    "routes-literal-fields.json": ["prototype_text_field_options_v1"],
-    "routes-literal-items-label.json": [],
-    "routes-literal-list-item.json": [],
-    "routes-literal-options.json": ["prototype_menus_v1"],
-    "routes-literal-scroll-target.json": [
-      "prototype_chat_scroll_v1",
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_text_field_actions_v1"
-    ],
-    "routes-long-param-name.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes-menu-bound-keys.json": [
-      "prototype_menus_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1"
-    ],
-    "routes-repeat-alias-backcompat.json": [],
-    "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
     "row-weight-size-bounds.json": [],
     "scroll-motion-all.json": ["prototype_scroll_motion_v1"],
     "scroll-motion-exact-cap.json": ["prototype_scroll_motion_v1"],
@@ -1992,6 +1956,42 @@
     "z-effects-all-types.json": ["prototype_effects_v1"],
     "z-effects-animated-phase.json": ["prototype_effects_v1"],
     "z-effects-at-limits.json": ["prototype_effects_v1"],
-    "z-effects-style-when.json": ["prototype_effects_v1"]
+    "z-effects-style-when.json": ["prototype_effects_v1"],
+    "routes-bindings.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1",
+      "prototype_storage_v1"
+    ],
+    "routes-boundaries.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
+    "routes-integration-list-refresh.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1",
+      "prototype_refresh_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "routes-literal-anchor-selector.json": ["prototype_tooltip_v1"],
+    "routes-literal-chart-series.json": ["prototype_chart_v1", "prototype_data_model_v1"],
+    "routes-literal-fields.json": ["prototype_text_field_options_v1"],
+    "routes-literal-items-label.json": [],
+    "routes-literal-list-item.json": [],
+    "routes-literal-options.json": ["prototype_menus_v1"],
+    "routes-literal-scroll-target.json": [
+      "prototype_chat_scroll_v1",
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_text_field_actions_v1"
+    ],
+    "routes-long-param-name.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "routes-menu-bound-keys.json": [
+      "prototype_menus_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "routes-repeat-alias-backcompat.json": [],
+    "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"]
   }
 }

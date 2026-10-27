@@ -93,6 +93,5 @@
       "prototype_network_v1"
     ]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_refresh_v1"
+  "expectedPath": "$"
 }

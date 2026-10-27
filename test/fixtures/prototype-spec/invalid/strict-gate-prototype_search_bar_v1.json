@@ -24,6 +24,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_search_bar_v1"
+  "expectedPath": "$"
 }

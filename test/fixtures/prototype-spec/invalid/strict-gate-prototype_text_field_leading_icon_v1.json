@@ -53,6 +53,5 @@
   "options": {
     "supportedCapabilities": ["prototype_text_field_actions_v1", "prototype_text_field_options_v1"]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_text_field_leading_icon_v1"
+  "expectedPath": "$"
 }

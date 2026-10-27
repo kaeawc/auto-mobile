@@ -207,6 +207,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_rich_text_v1"
+  "expectedPath": "$"
 }

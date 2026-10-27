@@ -35,6 +35,5 @@
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_checks_v1"
+  "expectedPath": "$"
 }

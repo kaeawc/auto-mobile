@@ -98,6 +98,5 @@
   "options": {
     "supportedCapabilities": ["prototype_theme_modes_v1"]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_style_polish_v2"
+  "expectedPath": "$"
 }

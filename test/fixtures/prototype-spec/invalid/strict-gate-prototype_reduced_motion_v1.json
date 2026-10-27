@@ -15,9 +15,9 @@
     },
     "motion": "reduced"
   },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_reduced_motion_v1",
   "options": {
     "supportedCapabilities": []
-  },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_reduced_motion_v1"
+  }
 }

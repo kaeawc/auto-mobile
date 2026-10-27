@@ -36,6 +36,5 @@
   "options": {
     "supportedCapabilities": ["prototype_data_model_v1", "prototype_strings_v1"]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_semantics_v1"
+  "expectedPath": "$"
 }

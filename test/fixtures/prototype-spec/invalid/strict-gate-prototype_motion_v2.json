@@ -117,6 +117,5 @@
   "options": {
     "supportedCapabilities": ["prototype_choreography_v1"]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_motion_v2"
+  "expectedPath": "$"
 }

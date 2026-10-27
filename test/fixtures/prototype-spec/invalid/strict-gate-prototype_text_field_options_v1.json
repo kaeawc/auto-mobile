@@ -1,23 +1,73 @@
 {
   "spec": {
-    "id": "literal-route-label",
+    "id": "secure",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
     "state": {
-      "draft": ""
+      "secret": "",
+      "password": "",
+      "public": "ok"
     },
     "root": {
-      "type": "textField",
-      "stateKey": "draft",
-      "label": "{route.literal}"
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "secret",
+          "secure": true
+        },
+        {
+          "type": "textField",
+          "stateKey": "password",
+          "keyboardType": "password"
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/{public}",
+              "via": "device",
+              "method": "POST",
+              "headers": {
+                "X-Public": {
+                  "state": "public"
+                },
+                "X-Literal": {
+                  "value": "{secret}"
+                }
+              },
+              "query": {
+                "q": "{public}"
+              },
+              "body": {
+                "value": {
+                  "state": "secret",
+                  "text": "{password}",
+                  "type": "request",
+                  "url": "https://example.com/{secret}"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:public"]
     }
   },
   "options": {
-    "supportedCapabilities": []
+    "supportedCapabilities": [
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_storage_v1"
+    ]
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_text_field_options_v1"
+  "expectedPath": "$"
 }

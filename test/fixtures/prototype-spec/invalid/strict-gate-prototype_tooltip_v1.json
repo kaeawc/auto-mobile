@@ -4,33 +4,46 @@
     "window": {
       "placement": {
         "type": "fullscreen"
-      }
+      },
+      "opacity": 100
     },
     "state": {
       "open": true
     },
     "root": {
-      "type": "tooltip",
-      "text": "Element hint",
-      "openWhen": {
-        "key": "open",
-        "equals": true
-      },
-      "anchor": {
-        "type": "element",
-        "selector": {
-          "testTag": "buy",
-          "text": "{route.x}"
+      "type": "column",
+      "children": [
+        {
+          "id": "target",
+          "type": "button",
+          "label": "Help"
         },
-        "alignment": "cover"
-      },
-      "caret": "bottom",
-      "spotlight": {}
+        {
+          "testTag": "help",
+          "type": "tooltip",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "text": "Helpful hint",
+          "anchorTo": "target",
+          "caret": "top",
+          "spotlight": {
+            "padding": 64,
+            "cornerRadius": 12
+          },
+          "onDismiss": [
+            {
+              "type": "emit",
+              "name": "closed"
+            }
+          ]
+        }
+      ]
     }
   },
   "options": {
     "supportedCapabilities": []
   },
-  "expectedPath": "$",
-  "expectedMessage": "Unsupported capabilities: prototype_tooltip_v1"
+  "expectedPath": "$"
 }

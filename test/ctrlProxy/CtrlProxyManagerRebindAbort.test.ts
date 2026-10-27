@@ -359,6 +359,7 @@ test.each(["retry", "load", "exhausted", "stuck"] as const)(
       assertNotDrivenByOtherDaemon: async () => {},
       isAccessibilityServiceHealthy: async () => false,
       clearAvailabilityCache: () => {},
+      setupUser: async () => undefined,
     });
     const result = rebind.rebindIfUnhealthy().then(
       (value) => value,

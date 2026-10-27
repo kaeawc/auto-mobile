@@ -10,6 +10,7 @@ export {
   type CtrlProxyManager,
   type CtrlProxySetupResult,
 } from "./CtrlProxyManagerContracts";
+import { resolveSetupUser } from "./setupUser";
 import * as fs from "fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ENV, readEnvBool, readEnvRaw } from "../config/env";
@@ -84,6 +85,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private readonly rebind: AndroidCtrlProxyRebind;
   private readonly compatibility: AndroidCtrlProxyCompatibility;
   private readonly apkInstaller: AndroidCtrlProxyApkInstaller;
+  /**
+   * The user CtrlProxy is set up for: the foreground user on a headless-system-user automotive
+   * device, otherwise undefined and every command stays exactly as it was (#14918).
+   */
+  private async setupUser(): Promise<number | undefined> {
+    return resolveSetupUser(this.adb, this.device);
+  }
+
   private createAndroidCtrlProxyAccessibility(): AndroidCtrlProxyAccessibility {
     const manager = this;
     return new AndroidCtrlProxyAccessibility({
@@ -108,6 +117,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       clearAvailabilityCache: () => this.clearAvailabilityCache(),
       enableViaSettings: () => this.enableViaSettings(),
       getApiLevel: () => this.getApiLevel(),
+      setupUser: () => this.setupUser(),
     });
   }
 
@@ -126,6 +136,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       },
       isAccessibilityServiceHealthy: () => this.isAccessibilityServiceHealthy(),
       clearAvailabilityCache: () => this.clearAvailabilityCache(),
+      setupUser: () => this.setupUser(),
     });
   }
 
@@ -206,6 +217,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       grantLocalNetworkAfterInstall: () => this.grantLocalNetworkAfterInstall(),
       statusInspectionDeviceError: (error) => this.statusInspectionDeviceError(error),
       getApiLevel: () => this.getApiLevel(),
+      setupUser: () => this.setupUser(),
       get device() {
         return manager.device;
       },

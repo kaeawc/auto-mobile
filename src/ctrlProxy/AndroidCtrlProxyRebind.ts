@@ -1,3 +1,4 @@
+import { settingsCommand } from "./setupUser";
 import { ENV } from "../config/env";
 import { readEnvInt } from "../utils/envNumbers";
 import {
@@ -50,6 +51,8 @@ export interface AndroidCtrlProxyRebindHost {
   readonly device: BootedDevice;
   isAccessibilityServiceHealthy(): Promise<boolean>;
   clearAvailabilityCache(): void;
+  /** The user to set CtrlProxy up for on a headless-system-user device; undefined everywhere else. */
+  setupUser(): Promise<number | undefined>;
 }
 
 /** Framework binding inspection and cancellation-safe shared recovery. */
@@ -327,8 +330,9 @@ export class AndroidCtrlProxyRebind {
   }
 
   private async readRebindPlan(): Promise<RebindPlan> {
+    const user = await this.host.setupUser();
     const result = await this.host.adb.executeCommand(
-      "shell settings get secure enabled_accessibility_services",
+      settingsCommand(user, "get secure enabled_accessibility_services"),
     );
     const diagnostic = `${result.stdout}\n${result.stderr}`;
     if (isAndroidFrameworkUnavailable(diagnostic)) {
@@ -392,7 +396,7 @@ export class AndroidCtrlProxyRebind {
   private async liveServicesWithCtrlProxy(rememberedServices: string): Promise<string> {
     try {
       const result = await this.runShieldedCommand(
-        "shell settings get secure enabled_accessibility_services",
+        settingsCommand(await this.host.setupUser(), "get secure enabled_accessibility_services"),
       );
       const diagnostic = `${result.stdout}\n${result.stderr}`;
       if (isAndroidFrameworkUnavailable(diagnostic)) {
@@ -418,9 +422,12 @@ export class AndroidCtrlProxyRebind {
     ].join(":");
   }
 
-  private writeEnabledServicesShielded(services: string): Promise<unknown> {
+  private async writeEnabledServicesShielded(services: string): Promise<unknown> {
     return this.runShieldedCommand(
-      `shell settings put secure enabled_accessibility_services ${shellQuote(services)}`,
+      settingsCommand(
+        await this.host.setupUser(),
+        `put secure enabled_accessibility_services ${shellQuote(services)}`,
+      ),
     );
   }
 

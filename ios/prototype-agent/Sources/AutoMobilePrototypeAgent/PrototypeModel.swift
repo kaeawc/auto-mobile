@@ -145,7 +145,7 @@
         @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
             let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
             driver.onComplete = { [weak self] id, result, duration in
-                self?.apply(activity: false) { $0.completePlatformCall(id, result, durationMs: duration) }
+                self?.apply(activity: false) { $0.completePlatformCall(id, result, durationMs: duration, atMs: self?.clock.nowMilliseconds ?? 0) }
             }
             driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
             driver.onEvent = { [weak self] event in
@@ -559,6 +559,7 @@
             ]
             let timerSnapshots = timers.snapshot()
             if !timerSnapshots.isEmpty { status["timers"] = timerSnapshots.map(\.wireObject) }
+            if let feedback = session.feedbackLog.wireArray { status["feedbackLog"] = feedback.foundationObject }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
             if let platform = session.spec?

@@ -17,7 +17,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // Chat-list scrolls (#14232) are drawn on Android only so far (#14671);
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
         // transition choreography (#15247). Style effects (#15128) have a validated contract and
-        // no renderer yet, and so do the haptics and sound platform modules (#14329).
+        // no renderer yet. The haptics and sound platform modules (#14329) are advertised through the
+        // platform registry the agent builds at launch, not through the static list this test reads.
         let exclusions: Set<String> = [
             "prototype_platform_test_v1",
             "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",

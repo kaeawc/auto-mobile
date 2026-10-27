@@ -117,6 +117,8 @@ struct PrototypeSession {
     private(set) var requests = PrototypeRequestLedger()
     private var platformEventData: JSONValue?
     private var platformIssued = 0
+    /// The last haptic and sound calls of the shown prototype (#14329); a show or dismissal clears it.
+    private(set) var feedbackLog = PrototypeFeedbackLog()
     private var platformCalls: [String: PrototypeInFlightPlatformCall] = [:]
     private var platformCommands: [PrototypePlatformCommand] = []
     private var platformLifecycleEvents: [PrototypeEvent] = []
@@ -174,6 +176,7 @@ struct PrototypeSession {
         restoredState: [String: JSONValue]? = nil
     ) {
         platformLifecycleEvents += cancelPlatformCalls()
+        feedbackLog = PrototypeFeedbackLog()
         timerCommands.append(.cancelAll)
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
@@ -781,6 +784,7 @@ struct PrototypeSession {
         )
         requests.cancelAll()
         timerCommands.append(.cancelAll)
+        feedbackLog = PrototypeFeedbackLog()
         spec = nil
         return events
     }
@@ -1161,7 +1165,10 @@ extension PrototypeSession {
             timeoutMs: action.timeoutMs.flatMap { Int(exactly: $0) }
                 ?? PrototypeContractValidator.limit("DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS")
         )
-        let pending = PrototypeInFlightPlatformCall(job: job, action: action, eventData: platformEventData)
+        let pending = PrototypeInFlightPlatformCall(
+            job: job, action: action, eventData: platformEventData,
+            nodeId: PrototypeNode.owningNodeId(of: action, in: spec.root)
+        )
         if platformCalls.count >= PrototypeContractValidator.limit("MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT") {
             failure = .failure(.tooManyInFlight, "Too many platform calls in flight")
         }
@@ -1172,11 +1179,17 @@ extension PrototypeSession {
     }
 
     mutating func completePlatformCall(
-        _ id: String, _ result: PlatformCallResult, durationMs: Int
+        _ id: String, _ result: PlatformCallResult, durationMs: Int, atMs: Int = 0
     )
         -> [PrototypeEvent]
     {
         guard isShown, let pending = platformCalls.removeValue(forKey: id) else { return [] }
+        if let entry = PrototypeFeedbackEntry.entry(
+            call: pending.job.call.call, args: pending.job.call.args, result: result,
+            nodeId: pending.nodeId, timeMs: atMs
+        ) {
+            feedbackLog.record(entry)
+        }
         return finishPlatform(pending, result, durationMs: durationMs)
     }
 

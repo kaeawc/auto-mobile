@@ -22,7 +22,11 @@ import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
-import { prototypeKeyframesError, prototypeKeyframeTracksError } from "./prototypeKeyframes";
+import {
+  chargeKeyframeNode,
+  prototypeKeyframesError,
+  prototypeKeyframeTracksError,
+} from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
@@ -137,11 +141,9 @@ function chargeNodeBudgets(
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
   }
-  if (
-    node.keyframes !== undefined &&
-    ++context.keyframeNodes > contract.limits.MAX_PROTOTYPE_KEYFRAME_NODES
-  ) {
-    return fail(`${path}.keyframes`, "Keyframe node limit exceeded");
+  const keyframeLimit = chargeKeyframeNode(node, context, contract.limits, path);
+  if (keyframeLimit) {
+    return fail(keyframeLimit.path, keyframeLimit.message);
   }
   const uses = effectUses(node);
   context.effects += uses.total;
@@ -274,11 +276,19 @@ function visitObject(
       return error;
     }
   }
-  return (
-    (rule === definitions.keyframes
+  return objectRuleError(rule, data, path);
+}
+/** The `keyframes` object adds cross-point track rules on top of the generic object constraint. */
+function objectRuleError(
+  rule: Parameters<typeof objectConstraint>[1],
+  data: Record<string, unknown>,
+  path: string,
+): ReturnType<typeof objectConstraint> {
+  const tracks =
+    rule === definitions.keyframes
       ? prototypeKeyframeTracksError(data.tracks, `${path}.tracks`)
-      : undefined) ?? objectConstraint(data, rule, path)
-  );
+      : undefined;
+  return tracks ?? objectConstraint(data, rule, path);
 }
 function objectConstraint(
   data: Record<string, unknown>,

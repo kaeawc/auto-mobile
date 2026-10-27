@@ -47,9 +47,59 @@ export const prototypeKeyframesSchema = z
   .strict()
   .superRefine((v, context) => {
     const error = prototypeKeyframeTracksError(v.tracks, "tracks");
-    if (error)
+    if (error) {
       context.addIssue({ code: "custom", path: error.path.split("."), message: error.message });
+    }
   });
+
+/** Counts a node carrying `keyframes` against the expanded-tree cap. */
+export function chargeKeyframeNode(
+  node: Record<string, unknown>,
+  counter: { keyframeNodes: number },
+  limits: { MAX_PROTOTYPE_KEYFRAME_NODES: number },
+  path: string,
+): { path: string; message: string } | undefined {
+  if (
+    node.keyframes !== undefined &&
+    ++counter.keyframeNodes > limits.MAX_PROTOTYPE_KEYFRAME_NODES
+  ) {
+    return { path: `${path}.keyframes`, message: "Keyframe node limit exceeded" };
+  }
+  return undefined;
+}
+
+/** The [fraction, value] points of one track when its structure is valid; otherwise undefined. */
+function wellFormedPoints(value: unknown): number[][] | undefined {
+  const raw = Array.isArray(value) ? value : record(value)?.points;
+  if (!Array.isArray(raw) || raw.length < 2) {
+    return undefined;
+  }
+  const valid = raw.every(
+    (p) =>
+      Array.isArray(p) &&
+      p.length === 2 &&
+      p.every((n) => typeof n === "number" && Number.isFinite(n)),
+  );
+  return valid ? (raw as number[][]) : undefined;
+}
+
+function trackError(name: string, points: number[][], path: string): string | undefined {
+  const rest = PROTOTYPE_KEYFRAME_REST[name as keyof typeof PROTOTYPE_KEYFRAME_REST];
+  const fractions =
+    points[0]![0] !== 0 ||
+    points.at(-1)![0] !== 1 ||
+    points.some((p, i) => p[0]! < 0 || p[0]! > 1 || (i > 0 && p[0]! <= points[i - 1]![0]!));
+  if (fractions) {
+    return "Fractions must increase strictly from 0 to 1";
+  }
+  if (points[0]![1] !== rest || points.at(-1)![1] !== rest) {
+    return `First and last values must equal rest value ${rest}`;
+  }
+  const outOfRange = points.some((p) =>
+    name === "alpha" ? p[1]! < 0 || p[1]! > 1 : name.startsWith("scale") && p[1]! <= 0,
+  );
+  return outOfRange ? "alpha must be in 0..1 and scale values must be positive" : undefined;
+}
 
 /** Cross-point invariants shared with the native contract validators. Structure is checked first. */
 export function prototypeKeyframeTracksError(
@@ -57,42 +107,10 @@ export function prototypeKeyframeTracksError(
   path: string,
 ): { path: string; message: string } | undefined {
   for (const [name, value] of Object.entries(record(tracks) ?? {})) {
-    const rest = PROTOTYPE_KEYFRAME_REST[name as keyof typeof PROTOTYPE_KEYFRAME_REST];
-    const raw = Array.isArray(value) ? value : record(value)?.points;
-    if (!Array.isArray(raw)) continue;
-    const points = raw as number[][];
-    if (
-      points.length < 2 ||
-      points.some(
-        (p) =>
-          !Array.isArray(p) ||
-          p.length !== 2 ||
-          p.some((n) => typeof n !== "number" || !Number.isFinite(n)),
-      )
-    )
-      continue;
-    if (
-      points[0][0] !== 0 ||
-      points.at(-1)![0] !== 1 ||
-      points.some((p, i) => p[0] < 0 || p[0] > 1 || (i > 0 && p[0] <= points[i - 1][0]))
-    ) {
-      return { path: `${path}.${name}`, message: "Fractions must increase strictly from 0 to 1" };
-    }
-    if (points[0][1] !== rest || points.at(-1)![1] !== rest) {
-      return {
-        path: `${path}.${name}`,
-        message: `First and last values must equal rest value ${rest}`,
-      };
-    }
-    if (
-      points.some((p) =>
-        name === "alpha" ? p[1] < 0 || p[1] > 1 : name.startsWith("scale") && p[1] <= 0,
-      )
-    ) {
-      return {
-        path: `${path}.${name}`,
-        message: "alpha must be in 0..1 and scale values must be positive",
-      };
+    const points = wellFormedPoints(value);
+    const message = points ? trackError(name, points, path) : undefined;
+    if (message) {
+      return { path: `${path}.${name}`, message };
     }
   }
   return undefined;
@@ -120,7 +138,9 @@ export function prototypeKeyframesError(
 export function prototypeKeyframesFields(spec: unknown): string[] {
   const fields: string[] = [];
   walkPrototypeNodes(spec, (node, path) => {
-    if (node.keyframes !== undefined) fields.push(`${path}.keyframes`);
+    if (node.keyframes !== undefined) {
+      fields.push(`${path}.keyframes`);
+    }
   });
   return fields;
 }

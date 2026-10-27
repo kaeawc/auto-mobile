@@ -148,7 +148,9 @@ test.each([
 ] as const)("rejects %s", (_, keyframes, path) => {
   const result = validatePrototypeSpec(spec(node(keyframes)));
   expect(result.success).toBe(false);
-  if (!result.success) expect(result.error.path).toBe(path);
+  if (!result.success) {
+    expect(result.error.path).toBe(path);
+  }
 });
 test("data triggers and object curves validate", () => {
   expect(
@@ -168,7 +170,9 @@ test("the seventeenth expanded node fails at keyframes", () => {
     spec({ type: "column", children: Array.from({ length: 17 }, () => node()) }),
   );
   expect(result.success).toBe(false);
-  if (!result.success) expect(result.error.path).toBe("root.children[16].keyframes");
+  if (!result.success) {
+    expect(result.error.path).toBe("root.children[16].keyframes");
+  }
 });
 
 test("fields walker covers component roots and every container without walking payloads", async () => {

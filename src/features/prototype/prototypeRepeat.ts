@@ -1,3 +1,4 @@
+import { chargeKeyframeNode } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { PrototypeRepeatData } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -488,11 +489,9 @@ function expandedErrors(
   if (budget.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(at, "Expanded image limit exceeded");
   }
-  if (
-    node.keyframes !== undefined &&
-    ++budget.keyframeNodes > contract.limits.MAX_PROTOTYPE_KEYFRAME_NODES
-  ) {
-    return fail(`${path}.keyframes`, "Keyframe node limit exceeded");
+  const keyframeLimit = chargeKeyframeNode(node, budget, contract.limits, path);
+  if (keyframeLimit) {
+    return fail(keyframeLimit.path, keyframeLimit.message);
   }
   const effects = effectUses(node);
   budget.effects += effects.total;

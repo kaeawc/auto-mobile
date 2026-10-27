@@ -1,0 +1,42 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "on": true
+  },
+  "root": {
+    "type": "text",
+    "text": "Selected",
+    "style": {
+      "effects": [
+        {
+          "type": "glow",
+          "color": "primary"
+        }
+      ]
+    },
+    "styleWhen": [
+      {
+        "when": {
+          "key": "on",
+          "equals": true
+        },
+        "style": {
+          "effects": [
+            {
+              "type": "vignette"
+            },
+            {
+              "type": "blur",
+              "radius": 0
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 import { applyPrototypeDataWrite } from "../src/features/prototype/prototypeDataWrite";
 /** Capture strict differential fixtures from the real TS validator, never hand-authored paths. */
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import contract from "../schemas/prototype-spec-contract.json";
 import { object, type Rule } from "../src/features/prototype/prototypeBindingValidation";
@@ -11,7 +11,21 @@ import {
 } from "../src/features/prototype/prototypeValidation";
 import type { PrototypeStrictOptions } from "../src/features/prototype/prototypeStrictPolicy";
 
-const directory = join(import.meta.dir, "../test/fixtures/prototype-spec");
+/**
+ * The committed corpus is a curated subset of what this script derives, and the derived names are
+ * numbered in contract order, so a full run renumbers fixtures, adds near-duplicates and rewrites
+ * formatting (#15565). By default it works on a copy under scratch/ and prints how to compare;
+ * copy the fixtures you want into test/fixtures by hand. Pass --in-place only to regenerate the
+ * whole corpus deliberately, then run oxfmt and review every change.
+ */
+const live = join(import.meta.dir, "../test/fixtures/prototype-spec");
+const inPlace = process.argv.includes("--in-place");
+const directory = inPlace ? live : join(import.meta.dir, "../scratch/prototype-spec-capture");
+if (!inPlace) {
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+  cpSync(live, directory, { recursive: true });
+}
 const definitions: Record<string, Rule> = contract.definitions;
 const base = () => ({
   id: "strict",
@@ -264,7 +278,7 @@ capture("strict-storage-unknown", {
 for (const plus of [0, 1]) {
   capture(`strict-data-bytes-${plus ? "plus-one" : "boundary"}`, {
     ...base(),
-    data: { x: "x".repeat(262144 - 8 + plus) },
+    data: { x: "x".repeat(contract.limits.MAX_PROTOTYPE_DATA_BYTES - 8 + plus) },
   });
   capture(
     `strict-payload-bytes-${plus ? "plus-one" : "boundary"}`,
@@ -275,7 +289,28 @@ for (const plus of [0, 1]) {
   );
   capture(`strict-data-array-${plus ? "plus-one" : "boundary"}`, {
     ...base(),
-    data: { x: Array.from({ length: 500 + plus }, () => false) },
+    data: {
+      x: Array.from({ length: contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS + plus }, () => false),
+    },
+  });
+  // Feed-scale list (#14183): one row template over MAX_PROTOTYPE_LIST_ITEMS posts.
+  capture(`strict-list-items-${plus ? "plus-one" : "boundary"}`, {
+    ...base(),
+    data: {
+      feed: {
+        items: Array.from({ length: contract.limits.MAX_PROTOTYPE_LIST_ITEMS + plus }, (_, id) => ({
+          id,
+          author: "user" + id,
+          caption: "Post number " + id,
+          likes: id,
+        })),
+      },
+    },
+    root: {
+      type: "list",
+      repeat: { items: { path: "/feed/items" }, as: "post", key: "id" },
+      children: [{ type: "text", text: "{post.author}: {post.caption} ({post.likes})" }],
+    },
   });
   let condition: unknown = { key: "x", equals: true };
   for (let index = 1; index < 8 + plus; index++) {
@@ -447,6 +482,32 @@ for (const name of originalValid) {
   }
   walk(result.data, result.data, definitions.spec, [], "spec");
 }
+// Frosted backdrops (#15126): a closed material list, a whole-dp blur cap and a colour tint.
+const backdropSpec = (backdrop: unknown, placement: unknown = { type: "fullscreen" }) => ({
+  ...base(),
+  window: { placement, backdrop },
+});
+capture("backdrop-material-only", backdropSpec({ material: "thin" }));
+capture(
+  "backdrop-full",
+  backdropSpec(
+    { material: "glass", blur: 150, tint: "#FFFFFF" },
+    { type: "sheet", edge: "bottom", height: 320 },
+  ),
+);
+capture("backdrop-blur-zero", backdropSpec({ material: "ultraThin", blur: 0, tint: "scrim" }));
+capture("backdrop-unknown-material", backdropSpec({ material: "frosted" }));
+capture("backdrop-missing-material", backdropSpec({ blur: 10 }));
+capture("backdrop-blur-over-cap", backdropSpec({ material: "thick", blur: 151 }));
+capture("backdrop-blur-negative", backdropSpec({ material: "thick", blur: -1 }));
+capture("backdrop-blur-fractional", backdropSpec({ material: "thick", blur: 2.5 }));
+capture(
+  "backdrop-tint-per-mode",
+  backdropSpec({ material: "thin", tint: { light: "#FFFFFF", dark: "#000000" } }),
+);
+capture("backdrop-tint-invalid", backdropSpec({ material: "thick", tint: "not-a-colour" }));
+capture("backdrop-unknown-key", backdropSpec({ material: "thick", radius: 4 }));
+capture("backdrop-not-object", backdropSpec("thin"));
 const capabilityExamples = new Map<string, unknown>();
 for (const name of readdirSync(join(directory, "valid"))
   .filter((file) => file.endsWith(".json"))
@@ -487,3 +548,6 @@ writeFileSync(
 console.log(
   `Captured ${valid.length} valid, ${invalid.length} invalid; ${seenObjects.size} object rules, ${seenBounds.size} bounds, ${capabilityExamples.size} gates`,
 );
+if (!inPlace) {
+  console.log(`Wrote the capture to ${directory}; compare with: diff -rq ${live} ${directory}`);
+}

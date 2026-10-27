@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "bars",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "topAppBar",
+          "title": "Feed",
+          "variant": "large",
+          "onScroll": "exitUntilCollapsed",
+          "scroll": "feed"
+        },
+        {
+          "type": "text",
+          "id": "feed",
+          "text": "not a scroll"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].scroll"
+}

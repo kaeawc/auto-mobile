@@ -1,3 +1,4 @@
+import { ROTARY_BUTTONS } from "../../src/features/action/RotaryInput";
 import {
   opaqueIntentKey,
   opaqueForcesFallback,
@@ -30,6 +31,7 @@ const PURE_INPUT_TOOLS = [
   "dragPath",
   "highlight",
   "homeScreen",
+  "hoverAt",
   "multiTouch",
   "pinchOn",
   "recentApps",
@@ -84,6 +86,8 @@ describe("Interaction journal intents (#14359)", () => {
       "screenshot",
       "split_screen",
       "dismiss_notification_shade",
+      // Rotary input moves focus only (#14920).
+      ...ROTARY_BUTTONS,
     ];
     const persistent = ["power", "lock", "volume_up", "volume_down", "action"];
     const buttons = pressButtonInput.shape.button.options;

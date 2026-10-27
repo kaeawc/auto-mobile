@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import type { DeviceClaim, DeviceClaims } from "./deviceClaims";
 import type { BindingRegistry } from "./sessionBroker/registry/bindingRegistry";
 import {
   defaultBindingRegistryPath,
@@ -8,7 +9,10 @@ import {
 } from "./sessionBroker/registry/sqliteBindingRegistry";
 
 /** What the doctor needs from the registry: one read, on a handle it also closes. */
-type OpenedRegistry = Pick<BindingRegistry, "findDeviceHolder"> & { close(): Promise<void> };
+type OpenedRegistry = Pick<BindingRegistry, "findDeviceHolder"> & {
+  close(): Promise<void>;
+  deviceClaims?(): Pick<DeviceClaims, "get" | "list">;
+};
 
 export interface ReadOnlyBindingRegistryDependencies {
   registryPath?: () => string;
@@ -51,5 +55,51 @@ export function createReadOnlyBindingRegistry(
         await registry.close();
       }
     },
+  };
+}
+
+/**
+ * The same read-only view of the host-wide `device_claims` table (#11811): no registry file, a
+ * registry awaiting its daemon's upgrade or an unreadable one all read as "no claims" (logged).
+ */
+export function createReadOnlyDeviceClaims(
+  dependencies: ReadOnlyBindingRegistryDependencies = {},
+): Pick<DeviceClaims, "get" | "list"> {
+  const registryPath = dependencies.registryPath ?? (() => defaultBindingRegistryPath());
+  const exists = dependencies.exists ?? existsSync;
+  const open =
+    dependencies.open ?? ((dbPath) => openSqliteBindingRegistry({ dbPath, migrate: false }));
+  async function withClaims<T>(
+    empty: T,
+    read: (claims: Pick<DeviceClaims, "get" | "list">) => Promise<T>,
+  ): Promise<T> {
+    const dbPath = registryPath();
+    if (!exists(dbPath)) {
+      return empty;
+    }
+    let registry: OpenedRegistry;
+    try {
+      registry = await open(dbPath);
+    } catch (error) {
+      logger.warn(`doctor: device claims not readable: ${errorMessage(error)}`, error);
+      return empty;
+    }
+    try {
+      const claims = registry.deviceClaims?.();
+      return claims ? await read(claims) : empty;
+    } finally {
+      await registry.close();
+    }
+  }
+  // One read per instance: the doctor asks per device, and each open runs the migration check.
+  let snapshot: Promise<DeviceClaim[]> | undefined;
+  const list = (): Promise<DeviceClaim[]> => {
+    snapshot ??= withClaims<DeviceClaim[]>([], (claims) => claims.list());
+    return snapshot;
+  };
+  return {
+    get: async (platform, deviceId) =>
+      (await list()).find((claim) => claim.platform === platform && claim.deviceId === deviceId),
+    list,
   };
 }

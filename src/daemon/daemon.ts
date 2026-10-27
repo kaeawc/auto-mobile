@@ -646,6 +646,7 @@ export class Daemon {
       identity,
       lifecycle,
       bindingRegistry: () => daemon.runtime.bindingRegistry,
+      deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       setBindingRegistry: (value) => {
         daemon.runtime.bindingRegistry = value;
       },
@@ -666,6 +667,8 @@ export class Daemon {
       identity,
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      bindingRegistry: () => daemon.runtime.bindingRegistry,
+      deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,
       deviceStateChangeNotifier: () => daemon.deviceStateChangeNotifier,
       observerSessionRegistry: () => daemon.observerSessionRegistry,

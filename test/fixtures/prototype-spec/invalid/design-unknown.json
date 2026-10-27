@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "design",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Save",
+      "testTag": "save"
+    },
+    "theme": {
+      "design": "unknown"
+    }
+  },
+  "expectedPath": "theme.design",
+  "expectedMessage": "Invalid enum value"
+}

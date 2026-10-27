@@ -5194,6 +5194,23 @@ describe("provisionDevice handler", () => {
     });
   });
 
+  test("public provisionDevice schema does not expose the exit-snapshot control, an internal call keeps it (#15477)", async () => {
+    const { parseProvisionDeviceArgs } =
+      await import("../../src/features/deviceLifecycle/provisioning/provisioning");
+    expect(
+      provisionDeviceSchema.safeParse({
+        ...provisionTestArgs("android"),
+        discardSnapshotOnExit: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      parseProvisionDeviceArgs({ ...provisionTestArgs("android"), discardSnapshotOnExit: true }),
+    ).toMatchObject({ discardSnapshotOnExit: true });
+    expect(parseProvisionDeviceArgs(provisionTestArgs("android"))).not.toHaveProperty(
+      "discardSnapshotOnExit",
+    );
+  });
+
   test("public provisionDevice schema does not expose binding rollback control", () => {
     expect(
       provisionDeviceSchema.safeParse({

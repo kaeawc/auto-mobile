@@ -75,6 +75,8 @@ class PrototypeStackTransitionRenderTest {
             CompositionLocalProvider(
               LocalPrototypeMotionActivity provides activity,
               LocalPrototypeMotion provides prototypeMotionEnabled(motion, durationScale),
+              LocalPrototypeMotionProfile provides
+                prototypeMotionProfile(motion, durationScale, 1f),
               LocalPrototypeStackRuntime provides runtime,
               LocalPrototypeStackSnapshot provides snapshot,
             ) {
@@ -302,7 +304,11 @@ class PrototypeStackTransitionRenderTest {
   @Test
   fun `an instant push override does not disable the following pop animation`() {
     val runtime = show()
-    act(runtime, PrototypePushAction("nav", "detail", PrototypeStackTransition.NONE), frames = 1)
+    act(
+      runtime,
+      PrototypePushAction("nav", "detail", PrototypeStackTransition.NONE.value),
+      frames = 1,
+    )
     assertEquals(0, count("home"))
     assertEquals(0, runtime.motionActivity.snapshot().active)
     act(runtime, PrototypePopAction("nav"))
@@ -310,6 +316,17 @@ class PrototypeStackTransitionRenderTest {
     assertEquals(1, count("detail"))
     settle()
     assertEquals(0, count("detail"))
+  }
+
+  @Test
+  fun `reduced stack crossfades without spatial movement`() {
+    val runtime = show("reduced")
+    act(runtime, PrototypePushAction("nav", "detail"))
+    val mid = compose.onNodeWithTag("detail").fetchSemanticsNode().boundsInRoot
+    assertTrue(runtime.motionActivity.snapshot().active > 0)
+    settle()
+    assertEquals(mid, compose.onNodeWithTag("detail").fetchSemanticsNode().boundsInRoot)
+    assertEquals(0, runtime.motionActivity.snapshot().active)
   }
 
   @Test

@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "design",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "theme": {
+      "design": "material",
+      "zzzUnknown": true
+    },
+    "root": {
+      "testTag": "save",
+      "type": "button",
+      "label": "Save"
+    }
+  },
+  "expectedPath": "theme.zzzUnknown"
+}

@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.InsertTextResult
 import dev.jasonpearson.automobile.protocol.InsertTextState
 import dev.jasonpearson.automobile.protocol.InsertTextStateResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
+import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
@@ -66,6 +67,8 @@ internal fun prototypeResultFrame(
   stacks: Map<String, PrototypeStackSnapshot>? = null,
   hiddenReason: PrototypeHiddenReason? = null,
   fired: Int? = null,
+  backdrop: String? = null,
+  degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     PrototypeResult(
@@ -81,6 +84,8 @@ internal fun prototypeResultFrame(
       stacks = stacks,
       hiddenReason = hiddenReason,
       fired = fired,
+      backdrop = backdrop,
+      degradedEffects = degradedEffects.ifEmpty { null },
     ),
   )
 

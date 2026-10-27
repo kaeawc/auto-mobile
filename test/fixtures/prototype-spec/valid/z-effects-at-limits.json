@@ -1,0 +1,357 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "Row 0",
+        "style": {
+          "effects": [
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            },
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            },
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            },
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 1",
+        "style": {
+          "effects": [
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            },
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            },
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            },
+            {
+              "type": "noise",
+              "animate": {
+                "periodMs": 1000
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 2",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 3",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 4",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 5",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 6",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 7",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 8",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 9",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 10",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 11",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 12",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 13",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 14",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      },
+      {
+        "type": "text",
+        "text": "Row 15",
+        "style": {
+          "effects": [
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            },
+            {
+              "type": "noise"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

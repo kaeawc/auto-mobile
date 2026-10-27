@@ -964,6 +964,25 @@ describe("MultiPlatformDeviceManager", () => {
     expect(received).toBe("/poster.png");
   });
 
+  test("startDevice launches with -no-snapshot-save only when asked (#15477)", async () => {
+    const received: Array<readonly string[] | undefined> = [];
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient(),
+      undefined,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => [],
+        launchEmulator: async (request) => {
+          received.push(request.extraArgs);
+          return launchedHandle(request.avdName);
+        },
+      }),
+    );
+    const image = { name: "Pixel", platform: "android" as const, isRunning: false };
+    await manager.startDevice(image, undefined, { discardSnapshotOnExit: true });
+    await manager.startDevice(image);
+    expect(received).toEqual([["-no-snapshot-save"], undefined]);
+  });
+
   test("startDevice rejects physical Android poster requests before probing or launching", async () => {
     const manager = new MultiPlatformDeviceManager(
       new FakeAdbClient(),

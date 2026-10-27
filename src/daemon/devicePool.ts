@@ -111,12 +111,17 @@ export class DevicePool {
     },
   );
   static create(deps: DevicePoolDependencies): DevicePool {
+    const android = new ForwardLeaseForeignDeviceOwnership();
+    const ios = new ForwardLeaseForeignDeviceOwnership(process.pid, iosDeviceOwnershipFileSource);
+    if (deps.deviceClaimMirrors?.android) {
+      android.attachClaimMirror(deps.deviceClaimMirrors.android);
+    }
+    if (deps.deviceClaimMirrors?.ios) {
+      ios.attachClaimMirror(deps.deviceClaimMirrors.ios);
+    }
     return new DevicePool({
-      foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(),
-      iosForeignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
-        process.pid,
-        iosDeviceOwnershipFileSource,
-      ),
+      foreignDeviceOwnership: android,
+      iosForeignDeviceOwnership: ios,
       ...deps,
     });
   }

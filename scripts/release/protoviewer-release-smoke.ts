@@ -44,12 +44,22 @@ async function main(): Promise<void> {
     },
   });
   const platform = positionals[0];
-  if (platform !== "android" && platform !== "ios") usage("platform must be android or ios");
+  if (platform !== "android" && platform !== "ios") {
+    usage("platform must be android or ios");
+  }
   const mode = values.mode as Mode;
-  if (!MODES.includes(mode)) usage(`unknown --mode ${values.mode}`);
-  if (!values.device) usage("--device is required");
-  if (!values.candidate) usage("--candidate is required");
-  if (mode !== "smoke" && !values.previous) usage("--previous is required for upgrade");
+  if (!MODES.includes(mode)) {
+    usage(`unknown --mode ${values.mode}`);
+  }
+  if (!values.device) {
+    usage("--device is required");
+  }
+  if (!values.candidate) {
+    usage("--candidate is required");
+  }
+  if (mode !== "smoke" && !values.previous) {
+    usage("--previous is required for upgrade");
+  }
 
   const runner = new ExecFileToolRunner();
   const driver =

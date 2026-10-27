@@ -1,3 +1,5 @@
+import { shownBackdrop, type PrototypeBackdropOutcome } from "./prototypeBackdrop";
+import { prototypeDegradedEffectsField, type DegradedEffect } from "./prototypeDegradedEffects";
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
@@ -42,6 +44,8 @@ export interface PrototypeLastResult {
   displayId?: number;
   /** Host-resolved chrome for a successful fullscreen show; absent for adopted prototypes. */
   chrome?: PrototypeWindowChrome;
+  /** What a show with `window.backdrop` drew: a blur, or the solid fallback dim (#15126). */
+  backdrop?: PrototypeBackdropOutcome;
   /**
    * The light or dark mode the prototype is drawn in, as last reported by the device: a show
    * result, an `inspect`, or an `appearance_changed` event since (which updates `mode` and `source`
@@ -57,6 +61,8 @@ export interface PrototypeLastResult {
    */
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  shaderFailures?: Record<string, string>;
+  degradedEffects?: DegradedEffect[];
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -79,6 +85,8 @@ export interface AdoptedPrototype {
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  shaderFailures?: Record<string, string>;
+  degradedEffects?: DegradedEffect[];
   pages: PrototypeEvent["pages"];
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
@@ -268,7 +276,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
+      ...prototypeDegradedEffectsField(prototype.degradedEffects),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
+      shaderFailures: structuredClone(prototype.shaderFailures),
       success: true,
       timestamp: this.clock.now(),
     };
@@ -397,11 +407,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
           ? applyPrototypeDataWrite(entry.data, { op: "remove", path: write.path })
           : write.value === undefined
             ? undefined
-            : applyPrototypeDataWrite(entry.data, {
-                op: write.op,
-                path: write.path,
-                value: write.value,
-              });
+            : write.op === "extend" || write.op === "prepend"
+              ? applyPrototypeDataWrite(entry.data, { ...write, value: write.value })
+              : applyPrototypeDataWrite(entry.data, { ...write, value: write.value });
       const written = { ...entry };
       if (applied?.success) {
         written.data = applied.data;
@@ -568,6 +576,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(displayId === undefined ? {} : { displayId }),
       ...(action === "show" && result.success && chrome !== undefined ? { chrome } : {}),
       ...shownAppearance(action, result),
+      ...shownBackdrop(action, result),
       success: result.success,
       ...(result.error ? { error: result.error } : {}),
       ...(result.totalTimeMs === undefined ? {} : { totalTimeMs: result.totalTimeMs }),

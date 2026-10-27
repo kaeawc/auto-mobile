@@ -88,6 +88,9 @@ internal object PrototypeStateChecks {
       nodeCheckError(value, path)?.let {
         return it
       }
+      conditionCheckError(value["errorWhen"], "$path.errorWhen", keys)?.let {
+        return it
+      }
       conditionCheckError(value["visibleWhen"], "$path.visibleWhen", keys)?.let {
         return it
       }
@@ -188,6 +191,8 @@ internal object PrototypeStateChecks {
     }
 
     var images = 0
+    var effects = 0
+    var animatedEffects = 0
     var selectorDepth = 0
     var conditionDepth = 0
     var actionDepth = 0

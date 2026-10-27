@@ -36,7 +36,12 @@ describe("prototypeThemeModeFields", () => {
 
   test("every shared fixture written before per-mode forms needs no capability", () => {
     const older = readdirSync(fixtures).filter(
-      (name) => name.endsWith(".json") && !name.startsWith("theme-modes-"),
+      (name) =>
+        name.endsWith(".json") &&
+        !name.startsWith("theme-modes-") &&
+        // Captured bound fixtures exercise every contract slot, including per-mode colours.
+        !name.startsWith("strict-bound-") &&
+        name !== "tooltip-drawer-start.json",
     );
     expect(older.length).toBeGreaterThan(20);
     for (const name of older) {

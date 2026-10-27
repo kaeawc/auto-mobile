@@ -243,6 +243,13 @@ export interface RebindSessionOptions {
    * state must be cleared even though the serial is unchanged.
    */
   force?: boolean;
+  /**
+   * The rebind moves the same session onto a replacement for a device that was lost (Android AVD
+   * recovery, System UI replacement). Only these bump `deviceGeneration` and announce
+   * `session_device_rebound`; a client-chosen move (setActiveDevice, an explicit bind) and the
+   * undo of a cancelled one do not (#15456).
+   */
+  recovery?: boolean;
   /** Durable identity of the replacement device. */
   stableDeviceId?: string;
   signal?: AbortSignal;

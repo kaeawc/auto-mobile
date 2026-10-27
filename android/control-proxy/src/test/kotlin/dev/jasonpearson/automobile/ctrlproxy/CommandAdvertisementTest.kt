@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.pointer.PointerInjectionSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import kotlinx.coroutines.cancel
@@ -32,6 +33,8 @@ class CommandAdvertisementTest {
       "ime_commit_trace_v1",
       "tap_double_v1",
       "multi_finger_gesture_v1",
+      "stylus_input_v1",
+      "hover_input_v1",
       "network_mock_rules_report_v1",
       "sdk_capabilities_user_id_v1",
       "gesture_display_id_v1",
@@ -40,15 +43,24 @@ class CommandAdvertisementTest {
       "prototype_multi_surface_v1",
       "prototype_window_options_v1",
       "prototype_window_chrome_v1",
+      "prototype_dead_tap_v1",
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
+      "prototype_tooltip_v1",
+      "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
+      "prototype_bar_scroll_v1",
       "prototype_data_model_v1",
+      "prototype_design_platform_v1",
       "prototype_data_actions_v1",
       "prototype_network_v1",
       "prototype_network_device_v1",
+      "prototype_platform_v1",
+      "prototype_platform_test_v1",
+      "prototype_platform_device_v1",
       "prototype_text_field_options_v1",
+      "prototype_scroll_motion_v1",
       "prototype_gestures_v1",
       "prototype_swipe_actions_v1",
       "prototype_text_field_actions_v1",
@@ -58,15 +70,27 @@ class CommandAdvertisementTest {
       "prototype_search_bar_v1",
       "prototype_rich_text_v1",
       "prototype_loading_states_v1",
+      "prototype_style_polish_v2",
+      "prototype_strings_v1",
+      "prototype_semantics_v1",
+      "prototype_string_conditions_v1",
       "prototype_motion_v2",
+      "prototype_effects_v1",
       "prototype_choreography_v1",
       "prototype_stack_transitions_v1",
+      "prototype_reduced_motion_v1",
+      "prototype_shared_element_v1",
       "prototype_chart_v1",
+      "prototype_lazy_list_v1",
       "prototype_linkify_v1",
+      "prototype_format_v1",
       "prototype_chat_scroll_v1",
+      "prototype_drawer_v1",
       "prototype_emit_context_v1",
       "prototype_checks_v1",
+      "prototype_custom_shaders_v1",
       "prototype_appearance_v1",
+      "prototype_backdrop_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
       "prototype_patch_v1",
@@ -99,6 +123,7 @@ class CommandAdvertisementTest {
           .supportedCommands()
       assertTrue("All sealed requests on API $sdk", commands.containsAll(sealedRequestTypes))
       assertTrue("Request ID echo on API $sdk", commands.contains("request_id_echo_v1"))
+      assertEquals(sdk >= 33, "prototype_custom_shaders_v1" in commands)
       assertCoreCommands(commands)
       assertPrototypeCommands(commands)
       assertEquals(commands.size, commands.toSet().size)
@@ -111,6 +136,9 @@ class CommandAdvertisementTest {
         sdk >= GestureDisplayRouting.DISPLAY_API,
         commands.contains("gesture_display_id_v1"),
       )
+      // Only where `am instrument --no-restart` exists, so an injection never kills the service.
+      assertEquals(sdk >= PointerInjectionSupport.MIN_SDK, commands.contains("stylus_input_v1"))
+      assertEquals(sdk >= PointerInjectionSupport.MIN_SDK, commands.contains("hover_input_v1"))
       assertEquals(
         sdk >= PrototypeDisplayRouting.DISPLAY_API,
         commands.contains("prototype_display_id_v1"),
@@ -144,13 +172,18 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_multi_surface_v1"))
     assertTrue(commands.contains("prototype_window_options_v1"))
     assertTrue(commands.contains("prototype_window_chrome_v1"))
+    assertTrue(commands.contains("prototype_dead_tap_v1"))
     assertTrue(commands.contains("prototype_theme_modes_v1"))
     assertTrue(commands.contains("prototype_flow_grid_v1"))
     assertTrue(commands.contains("prototype_pager_options_v1"))
+    assertTrue(commands.contains("prototype_bar_scroll_v1"))
     assertTrue(commands.contains("prototype_data_model_v1"))
     assertTrue(commands.contains("prototype_data_actions_v1"))
     assertTrue(commands.contains("prototype_network_v1"))
     assertTrue(commands.contains("prototype_network_device_v1"))
+    assertTrue(commands.contains("prototype_platform_v1"))
+    assertTrue(commands.contains("prototype_platform_device_v1"))
+    assertFalse(commands.contains("prototype_platform_test_v1"))
     assertTrue(commands.contains("prototype_text_field_options_v1"))
     assertTrue(commands.contains("prototype_gestures_v1"))
     assertTrue(commands.contains("prototype_swipe_actions_v1"))
@@ -161,9 +194,11 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_search_bar_v1"))
     assertTrue(commands.contains("prototype_rich_text_v1"))
     assertTrue(commands.contains("prototype_linkify_v1"))
+    assertTrue(commands.contains("prototype_format_v1"))
     assertTrue(commands.contains("prototype_chat_scroll_v1"))
     assertTrue(commands.contains("prototype_emit_context_v1"))
     assertTrue(commands.contains("prototype_checks_v1"))
+    assertTrue(commands.contains("prototype_style_polish_v2"))
     assertTrue(commands.contains("prototype_appearance_v1"))
     assertTrue(commands.contains("prototype_persistence_replay_v1"))
     assertTrue(commands.contains("prototype_saved_v1"))
@@ -176,6 +211,8 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("network_mock_rules_report_v1"))
     assertTrue(commands.contains("prototype_window_metadata_v1"))
     assertTrue(commands.contains("prototype_menus_v1"))
+    assertTrue(commands.contains("prototype_tooltip_v1"))
+    assertTrue(commands.contains("prototype_drawer_v1"))
     assertTrue(commands.contains("screenshot_hide_prototype_v1"))
     assertTrue(commands.contains("sdk_capabilities_user_id_v1"))
   }

@@ -20,6 +20,103 @@ class PrototypeTimersRuntimeTest {
     }
   }
 
+  @Test
+  fun `appearances run once per visible edge and reset show but not preserving show`() = runTest {
+    val visible = PrototypeCondition(key = "show", equals = PrototypeScalar.BooleanValue(true))
+    val appearSpec =
+      spec.copy(
+        state =
+          mapOf("show" to PrototypeScalar.BooleanValue(true), "n" to PrototypeScalar.Numeric(0.0)),
+        root =
+          PrototypeColumnNode(
+            children =
+              listOf(
+                PrototypeTextNode(
+                  text = "Splash",
+                  visibleWhen = visible,
+                  onAppear = listOf(PrototypeIncrementAction("n")),
+                ),
+              ),
+            onAppear =
+              listOf(
+                timer(
+                  "splash",
+                  actions =
+                    listOf(PrototypeSetStateAction("show", PrototypeScalar.BooleanValue(false))),
+                ),
+              ),
+          ),
+      )
+    val runtime =
+      PrototypeRuntime(
+        appearSpec,
+        PrototypeEventSink { events += it },
+        { testScheduler.currentTime },
+        { ++sequence },
+        warn = { warnings += it },
+        requestScope = backgroundScope,
+      )
+    runtime.shown()
+    assertEquals(PrototypeScalar.Numeric(1.0), runtime.current.state["n"])
+    assertEquals("splash", runtime.timerReports().single().id)
+    runtime.handle(PrototypeInteraction.Tap(emptyList()))
+    assertEquals(PrototypeScalar.Numeric(1.0), runtime.current.state["n"])
+    runtime.advanceClock(100)
+    runtime.act(PrototypeSetStateAction("show", PrototypeScalar.BooleanValue(true)))
+    assertEquals(PrototypeScalar.Numeric(2.0), runtime.current.state["n"])
+    runtime.shown(preservingState = true)
+    assertEquals(PrototypeScalar.Numeric(2.0), runtime.current.state["n"])
+    runtime.shown()
+    assertEquals(PrototypeScalar.Numeric(3.0), runtime.current.state["n"])
+    runtime.close()
+    assertTrue(runtime.timerReports().isEmpty())
+  }
+
+  @Test
+  fun `onAppear loop refuses a second run within the same interaction`() = runTest {
+    val appearSpec =
+      spec.copy(
+        state =
+          mapOf("show" to PrototypeScalar.BooleanValue(true), "n" to PrototypeScalar.Numeric(0.0)),
+        root =
+          PrototypeColumnNode(
+            children =
+              listOf(
+                PrototypeTextNode(
+                  text = "A",
+                  visibleWhen =
+                    PrototypeCondition(key = "show", equals = PrototypeScalar.BooleanValue(true)),
+                  onAppear =
+                    listOf(
+                      PrototypeIncrementAction("n"),
+                      PrototypeSetStateAction("show", PrototypeScalar.BooleanValue(false)),
+                    ),
+                ),
+                PrototypeTextNode(
+                  text = "B",
+                  visibleWhen =
+                    PrototypeCondition(key = "show", equals = PrototypeScalar.BooleanValue(false)),
+                  onAppear =
+                    listOf(PrototypeSetStateAction("show", PrototypeScalar.BooleanValue(true))),
+                ),
+              ),
+          ),
+      )
+    val runtime =
+      PrototypeRuntime(
+        appearSpec,
+        PrototypeEventSink { events += it },
+        { testScheduler.currentTime },
+        { ++sequence },
+        warn = { warnings += it },
+        requestScope = backgroundScope,
+      )
+    runtime.shown()
+    assertEquals(PrototypeScalar.Numeric(1.0), runtime.current.state["n"])
+    assertTrue(warnings.any { it.contains("repeated onAppear") })
+    runtime.close()
+  }
+
   private val events = mutableListOf<PrototypeEvent>()
   private val warnings = mutableListOf<String>()
   private var sequence = 0L

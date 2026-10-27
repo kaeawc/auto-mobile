@@ -24,6 +24,14 @@ internal class PrototypeGestureTaps {
   }
 
   private var pending: Pending? = null
+  private var handledDown: PointerInputChange? = null
+
+  fun markHandled(down: PointerInputChange) {
+    handledDown = down
+  }
+
+  fun wasHandled(down: PointerInputChange): Boolean =
+    handledDown?.let { it.id == down.id && it.uptimeMillis == down.uptimeMillis } == true
 
   fun begin(): Pending = Pending().also { pending = it }
 
@@ -58,6 +66,7 @@ internal fun Modifier.prototypeGestureObserver(
   return pointerInput(taps, presses, onLongPress != null, onDoubleTap != null) {
     awaitEachGesture {
       val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+      taps.markHandled(down)
       val first = observedPress(down, currentLongPress, presses) ?: return@awaitEachGesture
       val up = first.up ?: return@awaitEachGesture
       if (currentDoubleTap.value == null) return@awaitEachGesture
@@ -78,6 +87,7 @@ internal fun Modifier.prototypeGestureObserver(
           taps.finish(waiting, singleTap = true)
           return@awaitEachGesture
         }
+        taps.markHandled(secondDown)
         val second = observedPress(secondDown, currentLongPress, presses)
         if (second?.up != null) {
           second.up.consume()

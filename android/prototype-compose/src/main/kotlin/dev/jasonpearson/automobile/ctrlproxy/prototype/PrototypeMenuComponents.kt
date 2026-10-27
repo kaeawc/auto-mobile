@@ -77,8 +77,24 @@ private fun PrototypeMenuSurface(
       (end - layers.windowBounds.left)
         .toInt()
         .coerceIn(0, (constraints.maxWidth - surface.width).coerceAtLeast(0))
+    val placement =
+      placePrototypeBubble(
+        PrototypeTargetRect(anchor.left, anchor.top, anchor.right, anchor.bottom),
+        PrototypeBubbleSize(surface.width.toFloat(), surface.height.toFloat()),
+        PrototypeTargetRect(
+          layers.windowBounds.left,
+          layers.windowBounds.top,
+          layers.windowBounds.right,
+          layers.windowBounds.bottom,
+        ),
+        PrototypeBubbleOptions(direction == LayoutDirection.Rtl, "top", 0f, 0f, 0f),
+      )
+    val menuTop =
+      if (placement.caret == "bottom" && anchor.top - layers.windowBounds.top >= surface.height)
+        placement.y
+      else anchor.bottom
     val y =
-      (anchor.bottom - layers.windowBounds.top)
+      (menuTop - layers.windowBounds.top)
         .toInt()
         .coerceIn(0, (constraints.maxHeight - surface.height).coerceAtLeast(0))
     layout(constraints.maxWidth, constraints.maxHeight) { surface.place(x, y) }
@@ -185,6 +201,7 @@ internal fun visiblePrototypeSelect(
   if (!node.visible || (node.role in PROTOTYPE_MODAL_ROLES && !node.sheetOpen)) return null
   if (node.role == "select" && node.identity == identity) return node
   val children =
-    if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
+    if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page))
+    else node.childrenForIdentity(identity)
   return children.firstNotNullOfOrNull { visiblePrototypeSelect(it, identity) }
 }

@@ -209,6 +209,11 @@ function creatorPersistenceSource(
     : undefined;
 }
 
+/** Only an Android loss recovery names the serial it expects to replace (#15456). */
+function recoveryRebindFlag(expectedExistingSessionDeviceId: string | undefined): true | undefined {
+  return expectedExistingSessionDeviceId === undefined ? undefined : true;
+}
+
 function isAnonymousCaller(caller: AutolockClient | undefined): boolean {
   return caller?.oneShotCli === true || caller?.mcpSessionId === undefined;
 }
@@ -541,6 +546,7 @@ export class ExplicitDeviceBind {
             expectedExistingSessionDeviceId,
           ),
           recoveryTarget: options.recoveryTarget,
+          recovery: recoveryRebindFlag(expectedExistingSessionDeviceId),
           signal: options.signal,
         },
       ),
@@ -795,6 +801,8 @@ export class ExplicitDeviceBind {
       persistenceSource: string | undefined;
       deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
       recoveryTarget?: SessionRecoveryTarget;
+      /** An Android loss recovery moving its own session, not a client-chosen device. */
+      recovery?: boolean;
       signal?: AbortSignal;
     },
   ): () => Promise<Session> {
@@ -844,6 +852,7 @@ export class ExplicitDeviceBind {
       const session = await this.port.sessionManager.rebindSession(sessionId, deviceId, platform, {
         stableDeviceId,
         deferCleanup: creation.deferCleanup,
+        recovery: creation.recovery,
         signal,
       });
       if (previousDevice) {

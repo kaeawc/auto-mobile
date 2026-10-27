@@ -328,16 +328,23 @@ Unreachable: `rebinding` -> `ended`, `fenced` -> `live`, `ended` -> `fenced` (a
 terminal upgrade happens while `releasing`). `commitReleaseRemoval` returning false is
 unreachable under the slot design (the from-state assertion replaces it).
 
-Serial-changing rebind publication increments `Session.deviceGeneration` (absent
-means zero) and records the immediate `previousDeviceId`, preserving the session
+Only a recovery rebind (`RebindSessionOptions.recovery`: Android AVD recovery or System UI
+replacement, i.e. an explicit bind carrying `expectedExistingSessionDeviceId`, and the terminal-release
+recovery) counts. A client-chosen move (`setActiveDevice`, an explicit bind without that expectation)
+and the undo of a cancelled one change the serial but neither bump the generation nor notify (#15456;
+the conservative reading: when the cause is unclear the rebind is treated as a move). A
+serial-changing recovery rebind increments `Session.deviceGeneration` (absent
+means zero) and records `previousDeviceId`, the serial before the latest recovery (a later client-chosen move keeps both unchanged, so they describe the last recovery, not the current move), preserving the session
 UUID and stable AVD/UDID identity. These two fields are in-memory only, have no DB
 schema or migration, and reset on daemon restart/rehydration. Same-serial rebinds,
 including forced ones, preserve them. `sessionDeviceBinding` defines the shared
 client shape; session-info and active-sessions use its diagnostic field names.
 
 After persistence and live binding/index publication, SessionManager emits once
-per serial-changing rebind through an injected emitter. The process broadcaster
-feeds notification-subscribed control sockets, proxies filter to held sessions,
+per serial-changing recovery rebind through an injected emitter. The process broadcaster
+feeds only the notification-subscribed sockets that hold the session (acquired or restored it,
+hold its autolock route, or last routed a call to it; a derived `base:label` is held through its
+base), then proxies filter again to held sessions,
 and the MCP server forwards `session_device_rebound` as an info logging message.
 Fan-out failures warn without failing recovery. Admitted daemon tool results add
 `_meta["automobile/sessionDevice"]` only after generation zero; steady-state
@@ -611,8 +618,56 @@ and replay the committed disk prefix via `rehydratePersistedSessions`.
 | W1  | Journal hardening, independent: `record()` returns `durable`/`volatile`; directory fsync on first create (skipped on win32 like compaction); warn on mid-file corruption; Noop returns `volatile`; verify and pin restart ordering of `markStaleActiveSessionsExpired` vs journal replay | S    | Journal unit tests with `FakeTerminalReleaseJournalFileSystem`: failed append gives `volatile`, crash simulation, torn and mid-file corruption; restart-ordering test including the `deadlineAt` break case where unapplied intents meet the stale-active sweep |
 | W2  | `SessionRowWriter` for release rows only; replaces `pendingTerminalReleaseRetries`, `lateReleaseWrites`, `pendingNonTerminalReleaseSnapshots`; same ordering (terminal row before commit); adds the terminal generation guard (Q2 risk 3), named in the PR title                         | L    | `releaseRowRetry`, `releasePersistDeadline`, `rowInvariant` unchanged; fault injection failing each write kind at each await; regression test for same-UUID overwrite                                                                                           |
 | W3  | Create / rebind / activity-repair writes move to the writer; superseded-row fields and `OwedSupersededRowReassert` deleted                                                                                                                                                               | L    | `supersededRowReassertRetry`, `rowWritesRemainingCases`; fault injection extended                                                                                                                                                                               |
-| W4  | Behaviour change, isolated: terminal write after the final fence when `journal.record` is `durable` (§5); the only PR that changes ordering                                                                                                                                              | M    | Crash after free; record failure falls back to write-first; supersede after commit is refused; Linux and macOS CI                                                                                                                                               |
+| W4  | Behaviour change, isolated: terminal write after the final fence when `journal.record` is `durable` (§5); the only PR that changes ordering                                                                                                                                              | M    | Crash after free; record failure falls back to write-first; supersede after commit is refused; Linux and macOS CI                                                                                                                                               | **Status: landed for durable intents (#11799 W4)**; see "W4 as landed" below. |
 | W5  | Delete `abandonReleaseSupersededAfterPersist`, `reassertSupersededLiveRow` and the dead rewrite chain                                                                                                                                                                                    | S    | Dead-code check; full row-invariant suites                                                                                                                                                                                                                      |
+
+### W4 as landed
+
+A terminal release whose `journal.record` returned `durable` now fences and records its intent
+synchronously (`fenceTerminalRelease`), runs the final supersede fence, commits the removal, and only
+then writes the row (`persistCommittedTerminalRelease`). The device is freed (`notifySessionRelease`)
+without waiting for the row; the release still awaits the row afterwards, bounded by the persist
+deadline, so `drainReleasePromises` and the late-write tracking are unchanged. A final fence that
+declines lifts the fence and resolves the intent in one turn and has nothing to undo, so
+`abandonReleaseSupersededAfterPersist` is called with `rowWritten = false` and rewrites nothing.
+
+A row write that fails after the commit cannot keep the session: the device is already freed, the
+retry is scheduled (`scheduleTerminalReleaseRetry`), and the release rejects with the write error.
+Before W4 the session stayed published and the device held until a later release retried.
+
+A `volatile` intent keeps the write-first order exactly as before, including the final fence after
+the row landed and the rewrite chain behind it. Decision (open decision 2, Windows): `volatile` is the
+right answer where the directory fsync is skipped; no weaker guarantee is documented. W5 removes the
+chain by dropping the post-persist re-check for volatile releases (a supersede after the row landed
+is refused: the release already won) and deleting `supersededRows.ts`' release-driven half; the
+rebind and activity overlap repair stays and is re-modelled as the writer replacing an unwritten
+`live` desire.
+
+W5a (decided by the owner, 2026-10-26, #11799): no supersede fence is evaluated once a row
+statement is issued, for any intent: the volatile one included. This is a behaviour change, not a dead-code removal: a volatile release
+whose row statement was issued has won, so a newer identity confirmation that arrives during that
+write is too late, where before it ended with the live session rewritten over the terminal row. A
+durable release still declines at the one fence before its row exists. A faulted journal write
+reports `volatile`, so this reaches durable-journal daemons too whenever that write fails, not only
+Windows. `abandonReleaseSupersededAfterPersist`
+is deleted. The release-driven rewrite chain (`reassertSupersededLiveRow` and the owed-retry
+machinery) is now unreachable from a release; it stays until the next slice, whose tests drive it
+directly, and the rebind/activity overlap repair keeps using it.
+
+W5b: the release-driven half of that chain is deleted: `restoreNonTerminalRowOverSupersededRelease`
+and its `Later` form, `replaceSupersededReleaseRow`, the ledger's row-under-pending-release record,
+and the three call sites that reasserted a live row when a late terminal write landed
+(`trackLateReleaseWrite`), when a non-terminal commit settled, or after a fence's row was
+rewritten. What remains is the rebind/activity overlap repair (`oweSupersededRowReassert(session,
+[])`, its retries, drain and activity hook). The superseded-reason plumbing that the overlap repair
+still carries (`remember`, `expectReassert`'s reasons, the statement guard's `supersededReasons`)
+was always empty from production callers, and W5c removes it: the ledger no longer remembers reasons
+(`remember`, `isOwedFor`, `isBeingRewritten`, the owed entry's reasons), `reassertSupersededLiveRow`
+takes only the session, and the live-row rewrite's statement guard refuses every terminal row. What
+stays is the release write's `supersededReasons`, which carries only a terminal upgrade's own earlier
+reasons (`predecessors`). W5c also closes the gap the W5b review found: a finishing rewrite restores
+a terminal fence's row only for a volatile release (whose row was written first) or one that has
+committed, never for a durable release that has not committed and may still decline.
 
 ## 7. Risks
 

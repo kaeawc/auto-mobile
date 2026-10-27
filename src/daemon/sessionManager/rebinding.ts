@@ -62,6 +62,7 @@ export interface SessionRebindingHost {
     platform: Platform,
     stableDeviceId: string | undefined,
     deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
+    recovery?: boolean,
   ): Promise<Session>;
   readonly slotShadowProbe: SessionSlotShadowProbe<Session>;
   endSessionTerminallyReleasedInRow(session: Session): Promise<Error>;
@@ -140,6 +141,7 @@ export class SessionRebinding {
       platform,
       options.stableDeviceId ?? existing.stableDeviceId,
       options.deferCleanup,
+      options.recovery === true,
     );
     const rebind = { session: existing, promise };
     this.host.sessionSlots.setRebind(sessionId, rebind);
@@ -171,6 +173,7 @@ export class SessionRebinding {
     }
     return await this.host.rebindSession(session.sessionId, assignedDevice, platform, {
       force: true,
+      recovery: true,
       terminalReleaseReservationOwner: reservation.owner,
     });
   }
@@ -371,12 +374,13 @@ export class SessionRebinding {
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
+    recovery = false,
   ): Session {
     return {
       ...session,
       mutationRecorder: undefined,
       assignedDevice,
-      ...(assignedDevice !== session.assignedDevice
+      ...(recovery && assignedDevice !== session.assignedDevice
         ? {
             deviceGeneration: (session.deviceGeneration ?? 0) + 1,
             previousDeviceId: session.assignedDevice,

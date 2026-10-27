@@ -3,7 +3,7 @@ import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateP
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { typedRefusalFields } from "../../models/typedRefusalFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -31,6 +31,8 @@ import { HomeScreen } from "./HomeScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { isRotaryButton, RotaryInput, type RotaryButton } from "./RotaryInput";
+import type { DeviceTraits } from "../../utils/android-cmdline-tools/deviceTraits";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 /** iOS hardware buttons that only some devices have, pressed via XCUIDevice.Button (#14100). */
@@ -57,6 +59,25 @@ export interface PressButtonCtrlProxyOverrides {
   frameContextClient?: Pick<AndroidCtrlProxyClient, "validateFrameContext">;
   /** Capability check plus global-action dispatch for the Android system actions (#14095). */
   systemActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction" | "supportsCommand">;
+  /** Build-characteristics read the rotary gate uses (#14920). */
+  deviceTraits?: DeviceTraits;
+}
+
+/** `steps` only counts rotary detents; passing it with another button is a mistake worth refusing. */
+function rejectStepsOnPlainButton(button: string, call: unknown): undefined {
+  const steps =
+    typeof call === "object" && call !== null ? (call as PressButtonCall).steps : undefined;
+  if (steps !== undefined) {
+    throw new ActionableError(
+      `steps applies to rotary_rotate_cw and rotary_rotate_ccw only, not ${button}.`,
+    );
+  }
+  return undefined;
+}
+
+/** `ActionCall` for pressButton: also carries the rotary step count (#14920). */
+export interface PressButtonCall extends ActionCall {
+  steps?: number;
 }
 
 /** A dispatched press whose outcome was never confirmed: replaying it could apply it twice. */
@@ -153,6 +174,7 @@ export class PressButton extends BaseVisualChange {
   private readonly globalActionClient?: PressButtonCtrlProxyOverrides["globalActionClient"];
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
   private readonly systemActionClient?: PressButtonCtrlProxyOverrides["systemActionClient"];
+  private readonly deviceTraits?: DeviceTraits;
 
   constructor(
     device: BootedDevice,
@@ -168,6 +190,7 @@ export class PressButton extends BaseVisualChange {
     this.globalActionClient = collaborators.globalActionClient;
     this.frameContextClient = collaborators.frameContextClient;
     this.systemActionClient = collaborators.systemActionClient;
+    this.deviceTraits = collaborators.deviceTraits;
   }
 
   private iosLockStateInvalidator?: IosLockStateInvalidator;
@@ -225,7 +248,7 @@ export class PressButton extends BaseVisualChange {
     return liveWait ? awaitWhileRequestIsLive(request, signal) : request;
   }
 
-  async execute(button: string, call?: ActionCall): Promise<PressButtonResult>;
+  async execute(button: string, call?: PressButtonCall): Promise<PressButtonResult>;
   /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     button: string,
@@ -234,10 +257,18 @@ export class PressButton extends BaseVisualChange {
   ): Promise<PressButtonResult>;
   async execute(
     button: string,
-    progressOrCall?: ProgressCallback | ActionCall,
+    progressOrCall?: ProgressCallback | PressButtonCall,
     signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    const rotary = isRotaryButton(button) ? this.rotaryInput() : undefined;
+    // Refuse a bad rotary call before observing; `steps` means nothing on any other button.
+    const rotarySteps = isRotaryButton(button)
+      ? await rotary?.prepare(
+          button,
+          typeof progressOrCall === "object" ? progressOrCall?.steps : undefined,
+        )
+      : rejectStepsOnPlainButton(button, progressOrCall);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("pressButton");
@@ -269,7 +300,9 @@ export class PressButton extends BaseVisualChange {
         previousObservation,
       );
       const pressed = await perf.track("buttonPress", () =>
-        this.press(button, undefined, undefined, signal),
+        rotary && isRotaryButton(button)
+          ? this.pressRotary(rotary, button, rotarySteps ?? 1, signal)
+          : this.press(button, undefined, undefined, signal),
       );
       pressSucceeded = pressed.success;
       return pressed;
@@ -281,6 +314,25 @@ export class PressButton extends BaseVisualChange {
       pressSucceeded,
     });
     return result;
+  }
+
+  private async pressRotary(
+    rotary: RotaryInput,
+    button: RotaryButton,
+    steps: number,
+    signal?: AbortSignal,
+  ): Promise<PressButtonResult> {
+    try {
+      return await rotary.press(button, steps, signal);
+    } finally {
+      if (isNavigationPressButton(button)) {
+        this.windowCacheInvalidator.invalidate(this.device, true);
+      }
+    }
+  }
+
+  private rotaryInput(): RotaryInput {
+    return new RotaryInput(this.device, this.adb, this.deviceTraits);
   }
 
   /**

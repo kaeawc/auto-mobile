@@ -88,9 +88,9 @@ enum PrototypeStrictBindings {
             ) }
         }
         for node in nodes {
-            if let field = try secondary(node.value, state: state) { throw PrototypeContractValidator.invalid(
+            if let field = try secondary(node.value, state: state) { throw try PrototypeContractValidator.invalid(
                 "\(node.path).\(field)",
-                "Invalid control binding"
+                PrototypeStateValidator.openWhenError(control(node.value), state)?.message ?? "Invalid control binding"
             ) }
         }
         for action in actions {
@@ -114,9 +114,17 @@ enum PrototypeStrictBindings {
                             let second = try secondary($0.value, state: written)
                             return first != nil || second != nil
                         }) {
-                            throw PrototypeContractValidator.invalid(
+                            throw try PrototypeContractValidator.invalid(
                                 "\(action.path).value",
-                                "setState value does not fit control"
+                                controls.compactMap {
+                                    guard ["tooltip", "drawer"].contains($0.value["type"]?.stringValue ?? ""),
+                                          let error = try PrototypeStateValidator.openWhenError(
+                                              control($0.value),
+                                              written
+                                          )
+                                    else { return nil as String? }
+                                    return "setState value does not fit the control bound to \"\(key)\": \(error.message)"
+                                }.first ?? "setState value does not fit control"
                             )
                         }
                     }

@@ -50,7 +50,7 @@ describe("session device binding", () => {
       generation: 0,
     });
     expect(seen).toHaveLength(0);
-    expect(await manager.rebindSession("s", "b", "android")).toBe(original);
+    expect(await manager.rebindSession("s", "b", "android", { recovery: true })).toBe(original);
     expect(seen).toEqual([
       {
         sessionId: "s",
@@ -64,8 +64,32 @@ describe("session device binding", () => {
     await manager.rebindSession("s", "b", "android", { force: true });
     expect(seen).toHaveLength(1);
     expect(sessionDeviceBinding(original)).toMatchObject({ generation: 1, previousDeviceId: "a" });
-    await manager.rebindSession("s", "c", "android");
+    await manager.rebindSession("s", "c", "android", { recovery: true });
     expect(seen[1]).toMatchObject({ generation: 2, previousDeviceId: "b", deviceId: "c" });
+  });
+
+  test("a client-chosen move changes the serial without a generation bump or a notification (#15456)", async () => {
+    const seen: SessionDeviceRebound[] = [];
+    const manager = makeSessionManager({
+      fakeBarrier: true,
+      sessionDeviceReboundEmitter: { emit: (event) => seen.push(event) },
+    });
+    const original = await manager.createSession("s", "a", "android", { stableDeviceId: "Pixel" });
+    await manager.rebindSession("s", "b", "android");
+    expect(original.assignedDevice).toBe("b");
+    expect(sessionDeviceBinding(original)).toEqual({
+      sessionUuid: "s",
+      deviceId: "b",
+      stableDeviceId: "Pixel",
+      generation: 0,
+    });
+    expect(sessionDeviceInfo(original)).toEqual({});
+    expect(seen).toEqual([]);
+    // A later recovery counts from the manual move: one real recovery, generation one.
+    await manager.rebindSession("s", "c", "android", { recovery: true });
+    expect(seen).toEqual([
+      expect.objectContaining({ previousDeviceId: "b", deviceId: "c", generation: 1 }),
+    ]);
   });
 
   test("a failing injected emitter warns without rejecting the published rebind", async () => {
@@ -80,7 +104,7 @@ describe("session device binding", () => {
     });
     try {
       await manager.createSession("s", "a", "android");
-      expect(await manager.rebindSession("s", "b", "android")).toMatchObject({
+      expect(await manager.rebindSession("s", "b", "android", { recovery: true })).toMatchObject({
         assignedDevice: "b",
         deviceGeneration: 1,
         previousDeviceId: "a",
@@ -94,7 +118,7 @@ describe("session device binding", () => {
   test("session-info and active-sessions expose the same current binding", async () => {
     const manager = makeSessionManager({ fakeBarrier: true });
     await manager.createSession("s", "a", "android", { stableDeviceId: "Pixel" });
-    await manager.rebindSession("s", "b", "android");
+    await manager.rebindSession("s", "b", "android", { recovery: true });
     const request = {
       id: "r",
       type: "mcp_request" as const,
@@ -137,7 +161,7 @@ describe("session device binding", () => {
         ...result,
         _meta: { caller: "kept", [ROUTED_SESSION_META_KEY]: "s" },
       });
-      await manager.rebindSession("s", "b", "android");
+      await manager.rebindSession("s", "b", "android", { recovery: true });
       expect(withAdmittedSessionEcho(result, execution.id, context)).toEqual({
         ...result,
         _meta: {
@@ -162,7 +186,7 @@ describe("session device binding", () => {
     const manager = makeSessionManager({ fakeBarrier: true });
     await manager.createSession("s", "a", "android");
     const other = await manager.createSession("t", "c", "android", { stableDeviceId: "Tablet" });
-    await manager.rebindSession("t", "d", "android");
+    await manager.rebindSession("t", "d", "android", { recovery: true });
     const derived = { ...other, sessionId: "s:second" };
     const peek = manager.peekSession.bind(manager);
     spyOn(manager, "peekSession").mockImplementation((id) =>

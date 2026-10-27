@@ -17,6 +17,7 @@ struct LicensesView: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
+                        .readableContentWidth()
                 }
                 .navigationTitle(notice.name)
                 .navigationBarTitleDisplayMode(.inline)
@@ -28,6 +29,7 @@ struct LicensesView: View {
             }
             .accessibilityIdentifier("license-\(notice.id)")
         }
+        .readableContentWidth()
         .navigationTitle("Open-source licenses")
         .navigationBarTitleDisplayMode(.inline)
     }

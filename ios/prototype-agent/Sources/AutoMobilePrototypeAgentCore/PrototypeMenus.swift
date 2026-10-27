@@ -128,7 +128,7 @@ enum PrototypeMenus {
                 keys = ["type", "pager", "page"]
                 try validatePageAction(fields, path: path)
             case "dismiss": keys = ["type"]
-            case "setData", "appendData", "removeData":
+            case "setData", "appendData", "prependData", "removeData":
                 keys = type == "removeData" ? ["type", "path"] : ["type", "path", "value"]
                 try validateDataAction(fields, type: type, path: path)
             default: throw fail("\(path).type", "Invalid string value")
@@ -236,13 +236,7 @@ enum PrototypeMenus {
 
     /// Bottom-end alignment in window-local coordinates, clamped on both axes.
     static func origin(anchor: CGRect, surface: CGSize, window: CGSize, rightToLeft: Bool = false) -> CGPoint {
-        CGPoint(
-            x: min(
-                max(0, rightToLeft ? anchor.minX : anchor.maxX - surface.width),
-                max(0, window.width - surface.width)
-            ),
-            y: min(max(0, anchor.maxY), max(0, window.height - surface.height))
-        )
+        PrototypePlacement.menuOrigin(anchor: anchor, surface: surface, window: window, rightToLeft: rightToLeft)
     }
 }
 

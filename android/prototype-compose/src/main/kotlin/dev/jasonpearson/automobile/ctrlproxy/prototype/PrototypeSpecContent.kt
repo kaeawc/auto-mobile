@@ -316,8 +316,8 @@ fun PrototypeSpecContent(
               interact,
             )
           }
-          PrototypeExpandedSelect(root, modals, menuLayers, interact)
         }
+        PrototypeExpandedSelect(root, modals, menuLayers, interact)
       }
     }
     }

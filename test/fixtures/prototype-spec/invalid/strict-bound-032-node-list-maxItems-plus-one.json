@@ -88,5 +88,6 @@
       }
     }
   },
-  "expectedPath": "root.maxItems"
+  "expectedPath": "root.maxItems",
+  "expectedMessage": "Invalid number value"
 }

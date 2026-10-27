@@ -32,7 +32,8 @@ class AutoMobilePrototypeCapabilitiesTest {
   /**
    * The test module is a placeholder no production runtime advertises. No platform-namespace field
    * (#15257) has a renderer yet. `window.backdrop` (#15126) is a window-level blur only CtrlProxy's
-   * overlay window can draw (the embedded renderer has no window); iOS adds it with its own slice.
+   * overlay window can draw (the embedded renderer has no window). CtrlProxy registers the haptics
+   * and sound platform modules (#14329); the embedded renderer leaves them to the app.
    */
   // Routes are contract-only until navigation and restore semantics ship.
   private val exclusions =
@@ -41,6 +42,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_test_v1",
       "prototype_backdrop_v1",
       "prototype_platform_namespace_v1",
+      "prototype_platform_haptics_v1",
+      "prototype_platform_sound_v1",
     )
 
   @Test

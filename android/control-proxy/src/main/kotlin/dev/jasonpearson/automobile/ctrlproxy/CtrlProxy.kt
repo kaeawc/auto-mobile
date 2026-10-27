@@ -946,7 +946,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private val prototypePlatform =
-    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform()
+    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform(this)
 
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is

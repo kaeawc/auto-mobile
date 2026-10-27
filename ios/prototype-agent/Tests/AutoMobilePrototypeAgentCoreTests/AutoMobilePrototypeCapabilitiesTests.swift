@@ -18,7 +18,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
         // transition choreography (#15247). Style effects (#15128) have a validated contract and
         // no renderer yet, and neither does any platform-namespace field (#15257). Android window and
-        // modal motion (#15113) is Android-only (iOS is #14684).
+        // modal motion (#15113) is Android-only (iOS is #14684). The haptics and sound platform
+        // modules (#14329) are advertised through the platform registry the agent builds at launch,
+        // not through the static list this test reads.
         // Routes are contract-only until navigation and restore semantics ship.
         let exclusions: Set<String> = [
             "prototype_routes_v1",
@@ -27,6 +29,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1", "prototype_window_motion_v1",
+            "prototype_platform_haptics_v1", "prototype_platform_sound_v1",
         ]
         XCTAssertTrue(supported.contains("prototype_lazy_list_v1"))
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")

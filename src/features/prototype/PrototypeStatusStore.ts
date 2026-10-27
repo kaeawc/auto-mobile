@@ -1,3 +1,4 @@
+import type { PrototypeFeedbackEntry } from "./prototypeFeedbackLog";
 import { shownBackdrop, type PrototypeBackdropOutcome } from "./prototypeBackdrop";
 import { prototypeDegradedEffectsField, type DegradedEffect } from "./prototypeDegradedEffects";
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
@@ -61,6 +62,8 @@ export interface PrototypeLastResult {
    */
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  /** The device's last haptic and sound calls for this prototype, from an `inspect` (#14329). */
+  feedbackLog?: PrototypeFeedbackEntry[];
   shaderFailures?: Record<string, string>;
   degradedEffects?: DegradedEffect[];
   success: boolean;
@@ -76,6 +79,11 @@ export interface PrototypeEventState {
   context?: PrototypeEvent["context"];
   contextTruncated?: true;
 }
+/** The device-reported feedback log of an adopted prototype, copied so the report stays untouched. */
+function adoptedFeedbackLog(prototype: AdoptedPrototype): Pick<PrototypeLastResult, "feedbackLog"> {
+  return prototype.feedbackLog ? { feedbackLog: structuredClone(prototype.feedbackLog) } : {};
+}
+
 export interface AdoptedPrototype {
   data?: PrototypeData;
   id: string;
@@ -85,6 +93,7 @@ export interface AdoptedPrototype {
   appearance?: ShownPrototypeAppearance;
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
+  feedbackLog?: PrototypeFeedbackEntry[];
   shaderFailures?: Record<string, string>;
   degradedEffects?: DegradedEffect[];
   pages: PrototypeEvent["pages"];
@@ -278,6 +287,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
       ...prototypeDegradedEffectsField(prototype.degradedEffects),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
+      ...adoptedFeedbackLog(prototype),
       shaderFailures: structuredClone(prototype.shaderFailures),
       success: true,
       timestamp: this.clock.now(),

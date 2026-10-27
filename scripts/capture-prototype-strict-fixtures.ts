@@ -483,6 +483,146 @@ for (const name of originalValid) {
   }
   walk(result.data, result.data, definitions.spec, [], "spec");
 }
+// Haptic and sound feedback calls (#14329): closed effect and sound lists, a 0-100 volume.
+const feedbackEffects = [
+  "click",
+  "tick",
+  "heavyClick",
+  "doubleClick",
+  "selection",
+  "success",
+  "warning",
+  "error",
+  "impactLight",
+  "impactMedium",
+  "impactHeavy",
+  "longPress",
+];
+const feedbackCall = (name: string, args?: unknown) => ({
+  type: "platform",
+  call: name,
+  ...(args ? { args } : {}),
+});
+const feedbackSpec = (
+  onTap: unknown[],
+  requires: string[] = ["haptics", "sound"],
+  extra: Record<string, unknown> = {},
+) => ({
+  id: "feedback",
+  window: { placement: { type: "fullscreen" } },
+  requires: { platform: requires },
+  root: { type: "button", label: "Go", onTap },
+  ...extra,
+});
+const feedbackValid = {
+  "platform-feedback-haptics-sound": {
+    id: "feedback",
+    window: { placement: { type: "fullscreen" } },
+    requires: { platform: ["haptics", "sound"] },
+    root: {
+      type: "column",
+      children: [
+        ...feedbackEffects.map((effect) => ({
+          type: "button",
+          label: effect,
+          onTap: [feedbackCall("haptics.perform", { effect: { value: effect } })],
+        })),
+        {
+          type: "button",
+          label: "Send",
+          onTap: [feedbackCall("sound.play", { sound: { value: "send" }, volume: { value: 80 } })],
+        },
+        ...["click", "receive", "shutter"].map((sound) => ({
+          type: "button",
+          label: sound,
+          onTap: [feedbackCall("sound.play", { sound: { value: sound } })],
+        })),
+        {
+          type: "button",
+          label: "Quiet",
+          onTap: [feedbackCall("sound.play", { sound: { value: "click" }, volume: { value: 0 } })],
+        },
+        {
+          type: "button",
+          label: "Loud",
+          onTap: [
+            feedbackCall("sound.play", { sound: { value: "click" }, volume: { value: 100 } }),
+          ],
+        },
+      ],
+    },
+  },
+  "platform-feedback-bound-effect": feedbackSpec(
+    [feedbackCall("haptics.perform", { effect: { state: "k" } })],
+    ["haptics"],
+    { state: { k: "click" } },
+  ),
+  "platform-feedback-handler": {
+    id: "feedback",
+    window: { placement: { type: "fullscreen" } },
+    state: { liked: false },
+    requires: { platform: ["haptics"] },
+    root: {
+      type: "button",
+      label: "Like",
+      onTap: [
+        { type: "toggle", key: "liked" },
+        feedbackCall("haptics.perform", { effect: { value: "selection" } }),
+      ],
+    },
+  },
+};
+const feedbackInvalid: Record<string, unknown> = {
+  "platform-feedback-unknown-effect": feedbackSpec([
+    feedbackCall("haptics.perform", { effect: { value: "buzz" } }),
+  ]),
+  "platform-feedback-missing-effect": feedbackSpec([feedbackCall("haptics.perform", {})]),
+  "platform-feedback-unknown-arg": feedbackSpec([
+    feedbackCall("haptics.perform", { effect: { value: "click" }, strength: { value: 1 } }),
+  ]),
+  "platform-feedback-unknown-call": feedbackSpec([
+    feedbackCall("haptics.vibrate", { effect: { value: "click" } }),
+  ]),
+  "platform-feedback-undeclared-haptics": feedbackSpec(
+    [feedbackCall("haptics.perform", { effect: { value: "click" } })],
+    ["sound"],
+  ),
+  "platform-feedback-undeclared-sound": feedbackSpec(
+    [feedbackCall("sound.play", { sound: { value: "click" } })],
+    ["haptics"],
+  ),
+  "platform-feedback-unknown-sound": feedbackSpec([
+    feedbackCall("sound.play", { sound: { value: "cheer" } }),
+  ]),
+  "platform-feedback-asset-sound": feedbackSpec([
+    feedbackCall("sound.play", { sound: { asset: "ding" } }),
+  ]),
+  "platform-feedback-missing-sound": feedbackSpec([
+    feedbackCall("sound.play", { volume: { value: 50 } }),
+  ]),
+  "platform-feedback-volume-over": feedbackSpec([
+    feedbackCall("sound.play", { sound: { value: "click" }, volume: { value: 101 } }),
+  ]),
+  "platform-feedback-volume-negative": feedbackSpec([
+    feedbackCall("sound.play", { sound: { value: "click" }, volume: { value: -1 } }),
+  ]),
+  "platform-feedback-volume-fractional": feedbackSpec([
+    feedbackCall("sound.play", { sound: { value: "click" }, volume: { value: 50.5 } }),
+  ]),
+  "platform-feedback-read-state": feedbackSpec(
+    [feedbackCall("haptics.perform", { effect: { value: "click" } })],
+    ["haptics"],
+    {
+      root: { type: "text", text: "{platform:/haptics/last}" },
+    },
+  ),
+};
+for (const [name, value] of Object.entries(feedbackValid)) {
+  capture(name, value);
+}
+for (const [name, value] of Object.entries(feedbackInvalid)) {
+  capture(name, value);
+}
 // Frosted backdrops (#15126): a closed material list, a whole-dp blur cap and a colour tint.
 const backdropSpec = (backdrop: unknown, placement: unknown = { type: "fullscreen" }) => ({
   ...base(),

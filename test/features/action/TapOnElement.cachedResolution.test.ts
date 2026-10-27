@@ -351,6 +351,28 @@ describe("TalkBack off cached observation safety", () => {
   });
 });
 
+describe("Android long press long-click advertisement", () => {
+  test.each([
+    { actions: ["click"], expected: false },
+    { actions: ["click", "long_click"], expected: true },
+    { actions: undefined, expected: undefined },
+  ])("reports $expected for actions $actions", async ({ actions, expected }) => {
+    const target: Element = actions ? { ...row("Apps", 300), actions } : row("Apps", 300);
+    const current = page([target], "Main");
+    const h = harness(current, current);
+    const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
+    h.tap.refreshViewHierarchy = async (timeoutMs) =>
+      (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy;
+    const result = await h.tap.execute({
+      text: "Apps",
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.longClickAdvertised).toBe(expected);
+  });
+});
+
 describe("TalkBack cached observation after same-app BACK", () => {
   test("rejects text present only on cached screen A without any tap", async () => {
     const h = sameAppBack();

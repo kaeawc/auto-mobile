@@ -81,7 +81,7 @@ test("native coverage is exactly today's SwiftUI control set", () => {
       .filter(([, v]) => v.ios === "native")
       .map(([k]) => k)
       .sort(),
-  ).toEqual(["button", "datePicker", "slider", "timePicker"]);
+  ).toEqual(["button", "datePicker", "pasteButton", "slider", "timePicker"]);
 });
 
 for (const doc of ["android/prototype-ux.md", "ios/prototype-agent.md"]) {

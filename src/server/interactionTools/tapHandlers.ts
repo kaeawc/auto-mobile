@@ -36,6 +36,7 @@ export function buildTapOnResultMessage(
   searchSummary: string | undefined,
   activatedSubtext?: { text: string; occurrence: number },
   selectorLabel?: string,
+  longPress?: Pick<TapOnElementResult, "action" | "longClickAdvertised">,
 ): string {
   const details = buildTapOnResultDetails(
     selectedElement,
@@ -43,7 +44,14 @@ export function buildTapOnResultMessage(
     activatedSubtext,
     selectorLabel,
   );
-  return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
+  // A long press must not read as a tap: callers judged a held press "delivered as a tap" from
+  // the shared "Tapped on element" wording.
+  const isLongPress = longPress?.action === "longPress";
+  if (isLongPress && longPress?.longClickAdvertised === false) {
+    details.push("target advertises no long-click action");
+  }
+  const verb = isLongPress ? "Long-pressed element" : "Tapped on element";
+  return details.length > 0 ? `${verb} (${details.join("; ")})` : verb;
 }
 
 /**
@@ -208,6 +216,7 @@ function buildTapOnSuccessMessage(
     searchSummary,
     result.activatedSubtext,
     selectorLabel,
+    result,
   );
 }
 

@@ -27,6 +27,7 @@ import { toSearchable } from "../utility/SearchableNode";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { parseBounds } from "../../utils/bounds";
 import { IosKeyboardNativeEditableTracker } from "./iosKeyboardNativeEditable";
+import { readIosTokenField } from "./iosTokenField";
 import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
@@ -182,6 +183,10 @@ export interface FocusedTextField {
   nativeEditableValues?: Readonly<Record<string, string>>;
   /** Value of the sole native iOS editable above the on-screen keyboard (blank reads as ""). */
   keyboardNativeEditableValue?: string;
+  /** Committed token labels of a recipient/token field; absent for an ordinary text field. */
+  tokens?: readonly string[];
+  /** A token field's value minus its token labels: the text typed after the last token. */
+  trailingText?: string;
 }
 
 export interface FocusedTextFieldOptions {
@@ -229,7 +234,7 @@ export function getFocusedTextField(
         if (!isFocusedTextInputProperties(properties)) {
           return;
         }
-        const field = readFocusedTextField(properties, options);
+        const field = readFocusedTextFieldWithTokens(node, properties, options, parser);
         if (field === undefined) {
           return;
         }
@@ -351,6 +356,21 @@ function readFocusedTextField(
   return value !== undefined || options.includeIosNativeEditableValues
     ? { value, secure }
     : undefined;
+}
+
+/** The focused field's value, plus the committed tokens of a recipient/token field. */
+function readFocusedTextFieldWithTokens(
+  node: ViewHierarchyNode,
+  properties: Record<string, unknown>,
+  options: FocusedTextFieldOptions,
+  parser: ElementParser,
+): FocusedTextField | undefined {
+  const field = readFocusedTextField(properties, options);
+  if (field === undefined || field.secure) {
+    return field;
+  }
+  const tokenState = readIosTokenField(node, field.value, parser);
+  return tokenState === undefined ? field : { ...field, ...tokenState };
 }
 
 function iosFieldValueOrBlank(textSources: Readonly<Record<string, string>>): string {

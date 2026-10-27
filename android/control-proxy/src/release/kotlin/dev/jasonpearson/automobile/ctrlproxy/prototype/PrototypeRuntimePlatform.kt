@@ -1,8 +1,16 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.content.Context
-import dev.jasonpearson.automobile.prototype.PrototypePlatform
+import dev.jasonpearson.automobile.prototype.*
 
-/** Haptics and sound need no runtime permission; no permission-needing module is registered. */
-internal fun prototypeRuntimePlatform(context: Context): PrototypePlatform =
-  PrototypePlatform(prototypeFeedbackModules(context))
+/**
+ * Haptics, sound and the clipboard need no runtime permission the overlay would have to request.
+ */
+internal fun prototypeRuntimePlatform(
+  context: Context,
+  clipboard: PrototypeClipboard? = null,
+): PrototypePlatform =
+  PrototypePlatform(
+    prototypeFeedbackModules(context) +
+      listOfNotNull(clipboard?.let { PrototypeClipboardModule(it) }),
+  )

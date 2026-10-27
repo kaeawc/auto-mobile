@@ -21,6 +21,11 @@
     "checks-form.json",
     "checks-rules.json",
     "choreography.json",
+    "clipboard-copy.json",
+    "clipboard-has-text.json",
+    "clipboard-paste-button.json",
+    "clipboard-paste.json",
+    "clipboard-sensitive-copy.json",
     "color-role-and-corner-tokens.json",
     "component-gallery.json",
     "content-description.json",
@@ -499,6 +504,13 @@
     "choreography-stagger-unknown-order.json",
     "choreography-total-delay-too-long.json",
     "choreography-transition-unknown-type.json",
+    "clipboard-bad-label.json",
+    "clipboard-bad-sensitive.json",
+    "clipboard-bad-text.json",
+    "clipboard-over-limit.json",
+    "clipboard-paste-button-without-into.json",
+    "clipboard-undeclared.json",
+    "clipboard-unknown-call.json",
     "color-pair-bad-hex.json",
     "color-pair-bad-role.json",
     "color-pair-empty.json",
@@ -1137,6 +1149,7 @@
     "strict-gate-prototype_network_v1.json",
     "strict-gate-prototype_pager_options_v1.json",
     "strict-gate-prototype_pager_state_key_v1.json",
+    "strict-gate-prototype_platform_clipboard_v1.json",
     "strict-gate-prototype_platform_device_v1.json",
     "strict-gate-prototype_platform_haptics_v1.json",
     "strict-gate-prototype_platform_media_items_v1.json",
@@ -2131,6 +2144,15 @@
       "prototype_stack_patterns_v1",
       "prototype_stack_transitions_v1",
       "prototype_stack_v1"
-    ]
+    ],
+    "clipboard-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-has-text.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-paste-button.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-paste.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1"
+    ],
+    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"]
   }
 }

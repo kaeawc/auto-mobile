@@ -159,6 +159,10 @@ enum PrototypeBundleCapabilities {
             if let module = PrototypeDataPointer.tokens(pointer).first,
                let capability = PrototypePlatformValidator.modules[module]?.capability { names.insert(capability) }
         }
+        if type == "pasteButton" {
+            names.insert("prototype_platform_v1")
+            names.insert("prototype_platform_clipboard_v1")
+        }
         if type == "platform", let method = fields["call"]?.stringValue {
             names.insert("prototype_platform_v1")
             if let module = method.split(separator: ".").first,

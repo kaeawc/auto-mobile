@@ -294,7 +294,7 @@
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
             storage: PrototypeStorageCoordinator? = nil,
-            registry: PrototypePlatformRegistry = .empty
+            registry: PrototypePlatformRegistry = .system
         ) {
             platformRegistry = registry
             self.clock = clock
@@ -545,6 +545,10 @@
                 if reachedStart { events += session.run(node.onStartReached ?? []) }
                 return events
             }
+        }
+
+        func paste(_ text: String, into: String) {
+            apply { $0.pasteClipboard(text, into: into) }
         }
 
         func run(_ actions: [PrototypeAction]) {

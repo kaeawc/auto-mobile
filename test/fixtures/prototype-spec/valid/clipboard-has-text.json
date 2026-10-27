@@ -1,0 +1,21 @@
+{
+  "id": "clipboard",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["clipboard"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Clipboard",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "clipboard.hasText"
+      }
+    ]
+  }
+}

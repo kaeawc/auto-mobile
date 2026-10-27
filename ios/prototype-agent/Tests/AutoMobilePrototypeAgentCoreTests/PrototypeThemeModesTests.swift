@@ -35,6 +35,7 @@ final class PrototypeThemeModesTests: XCTestCase {
         let capabilities = PrototypeAgentProtocol.capabilities
         XCTAssertEqual(Set(capabilities).count, capabilities.count)
         XCTAssertTrue(capabilities.contains("prototype_theme_modes_v1"))
+        XCTAssertTrue(capabilities.contains("prototype_platform_clipboard_v1"))
     }
 
     // MARK: Gradient

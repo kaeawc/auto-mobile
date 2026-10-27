@@ -1015,7 +1015,8 @@ private fun RenderPrototypeNodeContent(
       PrototypeCheckedControl(node, parentModifier) {
         RenderPrototypeToggle(node, modifier, controlInteract)
       }
-    "button" -> RenderPrototypeButton(node, modifier, controlInteract)
+    "button",
+    "pasteButton" -> RenderPrototypeButton(node, modifier, controlInteract)
     "radioGroup" ->
       PrototypeCheckedControl(node, parentModifier) {
         RenderPrototypeRadioGroup(node, modifier, controlInteract)

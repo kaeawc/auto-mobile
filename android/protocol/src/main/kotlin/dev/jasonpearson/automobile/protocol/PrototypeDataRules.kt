@@ -37,7 +37,7 @@ internal object PrototypeDataRules {
         fail("data", "Data byte limit exceeded")
       else null
 
-  val dataActionTypes = setOf("setData", "appendData", "removeData")
+  val dataActionTypes = setOf("setData", "appendData", "upsertData", "removeData")
 
   /**
    * Static checks for `setData`, `appendData` and `removeData` (#12519) that the contract cannot
@@ -64,10 +64,13 @@ internal object PrototypeDataRules {
           "A data write value must be a string, boolean, finite number, array or object",
         )
       }
-      if (type == "appendData" && !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)) {
+      if (
+        (type == "appendData" || type == "upsertData") &&
+          !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)
+      ) {
         val target = PrototypeDataPointer.resolve(data, pointer)
         if (target != null && target !is JsonArray) {
-          return fail("$path.path", "appendData target is not an array")
+          return fail("$path.path", "$type target is not an array")
         }
       }
     }

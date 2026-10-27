@@ -4,6 +4,7 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   pointerSchema,
   prototypeDataActionValueSchema,
+  prototypeEventBindingSchema,
   stateKeySchema,
 } from "./prototypeActionValues";
 
@@ -20,7 +21,7 @@ import {
 export const prototypePlatformBindingSchema = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ platform: pointerSchema }).strict(),
-  z.object({ event: pointerSchema }).strict(),
+  prototypeEventBindingSchema,
 ]);
 export type PrototypePlatformBinding = z.infer<typeof prototypePlatformBindingSchema>;
 

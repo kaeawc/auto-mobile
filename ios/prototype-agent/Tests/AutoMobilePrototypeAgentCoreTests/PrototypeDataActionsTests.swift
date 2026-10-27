@@ -30,6 +30,31 @@ final class PrototypeDataActionsTests: XCTestCase {
 
     // MARK: Pure write
 
+    func testUpsertReplacesTheSameKeyOtherwiseAppendsAndMaxItemsDropsTheOldest() throws {
+        let data = #"{"m":[{"id":"a","t":1},{"id":"b","t":2}]}"#
+        func upsert(_ value: String, maxItems: Int? = nil) throws -> Result<[String: JSONValue], PrototypeDataWriteFailure> {
+            try PrototypeDataWrite.apply(
+                object(data), op: .upsert, path: "/data/m", value: object(value).isEmpty ? nil : .object(object(value)),
+                key: "/id", maxItems: maxItems
+            )
+        }
+        XCTAssertEqual(
+            try upsert(#"{"id":"b","t":9}"#).get(),
+            try object(#"{"m":[{"id":"a","t":1},{"id":"b","t":9}]}"#)
+        )
+        XCTAssertEqual(
+            try upsert(#"{"id":"c","t":3}"#, maxItems: 2).get(),
+            try object(#"{"m":[{"id":"b","t":2},{"id":"c","t":3}]}"#)
+        )
+        XCTAssertEqual(failure(try upsert(#"{"t":3}"#)), .invalidValue)
+        XCTAssertEqual(failure(try upsert(#"{"id":"c"}"#, maxItems: 0)), .invalidValue)
+        XCTAssertEqual(failure(try upsert(#"{"id":"c"}"#, maxItems: 501)), .invalidValue)
+        XCTAssertEqual(
+            try PrototypeDataWrite.apply(object(#"{"log":[1,2,3]}"#), op: .append, path: "/data/log", value: .number(4), maxItems: 3).get(),
+            try object(#"{"log":[2,3,4]}"#)
+        )
+    }
+
     func testSetCreatesAndReplacesObjectMembersAtANestedPointer() throws {
         let created = try write(#"{"a":{"b":{}}}"#, .set, "/data/a/b/c", .string("x"))
         XCTAssertEqual(try created.get(), try object(#"{"a":{"b":{"c":"x"}}}"#))

@@ -7,6 +7,7 @@ import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChild
 import { PROTOTYPE_REQUEST_EVENT_NAME, prototypeIntoError } from "./prototypeRequest";
 import type { Rule } from "./prototypeBindingValidation";
 import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
+import { prototypeDeviceChannelFields, prototypeRealtimeAdditionFields } from "./prototypeChannels";
 
 /**
  * Host-side rules for the platform vocabulary (#14294): the `platform` action, root `requires`,
@@ -70,6 +71,13 @@ export interface PrototypePlatformModule {
    * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
    */
   state?: Record<string, PrototypePlatformStateEntry>;
+  /**
+   * A module whose state is kept per realtime channel (#14261): `/<module>/<channel>[/<key>]`
+   * reads the keys listed here for a channel declared in the spec's root `channels`.
+   */
+  channelState?: Record<string, PrototypePlatformStateEntry>;
+  /** A transport sub-capability of this module, such as the realtime device transport. */
+  deviceCapability?: string;
 }
 
 /** The shared `platformModules` table: each module's calls, events and capability. */
@@ -242,6 +250,17 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     uses.push({ kind: "handler", path: at, event });
     scanValue(handlers![event], at, true, uses);
   }
+  // A channel's routes and hooks run like handlers: `{event}` reads the frame (#14261).
+  const channels = record(root.channels);
+  for (const id of channels ? sortedKeys(channels) : []) {
+    const channel = record(channels![id]);
+    const at = memberPath("channels", id);
+    for (const key of ["routes", "onOpen", "onClose", "onError"]) {
+      if (channel && channel[key] !== undefined) {
+        scanValue(channel[key], `${at}.${key}`, true, uses);
+      }
+    }
+  }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
     scanValue(node, path, false, uses);
   }
@@ -304,10 +323,18 @@ function argumentsError(
   return undefined;
 }
 
+interface PlatformContext {
+  declared: Set<string>;
+  permissions: Set<string>;
+  background: Set<string>;
+  /** The ids of the spec's realtime channels. */
+  channels: Set<string>;
+}
+
 function callError(
   action: Raw,
   path: string,
-  context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
+  context: PlatformContext,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   const call = prototypePlatformCall(action.call);
@@ -349,9 +376,27 @@ function strings(value: unknown): Set<string> {
   return new Set(Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : []);
 }
 
+function channelReadError(
+  use: { path: string; pointer: string },
+  state: Record<string, PrototypePlatformStateEntry>,
+  channels: Set<string>,
+): PrototypePlatformError | undefined {
+  const [, channel, key, ...rest] = use.pointer
+    .slice(1)
+    .split("/")
+    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+  if (!channel || rest.length > 0 || (key !== undefined && !Object.hasOwn(state, key))) {
+    return { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  }
+  return channels.has(channel)
+    ? undefined
+    : { path: use.path, message: `Unknown channel ${channel}` };
+}
+
 function readError(
   use: { path: string; pointer: string },
   declared: Set<string>,
+  channels: Set<string>,
 ): PrototypePlatformError | undefined {
   const name = prototypePlatformPointerModule(use.pointer);
   if (!module(name)) {
@@ -359,6 +404,10 @@ function readError(
   }
   if (!declared.has(name)) {
     return notDeclared(use.path, name);
+  }
+  const channelState = module(name)?.channelState;
+  if (channelState) {
+    return channelReadError(use, channelState, channels);
   }
   const state = module(name)?.state;
   const key = prototypePlatformPointerKey(use.pointer);
@@ -369,7 +418,7 @@ function readError(
 
 function useError(
   use: PrototypePlatformUse,
-  context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
+  context: PlatformContext,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   switch (use.kind) {
@@ -383,7 +432,7 @@ function useError(
     case "call":
       return callError(use.action, use.path, context, check);
     case "read":
-      return readError(use, context.declared);
+      return readError(use, context.declared, context.channels);
     case "event":
       return use.inHandler
         ? undefined
@@ -425,6 +474,7 @@ export function prototypePlatformError(
       ),
     ),
     background: strings(requires.background),
+    channels: new Set(Object.keys(record(root.channels) ?? {})),
   };
   const error = requiresError(root);
   if (error) {
@@ -522,12 +572,42 @@ export function prototypePlatformUnsupportedMessage(
   return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, "the platform vocabulary");
 }
 
+/** Extra authored paths a module's capability covers beyond ordinary platform uses. */
+const MODULE_ADDITIONS: Record<string, (spec: unknown) => string[]> = {
+  // Channels, `upsertData` and `appendData.maxItems` are gated by the realtime capability (#14261).
+  realtime: prototypeRealtimeAdditionFields,
+};
+
 /** One generated gate per module in the `platformModules` table. */
 export const PROTOTYPE_PLATFORM_MODULE_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).map(
   ([name, definition]) => ({
     capability: definition.capability,
-    fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
+    fields: (spec: unknown) =>
+      unique([
+        ...prototypePlatformModuleFields(spec, name),
+        ...(MODULE_ADDITIONS[name]?.(spec) ?? []),
+      ]),
     unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
       unsupported(fields, platform, definition.capability, `the ${name} platform module`),
   }),
 );
+
+/** Transport sub-gates of a module (`deviceCapability`), for the paths needing the device transport. */
+const DEVICE_TRANSPORT_FIELDS: Record<string, (spec: unknown) => string[]> = {
+  realtime: prototypeDeviceChannelFields,
+};
+
+/** The device-transport capability gates, kept apart from the one-per-module gates above. */
+export const PROTOTYPE_PLATFORM_DEVICE_TRANSPORT_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES)
+  .filter(([name, definition]) => definition.deviceCapability && DEVICE_TRANSPORT_FIELDS[name])
+  .map(([name, definition]) => ({
+    capability: definition.deviceCapability!,
+    fields: DEVICE_TRANSPORT_FIELDS[name]!,
+    unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+      unsupported(
+        fields,
+        platform,
+        definition.deviceCapability!,
+        `a ${name} channel with via "device"`,
+      ),
+  }));

@@ -159,7 +159,7 @@ enum PrototypeRequestValidator {
     }
 
     /// A declared string state key; a key holding a placeholder is bound per repeat row and checked only there.
-    private static func statusKey(_ raw: JSONValue?, path: String, state: [String: JSONValue]) throws {
+    static func statusKey(_ raw: JSONValue?, path: String, state: [String: JSONValue]) throws {
         guard let raw else { return }
         guard case let .string(key) = raw, !key.isEmpty else { throw fail(path, "statusKey must be a state key") }
         guard !key.contains("{") else { return }
@@ -167,7 +167,7 @@ enum PrototypeRequestValidator {
         guard stored.stringValue != nil else { throw fail(path, "statusKey requires a string state key") }
     }
 
-    private static func entries(_ raw: JSONValue?, path: String, isHeader: Bool) throws {
+    static func entries(_ raw: JSONValue?, path: String, isHeader: Bool) throws {
         guard let raw else { return }
         guard case let .object(fields) = raw, fields.count <= PrototypeLimits.maxRequestEntries else {
             throw fail(path, "Expected an object of at most \(PrototypeLimits.maxRequestEntries) entries")

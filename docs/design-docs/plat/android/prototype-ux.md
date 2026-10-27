@@ -1012,7 +1012,7 @@ or sheet binding's scalar type at runtime (renderer-enforced, #9300).
 
 ### Data actions (#12519)
 
-`setData {path, value}`, `appendData {path, value}` and `removeData {path}` let a tap change `/data`
+`setData {path, value}`, `appendData {path, value, maxItems?}`, `upsertData {path, key, value, maxItems?}` (#14261, see Realtime channels) and `removeData {path}` let a tap change `/data`
 on the device, so "add to cart" or "delete row" needs no agent round trip. They require
 `prototype_data_actions_v1` (which a device advertises only with `prototype_data_model_v1`); the
 host refuses a show, or a patch whose resulting spec contains one, on a device without it, through
@@ -1445,6 +1445,42 @@ module in release; debug additionally registers the permission-free test module.
 
 The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
 `invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
+
+### Realtime channels (#14261, `prototype_platform_realtime_v1`, contract only)
+
+A root `channels` block declares live WebSocket and SSE connections whose frames are written into
+`/data` and state without an agent round trip. This slice is the **contract**: schema, validators,
+fixtures and the pure rules. The runtimes (host #14268, Android device #14269, iOS device #14270)
+are separate, so no runtime advertises the capability yet and a spec using it is refused with the
+usual capability error.
+
+- `channels` is keyed by id (letters, digits, underscores). Each channel has `kind`
+  (`websocket` or `sse`), `url` (`ws`/`wss` or `http`/`https`, text placeholders allowed), optional
+  `protocols` (websocket only), `headers` (the request header rules plus no `Sec-WebSocket-*` and no
+  `Last-Event-ID`), `via` (`host` default, or `device`), `connect` (`onShow` default or `manual`),
+  `statusKey` (a declared string state key), `reconnect {maxAttempts, initialDelayMs,
+  maxDelayMs}` (defaults 8, 500, 30000; `maxDelayMs >= initialDelayMs`), `decode` (`json` default or
+  `text`), `routes` and the `onOpen`, `onClose` and `onError` hooks.
+- A route is `{when?, actions}`. `when` is `{pointer, equals|exists}` against the decoded JSON frame
+  (not with `decode: "text"`), plus `event` on SSE channels. Inside routes and hooks `{event: "/ptr"}`
+  reads the frame; the empty pointer is the whole frame. Routes may not run `request` or navigation
+  actions, so a frame cannot drive traffic or screen changes.
+- `requires.platform` must list `realtime`. The module's calls are `realtime.connect`,
+  `realtime.disconnect` and `realtime.send` (websocket only); the `channel` argument must name a
+  declared channel. Per channel state is read as `{platform: "/realtime/<id>/<key>"}` with keys
+  `status`, `attempt`, `framesIn`, `framesDropped`, `closeCode`, `closeReason` and `error`.
+- `upsertData {path, key, value, maxItems?}` replaces the array element whose `key` pointer equals
+  the written value's, else appends; `appendData` takes `maxItems` too. Both keep the newest
+  `maxItems` (1 to 500). A value without the key member is `invalid_value`.
+- Pure rules shared by every runtime and replayed from `test/fixtures/prototype-spec/realtime/`:
+  `prototypeChannelBackoffDelay` (full jitter, `floor(random * min(max, initial * 2^(attempt-1)))`,
+  null past `maxAttempts`) and `coalescePrototypeChannelFrames` (a run of same-target `setData` or
+  `setState` frames in one flush window keeps only the last; appends and upserts are never merged).
+  Kotlin (`PrototypeChannelBackoff`, `PrototypeChannelCoalescer`) and TypeScript replay the same
+  vectors; the Swift twins land with the iOS runtime.
+- Capabilities: `prototype_platform_realtime_v1` gates `channels`, `upsertData` and
+  `appendData.maxItems`; `prototype_platform_realtime_device_v1` additionally gates a channel with
+  `via: "device"`.
 
 ### Conditions
 

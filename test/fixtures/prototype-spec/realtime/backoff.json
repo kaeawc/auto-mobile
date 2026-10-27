@@ -1,0 +1,150 @@
+{
+  "note": "delayMs = floor(random * min(maxDelayMs, initialDelayMs * 2^(attempt-1))); null once attempt > maxAttempts or attempt < 1. Each attempt consumes the next random, cycling the list. Defaults: maxAttempts 8, initialDelayMs 500, maxDelayMs 30000.",
+  "cases": [
+    {
+      "name": "defaults, full jitter at the ceiling edge",
+      "reconnect": {},
+      "randoms": [0, 0.5, 0.999, 0.25, 0.75, 0.125, 0.875, 0.5, 0.5],
+      "expected": [
+        {
+          "attempt": 1,
+          "delayMs": 0
+        },
+        {
+          "attempt": 2,
+          "delayMs": 500
+        },
+        {
+          "attempt": 3,
+          "delayMs": 1998
+        },
+        {
+          "attempt": 4,
+          "delayMs": 1000
+        },
+        {
+          "attempt": 5,
+          "delayMs": 6000
+        },
+        {
+          "attempt": 6,
+          "delayMs": 2000
+        },
+        {
+          "attempt": 7,
+          "delayMs": 26250
+        },
+        {
+          "attempt": 8,
+          "delayMs": 15000
+        },
+        {
+          "attempt": 9,
+          "delayMs": null
+        }
+      ]
+    },
+    {
+      "name": "ceiling is capped by maxDelayMs",
+      "reconnect": {
+        "initialDelayMs": 1000,
+        "maxDelayMs": 4000,
+        "maxAttempts": 6
+      },
+      "randoms": [0.5],
+      "expected": [
+        {
+          "attempt": 1,
+          "delayMs": 500
+        },
+        {
+          "attempt": 2,
+          "delayMs": 1000
+        },
+        {
+          "attempt": 3,
+          "delayMs": 2000
+        },
+        {
+          "attempt": 4,
+          "delayMs": 2000
+        },
+        {
+          "attempt": 5,
+          "delayMs": 2000
+        },
+        {
+          "attempt": 6,
+          "delayMs": 2000
+        },
+        {
+          "attempt": 7,
+          "delayMs": null
+        }
+      ]
+    },
+    {
+      "name": "maxAttempts 0 never reconnects",
+      "reconnect": {
+        "maxAttempts": 0
+      },
+      "randoms": [0.5],
+      "expected": [
+        {
+          "attempt": 1,
+          "delayMs": null
+        },
+        {
+          "attempt": 2,
+          "delayMs": null
+        }
+      ]
+    },
+    {
+      "name": "single attempt",
+      "reconnect": {
+        "maxAttempts": 1,
+        "initialDelayMs": 100,
+        "maxDelayMs": 100
+      },
+      "randoms": [0.75],
+      "expected": [
+        {
+          "attempt": 0,
+          "delayMs": null
+        },
+        {
+          "attempt": 1,
+          "delayMs": 75
+        },
+        {
+          "attempt": 2,
+          "delayMs": null
+        }
+      ]
+    },
+    {
+      "name": "the largest bounds",
+      "reconnect": {
+        "maxAttempts": 20,
+        "initialDelayMs": 60000,
+        "maxDelayMs": 60000
+      },
+      "randoms": [0.5, 0.25],
+      "expected": [
+        {
+          "attempt": 1,
+          "delayMs": 30000
+        },
+        {
+          "attempt": 20,
+          "delayMs": 15000
+        },
+        {
+          "attempt": 21,
+          "delayMs": null
+        }
+      ]
+    }
+  ]
+}

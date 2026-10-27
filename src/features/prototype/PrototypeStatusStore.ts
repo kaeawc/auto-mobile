@@ -4,7 +4,7 @@ import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import type { PrototypeData } from "./prototypeSpec";
 import { applyPrototypeDataWrite } from "./prototypeDataWrite";
-import { prototypeDataWriteOf } from "./prototypeDataWriteEvent";
+import { prototypeDataWriteOf, prototypeDeviceDataWrite } from "./prototypeDataWriteEvent";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type {
@@ -401,11 +401,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
           ? applyPrototypeDataWrite(entry.data, { op: "remove", path: write.path })
           : write.value === undefined
             ? undefined
-            : applyPrototypeDataWrite(entry.data, {
-                op: write.op,
-                path: write.path,
-                value: write.value,
-              });
+            : applyPrototypeDataWrite(entry.data, prototypeDeviceDataWrite(write, write.value));
       const written = { ...entry };
       if (applied?.success) {
         written.data = applied.data;

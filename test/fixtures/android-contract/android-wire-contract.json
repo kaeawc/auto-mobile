@@ -4743,6 +4743,12 @@
         "type": "json",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "maxItems",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "badge": [
@@ -6987,6 +6993,120 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeChannel": [
+      {
+        "name": "kind",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "url",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "protocols",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "headers",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "via",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "connect",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "statusKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "reconnect",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeChannelReconnect",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "decode",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "routes",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onOpen",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onClose",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onError",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeChannelReconnect": [
+      {
+        "name": "maxAttempts",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "initialDelayMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "maxDelayMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeChannelRoute": [
+      {
+        "name": "when",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "actions",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeChartRange": [
       {
         "name": "min",
@@ -7563,6 +7683,12 @@
       {
         "name": "platform",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "channels",
+        "type": "map",
         "nullable": true,
         "hasDefault": true
       }
@@ -12257,6 +12383,32 @@
       {
         "name": "actions",
         "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "upsertData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "maxItems",
+        "type": "int",
         "nullable": true,
         "hasDefault": true
       }

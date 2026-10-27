@@ -2,6 +2,7 @@ export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import * as timers from "./prototypeTimerSchema";
+import { bindPrototypeChannelActions, channelsSchema } from "./prototypeChannelSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
 import { z } from "zod";
@@ -11,6 +12,7 @@ import {
   keySchema,
   pointerSchema,
   prototypeDataActionValueSchema,
+  prototypeEventBindingSchema,
   prototypeMatchBindingSchema,
   stateKeySchema,
   type PrototypeDataActionValue,
@@ -81,7 +83,14 @@ const dataActionPathSchema = z
   .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
 const dataActionFields = {
   path: dataActionPathSchema,
-  value: z.union([...prototypeDataActionValueSchema.options, prototypeMatchBindingSchema]),
+  value: z.union([
+    ...prototypeDataActionValueSchema.options,
+    prototypeMatchBindingSchema,
+    prototypeEventBindingSchema,
+  ]),
+};
+const maxItemsField = {
+  maxItems: z.number().finite().int().min(1).max(MAX_PROTOTYPE_DATA_ARRAY_ITEMS).optional(),
 };
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
@@ -109,7 +118,13 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["setState"]),
       key: stateKeySchema,
-      value: z.union([z.string(), z.number().finite(), z.boolean(), prototypeMatchBindingSchema]),
+      value: z.union([
+        z.string(),
+        z.number().finite(),
+        z.boolean(),
+        prototypeMatchBindingSchema,
+        prototypeEventBindingSchema,
+      ]),
     })
     .strict(),
   z
@@ -134,7 +149,16 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
-  z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["appendData"]), ...dataActionFields, ...maxItemsField }).strict(),
+  z
+    .object({
+      type: z.enum(["upsertData"]),
+      path: dataActionFields.path,
+      key: pointerSchema,
+      value: dataActionFields.value,
+      ...maxItemsField,
+    })
+    .strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
   timers.startTimerActionSchema,
   timers.cancelTimerActionSchema,
@@ -159,6 +183,7 @@ export const actionSchema = z.discriminatedUnion("type", [
 timers.bindPrototypeTimerActions(() => actionSchema);
 bindPrototypeRequestFollowUps(() => actionSchema);
 bindPrototypePlatformFollowUps(() => actionSchema);
+bindPrototypeChannelActions(() => actionSchema);
 const gestureNodeShape = {
   onLongPress: z.array(actionSchema).min(1).max(32).optional(),
   onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
@@ -856,6 +881,7 @@ const specSchema = z
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
+    channels: channelsSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();
@@ -919,6 +945,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "dismiss",
   "setData",
   "appendData",
+  "upsertData",
   "removeData",
   "request",
   "platform",

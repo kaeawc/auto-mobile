@@ -31,3 +31,12 @@ export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSc
  * `linkify.onTap`, where the runtime replaces it with the match before the actions run.
  */
 export const prototypeMatchBindingSchema = z.object({ match: z.enum(["text", "kind"]) }).strict();
+
+/**
+ * `{event: pointer}` (#14261): a value read from the event or channel frame that is being handled,
+ * valid only inside a `platform.on` handler or a channel `routes` / hook action list. The pointer
+ * is RFC 6901 against the decoded frame, and the empty pointer is the whole frame.
+ */
+export const prototypeEventBindingSchema = z
+  .object({ event: z.union([z.literal(""), pointerSchema]) })
+  .strict();

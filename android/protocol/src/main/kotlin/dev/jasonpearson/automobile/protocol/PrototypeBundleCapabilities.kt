@@ -38,7 +38,14 @@ internal object PrototypeBundleCapabilities {
       }
       "setData",
       "appendData",
-      "removeData" -> caps.add("prototype_data_actions_v1")
+      "upsertData",
+      "removeData" -> {
+        caps.add("prototype_data_actions_v1")
+        // `upsertData` and `appendData.maxItems` are realtime additions (#14261).
+        if (text(action["type"]) == "upsertData" || "maxItems" in action) {
+          caps.add("prototype_platform_realtime_v1")
+        }
+      }
       "startTimer",
       "cancelTimer" -> caps.add("prototype_timers_v1")
       "push",
@@ -98,6 +105,7 @@ internal object PrototypeBundleCapabilities {
         ?.let { text(PrototypePlatformModules.module(it)?.get("capability")) }
         ?.let(caps::add)
     }
+    realtime(refs, caps)
     val uses = PrototypePlatformUses.uses(refs.spec, refs.context)
     if (uses.isNotEmpty()) caps.add("prototype_platform_v1")
     for (use in uses) {
@@ -110,6 +118,17 @@ internal object PrototypeBundleCapabilities {
           is PrototypePlatformUses.Use.Event -> null
         }
       module?.let { text(PrototypePlatformModules.module(it)?.get("capability")) }?.let(caps::add)
+    }
+  }
+
+  /** Channels, `upsertData` and `appendData.maxItems` need the realtime module (#14261). */
+  private fun realtime(refs: PrototypeBundleReferences, caps: MutableSet<String>) {
+    val channels = refs.spec["channels"] as? JsonObject
+    if (!channels.isNullOrEmpty()) {
+      caps.add("prototype_platform_realtime_v1")
+      if (channels.values.any { (it as? JsonObject)?.get("via")?.let(::text) == "device" }) {
+        caps.add("prototype_platform_realtime_device_v1")
+      }
     }
   }
 }

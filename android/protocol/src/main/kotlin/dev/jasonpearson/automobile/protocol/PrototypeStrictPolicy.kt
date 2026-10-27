@@ -138,6 +138,7 @@ internal object PrototypeStrictPolicy {
     spec["root"]?.let { scanner.scan(it) }
     scanner.platform(spec)
     (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
+    scanner.channels(spec)
     return scanner.result
   }
 
@@ -159,6 +160,7 @@ internal object PrototypeStrictPolicy {
       "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
+      "upsertData" to "data_actions",
       "removeData" to "data_actions",
       "platform" to "platform",
     )
@@ -249,6 +251,23 @@ internal object PrototypeStrictPolicy {
       if (spec["platform"] != null) need("platform")
     }
 
+    /**
+     * Realtime channels (#14261): the block needs the realtime module, a `via: "device"` channel
+     * its transport sub-capability, and the routes and hooks are scanned like platform handlers.
+     */
+    fun channels(spec: JsonObject) {
+      val channels = spec["channels"] as? JsonObject ?: return
+      if (channels.isEmpty()) return
+      need("platform_realtime")
+      for (id in channels.keys.sorted()) {
+        val channel = channels[id] as? JsonObject ?: continue
+        if (channel.text("via") == "device") need("platform_realtime_device")
+        for (key in listOf("routes", "onOpen", "onClose", "onError")) {
+          channel[key]?.let { scan(it) }
+        }
+      }
+    }
+
     fun scan(value: JsonElement, field: String = "") {
       if (value is JsonArray) {
         value.forEach { scan(it) }
@@ -278,7 +297,8 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" || (key == "value" && type !in listOf("setData", "appendData"))
+      key == "payload" ||
+        (key == "value" && type !in listOf("setData", "appendData", "upsertData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement) {
@@ -303,6 +323,9 @@ internal object PrototypeStrictPolicy {
         if (keys.any { fields[it] != null }) need(feature)
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
+      if (type == "upsertData" || (type == "appendData" && fields["maxItems"] != null)) {
+        need("platform_realtime")
+      }
     }
 
     private fun repeatFeatures(child: JsonElement) {

@@ -9,6 +9,7 @@ enum PrototypePlatformValidator {
     /// A literal `{value}` argument's rule, from the contract's `platformModules` table.
     enum Rule: Equatable {
         case json(maxBytes: Int)
+        case string(max: Int)
         case integer(min: Double, max: Double)
     }
 
@@ -28,6 +29,9 @@ enum PrototypePlatformValidator {
         let calls: [String: Call]
         let events: Set<String>
         var state: Set<String>?
+        /// Keys readable per realtime channel as `/<module>/<channel>/<key>` (#14261).
+        var channelState: Set<String>?
+        var deviceCapability: String?
     }
 
     /// The contract's `platformModules`; `PrototypePlatformTests` keeps the two equal. `test` is a
@@ -42,9 +46,7 @@ enum PrototypePlatformValidator {
                     let rule = arg["value"]?.objectFields ?? [:]
                     return Argument(
                         optional: arg["optional"] == .bool(true),
-                        rule: rule["kind"] == .string("json")
-                            ? .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
-                            : .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+                        rule: argumentRule(rule)
                     )
                 }
                 func strings(_ key: String) -> [String] {
@@ -57,9 +59,19 @@ enum PrototypePlatformValidator {
                 capability: fields["capability"]?.stringValue ?? "",
                 calls: calls,
                 events: Set((fields["events"]?.objectFields ?? [:]).keys),
-                state: fields["state"]?.objectFields.map { Set($0.keys) }
+                state: fields["state"]?.objectFields.map { Set($0.keys) },
+                channelState: fields["channelState"]?.objectFields.map { Set($0.keys) },
+                deviceCapability: fields["deviceCapability"]?.stringValue
             )
         }
+
+    private static func argumentRule(_ rule: [String: JSONValue]) -> Rule {
+        switch rule["kind"]?.stringValue {
+        case "json": .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
+        case "string": .string(max: Int(rule["max"]?.numberValue ?? 0))
+        default: .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        }
+    }
 
     static let permissionNames: Set<String> = [
         "camera", "microphone", "location", "locationBackground", "notifications", "photos",
@@ -89,16 +101,28 @@ enum PrototypePlatformValidator {
         var modules: Set<String> = []
         var permissions: Set<String> = []
         var background: Set<String> = []
+        var channels: [String: JSONValue] = [:]
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
-        requires: JSONValue?, handlers: JSONValue?, root: JSONValue, state: [String: JSONValue]
+        requires: JSONValue?, handlers: JSONValue?, root: JSONValue, state: [String: JSONValue],
+        channels: JSONValue? = nil
     )
         throws
     {
-        let declared = try validateRequires(requires)
+        var declared = try validateRequires(requires)
+        declared.channels = channels?.objectFields ?? [:]
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
+        // A channel's routes and hooks run like handlers: `{event}` reads the frame (#14261).
+        for id in sorted(Set(declared.channels.keys)) {
+            let channel = declared.channels[id]?.objectFields ?? [:]
+            for key in ["routes", "onOpen", "onClose", "onError"] {
+                guard let value = channel[key] else { continue }
+                let at = PrototypeLimits.dataMemberPath(PrototypeLimits.dataMemberPath("channels", key: id), key: key)
+                try scan(value, path: at, inHandler: true, declared: declared, state: state)
+            }
+        }
         try scan(root, path: "root", inHandler: false, declared: declared, state: state)
     }
 
@@ -274,6 +298,14 @@ enum PrototypePlatformValidator {
         let name = PrototypeDataPointer.tokens(pointer).first ?? ""
         guard modules[name] != nil else { throw fail(path, "Unknown platform module \(name)") }
         guard declared.modules.contains(name) else { throw notDeclared(path, name) }
+        if let channelState = modules[name]?.channelState {
+            let tokens = PrototypeDataPointer.tokens(pointer)
+            guard tokens.count >= 2, tokens.count <= 3, tokens.count < 3 || channelState.contains(tokens[2]) else {
+                throw fail(path, "Unknown platform state \(pointer)")
+            }
+            guard declared.channels[tokens[1]] != nil else { throw fail(path, "Unknown channel \(tokens[1])") }
+            return
+        }
         if let state = modules[name]?.state {
             let tokens = PrototypeDataPointer.tokens(pointer)
             guard tokens.count == 2, state.contains(tokens[1]) else {
@@ -312,6 +344,7 @@ enum PrototypePlatformValidator {
         }
         let owner = parts.module
         guard declared.modules.contains(owner) else { throw notDeclared("\(path).call", owner) }
+        try PrototypeChannelValidator.checkCall(call, args: args, path: path, channels: declared.channels)
         if let missing = definition.permissions.first(where: { !declared.permissions.contains($0) }) {
             throw fail("\(path).call", "Platform call \(call) requires permission \(missing) in requires.permissions")
         }
@@ -353,6 +386,10 @@ enum PrototypePlatformValidator {
             encoder.outputFormatting = .withoutEscapingSlashes
             guard let bytes = try? encoder.encode(literal), bytes.count <= maxBytes else {
                 throw fail(path, "Invalid json value")
+            }
+        case let .string(max):
+            guard case let .string(text) = literal, (1 ... max).contains(text.utf16.count) else {
+                throw fail(path, "Invalid string value")
             }
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {

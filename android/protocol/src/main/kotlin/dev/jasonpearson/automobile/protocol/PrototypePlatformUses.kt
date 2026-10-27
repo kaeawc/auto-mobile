@@ -30,6 +30,15 @@ internal object PrototypePlatformUses {
       found.add(Use.Handler(at, event))
       scan(handler, at, true, found)
     }
+    // A channel's routes and hooks run like handlers: `{event}` reads the frame (#14261).
+    val channels = root.member("channels").orEmpty()
+    for (id in channels.keys.sorted()) {
+      val channel = channels[id] as? JsonObject ?: continue
+      val at = keyPath("channels", id)
+      for (key in listOf("routes", "onOpen", "onClose", "onError")) {
+        channel[key]?.let { scan(it, "$at.$key", true, found) }
+      }
+    }
     root["root"]?.let { scan(it, "root", false, found) }
     for ((node, path) in context.nodes) {
       PrototypeBindableFields.first(node, path) { field, at, kind ->

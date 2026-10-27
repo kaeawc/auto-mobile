@@ -35,7 +35,7 @@ object PrototypeDataPointer {
       pointer.substring(1).split('/').map { it.replace("~1", "/").replace("~0", "~") }
     else emptyList()
 
-  fun resolve(data: JsonObject?, pointer: String): JsonElement? {
+  fun resolve(data: JsonElement?, pointer: String): JsonElement? {
     if (!isValid(pointer)) return null
     var value: JsonElement? = data
     for (token in tokens(pointer)) {

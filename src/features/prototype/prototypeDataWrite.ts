@@ -14,7 +14,14 @@ import { prototypeDataError } from "./prototypeValidation";
  * bound), and a patch op on `/data` uses the same spelling.
  */
 export type PrototypeDataWrite =
-  | { op: "set" | "append"; path: string; value: unknown }
+  | { op: "set"; path: string; value: unknown }
+  /** `maxItems` drops the oldest items so the array stays within it (#14261). */
+  | { op: "append"; path: string; value: unknown; maxItems?: number }
+  /**
+   * Replaces the array element whose `key` pointer value equals the new value's, else appends it
+   * (#14261). `maxItems` trims the oldest items afterwards.
+   */
+  | { op: "upsert"; path: string; key: string; value: unknown; maxItems?: number }
   | { op: "remove"; path: string };
 
 export type PrototypeDataWriteErrorCode =
@@ -38,15 +45,63 @@ const refused = (code: PrototypeDataWriteErrorCode, message: string): PrototypeD
   error: { code, message },
 });
 
-/** The patch op that performs a write whose target has been checked. */
-function patchOp(write: PrototypeDataWrite, exists: boolean): PrototypePatchOp {
+/** JSON structural equality, for the `upsert` identity comparison. */
+function sameJson(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => sameJson(item, right[index]))
+    );
+  }
+  const a = record(left);
+  const b = record(right);
+  if (a && b) {
+    const keys = Object.keys(a);
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((key) => Object.hasOwn(b, key) && sameJson(a[key], b[key]))
+    );
+  }
+  return left === right;
+}
+
+/** The patch ops that perform a write whose target has been checked. */
+function patchOps(
+  write: PrototypeDataWrite,
+  pointer: string,
+  current: PrototypeData,
+): PrototypePatchOp[] {
   if (write.op === "remove") {
-    return { op: "remove", path: write.path };
+    return [{ op: "remove", path: write.path }];
   }
   const value = write.value as PrototypeJson;
-  return write.op === "append"
-    ? { op: "add", path: `${write.path}/-`, value }
-    : { op: exists ? "replace" : "add", path: write.path, value };
+  if (write.op === "set") {
+    const exists = resolvePrototypeDataPointer(current, pointer) !== undefined;
+    return [{ op: exists ? "replace" : "add", path: write.path, value }];
+  }
+  const items = resolvePrototypeDataPointer(current, pointer) as unknown[];
+  const identity =
+    write.op === "upsert" ? resolvePrototypeDataPointer(value, write.key) : undefined;
+  const matched =
+    write.op === "upsert"
+      ? items.findIndex((item) => {
+          const existing = resolvePrototypeDataPointer(item, write.key);
+          return existing !== undefined && sameJson(existing, identity);
+        })
+      : -1;
+  const ops: PrototypePatchOp[] =
+    matched >= 0
+      ? [{ op: "replace", path: `${write.path}/${matched}`, value }]
+      : [{ op: "add", path: `${write.path}/-`, value }];
+  // Dropping the oldest items: each removal at 0 shifts the rest down.
+  const length = matched >= 0 ? items.length : items.length + 1;
+  const excess = write.maxItems === undefined ? 0 : Math.max(0, length - write.maxItems);
+  for (let dropped = 0; dropped < excess; dropped++) {
+    ops.push({ op: "remove", path: `${write.path}/0` });
+  }
+  return ops;
 }
 
 /** Why the write cannot apply to `data`, or undefined when its target is acceptable. */
@@ -56,13 +111,14 @@ function targetRefusal(
   write: PrototypeDataWrite,
 ): PrototypeDataWriteResult | undefined {
   const existing = resolvePrototypeDataPointer(data, pointer);
-  if (write.op === "append") {
+  if (write.op === "append" || write.op === "upsert") {
+    const name = write.op === "append" ? "appendData" : "upsertData";
     if (existing === undefined) {
-      return refused("not_found", `appendData target ${write.path} does not exist`);
+      return refused("not_found", `${name} target ${write.path} does not exist`);
     }
     return Array.isArray(existing)
       ? undefined
-      : refused("not_array", `appendData target ${write.path} is not an array`);
+      : refused("not_array", `${name} target ${write.path} is not an array`);
   }
   if (write.op === "remove") {
     return existing === undefined
@@ -101,8 +157,20 @@ export function applyPrototypeDataWrite(
   if (target) {
     return target;
   }
-  const exists = resolvePrototypeDataPointer(current, pointer) !== undefined;
-  const applied = applyPrototypePatch({ data: current }, [patchOp(write, exists)]);
+  if (write.op === "upsert" && resolvePrototypeDataPointer(write.value, write.key) === undefined) {
+    return refused("invalid_value", `upsertData value has no member at ${write.key}`);
+  }
+  if (write.op !== "remove" && write.op !== "set" && write.maxItems !== undefined) {
+    const { maxItems } = write;
+    if (
+      !Number.isInteger(maxItems) ||
+      maxItems < 1 ||
+      maxItems > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+    ) {
+      return refused("invalid_value", "maxItems must be an integer from 1 to the data array limit");
+    }
+  }
+  const applied = applyPrototypePatch({ data: current }, patchOps(write, pointer, current));
   if (!applied.success) {
     return refused("not_found", `${write.path}: ${applied.error.message}`);
   }

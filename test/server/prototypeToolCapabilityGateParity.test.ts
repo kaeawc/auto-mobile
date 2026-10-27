@@ -238,6 +238,25 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  // Channels are a root block (#14261): a patch cannot introduce them, so only the show half applies.
+  prototype_platform_realtime_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["realtime"] },
+      channels: { chat: { kind: "websocket", url: "wss://chat.example.com/room" } },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_realtime_device_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["realtime"] },
+      channels: { chat: { kind: "websocket", url: "wss://chat.example.com/room", via: "device" } },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_realtime_v1"],
+  },
   prototype_platform_test_v1: {
     minimalSpec: {
       ...base,

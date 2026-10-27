@@ -85,11 +85,14 @@ enum PrototypeStrictCapabilities {
                     }
                 }
             }
-            if ["setData", "appendData", "removeData"].contains(type) { need("data_actions") }
+            if ["setData", "appendData", "upsertData", "removeData"].contains(type) { need("data_actions") }
+            if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) {
+                need("platform_realtime")
+            }
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
             for (key, child) in fields {
-                if key == "payload" || (key == "value" && !["setData", "appendData"].contains(type)) { continue }
+                if key == "payload" || (key == "value" && !["setData", "appendData", "upsertData"].contains(type)) { continue }
                 if key == "repeat" {
                     if let repeatSpec = child.objectFields,
                        repeatSpec["items"]?
@@ -134,6 +137,14 @@ enum PrototypeStrictCapabilities {
                 .strings(requires["platform"]) { need("platform"); need("platform_\(module)") }
         }
         if spec["platform"] != nil { need("platform") }
+        // Realtime channels (#14261): the block itself, and the device transport per channel.
+        if let channels = spec["channels"]?.objectFields, !channels.isEmpty {
+            need("platform_realtime")
+            if channels.values.contains(where: { $0.objectFields?["via"] == .string("device") }) {
+                need("platform_realtime_device")
+            }
+            scan(.object(channels))
+        }
         return result
     }
 }

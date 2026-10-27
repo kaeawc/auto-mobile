@@ -1,0 +1,43 @@
+{
+  "id": "realtime",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["realtime"]
+  },
+  "state": {
+    "chatStatus": "idle",
+    "peerTyping": false,
+    "unread": 0,
+    "roomId": "general"
+  },
+  "data": {
+    "messages": [],
+    "driver": {}
+  },
+  "root": {
+    "type": "text",
+    "text": "four channels"
+  },
+  "channels": {
+    "a": {
+      "kind": "sse",
+      "url": "https://example.com/a"
+    },
+    "b": {
+      "kind": "sse",
+      "url": "https://example.com/b"
+    },
+    "c": {
+      "kind": "sse",
+      "url": "https://example.com/c"
+    },
+    "d": {
+      "kind": "sse",
+      "url": "https://example.com/d"
+    }
+  }
+}

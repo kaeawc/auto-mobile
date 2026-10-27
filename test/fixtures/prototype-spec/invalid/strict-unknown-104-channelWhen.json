@@ -1,0 +1,94 @@
+{
+  "spec": {
+    "id": "realtime",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "data": {
+      "messages": [],
+      "driver": {}
+    },
+    "state": {
+      "chatStatus": "idle",
+      "peerTyping": false,
+      "unread": 0,
+      "roomId": "general"
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "channels": {
+      "chat": {
+        "kind": "websocket",
+        "url": "wss://chat.example.com/rooms/{roomId}",
+        "protocols": ["chat.v1"],
+        "headers": {
+          "Authorization": "Bearer {token}"
+        },
+        "via": "device",
+        "connect": "manual",
+        "statusKey": "chatStatus",
+        "reconnect": {
+          "maxAttempts": 8,
+          "initialDelayMs": 500,
+          "maxDelayMs": 30000
+        },
+        "decode": "text",
+        "routes": [
+          {
+            "actions": [
+              {
+                "type": "setState",
+                "key": "peerTyping",
+                "value": {
+                  "event": ""
+                }
+              }
+            ]
+          }
+        ],
+        "onOpen": [],
+        "onClose": [],
+        "onError": []
+      },
+      "driver": {
+        "kind": "sse",
+        "url": "https://api.example.com/trips/{tripId}/events",
+        "routes": [
+          {
+            "when": {
+              "event": "location",
+              "zzzUnknown": true
+            },
+            "actions": [
+              {
+                "type": "setData",
+                "path": "/data/driver",
+                "value": {
+                  "event": ""
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Status {platform:/realtime/chat/status}"
+        },
+        {
+          "type": "text",
+          "text": "Unread {unread}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "channels.driver.routes[0].when.equals"
+}

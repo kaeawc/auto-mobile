@@ -18,6 +18,7 @@ import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { prototypePlatformError } from "./prototypePlatform";
+import { prototypeChannelsError } from "./prototypeChannels";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
@@ -831,6 +832,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
+    prototypeChannelsError(value, context.actions) ??
     prototypePlatformError(value, context.actions, platformArgumentError) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??

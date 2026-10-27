@@ -1,0 +1,114 @@
+{
+  "spec": {
+    "id": "realtime",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["device"]
+    },
+    "state": {
+      "chatStatus": "idle",
+      "peerTyping": false,
+      "unread": 0,
+      "roomId": "general"
+    },
+    "data": {
+      "messages": [],
+      "driver": {}
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "x"
+        }
+      ]
+    },
+    "channels": {
+      "chat": {
+        "kind": "websocket",
+        "url": "wss://chat.example.com/rooms/{roomId}",
+        "protocols": ["chat.v1"],
+        "headers": {
+          "Authorization": "Bearer {token}"
+        },
+        "via": "host",
+        "connect": "onShow",
+        "statusKey": "chatStatus",
+        "reconnect": {
+          "maxAttempts": 8,
+          "initialDelayMs": 500,
+          "maxDelayMs": 30000
+        },
+        "decode": "json",
+        "routes": [
+          {
+            "when": {
+              "pointer": "/type",
+              "equals": "message"
+            },
+            "actions": [
+              {
+                "type": "upsertData",
+                "path": "/data/messages",
+                "key": "/id",
+                "value": {
+                  "event": "/message"
+                },
+                "maxItems": 200
+              },
+              {
+                "type": "increment",
+                "key": "unread"
+              }
+            ]
+          },
+          {
+            "when": {
+              "pointer": "/type",
+              "equals": "typing"
+            },
+            "actions": [
+              {
+                "type": "setState",
+                "key": "peerTyping",
+                "value": {
+                  "event": "/typing"
+                }
+              }
+            ]
+          }
+        ],
+        "onOpen": [],
+        "onClose": [],
+        "onError": []
+      },
+      "driver": {
+        "kind": "sse",
+        "url": "https://api.example.com/trips/{tripId}/events",
+        "routes": [
+          {
+            "when": {
+              "event": "location"
+            },
+            "actions": [
+              {
+                "type": "setData",
+                "path": "/data/driver",
+                "value": {
+                  "event": ""
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "channels",
+  "expectedMessage": "channels require realtime in requires.platform"
+}

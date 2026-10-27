@@ -1,17 +1,24 @@
 import { z } from "zod";
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
+import type { PrototypeDataWrite } from "./prototypeDataWrite";
+import { pointerSchema } from "./prototypeActionValues";
 import { prototypeDataPathPointer } from "./prototypeData";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";
 
 /**
- * A device `/data` write (`setData`, `appendData`, `removeData`) is reported as a `change` event
+ * A device `/data` write (`setData`, `appendData`, `upsertData`, `removeData`) is reported as a `change` event
  * (`prototype_data_actions_v1`) that reuses the existing wire fields, so no event field is added:
  * `name` is the `/data/<pointer>` written (repeat `{index}` segments bound; for an append, the
  * array appended to) and `payload` is this object. `validity` may accompany it; `state` and
  * `pages` are the usual snapshot.
  */
 export interface PrototypeDataWriteEventPayload {
-  op: "set" | "append" | "remove";
+  op: "set" | "append" | "upsert" | "remove";
+  /** `upsert` only (#14261): the pointer, inside each element, of the identity the write matched. */
+  key?: string;
+  /** `append` and `upsert` only: the cap that dropped the oldest items after the write. */
+  maxItems?: number;
   /**
    * The written value (set, append). Absent for a remove, or when the value is too large for the
    * event: the host then cannot mirror the write and stops tracking the spec.
@@ -24,12 +31,31 @@ export interface PrototypeDataWriteEventPayload {
   revision: number;
 }
 
+const { MAX_PROTOTYPE_DATA_ARRAY_ITEMS } = contract.limits;
 const revisionSchema = z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const maxItemsSchema = z.number().finite().int().min(1).max(MAX_PROTOTYPE_DATA_ARRAY_ITEMS);
 const payloadSchema = z.union([
   z
     .object({
-      op: z.enum(["set", "append"]),
+      op: z.literal("set"),
       value: prototypeJsonSchema.optional(),
+      revision: revisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("append"),
+      value: prototypeJsonSchema.optional(),
+      maxItems: maxItemsSchema.optional(),
+      revision: revisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("upsert"),
+      key: pointerSchema,
+      value: prototypeJsonSchema.optional(),
+      maxItems: maxItemsSchema.optional(),
       revision: revisionSchema,
     })
     .strict(),
@@ -52,4 +78,19 @@ export function prototypeDataWriteOf(
   }
   const payload = payloadSchema.safeParse(event.payload);
   return payload.success ? { ...payload.data, path: event.name } : undefined;
+}
+
+/** The write a device `set`, `append` or `upsert` event reports, as the shared pure function takes it. */
+export function prototypeDeviceDataWrite(
+  write: PrototypeDataWriteEvent,
+  value: PrototypeJson,
+): PrototypeDataWrite {
+  switch (write.op) {
+    case "upsert":
+      return { op: "upsert", path: write.path, key: write.key!, value, maxItems: write.maxItems };
+    case "append":
+      return { op: "append", path: write.path, value, maxItems: write.maxItems };
+    default:
+      return { op: "set", path: write.path, value };
+  }
 }

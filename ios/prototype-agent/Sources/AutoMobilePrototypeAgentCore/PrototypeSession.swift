@@ -439,7 +439,7 @@ struct PrototypeSession {
                 events += runStack(action)
             case "setPage":
                 events += runSetPage(action)
-            case "setData", "appendData", "removeData":
+            case "setData", "appendData", "upsertData", "removeData":
                 events += runDataWrite(action)
             case "startTimer":
                 timerCommands.append(.start(action))
@@ -485,19 +485,24 @@ struct PrototypeSession {
             }
             value = resolved
         }
-        return (try? commitDataWrite(operation, path: path, value: value).get()) ?? []
+        return (try? commitDataWrite(
+            operation, path: path, value: value, key: action.key, maxItems: action.maxItems
+        ).get()) ?? []
     }
 
     /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
     /// bumped revision and the `change` event. A refused write changes nothing.
     private mutating func commitDataWrite(
-        _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?
+        _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?,
+        key: String? = nil, maxItems: Int? = nil
     )
         -> Result<[PrototypeEvent], PrototypeDataWriteFailure>
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
         let data: [String: JSONValue]
-        switch PrototypeDataWrite.apply(spec.data, op: operation, path: path, value: value) {
+        switch PrototypeDataWrite.apply(
+            spec.data, op: operation, path: path, value: value, key: key, maxItems: maxItems
+        ) {
         case let .success(written): data = written
         case let .failure(failure): return .failure(failure)
         }

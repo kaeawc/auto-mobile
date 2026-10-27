@@ -191,6 +191,14 @@ function literalEntryError(
   return undefined;
 }
 
+/** Header-name and CR/LF rules shared with other header blocks (realtime channels, #14261). */
+export function prototypeHeaderEntriesError(
+  headers: unknown,
+  at: string,
+): PrototypeRequestActionError | undefined {
+  return literalEntryError(headers, at, "headers");
+}
+
 function requestActionError(
   action: Record<string, unknown>,
   at: string,

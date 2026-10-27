@@ -102,7 +102,7 @@ struct PrototypeSpec: Decodable {
     private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage, requires, platform
+        case id, window, state, data, theme, motion, root, storage, requires, platform, channels
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -136,11 +136,18 @@ struct PrototypeSpec: Decodable {
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
         // Validate platform vocabulary before resolving device-owned reads.
+        let channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
+        try PrototypeChannelValidator.validate(
+            channels: channels,
+            requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
+            state: menuState ?? [:]
+        )
         try PrototypePlatformValidator.validate(
             requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
             root: raw,
-            state: menuState ?? [:]
+            state: menuState ?? [:],
+            channels: channels
         )
         root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
@@ -561,9 +568,11 @@ struct PrototypeAction: Decodable, Sendable {
     let actions: [PrototypeAction]?
     let onSuccess: [PrototypeAction]?
     let onError: [PrototypeAction]?
+    /// `appendData` / `upsertData`: keep only this many newest items (#14261).
+    let maxItems: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, call, args
+        case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, call, args, maxItems
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
@@ -578,8 +587,9 @@ struct PrototypeAction: Decodable, Sendable {
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
         actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
-        call: String? = nil, args: [String: JSONValue]? = nil
+        call: String? = nil, args: [String: JSONValue]? = nil, maxItems: Int? = nil
     ) {
+        self.maxItems = maxItems
         self.call = call
         self.args = args
         self.id = id

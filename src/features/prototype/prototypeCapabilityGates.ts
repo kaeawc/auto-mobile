@@ -53,6 +53,7 @@ import {
 } from "../observe/android/ctrlProxyProtocol";
 import { hasPrototypeAnchors } from "./prototypeAnchors";
 import {
+  PROTOTYPE_PLATFORM_DEVICE_TRANSPORT_GATES,
   PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformUnsupportedMessage,
@@ -320,6 +321,7 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypePlatformUnsupportedMessage,
   },
   ...PROTOTYPE_PLATFORM_MODULE_GATES,
+  ...PROTOTYPE_PLATFORM_DEVICE_TRANSPORT_GATES,
 ];
 
 export function prototypeRequiredCapabilities(spec: unknown): {

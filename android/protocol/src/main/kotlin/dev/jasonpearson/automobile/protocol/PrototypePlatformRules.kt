@@ -50,6 +50,8 @@ internal object PrototypePlatformRules {
         .mapNotNull { (it as? JsonObject)?.text("name") }
         .toSet()
     val background = requires.strings("background").toSet()
+    /** The ids of the spec's realtime channels (#14261). */
+    val channels = root.member("channels")?.keys.orEmpty()
   }
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
@@ -113,10 +115,25 @@ internal object PrototypePlatformRules {
     return when {
       module(name) == null -> fail(use.path, "Unknown platform module $name")
       name !in declared.modules -> notDeclared(use.path, name)
+      module(name)?.member("channelState") != null -> channelReadError(use, declared)
       module(name)?.member("state")?.let { state ->
         val tokens = PrototypeDataPointer.tokens(use.pointer)
         tokens.size != 2 || tokens[1] !in state
       } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
+      else -> null
+    }
+  }
+
+  /** `/platform/<module>/<channel>[/<key>]`: a declared channel and a listed state key. */
+  private fun channelReadError(use: Use.Read, declared: Declared): PrototypeSpecError? {
+    val state = module(pointerModule(use.pointer))?.member("channelState") ?: return null
+    val tokens = PrototypeDataPointer.tokens(use.pointer)
+    val channel = tokens.getOrNull(1)
+    val key = tokens.getOrNull(2)
+    return when {
+      channel.isNullOrEmpty() || tokens.size > 3 || (key != null && key !in state) ->
+        fail(use.path, "Unknown platform state ${use.pointer}")
+      channel !in declared.channels -> fail(use.path, "Unknown channel $channel")
       else -> null
     }
   }

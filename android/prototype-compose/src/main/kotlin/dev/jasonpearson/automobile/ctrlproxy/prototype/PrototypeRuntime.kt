@@ -203,13 +203,27 @@ class PrototypeRuntime(
       .also { if (initialPlatformState.isNotEmpty()) it.update(initialPlatformState) }
   private var eventData: JsonObject? = null
 
+  /** The handler for [name], decoded now so `{event}` values in it can be bound first. */
+  private fun platformHandler(name: String): List<PrototypeAction> {
+    val handler = current.spec.platform?.on?.get(name) ?: return emptyList()
+    return try {
+      runtimeJson.decodeFromJsonElement(
+        kotlinx.serialization.builtins.ListSerializer(PrototypeAction.serializer()),
+        handler,
+      )
+    } catch (error: kotlinx.serialization.SerializationException) {
+      Log.w("PrototypeRuntime", "Platform handler $name is not runnable on this device", error)
+      emptyList()
+    }
+  }
+
   private suspend fun deliverPlatformEvent(name: String, data: JsonObject) {
     if (!current.active || name.substringBefore('.') !in current.spec.requires?.platform.orEmpty())
       return
     val previousEvent = eventData
     eventData = data
     try {
-      handle(PrototypeInteraction.Tap(current.spec.platform?.on?.get(name).orEmpty()))
+      handle(PrototypeInteraction.Tap(platformHandler(name)))
     } finally {
       eventData = previousEvent
     }
@@ -641,6 +655,7 @@ class PrototypeRuntime(
         PrototypeDismissAction -> dismiss()
         is PrototypeSetDataAction,
         is PrototypeAppendDataAction,
+        is PrototypeUpsertDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
         is PrototypePlatformAction -> startPlatformCall(action, touched)
@@ -1025,7 +1040,13 @@ class PrototypeRuntime(
       is PrototypeSetDataAction ->
         value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
       is PrototypeAppendDataAction ->
-        value(action.value, action.path)?.let { PrototypeDataWrite.Append(action.path, it) }
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Append(action.path, it, action.maxItems)
+        }
+      is PrototypeUpsertDataAction ->
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Upsert(action.path, action.key, it, action.maxItems)
+        }
       is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
       else -> null
     }
@@ -1038,6 +1059,12 @@ class PrototypeRuntime(
   private fun dataWritePayload(write: PrototypeDataWrite, revision: Long): JsonObject {
     fun payload(value: JsonElement?) = buildJsonObject {
       put("op", write.op)
+      if (write is PrototypeDataWrite.Upsert) put("key", write.key)
+      when (write) {
+        is PrototypeDataWrite.Append -> write.maxItems
+        is PrototypeDataWrite.Upsert -> write.maxItems
+        else -> null
+      }?.let { put("maxItems", it) }
       if (value != null) put("value", value)
       put("revision", revision)
     }
@@ -1045,6 +1072,7 @@ class PrototypeRuntime(
       when (write) {
         is PrototypeDataWrite.Set -> write.value
         is PrototypeDataWrite.Append -> write.value
+        is PrototypeDataWrite.Upsert -> write.value
         is PrototypeDataWrite.Remove -> null
       }
     val full = payload(value)

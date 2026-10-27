@@ -129,6 +129,10 @@ const fixtures: Record<string, Node> = {
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
+  prototype_platform_realtime_v1: {
+    ...label,
+    onTap: [{ type: "platform", call: "realtime.connect", args: { channel: { value: "chat" } } }],
+  },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -166,7 +170,11 @@ const containers: {
 
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
-const ROOT_LEVEL_GATES = ["prototype_storage_v1", "prototype_reduced_motion_v1"];
+const ROOT_LEVEL_GATES = [
+  "prototype_storage_v1",
+  "prototype_reduced_motion_v1",
+  "prototype_platform_realtime_device_v1",
+];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
@@ -181,6 +189,39 @@ test("the storage gate reports the root-level storage block", () => {
   const spec = { root: label, state: { a: 1 }, storage: { version: 1, keys: ["state:a"] } };
   expect(gate.fields(spec)).toEqual(["storage"]);
   expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the realtime gates report the root channels block, channel data actions and device channels", () => {
+  const find = (capability: string) =>
+    PROTOTYPE_SPEC_CAPABILITY_GATES.find((entry) => entry.capability === capability)!;
+  const channel = {
+    kind: "websocket",
+    url: "wss://chat.example.com/room",
+    routes: [
+      {
+        actions: [
+          { type: "upsertData", path: "/data/messages", key: "/id", value: { event: "" } },
+          { type: "appendData", path: "/data/log", value: { event: "" }, maxItems: 5 },
+        ],
+      },
+    ],
+  };
+  const spec = {
+    root: label,
+    requires: { platform: ["realtime"] },
+    channels: { chat: channel, feed: { ...channel, via: "device" } },
+  };
+  expect(find("prototype_platform_realtime_v1").fields(spec)).toEqual([
+    "requires.platform[0]",
+    "channels",
+    "channels.chat.routes[0].actions[0]",
+    "channels.chat.routes[0].actions[1]",
+    "channels.feed.routes[0].actions[0]",
+    "channels.feed.routes[0].actions[1]",
+  ]);
+  expect(find("prototype_platform_realtime_device_v1").fields(spec)).toEqual(["channels.feed.via"]);
+  expect(find("prototype_platform_realtime_device_v1").fields({ root: label })).toEqual([]);
+  expect(find("prototype_data_actions_v1").fields(spec).length).toBe(4);
 });
 
 for (const gate of PROTOTYPE_SPEC_CAPABILITY_GATES.filter(

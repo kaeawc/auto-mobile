@@ -252,8 +252,26 @@ data class PrototypeSetDataAction(val path: String, val value: EmitContextBindin
 
 @SerialName("appendData")
 @Serializable
-data class PrototypeAppendDataAction(val path: String, val value: EmitContextBinding) :
-  PrototypeAction()
+data class PrototypeAppendDataAction(
+  val path: String,
+  val value: EmitContextBinding,
+  /** Drops the oldest items so the array stays within it (`prototype_platform_realtime_v1`). */
+  val maxItems: Int? = null,
+) : PrototypeAction()
+
+/**
+ * `upsertData` (`prototype_platform_realtime_v1`, #14261): replaces the element of the array at
+ * [path] whose [key] pointer value equals the new value's, else appends it; [maxItems] trims the
+ * oldest items afterwards.
+ */
+@SerialName("upsertData")
+@Serializable
+data class PrototypeUpsertDataAction(
+  val path: String,
+  val key: String,
+  val value: EmitContextBinding,
+  val maxItems: Int? = null,
+) : PrototypeAction()
 
 @SerialName("removeData")
 @Serializable
@@ -1587,6 +1605,8 @@ data class PrototypeSpec(
   val requires: PrototypeRequires? = null,
   /** `platform.on`: action lists run when a platform event is delivered (#14294). */
   val platform: PrototypePlatformHandlers? = null,
+  /** Realtime channels keyed by id (`prototype_platform_realtime_v1`, #14261). */
+  val channels: Map<String, PrototypeChannel>? = null,
 )
 
 /** The root `requires` block (#14294): platform modules, permissions and background needs. */
@@ -1600,8 +1620,44 @@ data class PrototypeRequires(
 /** One declared permission: a canonical [name] and the [purpose] shown to the user. */
 @Serializable data class PrototypePermissionRequirement(val name: String, val purpose: String)
 
-/** Root `platform`: action lists keyed by `<module>.<event>`. */
-@Serializable data class PrototypePlatformHandlers(val on: Map<String, List<PrototypeAction>>)
+/**
+ * Root `platform`: action lists keyed by `<module>.<event>`, kept as JSON because a handler may
+ * read `{event}` in a `setState` value, which the typed action does not model; the dispatcher
+ * decodes a list when it runs it.
+ */
+@Serializable data class PrototypePlatformHandlers(val on: Map<String, JsonArray>)
+
+/**
+ * A realtime channel (`prototype_platform_realtime_v1`, #14261). Route and hook action lists stay
+ * JSON for the same reason as platform handlers: they read `{event}` frame values.
+ */
+@Serializable
+data class PrototypeChannel(
+  val kind: String,
+  val url: String,
+  val protocols: List<String>? = null,
+  val headers: Map<String, JsonElement>? = null,
+  val via: String? = null,
+  val connect: String? = null,
+  val statusKey: String? = null,
+  val reconnect: PrototypeChannelReconnect? = null,
+  val decode: String? = null,
+  val routes: List<PrototypeChannelRoute>? = null,
+  val onOpen: JsonArray? = null,
+  val onClose: JsonArray? = null,
+  val onError: JsonArray? = null,
+)
+
+@Serializable
+data class PrototypeChannelReconnect(
+  val maxAttempts: Int? = null,
+  val initialDelayMs: Int? = null,
+  val maxDelayMs: Int? = null,
+)
+
+/** One route: [`when`] is `{pointer, equals}`, `{pointer, exists}`, `{event}` or absent. */
+@Serializable
+data class PrototypeChannelRoute(val `when`: JsonObject? = null, val actions: JsonArray)
 
 @Serializable
 enum class PrototypeValidateOn {

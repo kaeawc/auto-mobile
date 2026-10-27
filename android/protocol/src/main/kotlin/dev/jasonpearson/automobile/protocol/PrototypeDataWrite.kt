@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.protocol
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /** One `/data` write, with the path spelled `/data/<pointer>` and any `{index}` already bound. */
@@ -11,7 +13,23 @@ sealed interface PrototypeDataWrite {
 
   data class Set(override val path: String, val value: JsonElement) : PrototypeDataWrite
 
-  data class Append(override val path: String, val value: JsonElement) : PrototypeDataWrite
+  /** [maxItems] drops the oldest items so the array stays within it (#14261). */
+  data class Append(
+    override val path: String,
+    val value: JsonElement,
+    val maxItems: Int? = null,
+  ) : PrototypeDataWrite
+
+  /**
+   * Replaces the array element whose [key] pointer value equals the new value's, else appends it;
+   * [maxItems] then trims the oldest items (#14261).
+   */
+  data class Upsert(
+    override val path: String,
+    val key: String,
+    val value: JsonElement,
+    val maxItems: Int? = null,
+  ) : PrototypeDataWrite
 
   data class Remove(override val path: String) : PrototypeDataWrite
 
@@ -21,6 +39,7 @@ sealed interface PrototypeDataWrite {
       when (this) {
         is Set -> "set"
         is Append -> "append"
+        is Upsert -> "upsert"
         is Remove -> "remove"
       }
 }
@@ -70,12 +89,19 @@ object PrototypeDataWriter {
     targetRefusal(current, pointer, write)?.let {
       return it
     }
+    valueRefusal(write)?.let {
+      return it
+    }
     val tokens = PrototypeDataPointer.tokens(pointer)
     val next =
       when (write) {
         is PrototypeDataWrite.Set -> update(current, tokens) { _ -> write.value }
         is PrototypeDataWrite.Append ->
-          update(current, tokens) { target -> JsonArray((target as JsonArray) + write.value) }
+          update(current, tokens) { target ->
+            trimmed(JsonArray((target as JsonArray) + write.value), write.maxItems)
+          }
+        is PrototypeDataWrite.Upsert ->
+          update(current, tokens) { target -> upserted(target as JsonArray, write) }
         is PrototypeDataWrite.Remove -> remove(current, tokens)
       }
         as JsonObject
@@ -89,6 +115,70 @@ object PrototypeDataWriter {
     return PrototypeDataWriteResult.Success(next)
   }
 
+  /** An `upsert` value must hold its identity, and `maxItems` must fit the array limit. */
+  private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
+    if (
+      write is PrototypeDataWrite.Upsert &&
+        PrototypeDataPointer.resolve(write.value, write.key) == null
+    ) {
+      return refused(
+        PrototypeDataWriteErrorCode.INVALID_VALUE,
+        "upsertData value has no member at ${write.key}",
+      )
+    }
+    val maxItems =
+      when (write) {
+        is PrototypeDataWrite.Append -> write.maxItems
+        is PrototypeDataWrite.Upsert -> write.maxItems
+        else -> null
+      }
+    return if (
+      maxItems != null && maxItems !in 1..PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+    )
+      refused(
+        PrototypeDataWriteErrorCode.INVALID_VALUE,
+        "maxItems must be an integer from 1 to the data array limit",
+      )
+    else null
+  }
+
+  /** The array with the oldest items dropped until at most [maxItems] remain. */
+  private fun trimmed(items: JsonArray, maxItems: Int?): JsonArray =
+    if (maxItems == null || items.size <= maxItems) items
+    else JsonArray(items.drop(items.size - maxItems))
+
+  private fun upserted(items: JsonArray, write: PrototypeDataWrite.Upsert): JsonArray {
+    val identity = PrototypeDataPointer.resolve(write.value, write.key)
+    val matched = items.indexOfFirst { item ->
+      val existing = PrototypeDataPointer.resolve(item, write.key)
+      existing != null && sameJson(existing, identity)
+    }
+    val next =
+      if (matched >= 0)
+        JsonArray(items.mapIndexed { at, item -> if (at == matched) write.value else item })
+      else JsonArray(items + write.value)
+    return trimmed(next, write.maxItems)
+  }
+
+  /** JSON structural equality; numbers compare by value, as in the TypeScript twin. */
+  private fun sameJson(left: JsonElement?, right: JsonElement?): Boolean =
+    when {
+      left is JsonArray && right is JsonArray ->
+        left.size == right.size && left.indices.all { sameJson(left[it], right[it]) }
+      left is JsonObject && right is JsonObject ->
+        left.size == right.size &&
+          left.all { (key, value) -> right.containsKey(key) && sameJson(value, right[key]) }
+      left is JsonPrimitive && right is JsonPrimitive ->
+        if (left.isString || right.isString)
+          left.isString && right.isString && left.content == right.content
+        else {
+          val a = left.doubleOrNull
+          val b = right.doubleOrNull
+          if (a != null && b != null) a == b else left.content == right.content
+        }
+      else -> left == right
+    }
+
   private fun refused(code: PrototypeDataWriteErrorCode, message: String) =
     PrototypeDataWriteResult.Failure(PrototypeDataWriteError(code, message))
 
@@ -99,20 +189,8 @@ object PrototypeDataWriter {
   ): PrototypeDataWriteResult? {
     val existing = PrototypeDataPointer.resolve(data, pointer)
     return when (write) {
-      is PrototypeDataWrite.Append ->
-        when {
-          existing == null ->
-            refused(
-              PrototypeDataWriteErrorCode.NOT_FOUND,
-              "appendData target ${write.path} does not exist",
-            )
-          existing !is JsonArray ->
-            refused(
-              PrototypeDataWriteErrorCode.NOT_ARRAY,
-              "appendData target ${write.path} is not an array",
-            )
-          else -> null
-        }
+      is PrototypeDataWrite.Append -> arrayTargetRefusal(existing, "appendData", write.path)
+      is PrototypeDataWrite.Upsert -> arrayTargetRefusal(existing, "upsertData", write.path)
       is PrototypeDataWrite.Remove ->
         if (existing == null)
           refused(
@@ -135,6 +213,19 @@ object PrototypeDataWriter {
       }
     }
   }
+
+  private fun arrayTargetRefusal(
+    existing: JsonElement?,
+    action: String,
+    path: String,
+  ): PrototypeDataWriteResult? =
+    when {
+      existing == null ->
+        refused(PrototypeDataWriteErrorCode.NOT_FOUND, "$action target $path does not exist")
+      existing !is JsonArray ->
+        refused(PrototypeDataWriteErrorCode.NOT_ARRAY, "$action target $path is not an array")
+      else -> null
+    }
 
   /** Rebuilds the spine to [tokens], replacing the value there with [transform]'s result. */
   private fun update(

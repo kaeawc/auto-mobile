@@ -44,6 +44,7 @@ import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
+import dev.jasonpearson.automobile.protocol.PrototypeUpsertDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatNodeBinding
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
@@ -574,6 +575,8 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
     is PrototypeSetDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeAppendDataAction ->
+      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+    is PrototypeUpsertDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
     is PrototypeStartTimerAction -> copy(actions = actions.map { it.bound(instance) })

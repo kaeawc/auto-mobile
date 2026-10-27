@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypeChannelRules.channelErrors
 import dev.jasonpearson.automobile.protocol.PrototypeChartRules.chartErrors
 import dev.jasonpearson.automobile.protocol.PrototypeChatScrollRules.chatScrollErrors
 import dev.jasonpearson.automobile.protocol.PrototypeChoreographyRules.choreographyErrors
@@ -133,6 +134,7 @@ internal object PrototypeSpecInput {
         ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
+        ?: channelErrors(value, context)
         ?: nodeVocabularyErrors(value, context)
         ?: swipeActionsErrors(context)
         ?: pagerErrors(context)

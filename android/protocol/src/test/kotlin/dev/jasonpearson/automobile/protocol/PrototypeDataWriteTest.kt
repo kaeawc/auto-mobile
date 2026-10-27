@@ -333,4 +333,96 @@ class PrototypeDataWriteTest {
         assertEquals(message, rejection(repeatSpec("[${action("removeData", path)}]")).message)
       }
   }
+
+  private fun upsert(path: String, key: String, value: String, maxItems: Int? = null) =
+    PrototypeDataWrite.Upsert(path, key, Json.parseToJsonElement(value), maxItems)
+
+  private val messages = obj("""{"messages":[{"id":"a","text":"one"},{"id":"b","text":"two"}]}""")
+
+  @Test
+  fun `upsert replaces the element with the same key and appends otherwise`() {
+    assertEquals(
+      obj("""{"messages":[{"id":"a","text":"one"},{"id":"b","text":"edited"}]}"""),
+      ok(upsert("/data/messages", "/id", """{"id":"b","text":"edited"}"""), messages),
+    )
+    assertEquals(
+      obj("""{"messages":[{"id":"a","text":"one"},{"id":"b","text":"two"},{"id":"c"}]}"""),
+      ok(upsert("/data/messages", "/id", """{"id":"c"}"""), messages),
+    )
+  }
+
+  @Test
+  fun `upsert matches structurally and by numeric value`() {
+    val rows = obj("""{"rows":[{"k":{"a":[1,2]},"v":1},{"k":7,"v":2}]}""")
+    assertEquals(
+      obj("""{"rows":[{"k":{"a":[1,2]},"v":9},{"k":7,"v":2}]}"""),
+      ok(upsert("/data/rows", "/k", """{"k":{"a":[1,2]},"v":9}"""), rows),
+    )
+    assertEquals(
+      obj("""{"rows":[{"k":{"a":[1,2]},"v":1},{"k":7.0,"v":8}]}"""),
+      ok(upsert("/data/rows", "/k", """{"k":7.0,"v":8}"""), rows),
+    )
+  }
+
+  @Test
+  fun `upsert refuses a value without its key and a bad target`() {
+    val missing =
+      PrototypeDataWriter.apply(messages, upsert("/data/messages", "/id", """{"text":"x"}"""))
+    assertEquals(
+      PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.INVALID_VALUE,
+        "upsertData value has no member at /id",
+      ),
+      (missing as PrototypeDataWriteResult.Failure).error,
+    )
+    val absent = PrototypeDataWriter.apply(messages, upsert("/data/nope", "/id", """{"id":1}"""))
+    assertEquals(
+      PrototypeDataWriteErrorCode.NOT_FOUND,
+      (absent as PrototypeDataWriteResult.Failure).error.code,
+    )
+    val notArray =
+      PrototypeDataWriter.apply(
+        obj("""{"messages":{}}"""),
+        upsert("/data/messages", "/id", """{"id":1}"""),
+      )
+    assertEquals(
+      PrototypeDataWriteErrorCode.NOT_ARRAY,
+      (notArray as PrototypeDataWriteResult.Failure).error.code,
+    )
+  }
+
+  @Test
+  fun `maxItems drops the oldest items for append and upsert`() {
+    assertEquals(
+      obj("""{"messages":[{"id":"b","text":"two"},{"id":"c"}]}"""),
+      ok(upsert("/data/messages", "/id", """{"id":"c"}""", maxItems = 2), messages),
+    )
+    assertEquals(
+      obj("""{"messages":[{"id":"b","text":"edited"}]}"""),
+      ok(upsert("/data/messages", "/id", """{"id":"b","text":"edited"}""", maxItems = 1), messages),
+    )
+    assertEquals(
+      obj("""{"log":[2,3,4]}"""),
+      ok(
+        PrototypeDataWrite.Append("/data/log", JsonPrimitive(4), maxItems = 3),
+        obj("""{"log":[1,2,3]}"""),
+      ),
+    )
+  }
+
+  @Test
+  fun `maxItems out of range is invalid`() {
+    for (maxItems in listOf(0, 501)) {
+      val result =
+        PrototypeDataWriter.apply(
+          obj("""{"log":[]}"""),
+          PrototypeDataWrite.Append("/data/log", JsonPrimitive(1), maxItems),
+        )
+      assertEquals(
+        PrototypeDataWriteErrorCode.INVALID_VALUE,
+        (result as PrototypeDataWriteResult.Failure).error.code,
+        "maxItems $maxItems",
+      )
+    }
+  }
 }

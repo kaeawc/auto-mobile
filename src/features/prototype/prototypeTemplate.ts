@@ -148,6 +148,7 @@ export type FieldKind =
   | "request"
   | "deviceRequest"
   | "scrollTo"
+  | "realtimeData"
   | "timer"
   | "stackTransition";
 
@@ -244,6 +245,14 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
 
 function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   mapField(action, "path", path, "dataPath", visit);
+  // `upsertData` and `appendData.maxItems` are realtime additions (#14261); mark the whole action
+  // so the realtime gate can locate them.
+  if (
+    action.type === "upsertData" ||
+    (action.type === "appendData" && action.maxItems !== undefined)
+  ) {
+    visit(action, path, "realtimeData");
+  }
   if (action.type !== "removeData" && action.value !== undefined) {
     action.value = mapBinding(action.value, `${path}.value`, visit);
   }
@@ -275,6 +284,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "setData":
     case "appendData":
+    case "upsertData":
     case "removeData":
       mapDataAction(action, path, visit);
       break;
@@ -570,19 +580,39 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
   return copy;
 }
 
-/** Visit root platform handler actions, in the contract's sorted event-name order. */
+/**
+ * Visit the root action lists that run outside any node: platform handlers in the contract's
+ * sorted event-name order, then each realtime channel's routes and hooks (#14261).
+ */
 export function visitPrototypeHandlerFields(spec: unknown, visit: FieldVisitor): void {
   const handlers = record(record(record(spec)?.platform)?.on);
   for (const name of Object.keys(handlers ?? {}).sort()) {
-    const actions = handlers![name];
-    if (!Array.isArray(actions)) {
+    visitActionList(handlers![name], `platform.on[${JSON.stringify(name)}]`, visit);
+  }
+  const channels = record(record(spec)?.channels);
+  for (const id of Object.keys(channels ?? {}).sort()) {
+    const channel = record(channels![id]);
+    if (!channel) {
       continue;
     }
-    actions.forEach((action, index) => {
-      const value = record(action);
-      if (value) {
-        mapAction(value, `platform.on[${JSON.stringify(name)}][${index}]`, visit);
-      }
-    });
+    const at = memberPath("channels", id);
+    (Array.isArray(channel.routes) ? channel.routes : []).forEach((route, index) =>
+      visitActionList(record(route)?.actions, `${at}.routes[${index}].actions`, visit),
+    );
+    for (const hook of ["onOpen", "onClose", "onError"]) {
+      visitActionList(channel[hook], `${at}.${hook}`, visit);
+    }
   }
+}
+
+function visitActionList(actions: unknown, path: string, visit: FieldVisitor): void {
+  if (!Array.isArray(actions)) {
+    return;
+  }
+  actions.forEach((action, index) => {
+    const value = record(action);
+    if (value) {
+      mapAction(value, `${path}[${index}]`, visit);
+    }
+  });
 }

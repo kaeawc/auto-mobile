@@ -195,6 +195,7 @@ object PrototypeSpecValidator {
                 JsonObject(value + ("state" to stored)),
                 enforceBytes = false,
               )
+              ?: PrototypeChannelRules.statusKeyError(JsonObject(value + ("state" to stored)))
               ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")

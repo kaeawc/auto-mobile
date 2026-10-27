@@ -1,6 +1,6 @@
 import { prototypeDataPointerTokens } from "./prototypeData";
 import { applyPrototypeDataWrite } from "./prototypeDataWrite";
-import type { PrototypeDataWriteEvent } from "./prototypeDataWriteEvent";
+import { prototypeDeviceDataWrite, type PrototypeDataWriteEvent } from "./prototypeDataWriteEvent";
 import type { PrototypeData } from "./prototypeSpec";
 
 export type ShownSpecJson = Readonly<Record<string, unknown>>;
@@ -197,11 +197,7 @@ export class PrototypeShownSpecs {
         ? applyPrototypeDataWrite(spec.data, { op: "remove", path: write.path })
         : write.value === undefined
           ? undefined
-          : applyPrototypeDataWrite(spec.data, {
-              op: write.op,
-              path: write.path,
-              value: write.value,
-            });
+          : applyPrototypeDataWrite(spec.data, prototypeDeviceDataWrite(write, write.value));
     if (!applied?.success) {
       this.forget(deviceId, id);
       return { kind: "dropped" };

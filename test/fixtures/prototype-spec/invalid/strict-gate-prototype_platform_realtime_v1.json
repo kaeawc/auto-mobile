@@ -1,0 +1,93 @@
+{
+  "spec": {
+    "id": "realtime",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "chatStatus": "idle",
+      "peerTyping": false,
+      "unread": 0,
+      "roomId": "general"
+    },
+    "data": {
+      "messages": [],
+      "driver": {}
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "realtime.connect",
+              "args": {
+                "channel": {
+                  "value": "chat"
+                }
+              }
+            },
+            {
+              "type": "platform",
+              "call": "realtime.send",
+              "args": {
+                "channel": {
+                  "value": "chat"
+                },
+                "body": {
+                  "value": {
+                    "type": "ping"
+                  }
+                }
+              }
+            },
+            {
+              "type": "platform",
+              "call": "realtime.disconnect",
+              "args": {
+                "channel": {
+                  "value": "chat"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "{platform:/realtime/chat/framesIn} frames"
+        }
+      ]
+    },
+    "channels": {
+      "chat": {
+        "kind": "websocket",
+        "url": "wss://chat.example.com/room"
+      }
+    },
+    "platform": {
+      "on": {
+        "realtime.status": [
+          {
+            "type": "setState",
+            "key": "chatStatus",
+            "value": {
+              "event": "/status"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_model_v1", "prototype_platform_v1"]
+  },
+  "expectedPath": "$"
+}

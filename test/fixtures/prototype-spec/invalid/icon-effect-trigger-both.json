@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "icon-effects",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "flag": false
+    },
+    "data": {
+      "revision": 0
+    },
+    "root": {
+      "type": "icon",
+      "name": "home",
+      "effect": {
+        "type": "pulse",
+        "trigger": {
+          "key": "flag",
+          "data": "/revision"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.effect.trigger.key",
+  "expectedMessage": "Exactly one of key, data is required"
+}

@@ -70,6 +70,9 @@
     "gestures.json",
     "grid-adaptive-min-width.json",
     "grid-fixed-columns-span.json",
+    "icon-effects-integer-spellings.json",
+    "icon-effects-repeat.json",
+    "icon-effects.json",
     "integer-json-spellings.json",
     "linkify-repeat-binding.json",
     "linkify-repeat-data-rows.json",
@@ -657,6 +660,18 @@
     "grid-span-outside-grid.json",
     "height-dp-over-max.json",
     "icon-button-unknown-icon.json",
+    "icon-effect-expanded-loop-limit.json",
+    "icon-effect-extra.json",
+    "icon-effect-loop-limit.json",
+    "icon-effect-repeat-fraction.json",
+    "icon-effect-repeat-high.json",
+    "icon-effect-repeat-string.json",
+    "icon-effect-repeat-zero.json",
+    "icon-effect-trigger-both.json",
+    "icon-effect-trigger-empty.json",
+    "icon-effect-trigger-pointer.json",
+    "icon-effect-trigger-repeat.json",
+    "icon-effect-type.json",
     "id-wrong-type-before-width-over-max-first-error.json",
     "image-limit.json",
     "image-pair-empty-id.json",
@@ -1131,6 +1146,7 @@
     "strict-gate-prototype_flow_grid_v1.json",
     "strict-gate-prototype_format_v1.json",
     "strict-gate-prototype_gestures_v1.json",
+    "strict-gate-prototype_icon_effects_v1.json",
     "strict-gate-prototype_lazy_list_v1.json",
     "strict-gate-prototype_linkify_v1.json",
     "strict-gate-prototype_loading_states_v1.json",
@@ -2140,6 +2156,9 @@
       "prototype_platform_clipboard_v1",
       "prototype_platform_v1"
     ],
-    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"]
+    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "icon-effects-repeat.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
+    "icon-effects.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
+    "icon-effects-integer-spellings.json": ["prototype_icon_effects_v1"]
   }
 }

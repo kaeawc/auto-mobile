@@ -575,6 +575,22 @@
         }
 
         @ViewBuilder private var iconView: some View {
+            if let effect = node.effect {
+                let value = effect.trigger?.key.flatMap { model.state[$0] }
+                    ?? effect.trigger?.data.flatMap { PrototypeDataPointer.resolve(model.spec?.data, pointer: $0) }
+                PrototypeIconEffectView(
+                    activity: model.iconMotionActivity,
+                    effect: effect,
+                    value: value,
+                    name: node.name ?? "",
+                    profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile
+                ) {
+                    plainIconView
+                }
+            } else { plainIconView }
+        }
+
+        @ViewBuilder private var plainIconView: some View {
             if let symbol = prototypeSymbol(node.name, variant: node.variant) {
                 if accessibilityLabelOverride == nil {
                     PrototypeGlyph(symbol: symbol)

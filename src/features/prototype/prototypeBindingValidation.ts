@@ -10,6 +10,7 @@ export interface Rule {
   nonblank?: boolean;
   exclusive?: string[];
   exactlyOne?: string[];
+  atMostOne?: string[];
   dependents?: Record<string, string[]>;
   integer?: boolean;
   min?: number;

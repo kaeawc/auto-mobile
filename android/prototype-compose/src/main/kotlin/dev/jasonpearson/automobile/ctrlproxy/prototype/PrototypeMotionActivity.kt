@@ -72,5 +72,5 @@ internal fun ReportPrototypeMotion(loop: Boolean = false, running: () -> Boolean
   LaunchedEffect(activity, owner, loop) {
     snapshotFlow { current.value() }.collect { activity.report(owner, it, loop) }
   }
-  DisposableEffect(activity, owner) { onDispose { activity.release(owner) } }
+  DisposableEffect(activity, owner, loop) { onDispose { activity.release(owner) } }
 }

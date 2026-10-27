@@ -16,7 +16,7 @@ import { prototypeChoreographyError } from "./prototypeChoreography";
 import { prototypeMotionV2Error } from "./prototypeMotionV2";
 import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
-import { prototypePlatformError } from "./prototypePlatform";
+import { prototypePlatformError, prototypeReservedTestTagError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
@@ -801,6 +801,17 @@ function platformArgumentError(
   return walk(value, rule, path, context, 0);
 }
 
+/** The host-owned vocabulary: the reserved `automobile-` testTag namespace, then the platform rules. */
+function hostVocabularyError(
+  value: unknown,
+  context: Context,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeReservedTestTagError(context.nodes) ??
+    prototypePlatformError(value, context.actions, platformArgumentError)
+  );
+}
+
 /** Motion and choreography share one set of located nodes. */
 function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
   return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
@@ -830,7 +841,7 @@ function behaviourErrors(
   return (
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions) ??
-    prototypePlatformError(value, context.actions, platformArgumentError) ??
+    hostVocabularyError(value, context) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
     prototypeLoadingStatesError(context.nodes) ??
     motionErrors(context.nodes) ??

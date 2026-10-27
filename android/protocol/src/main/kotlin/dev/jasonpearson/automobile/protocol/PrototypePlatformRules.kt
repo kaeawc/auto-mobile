@@ -32,6 +32,9 @@ object PrototypePlatform {
 
   /** Authored emit names cannot start with this; the runtime reports its own events under it. */
   const val RESERVED_EMIT_PREFIX = "prototype_"
+
+  /** Authored `testTag`s cannot start with this; host controls own the namespace (#15120). */
+  const val RESERVED_TEST_TAG_PREFIX = "automobile-"
 }
 
 /**
@@ -55,6 +58,9 @@ internal object PrototypePlatformRules {
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val root = value as? JsonObject ?: return null
     val declared = Declared(root)
+    reservedTestTagError(context)?.let {
+      return it
+    }
     requiresError(root)?.let {
       return it
     }
@@ -174,6 +180,18 @@ internal object PrototypePlatformRules {
     if (into == "/platform" || into.startsWith("/platform/"))
       "/platform is read-only: write a platform call result into /data"
     else PrototypeRequestRules.requestIntoError(into)?.replaceFirst("request into", "platform into")
+
+  private fun reservedTestTagError(context: Context): PrototypeSpecError? =
+    context.nodes
+      .firstOrNull {
+        it.value.text("testTag")?.startsWith(PrototypePlatform.RESERVED_TEST_TAG_PREFIX) == true
+      }
+      ?.let {
+        fail(
+          "${it.path}.testTag",
+          "testTag values starting with ${PrototypePlatform.RESERVED_TEST_TAG_PREFIX} are reserved for host controls",
+        )
+      }
 
   private fun emitNameError(action: JsonObject, path: String): PrototypeSpecError? {
     val name = action.text("name") ?: return null

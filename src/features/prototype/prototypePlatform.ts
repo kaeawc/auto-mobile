@@ -24,6 +24,8 @@ export const PROTOTYPE_PLATFORM_EVENT_NAME = "prototype_platform";
 export const PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME = "prototype_platform_event";
 /** Authored emit names cannot start with this; the runtime reports its own events under it. */
 export const PROTOTYPE_RESERVED_EMIT_PREFIX = "prototype_";
+/** Authored `testTag`s cannot start with this; host controls own the namespace (#15120). */
+export const PROTOTYPE_RESERVED_TEST_TAG_PREFIX = "automobile-";
 /** Typed outcomes a call writes to `<into>__meta.error` and reports in `prototype_platform`. */
 export const PROTOTYPE_PLATFORM_ERROR_CODES = [
   "unsupported",
@@ -404,6 +406,23 @@ function emitNameError(action: Raw, path: string): PrototypePlatformError | unde
         message: `Emit names starting with ${PROTOTYPE_RESERVED_EMIT_PREFIX} are reserved for runtime events`,
       }
     : undefined;
+}
+
+/** The first authored node whose `testTag` takes the host-reserved `automobile-` namespace. */
+export function prototypeReservedTestTagError(
+  nodes: readonly { value: Raw; path: string }[],
+): PrototypePlatformError | undefined {
+  const node = nodes.find(
+    ({ value }) =>
+      typeof value.testTag === "string" &&
+      value.testTag.startsWith(PROTOTYPE_RESERVED_TEST_TAG_PREFIX),
+  );
+  return node === undefined
+    ? undefined
+    : {
+        path: `${node.path}.testTag`,
+        message: `testTag values starting with ${PROTOTYPE_RESERVED_TEST_TAG_PREFIX} are reserved for host controls`,
+      };
 }
 
 /**

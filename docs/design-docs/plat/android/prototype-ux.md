@@ -1892,7 +1892,9 @@ circular close chip (#15119), the twin of the iOS chip: a 32 dp opaque `prototyp
 Close glyph, no text label, a 48 dp hit target, and the shared host id `automobile-prototype-dismiss`
 (`testTag`, exposed as the resource id) with content description `Dismiss AutoMobile prototype`. The persistent
 chip sits top-end inside the system-bar and cutout insets; the bar keeps its inset-aware row. The brief
-chromeless escape pill keeps its text. Session-scoped sheets and floating windows still draw no host control
+chromeless escape pill keeps its text and carries the same id (#15120). The `automobile-` `testTag` prefix is
+reserved on every platform (the validators reject an authored tag with it), observe sees the controls by that id,
+and `tapOn` moves its point off them or fails naming the control that covers the whole target. Session-scoped sheets and floating windows still draw no host control
 (they end through the agent's `dismiss`, a replacing show, the TTL or a disconnect).
 
 A `persistence: "device"` prototype outlives its host session: it is not dismissed when the last client

@@ -846,6 +846,9 @@ Authoring choices:
   no node. Every text, tagged node and tappable node stays targetable. Give a \`testTag\` only to
   nodes you will look up. Every accessibility node is work whenever \`observe\` or a screen reader
   reads the tree.
+- **Reserved \`testTag\` prefix.** A \`testTag\` cannot start with \`automobile-\`: the host's own dismiss
+  controls use \`automobile-prototype-dismiss\`, and a spec that takes one is rejected with the node's path.
+  \`tapOn\` keeps its point off those controls, or fails naming one that covers the whole target.
 - **Long lists.** A \`scroll\` node builds all of its children up front on both platforms, so a
   long list inside \`scroll\` pays for every row when it is shown. *Being changed on Android
   (#12139).* \`repeat\` expands to real nodes that count against the node limit.

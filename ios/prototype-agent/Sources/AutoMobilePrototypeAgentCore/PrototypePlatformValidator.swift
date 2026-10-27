@@ -70,6 +70,8 @@ enum PrototypePlatformValidator {
         "remoteNotification",
     ]
     static let reservedEmitPrefix = "prototype_"
+    /// Authored `testTag`s cannot start with this; host controls own the namespace (#15120).
+    static let reservedTestTagPrefix = "automobile-"
     static let maxArgs = 16
     static let maxHandlers = 32
     static let maxTimeoutMs = 300_000
@@ -100,6 +102,19 @@ enum PrototypePlatformValidator {
         let declared = try validateRequires(requires)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         try scan(root, path: "root", inHandler: false, declared: declared, state: state)
+    }
+
+    /// Throws at the first authored node whose `testTag` takes the host-reserved namespace.
+    static func validateTestTags(nodes: [PrototypeLocatedValue]) throws {
+        for node in nodes {
+            guard case let .string(tag)? = node.value["testTag"], tag.hasPrefix(reservedTestTagPrefix) else {
+                continue
+            }
+            throw PrototypeContractValidator.invalid(
+                "\(node.path).testTag",
+                "testTag values starting with \(reservedTestTagPrefix) are reserved for host controls"
+            )
+        }
     }
 
     // MARK: requires

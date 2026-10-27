@@ -68,7 +68,9 @@ main() {
   local command_line
   command_line=$(ps -p "$emulator_pid" -o command= || true)
   [[ $command_line == *qemu-system* ]] || { echo "PID is not an emulator process" >&2; return 2; }
-  [[ $(unique_method) != unsupported ]] || { echo "Unsupported host OS" >&2; return 2; }
+  local method
+  method=$(unique_method)
+  [[ $method != unsupported ]] || { echo "Unsupported host OS" >&2; return 2; }
   mkdir -p "$output_dir"
   printf '%s\n' "$command_line" > "$output_dir/host-command.txt"
   printf 'epoch_seconds,cpu_seconds,unique_kib\n' > "$output_dir/cost-samples.csv"
@@ -86,7 +88,7 @@ main() {
     printf '%s,%s,%s\n' "$(date +%s)" "$cpu" "$unique" >> "$output_dir/cost-samples.csv"
     if ((sample + 1 < samples)); then sleep "$interval"; fi
   done
-  awk -F, -v method="$(unique_method)" 'NR > 1 {
+  awk -F, -v method="$method" 'NR > 1 {
     if (NR == 2) { firstTime = $1; firstCpu = $2; peak = $3 }
     lastTime = $1; lastCpu = $2; sum += $3; count++
     if ($3 > peak) peak = $3

@@ -523,6 +523,10 @@ export function mapBindableFields(
     mapField(entry, "hint", entryPath, "text", visit);
     return entry;
   });
+  mapObject(copy, "shared", path, (entry, entryPath) => {
+    mapField(entry, "key", entryPath, "operand", visit);
+    return entry;
+  });
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
     mapObject(copy, "linkify", path, (options, optionsPath) => {

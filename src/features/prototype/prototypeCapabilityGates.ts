@@ -17,6 +17,8 @@ import {
 import {
   prototypeReducedMotionFields,
   prototypeSharedElementFields,
+  prototypeSharedElementV2Fields,
+  prototypeSharedElementV2UnsupportedMessage,
   prototypeReducedMotionUnsupportedMessage,
   prototypeSharedElementUnsupportedMessage,
 } from "./prototypeSharedElement";
@@ -35,6 +37,7 @@ import {
   PROTOTYPE_EFFECTS_CAPABILITY,
   PROTOTYPE_REDUCED_MOTION_CAPABILITY,
   PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
+  PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
@@ -401,6 +404,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_REDUCED_MOTION_CAPABILITY,
     fields: prototypeReducedMotionFields,
     unsupportedMessage: prototypeReducedMotionUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
+    fields: prototypeSharedElementV2Fields,
+    unsupportedMessage: prototypeSharedElementV2UnsupportedMessage,
   },
   {
     capability: PROTOTYPE_SHARED_ELEMENT_CAPABILITY,

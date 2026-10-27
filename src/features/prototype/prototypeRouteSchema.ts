@@ -1,10 +1,17 @@
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { prototypeDataActionValueSchema } from "./prototypeActionValues";
+import {
+  buildPrototypeActionListSchema,
+  prototypeDataActionValueSchema,
+  type PrototypeDataActionValue,
+} from "./prototypeActionValues";
 
 // Reuse the neighbouring value bindings; routes accept flat scalar literals, never {value: JSON}.
-export const routeParamsSchema = z
+type RouteParams = Record<string, string | number | boolean | PrototypeDataActionValue>;
+
+// Preserve the parsed union without copying every binding schema into navigation actions.
+export const routeParamsSchema: z.ZodType<RouteParams, z.ZodTypeDef, unknown> = z
   .record(
     z.string().regex(prototypeContractPatterns.pathKey),
     z.union([
@@ -28,7 +35,18 @@ export const setStackActionSchema = z
   })
   .strict();
 
-export function buildRouteSchema<Action extends z.ZodTypeAny>(actionSchema: Action) {
+// Keep the action union's parsed type without propagating its full Zod implementation
+// through every recursive stack node and every consumer of PrototypeNode.
+interface Route<Action> {
+  params?: Record<string, "string" | "number" | "boolean">;
+  onEnter?: Action[];
+  onBack?: Action[];
+}
+
+export function buildRouteSchema<Action extends z.ZodTypeAny>(
+  actionSchema: Action,
+): z.ZodType<Route<z.output<Action>>, z.ZodTypeDef, unknown> {
+  const actions = buildPrototypeActionListSchema(actionSchema);
   return z
     .object({
       params: z
@@ -39,8 +57,8 @@ export function buildRouteSchema<Action extends z.ZodTypeAny>(actionSchema: Acti
         .and(z.unknown())
         .refine((value) => Object.keys(value).length <= 16)
         .optional(),
-      onEnter: z.array(actionSchema).min(1).max(32).optional(),
-      onBack: z.array(actionSchema).min(1).max(32).optional(),
+      onEnter: actions.optional(),
+      onBack: actions.optional(),
     })
     .strict();
 }

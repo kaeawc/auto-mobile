@@ -72,27 +72,7 @@ row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`icon
 \`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
-export const GUIDE_TEMPLATES = `## Starter templates
-
-The repository ships eight validated multi-screen specs, each a \`stack\` with a \`testTag\` on every
-interactive node. In a checkout, show one with \`specPath\` (an absolute path) from
-\`test/fixtures/prototype-spec/valid/\`, or copy its shape when writing a spec:
-
-- \`template-onboarding.json\`: welcome, sign-up form with \`checks\`, a button gated by
-  \`enabledWhen {valid}\`, \`emit\` with \`requireValid\`, done.
-- \`template-feed-detail.json\`: a \`repeat\` over \`{path: "/posts"}\` inside a refreshable \`scroll\`; a
-  tap stores the row in state and \`push\`es the detail screen.
-- \`template-tabbed-home.json\`: a \`pager\` driven by a \`bottomNav {pager}\`, plus a pushed screen.
-- \`template-checkout.json\`: quantity stepper, form with \`select\` and \`datePicker\`, and a
-  \`bottomSheet\` confirmation.
-- \`template-settings.json\`: \`listItem\` switches, \`radioGroup\`, \`slider\`, \`dialog\`, \`snackbar\` and
-  a \`storage\` block.
-- \`template-search.json\`: docked \`searchBar\` whose child lists \`/results\` and shows an empty
-  state with \`{data, empty: true}\`.
-- \`template-chat.json\`: reversed \`scroll\` with \`stickToEnd\`, quick-reply chips that
-  \`appendData\`, and a composer that \`emit\`s \`message_sent\` with the draft as context (Android only).
-- \`template-dashboard.json\`: \`chart\` line, bar and ring over \`/data\`, and a \`startTimer\` clock.
-`;
+export { GUIDE_TEMPLATES } from "./prototypeGuideTemplates";
 
 /**
  * Hand-written authoring prose for the `automobile:prototype` resource. Everything that names a
@@ -272,12 +252,18 @@ settling, pager scrolling and shared morphs) with a crossfade or snap with fade.
 other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
 Off makes every change instant.
 
-\`sharedKey\` requires \`prototype_shared_element_v1\` and \`visibleWhen\` on the same node.
-Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each key labels exactly two nodes, at most 16 distinct
-keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
-inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
-not visible together. Full motion morphs the pair's bounds between different content; reduced
-uses ordinary visibility fades and off swaps instantly.
+\`shared: {key, as: "element" | "bounds"}\` requires \`prototype_shared_element_v2\` and
+\`visibleWhen\` on the same node. Element shares identical content (a hero image); bounds shares
+a container with changing content and crossfades both sides. \`sharedKey\` remains the
+\`prototype_shared_element_v1\` bounds alias; a node cannot set both. Literal v2 keys allow
+letters, digits, underscore and hyphen, starting with a letter or underscore (1-64 characters).
+A spec has at most 16 resolved keys, including unmatched feed items. Literal keys pair exactly two nodes, neither nested in the
+other. Inside repeat children, use \`shared: {key: "story-{item.id}", as: "bounds"}\` with
+\`repeat.key: "id"\`: placeholders must name that same field; index and constant keys are refused.
+Each item resolves a distinct key, used at most twice; unmatched feed items remain ordinary cards.
+The pair must use the same as value and cannot cross a dialog or bottomSheet boundary.
+Choose visibility conditions so the pair is not visible together. Full motion morphs geometry;
+reduced uses ordinary visibility crossfades and off swaps instantly.
 
 ## Motion v2
 

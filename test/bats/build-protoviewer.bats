@@ -10,7 +10,10 @@ setup() {
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgent" \
     "${FIXTURE}/ios/prototype-agent/ProtoViewer" "${FIXTURE}/ios/prototype-agent/Viewer"
-  cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${FIXTURE}/scripts/ios/"
+  cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${REPO_ROOT}/scripts/ios/prototype-effects-metallib.sh" \
+    "${FIXTURE}/scripts/ios/"
+  mkdir -p "${FIXTURE}/ios/prototype-agent/Shaders"
+  touch "${FIXTURE}/ios/prototype-agent/Shaders/PrototypeEffects.metal"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
     "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/"*.xcstrings "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
@@ -25,6 +28,9 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$BUILD_LOG"
 if [[ "$*" == '--sdk iphonesimulator --show-sdk-path' ]]; then
   echo /fake/sdk
+elif [[ "${3:-}" == metal || "${3:-}" == metallib ]]; then
+  # The effects metallib step: `metal --version` probes, `metal -c ... -o air`, `metallib air -o out`.
+  [[ "${4:-}" == --version ]] || printf 'compiled\n' > "${!#}"
 elif [[ "$1 ${2:-}" == 'xcstringstool compile' ]]; then
   [[ -s "$3" && "$4" == --output-directory ]]
   mkdir -p "$5/en.lproj"

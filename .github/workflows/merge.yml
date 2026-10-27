@@ -723,8 +723,16 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-      - uses: ./.github/actions/ci-junit-runner-unit-tests
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      # Only run unit tests without Emulator
+      - uses: ./.github/actions/gradle-task-run
         with:
+          gradle-tasks: ":junit-runner:test"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -982,13 +990,30 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-      - uses: ./.github/actions/ci-build-android-control-proxy
+
+      - uses: ./.github/actions/gradle-task-run
         with:
+          gradle-tasks: ":control-proxy:assembleDebug :video-server:d8Dex"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      - name: "Upload CtrlProxy APK"
+        uses: actions/upload-artifact@v6
+        with:
+          name: control-proxy-apk
+          path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+
+      - name: "Upload video-server jar"
+        uses: actions/upload-artifact@v6
+        with:
+          name: video-server-jar
+          path: android/video-server/build/libs/automobile-video.jar
 
   build-playground-app:
     name: "Build Playground App"

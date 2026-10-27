@@ -668,6 +668,15 @@
             apply(activity: false) { $0.completeRequest(requestId, response) }
         }
 
+        /// `style.effects` entries this device does not draw right now (`prototype_effects_v1`), shaped
+        /// like Android's `degradedEffects`: `[{path, type, reason}]`.
+        func degradedEffects() -> [[String: String]] {
+            guard let root = spec?.root else { return [] }
+            return PrototypeEffects.degraded(
+                root: root, state: state, activeScreen: stacks.compactMapValues { $0.path.last }
+            )
+        }
+
         func status() -> [String: Any] {
             var status: [String: Any] = [
                 "shown": session.isShown,
@@ -686,6 +695,8 @@
             if let platform = session.spec?
                 .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
+            let degraded = degradedEffects()
+            if !degraded.isEmpty { status["degradedEffects"] = degraded }
             if let id = spec?.id, let storage {
                 storage.flush()
                 if let report = storage.report(id: id) { status["storage"] = report.wireObject }

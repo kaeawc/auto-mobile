@@ -1,5 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { createReadOnlyBindingRegistry } from "../../src/daemon/readOnlyBindingRegistry";
+import {
+  createReadOnlyBindingRegistry,
+  createReadOnlyDeviceClaims,
+} from "../../src/daemon/readOnlyBindingRegistry";
 import {
   DeviceOwnershipView,
   createDefaultDeviceOwnershipSources,
@@ -60,6 +63,69 @@ describe("createReadOnlyBindingRegistry", () => {
       });
       expect(ownership.records.map((r) => r.source)).toEqual(["exec_owner"]);
       expect(closed).toBe(1);
+    } finally {
+      await real.close?.();
+    }
+  });
+});
+
+describe("createReadOnlyDeviceClaims", () => {
+  test("a missing registry file reads as no claims and is never opened", async () => {
+    let opened = false;
+    const claims = createReadOnlyDeviceClaims({
+      exists: () => false,
+      open: async () => {
+        opened = true;
+        throw new Error("must not open");
+      },
+    });
+    expect(await claims.list()).toEqual([]);
+    expect(await claims.get("android", "Pixel_8")).toBeUndefined();
+    expect(opened).toBe(false);
+  });
+
+  test("an unreadable registry logs and reads as no claims", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const claims = createReadOnlyDeviceClaims({
+        exists: () => true,
+        open: async () => {
+          throw new Error("upgrade pending");
+        },
+      });
+      expect(await claims.list()).toEqual([]);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a claim reaches the reader and every handle is closed", async () => {
+    const real = await openSqliteBindingRegistry({ dbPath: ":memory:" });
+    let closed = 0;
+    try {
+      await real.deviceClaims().upsert({
+        platform: "android",
+        deviceId: "Pixel_8",
+        kind: "allocation",
+        pid: 77,
+        ownerToken: "t",
+        claimedAtMs: 1,
+        updatedAtMs: 1,
+      });
+      const claims = createReadOnlyDeviceClaims({
+        exists: () => true,
+        open: async () => ({
+          findDeviceHolder: (p, id) => real.findDeviceHolder(p, id),
+          deviceClaims: () => real.deviceClaims(),
+          close: async () => {
+            closed++;
+          },
+        }),
+      });
+      expect((await claims.list()).map((claim) => claim.pid)).toEqual([77]);
+      expect((await claims.get("android", "Pixel_8"))?.ownerToken).toBe("t");
+      expect(closed).toBe(2);
     } finally {
       await real.close?.();
     }

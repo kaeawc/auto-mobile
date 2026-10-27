@@ -173,6 +173,7 @@ nav:
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md
       - "CI attestation shadow promotion": design-docs/ci/attestation-shadow-promotion.md
+      - "CI attestation store": design-docs/ci/attestation-store.md
       - "CI attestation signing envelope": design-docs/ci/attestation-envelope.md
       - "CI attestation GitHub App transport": design-docs/ci/attestation-github-app-transport.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md

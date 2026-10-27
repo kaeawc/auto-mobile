@@ -351,11 +351,14 @@ function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities
   };
 }
 
-/** A daemon request is stateless, with no client connection to ask; only a direct server asks. */
+/** Modern requests ask in-band; only a direct legacy server has a push channel. */
 function deviceElicitationDispatch(
   daemonMode: boolean,
   options: McpServerOptions,
-): { ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions } {
+): { era?: "modern"; ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions } {
+  if (options.era === "modern") {
+    return { era: "modern" };
+  }
   return daemonMode ? {} : { ambiguousDeviceElicitation: options.ambiguousDeviceElicitation ?? {} };
 }
 

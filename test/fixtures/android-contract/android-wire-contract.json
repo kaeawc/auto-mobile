@@ -11283,13 +11283,13 @@
         "hasDefault": false
       },
       {
-        "name": "source",
+        "name": "transition",
         "type": "string",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "transition",
+        "name": "source",
         "type": "string",
         "nullable": true,
         "hasDefault": true
@@ -11459,13 +11459,13 @@
         "hasDefault": false
       },
       {
-        "name": "source",
+        "name": "transition",
         "type": "string",
         "nullable": true,
         "hasDefault": true
       },
       {
-        "name": "transition",
+        "name": "source",
         "type": "string",
         "nullable": true,
         "hasDefault": true

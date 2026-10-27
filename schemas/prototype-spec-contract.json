@@ -1615,15 +1615,15 @@
               },
               "optional": false
             },
-            "source": {
-              "rule": { "kind": "string", "min": 1 },
-              "optional": true
-            },
             "transition": {
               "rule": {
                 "kind": "ref",
                 "name": "stackTransition"
               },
+              "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
               "optional": true
             }
           }
@@ -1686,15 +1686,15 @@
               },
               "optional": false
             },
-            "source": {
-              "rule": { "kind": "string", "min": 1 },
-              "optional": true
-            },
             "transition": {
               "rule": {
                 "kind": "ref",
                 "name": "stackTransition"
               },
+              "optional": true
+            },
+            "source": {
+              "rule": { "kind": "string", "min": 1 },
               "optional": true
             }
           }

@@ -11,11 +11,13 @@ internal object PrototypeStrictPolicy {
     library: Boolean,
     context: PrototypeStateChecks.Context,
   ): PrototypeSpecError? {
-    if (supported != null && !supported.containsAll(required(spec))) {
-      return PrototypeSpecError(
-        "$",
-        "Unsupported capabilities: " + (required(spec) - supported).sorted().joinToString(", "),
-      )
+    if (supported != null) {
+      val missing = required(spec) - supported
+      if (missing.isNotEmpty())
+        return PrototypeSpecError(
+          "$",
+          "Unsupported capabilities: ${missing.sorted().joinToString(", ")}",
+        )
     }
     if (library && "prototype_custom_shaders_v1" in required(spec))
       return PrototypeSpecError(
@@ -283,6 +285,12 @@ internal object PrototypeStrictPolicy {
 
     fun envelope(spec: JsonObject) {
       PrototypeEnvelopeFeatures.collect(spec).forEach(::need)
+      if (
+        ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().any {
+          it.jsonPrimitive.content.startsWith("stack:")
+        }
+      )
+        need("routes")
     }
 
     fun platform(spec: JsonObject) {
@@ -296,19 +304,20 @@ internal object PrototypeStrictPolicy {
       if (spec["platform"] != null) need("platform")
     }
 
-    fun scan(value: JsonElement, field: String = "") {
+    fun scan(value: JsonElement, field: String = "", routeAlias: Boolean = false) {
       if (value is JsonArray) {
-        value.forEach { scan(it) }
+        value.forEach { scan(it, routeAlias = routeAlias) }
         return
       }
       val fields = value as? JsonObject ?: return
       if (fields.size == 1 && fields.containsKey("value")) return
       if (PrototypeStringConditions.uses(fields)) need("string_conditions")
-      nodeFeatures(fields)
-      scanFields(fields, field)
+      val alias = routeAlias || (fields["repeat"] as? JsonObject)?.text("as") == "route"
+      nodeFeatures(fields, alias)
+      scanFields(fields, field, alias)
     }
 
-    private fun scanFields(fields: JsonObject, field: String) {
+    private fun scanFields(fields: JsonObject, field: String, routeAlias: Boolean) {
       val type = fields.text("type") ?: ""
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
@@ -321,7 +330,7 @@ internal object PrototypeStrictPolicy {
         } else {
           fieldFeatures(key, child, field)
         }
-        descend(key, child)
+        descend(key, child, routeAlias)
       }
     }
 
@@ -330,19 +339,23 @@ internal object PrototypeStrictPolicy {
         (key == "value" && type !in listOf("setData", "appendData", "prependData", "upsertData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
-    private fun descend(key: String, child: JsonElement) {
+    private fun descend(key: String, child: JsonElement, routeAlias: Boolean) {
       when {
-        key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") -> scan(child, key)
+        key == "linkify" ->
+          (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition") ->
+          scan(child, key, routeAlias)
       }
     }
 
-    private fun nodeFeatures(fields: JsonObject) {
+    private fun nodeFeatures(fields: JsonObject, routeAlias: Boolean) {
+      if ("shared" in fields) result.add("prototype_shared_element_v2")
       val binding =
         PrototypeBindableFields.first<Boolean>(fields, "") { raw, _, kind ->
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
+      if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
       if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
@@ -369,11 +382,13 @@ internal object PrototypeStrictPolicy {
         need("data_model")
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
+      if (PrototypeMediaItemBindings.usedBy(fields)) need("platform_media_items")
     }
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
       if (repeatSpec?.containsKey("derive") == true) need("format")
+      if (repeatSpec?.get("stagger") != null) need("window_motion")
       if (repeatSpec?.get("items") is JsonObject || repeatSpec?.get("key") != null)
         need("data_model")
     }
@@ -443,6 +458,7 @@ internal object PrototypeEnvelopeFeatures {
       if ("ios" in block || "android" in block) add("platform_namespace")
     }
     if (spec.text("motion") == "reduced") add("reduced_motion")
+    if ((spec["window"] as? JsonObject)?.get("transition") != null) add("window_motion")
     if ((spec["window"] as? JsonObject)?.get("backdrop") != null) add("backdrop")
     if ((spec["theme"] as? JsonObject)?.text("design") == "platform") add("design_platform")
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject

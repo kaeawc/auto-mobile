@@ -105,7 +105,8 @@ final class PrototypeSpecDecodingTests: XCTestCase {
             XCTAssertTrue(names.contains("\(name).json"))
         }
         for file in files {
-            if file.lastPathComponent.contains("shader") {
+            let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file))
+            if PrototypeCustomShaders.uses(raw.objectFields ?? [:]) {
                 XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: file)))
                 continue
             }

@@ -332,6 +332,9 @@ struct PrototypeSpec: Decodable {
 enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLiteral {
     case single(String)
     case modes(light: String, dark: String)
+    /// `{data: "/pointer"}` on an image slot (#14192): the id of a device media item held in `/data`.
+    /// The shared contract accepts it only there, and it names no uploaded asset.
+    case data(String)
 
     init(stringLiteral value: String) {
         self = .single(value)
@@ -346,6 +349,10 @@ enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLite
             return
         }
         let fields = try container.decode([String: String].self)
+        if fields.count == 1, let pointer = fields["data"] {
+            self = .data(pointer)
+            return
+        }
         guard fields.count == 2, let light = fields["light"], let dark = fields["dark"] else {
             throw DecodingError.dataCorruptedError(
                 in: container,
@@ -361,6 +368,8 @@ enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLite
         switch self {
         case let .single(value): value
         case let .modes(light, darkValue): dark ? darkValue : light
+        // Resolved by the media runtime; until then the slot is empty and draws the placeholder.
+        case .data: ""
         }
     }
 
@@ -369,6 +378,7 @@ enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLite
         switch self {
         case let .single(value): [value]
         case let .modes(light, dark): light == dark ? [light] : [light, dark]
+        case .data: []
         }
     }
 }
@@ -600,6 +610,17 @@ struct StyleWhen: Decodable {
     let style: Style
 }
 
+struct PrototypeRouteEntry: Decodable, Sendable {
+    let screen: String
+    let params: [String: JSONValue]?
+}
+
+struct PrototypeRoute: Decodable, Sendable {
+    let params: [String: String]?
+    let onEnter: [PrototypeAction]?
+    let onBack: [PrototypeAction]?
+}
+
 struct PrototypeAction: Decodable, Sendable {
     let type: String
     let name: String?
@@ -612,6 +633,10 @@ struct PrototypeAction: Decodable, Sendable {
     let page: JSONValue?
     let stack: String?
     let screen: String?
+    let params: [String: JSONValue]?
+    let force: Bool?
+    /// Contract-only setStack path; data actions retain their existing string path.
+    let stackPath: [PrototypeRouteEntry]?
     let transition: PrototypeStackTransition?
     /// `setData`/`appendData`/`prependData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
@@ -648,7 +673,7 @@ struct PrototypeAction: Decodable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case type, name, payload, context, pager, page, stack, screen, transition, path, key, value, scroll, to,
-             animated, call, args
+             animated, call, args, params, force
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, body, into, append, statusKey, via, timeoutMs, onSuccess,
@@ -666,7 +691,8 @@ struct PrototypeAction: Decodable, Sendable {
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
         actions: [PrototypeAction]? = nil, transition: PrototypeStackTransition? = nil,
         scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil,
-        call: String? = nil, args: [String: JSONValue]? = nil
+        call: String? = nil, args: [String: JSONValue]? = nil,
+        params: [String: JSONValue]? = nil, force: Bool? = nil, stackPath: [PrototypeRouteEntry]? = nil
     ) {
         self.scroll = scroll
         self.to = to
@@ -686,6 +712,9 @@ struct PrototypeAction: Decodable, Sendable {
         self.page = page
         self.stack = stack
         self.screen = screen
+        self.params = params
+        self.force = force
+        self.stackPath = stackPath
         self.transition = transition
         self.path = path
         self.key = key
@@ -704,6 +733,52 @@ struct PrototypeAction: Decodable, Sendable {
         self.timeoutMs = timeoutMs
         self.onSuccess = onSuccess
         self.onError = onError
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        try self.init(
+            type: type,
+            name: container.decodeIfPresent(String.self, forKey: .name),
+            payload: container.decodeIfPresent(JSONValue.self, forKey: .payload),
+            context: container.decodeIfPresent(PrototypeEmitContext.self, forKey: .context),
+            pager: container.decodeIfPresent(String.self, forKey: .pager),
+            page: container.decodeIfPresent(JSONValue.self, forKey: .page),
+            stack: container.decodeIfPresent(String.self, forKey: .stack),
+            screen: container.decodeIfPresent(String.self, forKey: .screen),
+            path: type == "setStack" ? nil : container.decodeIfPresent(String.self, forKey: .path),
+            key: container.decodeIfPresent(String.self, forKey: .key),
+            value: container.decodeIfPresent(JSONValue.self, forKey: .value),
+            by: container.decodeIfPresent(Double.self, forKey: .incrementAmount),
+            requireValid: container.decodeIfPresent([String].self, forKey: .requireValid),
+            method: container.decodeIfPresent(String.self, forKey: .method),
+            url: container.decodeIfPresent(String.self, forKey: .url),
+            headers: container.decodeIfPresent([String: JSONValue].self, forKey: .headers),
+            query: container.decodeIfPresent([String: JSONValue].self, forKey: .query),
+            body: container.decodeIfPresent(JSONValue.self, forKey: .body),
+            into: container.decodeIfPresent(String.self, forKey: .into),
+            append: container.decodeIfPresent(PrototypeRequestAppend.self, forKey: .append),
+            statusKey: container.decodeIfPresent(String.self, forKey: .statusKey),
+            via: container.decodeIfPresent(String.self, forKey: .via),
+            timeoutMs: container.decodeIfPresent(Double.self, forKey: .timeoutMs),
+            onSuccess: container.decodeIfPresent([PrototypeAction].self, forKey: .onSuccess),
+            onError: container.decodeIfPresent([PrototypeAction].self, forKey: .onError),
+            id: container.decodeIfPresent(String.self, forKey: .id),
+            afterMs: container.decodeIfPresent(Int.self, forKey: .afterMs),
+            everyMs: container.decodeIfPresent(Int.self, forKey: .everyMs),
+            maxRuns: container.decodeIfPresent(Int.self, forKey: .maxRuns),
+            actions: container.decodeIfPresent([PrototypeAction].self, forKey: .actions),
+            transition: container.decodeIfPresent(PrototypeStackTransition.self, forKey: .transition),
+            scroll: container.decodeIfPresent(String.self, forKey: .scroll),
+            to: container.decodeIfPresent(JSONValue.self, forKey: .to),
+            animated: container.decodeIfPresent(Bool.self, forKey: .animated),
+            call: container.decodeIfPresent(String.self, forKey: .call),
+            args: container.decodeIfPresent([String: JSONValue].self, forKey: .args),
+            params: container.decodeIfPresent([String: JSONValue].self, forKey: .params),
+            force: container.decodeIfPresent(Bool.self, forKey: .force),
+            stackPath: type == "setStack" ? container.decode([PrototypeRouteEntry].self, forKey: .path) : nil
+        )
     }
 
     /// This action and every action nested in its `onSuccess` / `onError` lists, depth first.
@@ -858,6 +933,8 @@ final class PrototypeNode: Decodable {
     let style: Style?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
+    let shared: Shared?
+    var resolvedSharedKey: String? { shared?.key ?? sharedKey }
     let sharedKey: String?
     let enabledWhen: Condition?
     let checks: [PrototypeCheck]?
@@ -879,6 +956,7 @@ final class PrototypeNode: Decodable {
     let child: PrototypeNode?
     let start: String?
     let screens: [String: PrototypeNode]?
+    let routes: [String: PrototypeRoute]?
     /// Structured screen definitions distinguish content edits from an unchanged navigation rebuild.
     let screenDefinitions: JSONValue?
     let text: String?
@@ -1010,7 +1088,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case type, id, testTag, onAppear, onTap, style, styleWhen, visibleWhen, sharedKey, transition
+        case type, id, testTag, onAppear, onTap, style, styleWhen, visibleWhen, shared, sharedKey, transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1024,6 +1102,7 @@ final class PrototypeNode: Decodable {
         case reverse, stickToEnd, atEndKey, onStartReached
         case repeatKey = "_repeatKey"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
+             routes,
              linkify,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
              dismissOnSwipe, supportingText, errorWhen, errorText, keyboardType, secure, multiline, minLines, maxLength,
@@ -1048,6 +1127,7 @@ final class PrototypeNode: Decodable {
         style = try container.decodeIfPresent(Style.self, forKey: .style)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
+        shared = try container.decodeIfPresent(Shared.self, forKey: .shared)
         sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
         transition = try container.decodeIfPresent(PrototypeTransitionForm.self, forKey: .transition)?.type
         scrollTransition = try container.decodeIfPresent(ScrollTransition.self, forKey: .scrollTransition)
@@ -1139,6 +1219,7 @@ final class PrototypeNode: Decodable {
         start = try container.decodeIfPresent(String.self, forKey: .start)
         screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
         screenDefinitions = try container.decodeIfPresent(JSONValue.self, forKey: .screens)
+        routes = try container.decodeIfPresent([String: PrototypeRoute].self, forKey: .routes)
         spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
         linkify = try container.decodeIfPresent(PrototypeLinkifyOptions.self, forKey: .linkify)
         activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)

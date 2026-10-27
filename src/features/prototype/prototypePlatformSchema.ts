@@ -2,6 +2,7 @@ import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
+  type PrototypeDataActionValue,
   pointerSchema,
   prototypeDataActionValueSchema,
   stateKeySchema,
@@ -17,12 +18,15 @@ import {
  */
 
 /** A call argument: a data-action value binding, a `{platform}` read or, in a handler, `{event}`. */
-export const prototypePlatformBindingSchema = z.union([
+export type PrototypePlatformBinding =
+  | PrototypeDataActionValue
+  | { platform: string }
+  | { event: string };
+export const prototypePlatformBindingSchema: z.ZodType<PrototypePlatformBinding> = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ platform: pointerSchema }).strict(),
   z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
 ]);
-export type PrototypePlatformBinding = z.infer<typeof prototypePlatformBindingSchema>;
 
 // Zod cannot name the union it is part of, so follow-up lists are bound after the action union
 // exists, the same way the request action's are.

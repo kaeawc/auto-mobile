@@ -37,7 +37,15 @@ export const dataActionPathSchema = z
   .string()
   .min(1)
   .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
-export const dataActionFields = {
+type PrototypeDataActionBinding =
+  | PrototypeDataActionValue
+  | z.infer<typeof prototypeMatchBindingSchema>
+  | { event: string }
+  | { platform: string };
+export const dataActionFields: {
+  path: z.ZodString;
+  value: z.ZodType<PrototypeDataActionBinding>;
+} = {
   path: dataActionPathSchema,
   value: z.union([
     ...prototypeDataActionValueSchema.options,
@@ -47,16 +55,52 @@ export const dataActionFields = {
   ]),
 };
 
-export const prototypeEmitContextBindingSchema = z.union([
+export const appendDataActionSchema = z
+  .object({
+    type: z.enum(["appendData"]),
+    ...dataActionFields,
+    maxItems: z
+      .number()
+      .int()
+      .min(1)
+      .max(contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
+      .optional(),
+  })
+  .strict();
+export const upsertDataActionSchema = z
+  .object({
+    type: z.enum(["upsertData"]),
+    ...dataActionFields,
+    key: pointerSchema,
+    maxItems: z
+      .number()
+      .int()
+      .min(1)
+      .max(contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
+      .optional(),
+  })
+  .strict();
+
+export type PrototypeEmitContextBinding =
+  | PrototypeDataActionValue
+  | { page: string }
+  | z.infer<typeof prototypeMatchBindingSchema>;
+export const prototypeEmitContextBindingSchema: z.ZodType<PrototypeEmitContextBinding> = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
   prototypeMatchBindingSchema,
 ]);
-export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
-export const prototypeEmitContextSchema = z
+export const prototypeEmitContextSchema: z.ZodType<Record<string, PrototypeEmitContextBinding>> = z
   .record(z.string().min(1), prototypeEmitContextBindingSchema)
   .and(z.unknown())
   .refine(
     (context) => Object.keys(context).length <= contract.limits.MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES,
   );
+
+/** Bound action lists expose parsed actions without propagating the union's Zod internals. */
+export function buildPrototypeActionListSchema<Action extends z.ZodTypeAny>(
+  actionSchema: Action,
+): z.ZodType<z.output<Action>[], z.ZodTypeDef, unknown> {
+  return z.array(actionSchema).min(1).max(32);
+}

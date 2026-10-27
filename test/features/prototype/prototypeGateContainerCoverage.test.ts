@@ -17,11 +17,33 @@ const platformCall = {
   ...label,
   onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
 };
+const hapticsCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "haptics.perform",
+      args: { effect: { value: "click" } },
+    },
+  ],
+};
+const soundCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "sound.play",
+      args: { sound: { value: "send" }, volume: { value: 80 } },
+    },
+  ],
+};
+const mediaImage = { type: "image", asset: { data: "/photo" }, contentDescription: "Photo" };
 const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_routes_v1: { ...label, onTap: [{ type: "pop", stack: "nav", force: true }] },
   prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
   prototype_tooltip_v1: {
     type: "tooltip",
@@ -95,6 +117,7 @@ const fixtures: Record<string, Node> = {
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
   prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_shared_element_v2: { ...label, shared: { key: "hero", as: "bounds" } },
   prototype_shared_element_v1: { ...label, sharedKey: "hero" },
   prototype_stack_transitions_v1: {
     ...label,
@@ -158,6 +181,9 @@ const fixtures: Record<string, Node> = {
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
+  prototype_platform_haptics_v1: hapticsCall,
+  prototype_platform_sound_v1: soundCall,
+  prototype_platform_media_items_v1: mediaImage,
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -207,6 +233,7 @@ const ROOT_LEVEL_GATES = [
   "prototype_backdrop_v1",
   "prototype_design_platform_v1",
   "prototype_reduced_motion_v1",
+  "prototype_window_motion_v1",
 ];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
@@ -230,6 +257,16 @@ test("the design gate reports only explicit root-level platform design", () => {
   )!;
   expect(gate.fields({ root: label, theme: { design: "platform" } })).toEqual(["theme.design"]);
   expect(gate.fields({ root: label, theme: { design: "material" } })).toEqual([]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the window motion gate reports window.transition and a repeat stagger", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_window_motion_v1",
+  )!;
+  expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([
+    "window.transition",
+  ]);
   expect(gate.fields({ root: label })).toEqual([]);
 });
 
@@ -396,3 +433,14 @@ test("reduced motion gate reports only spec.motion", () => {
   expect(gate.fields({ motion: "reduced", root: label })).toEqual(["motion"]);
   expect(gate.fields({ motion: "standard", root: { motion: "reduced" } })).toEqual([]);
 });
+
+for (const container of containers) {
+  test(`window motion repeat.stagger covers ${container.name}`, () => {
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === "prototype_window_motion_v1",
+    )!;
+    expect(gate.fields(container.wrap({ ...label, repeat: { stagger: { ms: 20 } } }))).toEqual([
+      `${container.prefix}.repeat.stagger`,
+    ]);
+  });
+}

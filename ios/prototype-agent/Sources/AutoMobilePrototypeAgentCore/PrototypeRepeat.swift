@@ -279,6 +279,8 @@ enum PrototypeRepeat {
                 })
             }
         case .string("button")?, .string("fab")?: string("label", &fields)
+        // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
+        case .string("image")?: string("asset", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)
@@ -352,7 +354,8 @@ enum PrototypeRepeat {
         var name = String.UnicodeScalarView()
         name.append(contentsOf: inner.dropFirst(prefix.count))
         let field = String(name)
-        return isFieldName(field) ? (.field(field), end) : nil
+        return (alias == "route" ? PrototypeContractValidator.matches("pathKey", field) : isFieldName(field)) ?
+            (.field(field), end) : nil
     }
 
     static func isFieldName(_ name: String) -> Bool {
@@ -548,6 +551,10 @@ struct PrototypeRepeatInstance {
         if fields["type"] == .string("text") {
             bindList("spans", in: &fields) { bindPartFields(&$0) }
             bindPart("linkify", in: &fields)
+        }
+        if case var .object(shared)? = fields["shared"], let key = shared["key"]?.stringValue {
+            shared["key"] = .string(interpolate(key))
+            fields["shared"] = .object(shared)
         }
         bindStateKeys(&fields)
         bindPartFields(&fields)

@@ -4,6 +4,7 @@ import {
 } from "../../features/prototype/prototypeDegradedEffects";
 import { performPrototypeSimulate } from "../prototypeSimulateAction";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import { parsePrototypeFeedbackLog } from "../../features/prototype/prototypeFeedbackLog";
 import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
 import { z } from "zod/v4";
 import {
@@ -59,6 +60,7 @@ const devicePrototypeEntrySchema = z.object({
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
+  feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
   shaderFailures: z.record(z.string(), z.string()).optional().catch(undefined),
   degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });
@@ -247,6 +249,7 @@ const iosAgentStatusSchema = z.object({
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
+  feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
   degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });
 
@@ -301,6 +304,7 @@ async function inspectIosAgent(
     appearance,
     storage,
     timers,
+    feedbackLog,
     degradedEffects,
   } = status.data;
   const reported =
@@ -317,6 +321,7 @@ async function inspectIosAgent(
             appearance,
             storage,
             timers,
+            feedbackLog,
             degradedEffects,
           },
         ]

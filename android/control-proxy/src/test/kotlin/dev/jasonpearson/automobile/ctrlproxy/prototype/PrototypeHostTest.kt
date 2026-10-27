@@ -614,7 +614,7 @@ class PrototypeHostTest {
     val oldView = checkNotNull(manager.view)
     val oldOwner = checkNotNull(oldView.findViewTreeLifecycleOwner())
     history.clear()
-    assertTrue(host.replace(PrototypeRequest(bringToFront = true)))
+    assertTrue(host.replace(PrototypeRequest(bringToFront = true, transition = "fade")))
     assertEquals(listOf("add", "remove", "hook"), history)
     assertNotSame(oldView, manager.view)
     assertEquals(Lifecycle.State.DESTROYED, oldOwner.lifecycle.currentState)
@@ -627,7 +627,7 @@ class PrototypeHostTest {
     host.show()
     val owner = checkNotNull(manager.view?.findViewTreeLifecycleOwner())
     manager.failAdd = true
-    assertFalse(host.replace(PrototypeRequest(bringToFront = true)))
+    assertFalse(host.replace(PrototypeRequest(bringToFront = true, transition = "fade")))
     assertTrue(host.isShowing)
     assertEquals(Lifecycle.State.RESUMED, owner.lifecycle.currentState)
     assertEquals(0, manager.removals)

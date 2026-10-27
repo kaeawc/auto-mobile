@@ -934,5 +934,14 @@
       }
     },
     "maxItems": 200
+  },
+  "actionSetStack": {
+    "type": "setStack",
+    "stack": "targetStack",
+    "path": [
+      {
+        "screen": "home"
+      }
+    ]
   }
 }

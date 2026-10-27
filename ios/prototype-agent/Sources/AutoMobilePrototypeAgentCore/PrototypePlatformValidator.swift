@@ -11,6 +11,7 @@ enum PrototypePlatformValidator {
         case json(maxBytes: Int)
         case integer(min: Double, max: Double)
         case string(max: Int)
+        case enumeration(Set<String>)
     }
 
     struct Argument: Equatable {
@@ -41,13 +42,21 @@ enum PrototypePlatformValidator {
                 let args = (call["args"]?.objectFields ?? [:]).mapValues { raw in
                     let arg = raw.objectFields ?? [:]
                     let rule = arg["value"]?.objectFields ?? [:]
-                    return Argument(
-                        optional: arg["optional"] == .bool(true),
-                        rule: rule["kind"] == .string("json")
-                            ? .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 1_048_576))
-                            : rule["kind"] == .string("string") ? .string(max: Int(rule["max"]?.numberValue ?? 64)) :
-                            .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
-                    )
+                    let parsed: Rule
+                    switch rule["kind"] {
+                    case .string("json")?:
+                        parsed = .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 1_048_576))
+                    case .string("string")?:
+                        parsed = .string(max: Int(rule["max"]?.numberValue ?? 64))
+                    case .string("enum")?:
+                        guard case let .array(values)? = rule["values"] else {
+                            preconditionFailure("platform enum argument without values")
+                        }
+                        parsed = .enumeration(Set(values.compactMap(\.stringValue)))
+                    default:
+                        parsed = .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+                    }
+                    return Argument(optional: arg["optional"] == .bool(true), rule: parsed)
                 }
                 func strings(_ key: String) -> [String] {
                     guard case let .array(values)? = call[key] else { return [] }
@@ -396,6 +405,12 @@ enum PrototypePlatformValidator {
                 if realtime, name == "channel" { continue }
                 throw fail(at, "Invalid union value")
             }
+            // An unknown key inside a one-key form is reported at that key, as the TypeScript walk does.
+            if case let .object(form)? = fields[name], form.count == 1, let key = form.keys.first,
+               !bindingKeys.contains(key)
+            {
+                throw fail(PrototypeLimits.dataMemberPath(at, key: key), "Unknown property")
+            }
             guard case let .object(form)? = fields[name], form.count == 1, let key = form.keys.first,
                   bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
             else { throw fail(at, "Invalid union value") }
@@ -419,6 +434,10 @@ enum PrototypePlatformValidator {
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")
+            }
+        case let .enumeration(values):
+            guard case let .string(value) = literal, values.contains(value) else {
+                throw fail(path, "Invalid enum value")
             }
         }
     }

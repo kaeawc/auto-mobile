@@ -1,5 +1,6 @@
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
+import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
 import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
@@ -14,6 +15,9 @@ import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
+  buildPrototypeActionListSchema,
+  appendDataActionSchema,
+  upsertDataActionSchema,
   keySchema,
   prototypeEmitContextSchema,
   dataActionPathSchema,
@@ -138,21 +142,8 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
-  z
-    .object({
-      type: z.enum(["appendData"]),
-      ...dataActionFields,
-      maxItems: z.number().int().min(1).max(MAX_PROTOTYPE_DATA_ARRAY_ITEMS).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.enum(["upsertData"]),
-      ...dataActionFields,
-      key: pointerSchema,
-      maxItems: z.number().int().min(1).max(MAX_PROTOTYPE_DATA_ARRAY_ITEMS).optional(),
-    })
-    .strict(),
+  appendDataActionSchema,
+  upsertDataActionSchema,
   z.object({ type: z.enum(["prependData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
   timers.startTimerActionSchema,
@@ -160,7 +151,10 @@ export const actionSchema = z.discriminatedUnion("type", [
   requestActionSchema,
   platformActionSchema,
   stackScreenActionSchema("push"),
-  z.object({ type: z.enum(["pop"]), stack: z.string().min(1) }).strict(),
+  z
+    .object({ type: z.enum(["pop"]), stack: z.string().min(1), force: z.boolean().optional() })
+    .strict(),
+  setStackActionSchema,
   z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
   z
     .object({
@@ -178,9 +172,10 @@ export const actionSchema = z.discriminatedUnion("type", [
 timers.bindPrototypeTimerActions(() => actionSchema);
 bindPrototypeRequestFollowUps(() => actionSchema);
 bindPrototypePlatformFollowUps(() => actionSchema);
+const actionListSchema = buildPrototypeActionListSchema(actionSchema);
 const gestureNodeShape = {
-  onLongPress: z.array(actionSchema).min(1).max(32).optional(),
-  onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
+  onLongPress: actionListSchema.optional(),
+  onDoubleTap: actionListSchema.optional(),
 };
 export { prototypeCheckSchema, type PrototypeCheck } from "./prototypeCheckSchema";
 import { prototypeCheckSchema } from "./prototypeCheckSchema";
@@ -192,7 +187,7 @@ const checksShape = {
 };
 export const commonNodeShape = {
   semantics: prototypeSemanticsSchema.optional(),
-  onAppear: z.array(actionSchema).min(1).max(32).optional(),
+  onAppear: actionListSchema.optional(),
   ...prototypeScrollMotionShape,
   ...prototypePlatformNamespaceShape,
   span: z.number().finite().int().min(1).optional(),
@@ -200,11 +195,15 @@ export const commonNodeShape = {
   testTag: z.string().min(1).optional(),
   // The node's accessible label, read by observe and screen readers in place of its text (#10446).
   contentDescription: z.string().min(1).optional(),
-  onTap: z.array(actionSchema).min(1).max(32).optional(),
+  onTap: actionListSchema.optional(),
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   sharedKey: keySchema.optional(),
+  shared: z
+    .object({ key: z.string().min(1).max(256), as: z.enum(["element", "bounds"]) })
+    .strict()
+    .optional(),
   ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -223,6 +222,7 @@ const repeatSchema = z
     as: keySchema,
     derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),
+    stagger: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
@@ -290,7 +290,7 @@ const linkifySchema = z
       .min(1)
       .max(3),
     style: textSpanSchema.shape.style,
-    onTap: z.array(actionSchema).min(1).max(32),
+    onTap: actionListSchema,
   })
   .strict();
 const textBaseSchema = z
@@ -321,7 +321,6 @@ const iconBaseSchema = z
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();
-const actionListSchema = z.array(actionSchema).min(1).max(32);
 // An icon-only control in a top app bar: the icon, its accessible label and its tap.
 const appBarActionSchema = z
   .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
@@ -612,7 +611,7 @@ const scrollBaseSchema = z
     reverse: z.boolean().optional(),
     stickToEnd: z.boolean().optional(),
     atEndKey: stateKeySchema.optional(),
-    onStartReached: z.array(actionSchema).min(1).max(32).optional(),
+    onStartReached: actionListSchema.optional(),
   })
   .strict();
 // Pager distances share the contract's 10000 dp dimension ceiling.
@@ -688,6 +687,7 @@ const bottomSheetBaseSchema = z
     dismissOnSwipe: z.boolean().optional(),
   })
   .strict();
+const routeSchema = buildRouteSchema(actionSchema);
 const stackBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -695,6 +695,7 @@ const stackBaseSchema = z
     type: z.enum(["stack"]),
     id: z.string().min(1),
     start: z.string().min(1),
+    routes: z.record(routeSchema).and(z.unknown()).optional(),
   })
   .strict();
 export type PrototypeNode =
@@ -845,6 +846,7 @@ const windowSchema = z
     ...prototypePlatformNamespaceShape,
     placement: placementSchema,
     backdrop: prototypeBackdropSchema.optional(),
+    transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()
@@ -949,6 +951,7 @@ export const PROTOTYPE_NODE_TYPES = [
 export const PROTOTYPE_ACTION_TYPES = [
   "emit",
   "setPage",
+  "setStack",
   "push",
   "pop",
   "popToRoot",

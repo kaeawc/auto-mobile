@@ -1,0 +1,58 @@
+{
+  "id": "routes-integration",
+  "data": {
+    "items": []
+  },
+  "state": {
+    "input": "",
+    "open": true
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "text",
+        "text": "Home"
+      },
+      "detail": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/items"
+          },
+          "as": "row",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "{row.id}"
+          }
+        ],
+        "refresh": {
+          "stateKey": "loading_{route.id}",
+          "onRefresh": [
+            {
+              "type": "emit",
+              "name": "refresh"
+            }
+          ]
+        }
+      }
+    },
+    "routes": {
+      "detail": {
+        "params": {
+          "id": "string"
+        }
+      }
+    }
+  }
+}

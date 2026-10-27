@@ -190,7 +190,12 @@
         @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
             let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
             driver.onComplete = { [weak self] id, result, duration in
-                self?.apply(activity: false) { $0.completePlatformCall(id, result, durationMs: duration) }
+                self?.apply(activity: false) { $0.completePlatformCall(
+                    id,
+                    result,
+                    durationMs: duration,
+                    atMs: self?.clock.nowMilliseconds ?? 0
+                ) }
             }
             driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
             driver.onEvent = { [weak self] event in
@@ -663,6 +668,15 @@
             apply(activity: false) { $0.completeRequest(requestId, response) }
         }
 
+        /// `style.effects` entries this device does not draw right now (`prototype_effects_v1`), shaped
+        /// like Android's `degradedEffects`: `[{path, type, reason}]`.
+        func degradedEffects() -> [[String: String]] {
+            guard let root = spec?.root else { return [] }
+            return PrototypeEffects.degraded(
+                root: root, state: state, activeScreen: stacks.compactMapValues { $0.path.last }
+            )
+        }
+
         func status() -> [String: Any] {
             var status: [String: Any] = [
                 "shown": session.isShown,
@@ -675,11 +689,14 @@
             ]
             let timerSnapshots = timers.snapshot()
             if !timerSnapshots.isEmpty { status["timers"] = timerSnapshots.map(\.wireObject) }
+            if let feedback = session.feedbackLog.wireArray { status["feedbackLog"] = feedback.foundationObject }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
             if let platform = session.spec?
                 .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
+            let degraded = degradedEffects()
+            if !degraded.isEmpty { status["degradedEffects"] = degraded }
             if let id = spec?.id, let storage {
                 storage.flush()
                 if let report = storage.report(id: id) { status["storage"] = report.wireObject }

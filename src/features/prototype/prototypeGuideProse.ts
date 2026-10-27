@@ -72,8 +72,13 @@ row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`icon
 \`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
-export { GUIDE_TEMPLATES } from "./prototypeGuideProseMore";
+export { GUIDE_TEMPLATES } from "./prototypeGuideTemplates";
 
+/**
+ * Hand-written authoring prose for the `automobile:prototype` resource. Everything that names a
+ * limit, node type, action, theme role or icon is generated from the spec contract in
+ * prototypeGuide.ts; the prose here describes behaviour only and must not restate those values.
+ */
 export const GUIDE_INTRO = `# Prototype authoring guide
 
 Use the \`prototype\` tool with \`action: "show"\` and a full \`spec\`. A show with the id of the
@@ -91,6 +96,18 @@ existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot 
 Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
 and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
 \`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
+Route contract (requires \`prototype_routes_v1\`, currently unadvertised by Android and iOS):
+keep \`screens\` as bare nodes and optionally add \`routes:{screen:{params?,onEnter?,onBack?}}\`.
+Declare up to 16 params per screen as string|number|boolean; names match [A-Za-z_][A-Za-z0-9_]*.
+Push/replace accept a flat \`params\` map of scalars or {state}/{data}/{item}/{index:true} bindings;
+all declared params are required, literals must match their types, and extra names are refused.
+\`setStack {stack,path:[{screen,params?}]}\` takes 1-32 entries. In a screen and its lifecycle actions,
+\`{route.name}\` binds in the same fields as repeat placeholders, condition operands and whole
+/data pointer segments. onEnter/onBack each take 1-32 actions with normal nesting limits;
+a direct same-stack pop in onBack needs \`force:true\` (dialog actions are independent).
+Storage keys may name \`stack:<id>\`. Runtime navigation, lifecycle execution and path restore
+are deferred; the reserved reports keep \`path:string[]\` and add parallel \`params:object[]\`,
+with optional params beside screen/depth in screen_changed payloads.
 Android Back and the iOS edge swipe pop a stack above depth 1. A stack's optional
 \`transition: "platform" | "slide" | "fade" | "none"\` selects screen navigation animation
 (default \`platform\`); \`push\` and \`replace\` can override it with their own \`transition\`.
@@ -235,12 +252,18 @@ settling, pager scrolling and shared morphs) with a crossfade or snap with fade.
 other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
 Off makes every change instant.
 
-\`sharedKey\` requires \`prototype_shared_element_v1\` and \`visibleWhen\` on the same node.
-Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each key labels exactly two nodes, at most 16 distinct
-keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
-inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
-not visible together. Full motion morphs the pair's bounds between different content; reduced
-uses ordinary visibility fades and off swaps instantly.
+\`shared: {key, as: "element" | "bounds"}\` requires \`prototype_shared_element_v2\` and
+\`visibleWhen\` on the same node. Element shares identical content (a hero image); bounds shares
+a container with changing content and crossfades both sides. \`sharedKey\` remains the
+\`prototype_shared_element_v1\` bounds alias; a node cannot set both. Literal v2 keys allow
+letters, digits, underscore and hyphen, starting with a letter or underscore (1-64 characters).
+A spec has at most 16 resolved keys, including unmatched feed items. Literal keys pair exactly two nodes, neither nested in the
+other. Inside repeat children, use \`shared: {key: "story-{item.id}", as: "bounds"}\` with
+\`repeat.key: "id"\`: placeholders must name that same field; index and constant keys are refused.
+Each item resolves a distinct key, used at most twice; unmatched feed items remain ordinary cards.
+The pair must use the same as value and cannot cross a dialog or bottomSheet boundary.
+Choose visibility conditions so the pair is not visible together. Full motion morphs geometry;
+reduced uses ordinary visibility crossfades and off swaps instantly.
 
 ## Motion v2
 
@@ -381,6 +404,7 @@ very top of the screen, including under the status bar. A \`topAppBar\` or top c
 A host-owned two-finger long press (about 1 s) anywhere on the window reveals a dismiss pill for
 5 s; tapping it dismisses with reason \`user\`. Agent dismiss, a replacing show, authored dismiss,
 the session's five-minute idle TTL and last-client disconnect still work.
+\`window.transition\` (auto|none|fade|slide|scale) and \`repeat.stagger\` (0-100 ms per instance, capped at 600 ms) require \`prototype_window_motion_v1\` on Android.
 \`window.persistence: "device"\` defaults to \`bar\` and keeps its existing persistence behaviour.
 The device implementations ship separately: without the capability a device keeps the bar,
 explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successful fullscreen
@@ -539,74 +563,7 @@ devices are refused before upload, display or patch dispatch. The \`prototype_ev
 
 `;
 
-export const GUIDE_DATA_ACTIONS = `### Data actions
-
-A tap can change \`/data\` on the device without the agent answering it. Data actions write a
-member of \`data\`; each \`path\` is \`/data\` plus a non-empty data pointer (the same syntax and
-\`MAX_PROTOTYPE_DATA_POINTER_LENGTH\` as \`{data: pointer}\`), so the whole document cannot be
-written:
-
-- \`{type: "setData", path, value}\` creates or replaces an object member, or replaces an existing
-  array element. A missing parent is an error.
-- \`{type: "appendData", path, value}\` appends to the existing array at \`path\`.
-- \`{type: "prependData", path, value}\` inserts one row at the start; list maxItems trims from the end.
-- \`{type: "removeData", path}\` removes an existing member or element; later elements shift down.
-
-\`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
-\`{state: key}\` reads state, \`{data: pointer}\` reads data, and \`{item: field}\` and
-\`{index: true}\` read the repeat row (repeat only). A written value must be data: strings, booleans,
-finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{index}\` segment of
-\`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
-\`{alias.field}\`, is rejected.
-
-The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
-rejects an \`appendData\` or \`prependData\` whose target resolves in the spec's own \`data\` to something other than an
-array. A target that only exists after earlier writes is checked by the device. A write that would
-leave \`data\` over \`MAX_PROTOTYPE_DATA_WRITE_BYTES\` (or over a depth or array limit), or whose
-target is missing or not an array, changes nothing.
-Actions run in order, so a later action sees an earlier write.
-
-Each write is a \`change\` event with \`name\` the written \`/data/...\` path and \`payload\`
-\`{op: "set"|"append"|"remove", value?, revision}\`; \`awaitEvent\` with \`kind: "change"\` returns it.
-\`revision\` is the device revision after the write, the same counter as a patch result's. The host
-applies each write to its own copy of the spec and to \`status\` data, so both stay current. The
-agent's \`/data\` patches and a device's writes never silently lose each other: once the device
-has written a prototype's data, a patch with \`/data\` ops needs \`baseRevision\` (the latest
-\`revision\` the agent has seen) and is refused with \`conflict: {revision, state, data}\` when a write
-newer than that revision touched an overlapping path (\`data\` lists those paths). A \`show\` makes its
-own \`data\` authoritative again and clears the history.
-
-Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
-refused on a device without it, before anything is shown or sent.
-
-
-### Realtime channels
-
-The validated contract requires \`prototype_platform_realtime_v1\`; current Android and iOS
-runtimes do not advertise it. A root \`channels\` map holds at most four named channels and
-requires \`requires.platform:["realtime"]\`. Each channel declares \`kind:"websocket"|"sse"\`
-and \`url\` (ws/wss or http/https respectively), using request URL placeholders and length rules.
-Optional fields: \`protocols\` (WebSocket only, up to four), \`headers\` (up to 16, request rules
-plus refusing Sec-WebSocket-* and Last-Event-ID), \`via:"host"|"device"\` (host default),
-\`connect:"onShow"|"manual"\` (onShow default), declared string \`statusKey\`,
-\`decode:"json"|"text"\` (json default), \`reconnect\`, \`routes\`, \`onOpen/onClose/onError\`.
-Device routing additionally requires \`prototype_platform_realtime_device_v1\`.
-Reconnect fields are integer \`maxAttempts:0..20\`, \`initialDelayMs>=100\`,
-\`maxDelayMs<=60000\`, with initial <= max. Up to 16 routes use \`when:{pointer,equals}\`,
-\`{pointer,exists:boolean}\`, \`{event:SSE-name}\`, or omit when. Their actions are state/data
-writes; request and navigation are refused. In channel callbacks and platform handlers,
-\`{event:"/message"}\` reads decoded event data and \`{event:""}\` reads the whole event.
-Calls use \`{type:"platform",call:"realtime.connect"|"realtime.disconnect",args:{channel:"chat"}}\`
-and \`realtime.send\` with \`args:{channel:"chat",body:{value:json}}\` (WebSocket only).
-Read live counters with \`{platform:"/realtime/chat/framesIn"}\`; state keys are status, attempt,
-framesIn, framesDropped, closeCode, closeReason and error. Events are realtime.status and realtime.frame.
-The same capability gates \`appendData.maxItems\` and \`upsertData {path,key,value,maxItems?}\`.
-Upsert replaces the first row whose key pointer matches the incoming value, otherwise appends;
-missing incoming identity is an error. maxItems is 1..2000 and drops oldest rows before limits apply.
-Frame/send budgets are 65536/16384 bytes, with eight open channels per device and a 50 ms flush budget.
-Transport, lifecycle and routing execution remain unavailable. Flush-window coalescing is an open
-decision; no coalescing behavior is implemented.
-`;
+export { GUIDE_DATA_ACTIONS } from "./prototypeGuideProseMore";
 
 export const GUIDE_STORAGE = `### Storage
 

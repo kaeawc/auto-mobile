@@ -1,0 +1,301 @@
+{
+  "spec": {
+    "id": "feedback",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["haptics", "sound"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "click",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "click"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "tick",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "tick"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "heavyClick",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "heavyClick"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "doubleClick",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "doubleClick"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "selection",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "selection"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "success",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "success"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "warning",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "warning"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "error",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "error"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "impactLight",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "impactLight"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "impactMedium",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "impactMedium"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "impactHeavy",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "impactHeavy"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "longPress",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "haptics.perform",
+              "args": {
+                "effect": {
+                  "value": "longPress"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "sound.play",
+              "args": {
+                "sound": {
+                  "value": "send"
+                },
+                "volume": {
+                  "value": 80
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "click",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "sound.play",
+              "args": {
+                "sound": {
+                  "value": "click"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "receive",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "sound.play",
+              "args": {
+                "sound": {
+                  "value": "receive"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "shutter",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "sound.play",
+              "args": {
+                "sound": {
+                  "value": "shutter"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Quiet",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "sound.play",
+              "args": {
+                "sound": {
+                  "value": "click"
+                },
+                "volume": {
+                  "value": 0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Loud",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "sound.play",
+              "args": {
+                "sound": {
+                  "value": "click"
+                },
+                "volume": {
+                  "value": 100
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_haptics_v1", "prototype_platform_v1"]
+  },
+  "expectedPath": "$"
+}

@@ -1,11 +1,36 @@
 import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { keySchema, pointerSchema } from "./prototypeActionValues";
-import { prototypeJsonSchema } from "./prototypeJson";
+import { keySchema, pointerSchema, type PrototypeDataActionValue } from "./prototypeActionValues";
+import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";
 import { requestActionSchema } from "./prototypeRequestSchema";
 
 export const prototypeEventPointerSchema = z.union([z.literal(""), pointerSchema]);
-export function prototypeChannelsSchema(action: () => z.ZodTypeAny) {
+/** Channel output stays independent of the Zod object graph used to validate it. */
+export type PrototypeChannel = {
+  kind: "websocket" | "sse";
+  url: string;
+  protocols?: string[];
+  headers?: Record<string, string | PrototypeDataActionValue>;
+  via?: "host" | "device";
+  connect?: "onShow" | "manual";
+  statusKey?: string;
+  reconnect?: { maxAttempts: number; initialDelayMs: number; maxDelayMs: number };
+  decode?: "json" | "text";
+  routes?: {
+    when?:
+      | { pointer: string; equals: PrototypeJson }
+      | { pointer: string; exists: boolean }
+      | { event: string };
+    actions: z.output<z.ZodTypeAny>[];
+  }[];
+  onOpen?: z.output<z.ZodTypeAny>[];
+  onClose?: z.output<z.ZodTypeAny>[];
+  onError?: z.output<z.ZodTypeAny>[];
+};
+
+export function prototypeChannelsSchema(
+  action: () => z.ZodTypeAny,
+): z.ZodType<Record<string, PrototypeChannel>, z.ZodTypeDef, unknown> {
   const actions = (min: number) => z.array(z.lazy(action)).min(min).max(32);
   const when = z.union([
     z.object({ pointer: prototypeEventPointerSchema, equals: prototypeJsonSchema }).strict(),

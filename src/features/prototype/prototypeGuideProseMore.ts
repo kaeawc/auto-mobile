@@ -132,30 +132,71 @@ rounded to one decimal in window-local dp (points on iOS). Reports include count
 up to 200 points per screen and a 48-unit grid. There is no screenshot overlay yet.
 `;
 
-export const GUIDE_TEMPLATES = `## Starter templates
+export const GUIDE_DATA_ACTIONS = `### Data actions
 
-The repository ships eight validated multi-screen specs, each a \`stack\` with a \`testTag\` on every
-interactive node. In a checkout, show one with \`specPath\` (an absolute path) from
-\`test/fixtures/prototype-spec/valid/\`, or copy its shape when writing a spec:
+A tap can change \`/data\` on the device without the agent answering it. Data actions write a
+member of \`data\`; each \`path\` is \`/data\` plus a non-empty data pointer (the same syntax and
+\`MAX_PROTOTYPE_DATA_POINTER_LENGTH\` as \`{data: pointer}\`), so the whole document cannot be
+written:
 
-- \`template-onboarding.json\`: welcome, sign-up form with \`checks\`, a button gated by
-  \`enabledWhen {valid}\`, \`emit\` with \`requireValid\`, done.
-- \`template-feed-detail.json\`: a \`repeat\` over \`{path: "/posts"}\` inside a refreshable \`scroll\`; a
-  tap stores the row in state and \`push\`es the detail screen.
-- \`template-tabbed-home.json\`: a \`pager\` driven by a \`bottomNav {pager}\`, plus a pushed screen.
-- \`template-checkout.json\`: quantity stepper, form with \`select\` and \`datePicker\`, and a
-  \`bottomSheet\` confirmation.
-- \`template-settings.json\`: \`listItem\` switches, \`radioGroup\`, \`slider\`, \`dialog\`, \`snackbar\` and
-  a \`storage\` block.
-- \`template-search.json\`: docked \`searchBar\` whose child lists \`/results\` and shows an empty
-  state with \`{data, empty: true}\`.
-- \`template-chat.json\`: reversed \`scroll\` with \`stickToEnd\`, quick-reply chips that
-  \`appendData\`, and a composer that \`emit\`s \`message_sent\` with the draft as context (Android only).
-- \`template-dashboard.json\`: \`chart\` line, bar and ring over \`/data\`, and a \`startTimer\` clock.
+- \`{type: "setData", path, value}\` creates or replaces an object member, or replaces an existing
+  array element. A missing parent is an error.
+- \`{type: "appendData", path, value}\` appends to the existing array at \`path\`.
+- \`{type: "prependData", path, value}\` inserts one row at the start; list maxItems trims from the end.
+- \`{type: "removeData", path}\` removes an existing member or element; later elements shift down.
+
+\`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
+\`{state: key}\` reads state, \`{data: pointer}\` reads data, and \`{item: field}\` and
+\`{index: true}\` read the repeat row (repeat only). A written value must be data: strings, booleans,
+finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{index}\` segment of
+\`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
+\`{alias.field}\`, is rejected.
+
+The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
+rejects an \`appendData\` or \`prependData\` whose target resolves in the spec's own \`data\` to something other than an
+array. A target that only exists after earlier writes is checked by the device. A write that would
+leave \`data\` over \`MAX_PROTOTYPE_DATA_WRITE_BYTES\` (or over a depth or array limit), or whose
+target is missing or not an array, changes nothing.
+Actions run in order, so a later action sees an earlier write.
+
+Each write is a \`change\` event with \`name\` the written \`/data/...\` path and \`payload\`
+\`{op: "set"|"append"|"remove", value?, revision}\`; \`awaitEvent\` with \`kind: "change"\` returns it.
+\`revision\` is the device revision after the write, the same counter as a patch result's. The host
+applies each write to its own copy of the spec and to \`status\` data, so both stay current. The
+agent's \`/data\` patches and a device's writes never silently lose each other: once the device
+has written a prototype's data, a patch with \`/data\` ops needs \`baseRevision\` (the latest
+\`revision\` the agent has seen) and is refused with \`conflict: {revision, state, data}\` when a write
+newer than that revision touched an overlapping path (\`data\` lists those paths). A \`show\` makes its
+own \`data\` authoritative again and clears the history.
+
+Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
+refused on a device without it, before anything is shown or sent.
+
+
+### Realtime channels
+
+The validated contract requires \`prototype_platform_realtime_v1\`; current Android and iOS
+runtimes do not advertise it. A root \`channels\` map holds at most four named channels and
+requires \`requires.platform:["realtime"]\`. Each channel declares \`kind:"websocket"|"sse"\`
+and \`url\` (ws/wss or http/https respectively), using request URL placeholders and length rules.
+Optional fields: \`protocols\` (WebSocket only, up to four), \`headers\` (up to 16, request rules
+plus refusing Sec-WebSocket-* and Last-Event-ID), \`via:"host"|"device"\` (host default),
+\`connect:"onShow"|"manual"\` (onShow default), declared string \`statusKey\`,
+\`decode:"json"|"text"\` (json default), \`reconnect\`, \`routes\`, \`onOpen/onClose/onError\`.
+Device routing additionally requires \`prototype_platform_realtime_device_v1\`.
+Reconnect fields are integer \`maxAttempts:0..20\`, \`initialDelayMs>=100\`,
+\`maxDelayMs<=60000\`, with initial <= max. Up to 16 routes use \`when:{pointer,equals}\`,
+\`{pointer,exists:boolean}\`, \`{event:SSE-name}\`, or omit when. Their actions are state/data
+writes; request and navigation are refused. In channel callbacks and platform handlers,
+\`{event:"/message"}\` reads decoded event data and \`{event:""}\` reads the whole event.
+Calls use \`{type:"platform",call:"realtime.connect"|"realtime.disconnect",args:{channel:"chat"}}\`
+and \`realtime.send\` with \`args:{channel:"chat",body:{value:json}}\` (WebSocket only).
+Read live counters with \`{platform:"/realtime/chat/framesIn"}\`; state keys are status, attempt,
+framesIn, framesDropped, closeCode, closeReason and error. Events are realtime.status and realtime.frame.
+The same capability gates \`appendData.maxItems\` and \`upsertData {path,key,value,maxItems?}\`.
+Upsert replaces the first row whose key pointer matches the incoming value, otherwise appends;
+missing incoming identity is an error. maxItems is 1..2000 and drops oldest rows before limits apply.
+Frame/send budgets are 65536/16384 bytes, with eight open channels per device and a 50 ms flush budget.
+Transport, lifecycle and routing execution remain unavailable. Flush-window coalescing is an open
+decision; no coalescing behavior is implemented.
 `;
-
-/**
- * Hand-written authoring prose for the `automobile:prototype` resource. Everything that names a
- * limit, node type, action, theme role or icon is generated from the spec contract in
- * prototypeGuide.ts; the prose here describes behaviour only and must not restate those values.
- */

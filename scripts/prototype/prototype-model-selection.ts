@@ -44,6 +44,7 @@ export const prototypeModelSelection = {
   },
   channelReconnect: { languages: ["kotlin"] },
   channelRoute: { languages: ["kotlin"], fieldTypes: { when: { kotlin: "JsonElement" } } },
+  shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},
   backdrop: { languages: ["kotlin"] },
@@ -56,6 +57,8 @@ export const prototypeModelSelection = {
   // Swift Action is a flat struct and Node a final class with different shapes; both stay hand-written.
   action: actionModelOptions,
   node: nodeModelOptions,
+  routeEntry: { languages: ["kotlin"] },
+  route: { languages: ["kotlin"] },
   scrollEdge: {},
   scrollTransition: {},
   scrollLinked: {},
@@ -178,6 +181,7 @@ export const prototypeModelSelection = {
 } as const satisfies ModelSelection;
 
 export const prototypeTypeRefs = {
+  routeParams: { kotlin: "Map<String, JsonElement>" },
   ...nodeActionTypeRefs,
   colorValue: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   action: { kotlin: "PrototypeAction", swift: "PrototypeAction" },

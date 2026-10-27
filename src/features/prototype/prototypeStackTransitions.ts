@@ -1,3 +1,4 @@
+import { routeParamsSchema } from "./prototypeRouteSchema";
 import { z } from "zod";
 import { PROTOTYPE_STACK_TRANSITIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -15,6 +16,7 @@ export const stackScreenActionSchema = <T extends "push" | "replace">(type: T) =
       type: z.enum([type]),
       stack: z.string().min(1),
       screen: z.string().min(1),
+      params: routeParamsSchema.optional(),
       transition: stackTransitionSchema,
     })
     .strict();

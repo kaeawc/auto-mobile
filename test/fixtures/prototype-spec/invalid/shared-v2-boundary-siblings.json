@@ -1,0 +1,60 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "bottomSheet",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "child": {
+            "type": "text",
+            "text": "Hero",
+            "visibleWhen": {
+              "key": "open",
+              "equals": true
+            },
+            "shared": {
+              "key": "hero",
+              "as": "element"
+            }
+          },
+          "detents": ["full"]
+        },
+        {
+          "type": "bottomSheet",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "child": {
+            "type": "text",
+            "text": "Hero",
+            "visibleWhen": {
+              "key": "open",
+              "equals": false
+            },
+            "shared": {
+              "key": "hero",
+              "as": "element"
+            }
+          },
+          "detents": ["full"]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].child.shared.key",
+  "expectedMessage": "shared pair cannot cross a dialog or bottomSheet boundary"
+}

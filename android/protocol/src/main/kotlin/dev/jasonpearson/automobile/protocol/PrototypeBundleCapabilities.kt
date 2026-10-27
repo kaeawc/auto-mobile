@@ -8,6 +8,7 @@ internal object PrototypeBundleCapabilities {
   fun required(refs: PrototypeBundleReferences): List<String> {
     val spec = refs.spec
     val caps = linkedSetOf<String>()
+    if (PrototypeRouteRules.uses(spec, refs.context)) caps.add("prototype_routes_v1")
     specContent(spec, caps)
     specPresentation(spec, caps)
     for (node in PrototypeBundleSpec.nodes(spec)) {
@@ -47,6 +48,8 @@ internal object PrototypeBundleCapabilities {
       if ("ios" in block || "android" in block) caps.add("prototype_platform_namespace_v1")
     }
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
+    if ((spec["window"] as? JsonObject)?.get("transition") != null)
+      caps.add("prototype_window_motion_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
     if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {

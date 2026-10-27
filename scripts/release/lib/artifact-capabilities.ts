@@ -64,14 +64,21 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "iOS agent keeps the transition type only; the host refuses delays, stagger and blurReplace (#15247)",
     prototype_custom_shaders_v1:
       "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
-    prototype_effects_v1:
-      "style.effects has a validated contract only; no renderer yet, so the host refuses it (#15128)",
+    prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
     prototype_motion_v2:
       "iOS agent does not advertise it; the host refuses motion v2 features against it",
+    prototype_platform_media_items_v1:
+      "imageAsset {data} has a validated contract only; no device media store yet, so the host refuses it (#14192)",
     prototype_platform_namespace_v1:
       "No renderer implements a platform-namespace field yet, so the host refuses own-platform blocks (#15257)",
+    prototype_platform_realtime_v1:
+      "Realtime channels have a validated contract only; the iOS agent does not implement transport, routing or lifecycle yet",
+    prototype_platform_realtime_device_v1:
+      "Device realtime channels are contract-only; the iOS agent does not implement device transport yet",
     prototype_platform_v1:
       "iOS agent validates platform specs but has no module registry yet (#14296)",
+    prototype_routes_v1:
+      "Navigation routes are contract-only: no runtime applies params, onEnter, onBack or setStack yet (#14188)",
   },
 };
 

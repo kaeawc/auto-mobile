@@ -113,9 +113,12 @@ export function prototypeLazyListLimitError(spec: unknown): ListError | undefine
 export function prototypeLazyListFields(spec: unknown): string[] {
   const fields: string[] = [];
   const visit: FieldVisitor = (value, actionPath, kind) => {
-    if (kind === "prependData") fields.push(actionPath);
-    if (kind === "request" && Object.hasOwn(record(value) ?? {}, "append"))
+    if (kind === "prependData") {
+      fields.push(actionPath);
+    }
+    if (kind === "request" && Object.hasOwn(record(value) ?? {}, "append")) {
       fields.push(`${actionPath}.append`);
+    }
     return value;
   };
   walkPrototypeNodes(spec, (node, path) => {

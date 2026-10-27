@@ -208,7 +208,7 @@ struct LibraryView: View {
             return
         }
         Task {
-            if let entry = await mcpInbox.handle(command) {
+            if let entry = await mcpInbox.handle(command, screen: ForegroundScreen.pixels()) {
                 // Swap before awaiting: overlapping opens each supersede exactly one predecessor.
                 let previous = mcpOpen
                 mcpOpen = command
@@ -223,7 +223,7 @@ struct LibraryView: View {
         guard mcpOpen == command else { return }
         mcpOpen = nil
         Task {
-            if success { await mcpInbox.reportOpened(command, entry: entry) }
+            if success { await mcpInbox.reportOpened(command, entry: entry, screen: ForegroundScreen.pixels()) }
             else { await mcpInbox.reportOpenFailed(command) }
         }
     }

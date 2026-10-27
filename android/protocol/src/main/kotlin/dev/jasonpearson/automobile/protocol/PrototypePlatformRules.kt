@@ -199,12 +199,7 @@ internal object PrototypePlatformRules {
         if (!argument.flag("optional")) return fail(at, "Required argument")
         continue
       }
-      if (binding is JsonPrimitive && binding.isString) {
-        if (action.text("call")?.startsWith("realtime.") == true && name == "channel") continue
-        return fail(at, "Invalid union value")
-      }
-      val literal = (binding as? JsonObject)?.get("value") ?: continue
-      walk(literal, argument.getValue("value").jsonObject, "$at.value", Context(), 0)?.let {
+      argumentValueError(action, name, binding, argument, at)?.let {
         return it
       }
     }
@@ -264,4 +259,22 @@ object PrototypePlatformCalls {
       definition,
     )
   }
+}
+
+private fun argumentValueError(
+  action: JsonObject,
+  name: String,
+  binding: JsonElement,
+  argument: JsonObject,
+  at: String,
+): PrototypeSpecError? {
+  if (binding is JsonPrimitive && binding.isString) {
+    if (action.text("call")?.startsWith("realtime.") == true && name == "channel") return null
+    return fail(at, "Invalid union value")
+  }
+  val literal = (binding as? JsonObject)?.get("value") ?: return null
+  walk(literal, argument.getValue("value").jsonObject, "$at.value", Context(), 0)?.let {
+    return it
+  }
+  return null
 }

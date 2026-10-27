@@ -21,6 +21,7 @@ import {
 } from "../../src/daemon/statelessMcpHttpEndpoint";
 import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../src/daemon/ResourceUpdatedBroadcasterClass";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { currentMcpTrace, type McpTraceContext } from "../../src/daemon/mcpTraceContext";
@@ -319,10 +320,13 @@ describe("opt-in modern HTTP routing", () => {
     async (flag) => {
       const h = harness(flag);
       const subscribe = spyOn(ListChangedBroadcaster, "subscribe");
+      const subscribeUpdates = spyOn(ResourceUpdatedBroadcaster, "subscribe");
       try {
         await h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
         ListChangedBroadcaster.emit("tools");
         expect(subscribe).not.toHaveBeenCalled();
+        ResourceUpdatedBroadcaster.emit(() => ["resource://disabled"]);
+        expect(subscribeUpdates).not.toHaveBeenCalled();
         expect(h.createEventBus).not.toHaveBeenCalled();
         expect(h.bus.publish).not.toHaveBeenCalled();
         expect(h.classify).not.toHaveBeenCalled();
@@ -331,6 +335,7 @@ describe("opt-in modern HTTP routing", () => {
         await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
       } finally {
         subscribe.mockRestore();
+        subscribeUpdates.mockRestore();
       }
     },
   );
@@ -500,6 +505,21 @@ describe("opt-in modern HTTP routing", () => {
     await again;
   });
 
+  test("a handler factory failure releases the reserved listen slot", async () => {
+    const h = harness("1", true);
+    h.createHandler.mockImplementationOnce(() => {
+      throw new Error("factory failed");
+    });
+    await expect(
+      h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error),
+    ).rejects.toThrow("factory failed");
+    const second = h.endpoint.handle(h.request(), new FakeResponse(), listenBody, h.error);
+    await h.fetched;
+    expect(h.createHandler).toHaveBeenCalledTimes(2);
+    await Promise.all(h.endpoint.inFlightRequests().map((r) => r.close()));
+    await second;
+  });
+
   test("a separate keyed cancellation POST reaches the modern in-flight index", async () => {
     const h = harness("true", true);
     const pending = h.endpoint.handle(h.request("key"), new FakeResponse(), listenBody, h.error);
@@ -552,4 +572,76 @@ describe("opt-in modern HTTP routing", () => {
       expect(h.forget).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+const resourceListenBody = {
+  ...listenBody,
+  params: {
+    ...listenBody.params,
+    notifications: { resourceSubscriptions: ["resource://subscribed"] },
+  },
+};
+
+test("resource bridge is lazy, tracks an open stream, and releases on response close", async () => {
+  const h = harness("1", true);
+  const subscribe = spyOn(ResourceUpdatedBroadcaster, "subscribe");
+  try {
+    expect(subscribe).not.toHaveBeenCalled();
+    const res = new FakeResponse();
+    const pending = h.endpoint.handle(h.request(), res, resourceListenBody, h.error);
+    await h.fetched;
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    ResourceUpdatedBroadcaster.emit((uris) => [...uris, "resource://unsubscribed"]);
+    expect(h.bus.publish.mock.calls).toEqual([
+      [{ kind: "resource_updated", uri: "resource://subscribed" }],
+    ]);
+    res.destroyed = true;
+    res.emit("close");
+    await pending;
+    const resolver = mock((_uris: Set<string>) => ["resource://subscribed"]);
+    ResourceUpdatedBroadcaster.emit(resolver);
+    expect(resolver).not.toHaveBeenCalled();
+    expect(h.bus.publish).toHaveBeenCalledTimes(1);
+    expect(h.error).not.toHaveBeenCalled();
+  } finally {
+    subscribe.mockRestore();
+  }
+});
+
+test("resource URI overflow refuses a listen stream before creating its SDK handler", async () => {
+  const h = harness("1");
+  const res = new FakeResponse();
+  await h.endpoint.handle(
+    h.request(),
+    res,
+    {
+      ...resourceListenBody,
+      params: {
+        ...resourceListenBody.params,
+        notifications: {
+          resourceSubscriptions: Array.from({ length: 257 }, (_, index) => `resource://${index}`),
+        },
+      },
+    },
+    h.error,
+  );
+  expect(res.status).toBe(429);
+  expect(h.createHandler).not.toHaveBeenCalled();
+  expect(h.endpoint.inFlightCount).toBe(0);
+  expect(h.error).not.toHaveBeenCalled();
+});
+
+test("resource bridge stays attached during shutdown until the stream closes", async () => {
+  const h = harness("1", true);
+  const pending = h.endpoint.handle(h.request(), new FakeResponse(), resourceListenBody, h.error);
+  await h.fetched;
+  h.endpoint.stopAccepting();
+  ResourceUpdatedBroadcaster.emit((uris) => [...uris]);
+  expect(h.bus.publish).toHaveBeenCalledTimes(1);
+  await Promise.all(h.endpoint.inFlightRequests().map((request) => request.close()));
+  await pending;
+  const resolver = mock((_uris: Set<string>) => ["resource://subscribed"]);
+  ResourceUpdatedBroadcaster.emit(resolver);
+  expect(resolver).not.toHaveBeenCalled();
+  expect(h.bus.publish).toHaveBeenCalledTimes(1);
 });

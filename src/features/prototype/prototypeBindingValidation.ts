@@ -501,8 +501,7 @@ function setStateBindingErrors(
     typeof key !== "string" ||
     action.operandTemplated ||
     value === undefined ||
-    object(value)?.event !== undefined ||
-    object(value)?.platform !== undefined
+    dynamicStateValue(value)
   ) {
     return undefined;
   }
@@ -579,3 +578,7 @@ export const bound = ({ located, value, item, operandTemplated }: KeyInstance<Lo
   item,
   operandTemplated,
 });
+
+function dynamicStateValue(value: unknown): boolean {
+  return object(value)?.event !== undefined || object(value)?.platform !== undefined;
+}

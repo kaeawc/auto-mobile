@@ -91,13 +91,13 @@ public enum PrototypeSpecStrictValidator {
                 )
             }
             if library {
-                for id in (fields["channels"]?.objectFields ?? [:]).keys.sorted() {
-                    if fields["channels"]?.objectFields?[id]?.objectFields?["via"] != .string("device") {
-                        throw PrototypeContractValidator.invalid(
-                            "\(PrototypeLimits.dataMemberPath("channels", key: id)).via",
-                            "Host requests are unavailable in a library"
-                        )
-                    }
+                for id in (fields["channels"]?.objectFields ?? [:]).keys.sorted()
+                    where fields["channels"]?.objectFields?[id]?.objectFields?["via"] != .string("device")
+                {
+                    throw PrototypeContractValidator.invalid(
+                        "\(PrototypeLimits.dataMemberPath("channels", key: id)).via",
+                        "Host requests are unavailable in a library"
+                    )
                 }
             }
             if library { try secureLibrary(

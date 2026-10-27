@@ -411,39 +411,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      - name: "Install FFmpeg and verify a browser is present"
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffmpeg -version | head -1
-          if ! command -v google-chrome >/dev/null 2>&1 \
-            && ! command -v chromium >/dev/null 2>&1 \
-            && ! command -v chromium-browser >/dev/null 2>&1; then
-            echo "::error::No Chrome/Chromium found on the runner; the WHEP decode step needs one"
-            exit 1
-          fi
-
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-
-      # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: scripts/ci/install-bun-deps.sh
-
-      - name: "Cache MediaMTX binary"
-        uses: actions/cache@v5
-        with:
-          path: scratch/mediamtx
-          key: mediamtx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/webrtc/run-mediamtx-publisher-integration.sh') }}
-
-      - name: "Run MediaMTX WebRTC publisher integration test"
-        shell: bash
-        run: bun run test:integration:webrtc-mediamtx
+      - uses: ./.github/actions/ci-webrtc-publisher-integration
 
   android-device-webrtc:
     name: "Android Device Capture to WHEP"
@@ -755,16 +723,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      # Only run unit tests without Emulator
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-junit-runner-unit-tests
         with:
-          gradle-tasks: ":junit-runner:test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -1022,30 +982,13 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-android-control-proxy
         with:
-          gradle-tasks: ":control-proxy:assembleDebug :video-server:d8Dex"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
-
-      - name: "Upload CtrlProxy APK"
-        uses: actions/upload-artifact@v6
-        with:
-          name: control-proxy-apk
-          path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
-
-      - name: "Upload video-server jar"
-        uses: actions/upload-artifact@v6
-        with:
-          name: video-server-jar
-          path: android/video-server/build/libs/automobile-video.jar
 
   build-playground-app:
     name: "Build Playground App"

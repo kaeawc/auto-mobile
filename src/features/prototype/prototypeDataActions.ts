@@ -103,21 +103,9 @@ export function prototypeDataActionError(
       message: "Data action paths are /data/<RFC 6901 pointer> and address a member of data",
     };
   }
-  const value = (action.value ?? {}) as Record<string, unknown>;
-  if (action.type === "upsertData" && Object.hasOwn(value, "value")) {
-    const key = typeof action.key === "string" ? action.key : "";
-    const identity = resolvePrototypeDataPointer(value.value, key);
-    if (identity === undefined || identity === null)
-      return {
-        path: `${at}.value.value`,
-        message: "upsertData key pointer must be present and non-null in the literal value",
-      };
-  }
-  if (Object.hasOwn(value, "value") && dataError({ value: value.value }) !== undefined) {
-    return {
-      path: `${at}.value.value`,
-      message: "A data write value must be a string, boolean, finite number, array or object",
-    };
+  const literal = dataActionLiteralError(action, at, dataError);
+  if (literal) {
+    return literal;
   }
   if (
     ["appendData", "prependData", "upsertData"].includes(action.type) &&
@@ -142,6 +130,31 @@ export function prototypeDataActionsError(
     if (error) {
       return error;
     }
+  }
+  return undefined;
+}
+
+function dataActionLiteralError(
+  action: Record<string, unknown>,
+  at: string,
+  dataError: (data: unknown) => unknown,
+): PrototypeDataActionError | undefined {
+  const value = (action.value ?? {}) as Record<string, unknown>;
+  if (action.type === "upsertData" && Object.hasOwn(value, "value")) {
+    const key = typeof action.key === "string" ? action.key : "";
+    const identity = resolvePrototypeDataPointer(value.value, key);
+    if (identity === undefined || identity === null) {
+      return {
+        path: `${at}.value.value`,
+        message: "upsertData key pointer must be present and non-null in the literal value",
+      };
+    }
+  }
+  if (Object.hasOwn(value, "value") && dataError({ value: value.value }) !== undefined) {
+    return {
+      path: `${at}.value.value`,
+      message: "A data write value must be a string, boolean, finite number, array or object",
+    };
   }
   return undefined;
 }

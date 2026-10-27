@@ -15,6 +15,9 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
   keySchema,
+  prototypeEmitContextSchema,
+  dataActionPathSchema,
+  dataActionFields,
   pointerSchema,
   prototypeDataActionValueSchema,
   prototypeMatchBindingSchema,
@@ -77,31 +80,11 @@ export const {
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
 export { prototypeJsonObjectSchema, prototypeJsonSchema, type PrototypeJson };
-export const prototypeEmitContextBindingSchema = z.union([
-  ...prototypeDataActionValueSchema.options,
-  z.object({ page: z.string().min(1) }).strict(),
-  prototypeMatchBindingSchema,
-]);
-export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
-// A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
-const dataActionPathSchema = z
-  .string()
-  .min(1)
-  .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
-const dataActionFields = {
-  path: dataActionPathSchema,
-  value: z.union([
-    ...prototypeDataActionValueSchema.options,
-    prototypeMatchBindingSchema,
-    z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
-    z.object({ platform: pointerSchema }).strict(),
-  ]),
-};
-// Retain arbitrary context names (Zod 3 record output alone drops __proto__).
-export const prototypeEmitContextSchema = z
-  .record(z.string().min(1), prototypeEmitContextBindingSchema)
-  .and(z.unknown())
-  .refine((context) => Object.keys(context).length <= MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES);
+export {
+  prototypeEmitContextBindingSchema,
+  type PrototypeEmitContextBinding,
+} from "./prototypeActionValues";
+export { prototypeEmitContextSchema };
 export const actionSchema = z.discriminatedUnion("type", [
   z
     .object({

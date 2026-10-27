@@ -602,11 +602,14 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
 /** Visit root platform handler actions, in the contract's sorted event-name order. */
 export function visitPrototypeHandlerFields(spec: unknown, visit: FieldVisitor): void {
   for (const handler of prototypeChannelHandlers(spec)) {
-    if (Array.isArray(handler.value))
+    if (Array.isArray(handler.value)) {
       handler.value.forEach((value, index) => {
         const action = record(value);
-        if (action) mapAction(action, `${handler.path}[${index}]`, visit);
+        if (action) {
+          mapAction(action, `${handler.path}[${index}]`, visit);
+        }
       });
+    }
   }
   const handlers = record(record(record(spec)?.platform)?.on);
   for (const name of Object.keys(handlers ?? {}).sort()) {

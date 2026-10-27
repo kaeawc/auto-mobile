@@ -27,25 +27,19 @@ internal object PrototypeStrictPolicy {
       return PrototypeSpecError("window.layer", "Privileged window")
     if (library && window?.text("persistence") == "device")
       return PrototypeSpecError("window.persistence", "Privileged window")
-    if (library) {
-      // Located actions exclude opaque data, request bodies and emit payloads.
-      val host =
-        context.actions.firstOrNull {
-          it.value.text("type") == "request" && it.value.text("via") == "host"
-        }
-      if (host != null)
-        return PrototypeSpecError("${host.path}.via", "Host requests are unavailable in a library")
-    }
-    if (library) {
-      for ((id, raw) in (spec["channels"] as? JsonObject).orEmpty().toSortedMap()) {
-        if ((raw as? JsonObject)?.text("via") != "device")
-          return PrototypeSpecError(
-            "${PrototypeValidationPaths.keyPath("channels", id)}.via",
-            "Host requests are unavailable in a library",
-          )
+    if (!library) return null
+    return hostRequestError(context) ?: hostChannelError(spec) ?: secureLibraryError(spec, context)
+  }
+
+  private fun hostRequestError(context: PrototypeStateChecks.Context): PrototypeSpecError? {
+    // Located actions exclude opaque data, request bodies and emit payloads.
+    val host =
+      context.actions.firstOrNull {
+        it.value.text("type") == "request" && it.value.text("via") == "host"
       }
-    }
-    return if (library) secureLibraryError(spec, context) else null
+    if (host != null)
+      return PrototypeSpecError("${host.path}.via", "Host requests are unavailable in a library")
+    return null
   }
 
   private data class Field(val text: String, val path: String, val key: Boolean)
@@ -353,12 +347,7 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
       val type = fields.text("type") ?: ""
-      if (
-        type == "upsertData" ||
-          (type == "appendData" && "maxItems" in fields) ||
-          PrototypeChannels.needsValueCapability(fields)
-      )
-        need("platform_realtime")
+      if (PrototypeChannels.needsRealtimeCapability(fields)) need("platform_realtime")
       val nodeTypes =
         PrototypeSpecContract.definitions
           .getValue("node")
@@ -459,4 +448,15 @@ internal object PrototypeEnvelopeFeatures {
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     if (colors?.get("light") != null || colors?.get("dark") != null) add("theme_modes")
   }
+}
+
+private fun hostChannelError(spec: JsonObject): PrototypeSpecError? {
+  for ((id, raw) in (spec["channels"] as? JsonObject).orEmpty().toSortedMap()) {
+    if ((raw as? JsonObject)?.text("via") != "device")
+      return PrototypeSpecError(
+        "${PrototypeValidationPaths.keyPath("channels", id)}.via",
+        "Host requests are unavailable in a library",
+      )
+  }
+  return null
 }

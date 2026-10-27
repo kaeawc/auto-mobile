@@ -114,8 +114,9 @@ function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | und
     write.op === "upsert" &&
     (!isPrototypeDataPointer(write.key) ||
       resolvePrototypeDataPointer(write.value, write.key) === undefined)
-  )
+  ) {
     return refused("invalid_value", "upsert needs a valid key pointer present in value");
+  }
   const name = write.op === "prepend" ? "prependData" : write.op;
   if (write.value === undefined) {
     return refused("invalid_value", `${name} write needs a value`);
@@ -123,6 +124,13 @@ function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | und
   if (["extend", "prepend"].includes(write.op) && !Array.isArray(write.value)) {
     return refused("invalid_value", `${name} needs an array value`);
   }
+  return maximumRefusal(write, name);
+}
+
+function maximumRefusal(
+  write: PrototypeDataWrite,
+  name: string,
+): PrototypeDataWriteResult | undefined {
   if (
     "maxItems" in write &&
     write.maxItems !== undefined &&
@@ -138,11 +146,14 @@ function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | und
 
 /** JSON identity compares numbers by value and strings/object keys by exact spelling. */
 function sameKey(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (Array.isArray(left) && Array.isArray(right))
+  if (left === right) {
+    return true;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
     return (
       left.length === right.length && left.every((value, index) => sameKey(value, right[index]))
     );
+  }
   const a = record(left),
     b = record(right);
   return (
@@ -182,8 +193,11 @@ function windowedWrite(
       return candidate !== undefined && sameKey(candidate, key);
     });
     combined = existing.slice();
-    if (index < 0) combined.push(write.value);
-    else combined[index] = write.value;
+    if (index < 0) {
+      combined.push(write.value);
+    } else {
+      combined[index] = write.value;
+    }
   }
   const trimmed = write.maxItems === undefined ? 0 : Math.max(0, combined.length - write.maxItems);
   return {

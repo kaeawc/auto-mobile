@@ -31,3 +31,32 @@ export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSc
  * `linkify.onTap`, where the runtime replaces it with the match before the actions run.
  */
 export const prototypeMatchBindingSchema = z.object({ match: z.enum(["text", "kind"]) }).strict();
+
+// A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
+export const dataActionPathSchema = z
+  .string()
+  .min(1)
+  .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
+export const dataActionFields = {
+  path: dataActionPathSchema,
+  value: z.union([
+    ...prototypeDataActionValueSchema.options,
+    prototypeMatchBindingSchema,
+    z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
+    z.object({ platform: pointerSchema }).strict(),
+  ]),
+};
+
+export const prototypeEmitContextBindingSchema = z.union([
+  ...prototypeDataActionValueSchema.options,
+  z.object({ page: z.string().min(1) }).strict(),
+  prototypeMatchBindingSchema,
+]);
+export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
+// Retain arbitrary context names (Zod 3 record output alone drops __proto__).
+export const prototypeEmitContextSchema = z
+  .record(z.string().min(1), prototypeEmitContextBindingSchema)
+  .and(z.unknown())
+  .refine(
+    (context) => Object.keys(context).length <= contract.limits.MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES,
+  );

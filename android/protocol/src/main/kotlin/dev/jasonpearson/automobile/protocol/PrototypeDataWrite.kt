@@ -126,6 +126,10 @@ object PrototypeDataWriter {
     return PrototypeDataWriteResult.Success(next, trimmed)
   }
 
+  private fun exceedsWindowLimit(write: PrototypeDataWrite, maxItems: Double): Boolean =
+    (write is PrototypeDataWrite.Upsert || write is PrototypeDataWrite.Append) &&
+      maxItems > PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+
   private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
     if (
       write is PrototypeDataWrite.Upsert &&
@@ -149,11 +153,7 @@ object PrototypeDataWriter {
         "$name needs an array value",
       )
     val maxItems = PrototypeDataArrayWindow.maximum(write) ?: return null
-    return if (
-      !positiveSafeInteger(maxItems) ||
-        ((write is PrototypeDataWrite.Upsert || write is PrototypeDataWrite.Append) &&
-          maxItems > PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
-    )
+    return if (!positiveSafeInteger(maxItems) || exceedsWindowLimit(write, maxItems))
       refused(
         PrototypeDataWriteErrorCode.INVALID_VALUE,
         "$name maxItems must be a positive safe integer",

@@ -1287,6 +1287,51 @@
     }
   },
   {
+    "name": "realtime invalid maxItems 0",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "extend",
+      "path": "/data/items",
+      "value": [],
+      "maxItems": 0
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "realtime invalid maxItems -1",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "extend",
+      "path": "/data/items",
+      "value": [],
+      "maxItems": -1
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
+    "name": "realtime invalid maxItems 1.5",
+    "before": {
+      "items": []
+    },
+    "write": {
+      "op": "extend",
+      "path": "/data/items",
+      "value": [],
+      "maxItems": 1.5
+    },
+    "expected": {
+      "errorCode": "invalid_value"
+    }
+  },
+  {
     "name": "upsert replaces first matching identity in place",
     "before": {
       "items": [
@@ -1709,7 +1754,7 @@
     "before": {
       "items": [
         {
-          "id": "é"
+          "id": "\u00e9"
         }
       ]
     },
@@ -1718,17 +1763,17 @@
       "path": "/data/items",
       "key": "/id",
       "value": {
-        "id": "é"
+        "id": "e\u0301"
       }
     },
     "expected": {
       "data": {
         "items": [
           {
-            "id": "é"
+            "id": "\u00e9"
           },
           {
-            "id": "é"
+            "id": "e\u0301"
           }
         ]
       },

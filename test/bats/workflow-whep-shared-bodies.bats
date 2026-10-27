@@ -20,6 +20,7 @@ setup() {
 # job-id|composite action|job name
 WHEP=(
   "android-device-webrtc|ci-android-device-whep|Android Device Capture to WHEP"
+  "webrtc-integration-test|ci-webrtc-publisher-integration|WebRTC Publisher Integration (MediaMTX)"
 )
 
 @test "each WebRTC job calls its composite action from both workflows, after checking out" {

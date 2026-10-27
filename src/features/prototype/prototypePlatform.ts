@@ -312,16 +312,9 @@ function argumentsError(
       }
       continue;
     }
-    if (typeof args[name] === "string") {
-      if (String(action.call).startsWith("realtime.") && name === "channel") continue;
-      return { path: at, message: "Invalid union value" };
-    }
-    const binding = record(args[name]);
-    if (binding && Object.hasOwn(binding, "value")) {
-      const error = check(binding.value, declared.value, `${at}.value`);
-      if (error) {
-        return error;
-      }
+    const error = argumentValueError(action, name, args[name], at, declared.value, check);
+    if (error) {
+      return error;
     }
   }
   return undefined;
@@ -394,8 +387,9 @@ function readError(
     .slice(1)
     .split("/")
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
-  if (name === "realtime" && (tokens.length !== 3 || !Object.hasOwn(channels, tokens[1])))
+  if (name === "realtime" && (tokens.length !== 3 || !Object.hasOwn(channels, tokens[1]))) {
     return { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  }
   const key =
     name === "realtime" && tokens.length === 3
       ? tokens[2]
@@ -519,9 +513,7 @@ export function prototypePlatformError(
     return error;
   }
   for (const use of prototypePlatformUses(root)) {
-    const found =
-      useError(use, context, check) ??
-      (use.kind === "call" ? prototypeChannelCallError(use.action, use.path, root) : undefined);
+    const found = useError(use, context, check) ?? channelUseError(use, root);
     if (found) {
       return found;
     }
@@ -647,3 +639,31 @@ export const PROTOTYPE_PLATFORM_MODULE_GATES = Object.entries(PROTOTYPE_PLATFORM
       : []),
   ],
 );
+
+function argumentValueError(
+  action: Raw,
+  name: string,
+  value: unknown,
+  at: string,
+  rule: Rule,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  if (typeof value === "string") {
+    if (String(action.call).startsWith("realtime.") && name === "channel") {
+      return undefined;
+    }
+    return { path: at, message: "Invalid union value" };
+  }
+  const binding = record(value);
+  if (binding && Object.hasOwn(binding, "value")) {
+    const error = check(binding.value, rule, `${at}.value`);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+function channelUseError(use: PrototypePlatformUse, root: Raw): PrototypePlatformError | undefined {
+  return use.kind === "call" ? prototypeChannelCallError(use.action, use.path, root) : undefined;
+}

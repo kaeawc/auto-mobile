@@ -7,8 +7,9 @@ import { prototypeGateCapabilities } from "../../../src/features/prototype/proto
 import * as limits from "../../../src/features/prototype/prototypeChannelLimits";
 
 test("channel budgets come from the contract", () => {
-  for (const [name, value] of Object.entries(limits))
+  for (const [name, value] of Object.entries(limits)) {
     expect(value).toBe(contract.limits[name as keyof typeof contract.limits]);
+  }
   expect(limits).toMatchObject({
     MAX_PROTOTYPE_CHANNELS: 4,
     MAX_PROTOTYPE_CHANNEL_FRAME_BYTES: 65536,
@@ -90,7 +91,9 @@ test("channel selectors require own declarations and preserve an authored __prot
   };
   const result = validatePrototypeSpec(spec);
   expect(result.success).toBe(true);
-  if (result.success) expect(Object.hasOwn(result.data.channels ?? {}, "__proto__")).toBe(true);
+  if (result.success) {
+    expect(Object.hasOwn(result.data.channels ?? {}, "__proto__")).toBe(true);
+  }
 });
 
 // Shared fixtures assert the same acceptance boundary and exact errors in all three validators.
@@ -128,7 +131,8 @@ for (const name of [
         requiredCapabilities: prototypeGateCapabilities,
       }).success,
     ).toBe(true);
-    if (name.endsWith("legacy-bindings"))
+    if (name.endsWith("legacy-bindings")) {
       expect(supportedCapabilities).not.toContain("prototype_platform_realtime_v1");
+    }
   });
 }

@@ -72,33 +72,8 @@ row with a \`textField\` (\`imeAction: "send"\`, \`onSubmit\`) and a send \`icon
 \`observe\`; \`swipeOn lookFor\` still finds them.
 `;
 
-export const GUIDE_TEMPLATES = `## Starter templates
+export { GUIDE_TEMPLATES } from "./prototypeGuideProseMore";
 
-The repository ships eight validated multi-screen specs, each a \`stack\` with a \`testTag\` on every
-interactive node. In a checkout, show one with \`specPath\` (an absolute path) from
-\`test/fixtures/prototype-spec/valid/\`, or copy its shape when writing a spec:
-
-- \`template-onboarding.json\`: welcome, sign-up form with \`checks\`, a button gated by
-  \`enabledWhen {valid}\`, \`emit\` with \`requireValid\`, done.
-- \`template-feed-detail.json\`: a \`repeat\` over \`{path: "/posts"}\` inside a refreshable \`scroll\`; a
-  tap stores the row in state and \`push\`es the detail screen.
-- \`template-tabbed-home.json\`: a \`pager\` driven by a \`bottomNav {pager}\`, plus a pushed screen.
-- \`template-checkout.json\`: quantity stepper, form with \`select\` and \`datePicker\`, and a
-  \`bottomSheet\` confirmation.
-- \`template-settings.json\`: \`listItem\` switches, \`radioGroup\`, \`slider\`, \`dialog\`, \`snackbar\` and
-  a \`storage\` block.
-- \`template-search.json\`: docked \`searchBar\` whose child lists \`/results\` and shows an empty
-  state with \`{data, empty: true}\`.
-- \`template-chat.json\`: reversed \`scroll\` with \`stickToEnd\`, quick-reply chips that
-  \`appendData\`, and a composer that \`emit\`s \`message_sent\` with the draft as context (Android only).
-- \`template-dashboard.json\`: \`chart\` line, bar and ring over \`/data\`, and a \`startTimer\` clock.
-`;
-
-/**
- * Hand-written authoring prose for the `automobile:prototype` resource. Everything that names a
- * limit, node type, action, theme role or icon is generated from the spec contract in
- * prototypeGuide.ts; the prose here describes behaviour only and must not restate those values.
- */
 export const GUIDE_INTRO = `# Prototype authoring guide
 
 Use the \`prototype\` tool with \`action: "show"\` and a full \`spec\`. A show with the id of the
@@ -388,7 +363,7 @@ app icon is already on the home screen. \`listSaved\` on iOS returns bundle ids 
 
 On Android or an iOS simulator with the ProtoViewer app installed, \`save\` without \`pin\` or \`icon\` imports
 the prototype into the ProtoViewer library instead, and does not need CtrlProxy or
-\`prototype_saved_v1\`. It returns \`viewer\` \`{app, libraryId, label}\`; every save is a new
+\`prototype_saved_v1\`. It returns \`viewer\` \`{app, libraryId, label}\` (plus \`display\` {key, role}, the panel it landed on, on an iPhone Duo); every save is a new
 library entry, which \`listSaved\` and \`deleteSaved\` do not see. ProtoViewer treats the entry
 as imported: its requests stay off until the user allows network in ProtoViewer, and it is not
 attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"open",id}\` with

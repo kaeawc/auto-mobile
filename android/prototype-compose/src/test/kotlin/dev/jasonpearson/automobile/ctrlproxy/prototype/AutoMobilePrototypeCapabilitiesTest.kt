@@ -39,6 +39,7 @@ class AutoMobilePrototypeCapabilitiesTest {
   // Routes are contract-only until navigation and restore semantics ship.
   private val exclusions =
     setOf(
+      "prototype_network_upload_v1", // Contract only until upload execution ships.
       "prototype_routes_v1",
       "prototype_platform_test_v1",
       "prototype_backdrop_v1",

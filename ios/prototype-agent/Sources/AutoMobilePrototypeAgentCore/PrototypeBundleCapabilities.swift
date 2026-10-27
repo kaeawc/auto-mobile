@@ -133,7 +133,13 @@ enum PrototypeBundleCapabilities {
             (type == "pop" && fields["force"] != nil) || type == "setStack" { names.insert("prototype_routes_v1") }
         if type == "startTimer" || type == "cancelTimer" { names.insert("prototype_timers_v1") }
         if type == "request" {
+            for part in PrototypeStrictBindings.array(fields["body"]?.objectFields?["multipart"]) {
+                if let binding = part.objectFields?["value"] { scanSlots(binding, names: &names) }
+            }
             names.insert("prototype_network_v1")
+            if fields["progressKey"] != nil || fields["body"]?.objectFields?.keys
+                .contains(where: { ["multipart", "form", "file"].contains($0) }) ==
+                true { names.insert("prototype_network_upload_v1") }
             if fields["via"]?.stringValue == "device" { names.insert("prototype_network_device_v1") }
         }
         if ["setData", "appendData", "prependData", "removeData"]

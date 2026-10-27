@@ -1,6 +1,18 @@
 // Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 
+struct RequestUploadFile: Codable, Equatable, Sendable {
+    let asset: String
+}
+
+struct RequestUploadPart: Codable, Equatable, Sendable {
+    let name: String
+    let value: JSONValue?
+    let file: RequestUploadFile?
+    let filename: String?
+    let contentType: String?
+}
+
 struct PrototypePress: Decodable, Equatable, Sendable {
     let scale: Double?
     let alpha: Double?

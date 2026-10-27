@@ -277,6 +277,29 @@ internal object PrototypeBindableFields {
     return null
   }
 
+  private fun <T : Any> Visitor<T>.requestBody(value: JsonElement?, path: String): T? {
+    val body = value as? JsonObject ?: return null
+    val parts = body["multipart"] as? JsonArray
+    if (parts != null) {
+      for ((index, part) in parts.withIndex()) {
+        binding((part as? JsonObject)?.get("value"), "$path.multipart[$index].value")?.let {
+          return it
+        }
+      }
+      return null
+    }
+    val form = body["form"] as? JsonObject
+    if (form != null) {
+      for ((name, entry) in form) {
+        binding(entry, memberPath("$path.form", name))?.let {
+          return it
+        }
+      }
+      return null
+    }
+    return if (body.containsKey("file")) null else binding(value, path)
+  }
+
   private class Visitor<T : Any>(
     val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ) {
@@ -382,7 +405,7 @@ internal object PrototypeBindableFields {
           return it
         }
       }
-      binding(action["body"], "$path.body")?.let {
+      requestBody(action["body"], "$path.body")?.let {
         return it
       }
       field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {

@@ -1,3 +1,4 @@
+import { prototypeFieldsOfKind } from "./prototypeEmitContext";
 import { prototypeRouteFields, PROTOTYPE_ROUTES_CAPABILITY } from "./prototypeRoutes";
 import { prototypeWindowMotionFields } from "./prototypeWindowMotion";
 import { PROTOTYPE_WINDOW_MOTION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -485,6 +486,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_PLATFORM_CAPABILITY,
     fields: prototypePlatformFields,
     unsupportedMessage: prototypePlatformUnsupportedMessage,
+  },
+  {
+    capability: "prototype_network_upload_v1",
+    fields: (spec) => prototypeFieldsOfKind(spec, "uploadRequest"),
+    unsupportedMessage: (fields, platform) =>
+      `The connected ${platform} runtime does not advertise prototype_network_upload_v1, required for upload requests at ${fields.join(", ")}. Update the runtime or use a JSON body without progressKey. Nothing was shown.`,
   },
   ...PROTOTYPE_PLATFORM_MODULE_GATES,
 ];

@@ -118,7 +118,7 @@ internal object PrototypeObjectRules {
     val exactlyOne = (rule["exactlyOne"] as? JsonArray)?.map { it.jsonPrimitive.content }
     if (exactlyOne != null && exactlyOne.count { data.containsKey(it) } != 1) {
       return fail(
-        keyPath(path, exactlyOne.first()),
+        if (rule.flag("exactlyOneAtObject")) path else keyPath(path, exactlyOne.first()),
         "Exactly one of ${exactlyOne.joinToString(", ")} is required",
       )
     }

@@ -654,6 +654,7 @@ struct PrototypeAction: Decodable, Sendable {
     let url: String?
     let headers: [String: JSONValue]?
     let query: [String: JSONValue]?
+    let progressKey: String?
     let body: JSONValue?
     let into: String?
     let append: PrototypeRequestAppend?
@@ -673,7 +674,8 @@ struct PrototypeAction: Decodable, Sendable {
              animated, call, args, params, force
         case id, afterMs, everyMs, maxRuns, actions
         case incrementAmount = "by"
-        case requireValid, method, url, headers, query, body, into, append, statusKey, via, timeoutMs, onSuccess,
+        case requireValid, method, url, headers, query, progressKey, body, into, append, statusKey, via, timeoutMs,
+             onSuccess,
              onError
     }
 
@@ -682,7 +684,9 @@ struct PrototypeAction: Decodable, Sendable {
         page: JSONValue?, stack: String?, screen: String?, path: String?, key: String?, value: JSONValue?,
         by incrementAmount: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
         headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
-        into: String? = nil, append: PrototypeRequestAppend? = nil, statusKey: String? = nil, via: String? = nil,
+        into: String? = nil, append: PrototypeRequestAppend? = nil, statusKey: String? = nil,
+        progressKey: String? = nil,
+        via: String? = nil,
         timeoutMs: Double? = nil,
         onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil,
         id: String? = nil, afterMs: Int? = nil, everyMs: Int? = nil, maxRuns: Int? = nil,
@@ -723,6 +727,7 @@ struct PrototypeAction: Decodable, Sendable {
         self.url = url
         self.headers = headers
         self.query = query
+        self.progressKey = progressKey
         self.body = body
         self.into = into
         self.append = append
@@ -758,6 +763,7 @@ struct PrototypeAction: Decodable, Sendable {
             into: container.decodeIfPresent(String.self, forKey: .into),
             append: container.decodeIfPresent(PrototypeRequestAppend.self, forKey: .append),
             statusKey: container.decodeIfPresent(String.self, forKey: .statusKey),
+            progressKey: container.decodeIfPresent(String.self, forKey: .progressKey),
             via: container.decodeIfPresent(String.self, forKey: .via),
             timeoutMs: container.decodeIfPresent(Double.self, forKey: .timeoutMs),
             onSuccess: container.decodeIfPresent([PrototypeAction].self, forKey: .onSuccess),
@@ -1088,7 +1094,8 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey, transition
+        case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
+             transition
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge

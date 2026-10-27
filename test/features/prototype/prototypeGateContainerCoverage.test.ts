@@ -175,6 +175,17 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
   },
+  prototype_network_upload_v1: {
+    ...label,
+    onTap: [
+      {
+        type: "request",
+        method: "POST",
+        url: "https://example.com/upload",
+        body: { form: { q: { value: "hello" } } },
+      },
+    ],
+  },
   prototype_network_device_v1: {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],

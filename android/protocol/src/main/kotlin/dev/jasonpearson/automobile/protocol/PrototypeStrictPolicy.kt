@@ -107,7 +107,7 @@ internal object PrototypeStrictPolicy {
 
   private fun inRequest(path: String, requests: List<String>): Boolean = requests.any { at ->
     path == "$at.url" ||
-      path == "$at.body.state" ||
+      path.startsWith("$at.body.") ||
       listOf("headers", "query").any { path.startsWith("$at.$it.") || path.startsWith("$at.$it[") }
   }
 
@@ -288,6 +288,10 @@ internal object PrototypeStrictPolicy {
       val type = fields.text("type") ?: ""
       if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
+        if (key == "form" && field == "body") {
+          (child as? JsonObject)?.values?.forEach { scan(it) }
+          continue
+        }
         if (skipsScan(key, type)) continue
         if (key == "repeat") {
           repeatFeatures(child)
@@ -350,6 +354,14 @@ internal object PrototypeStrictPolicy {
         need("data_model")
       }
       if (type == "request" && fields.text("via") == "device") need("network_device")
+      if (type == "request") {
+        val body = fields["body"] as? JsonObject
+        if (
+          fields["progressKey"] != null ||
+            listOf("multipart", "form", "file").any { body?.containsKey(it) == true }
+        )
+          need("network_upload")
+      }
       if (PrototypeMediaItemBindings.usedBy(fields)) need("platform_media_items")
     }
 

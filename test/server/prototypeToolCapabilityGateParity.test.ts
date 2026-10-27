@@ -329,6 +329,20 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
   }),
+  prototype_network_upload_v1: {
+    ...fixture({
+      ...label,
+      onTap: [
+        {
+          type: "request",
+          method: "POST",
+          url: "https://example.com/upload",
+          body: { form: { q: { value: "hello" } } },
+        },
+      ],
+    }),
+    with: ["prototype_network_v1"],
+  },
   prototype_network_device_v1: {
     ...fixture({
       ...label,

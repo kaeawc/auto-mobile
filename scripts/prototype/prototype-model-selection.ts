@@ -40,6 +40,8 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  requestUploadFile: {},
+  requestUploadPart: {},
   press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shared: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
@@ -178,6 +180,7 @@ export const prototypeModelSelection = {
 } as const satisfies ModelSelection;
 
 export const prototypeTypeRefs = {
+  requestUploadValue: { kotlin: "kotlinx.serialization.json.JsonObject", swift: "JSONValue" },
   routeParams: { kotlin: "Map<String, JsonElement>" },
   ...nodeActionTypeRefs,
   colorValue: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },

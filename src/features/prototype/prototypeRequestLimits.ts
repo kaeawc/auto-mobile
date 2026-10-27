@@ -6,6 +6,8 @@ import contract from "../../../schemas/prototype-spec-contract.json";
  * validator, the host executor (#12527) and the native runtimes cannot drift apart.
  */
 export const {
+  MAX_PROTOTYPE_UPLOAD_BYTES,
+  MAX_PROTOTYPE_UPLOAD_PARTS,
   DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
   /** The ceiling for a request's `timeoutMs`; a larger value is clamped by the host. */
   MAX_PROTOTYPE_REQUEST_TIMEOUT_MS,

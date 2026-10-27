@@ -50,6 +50,17 @@ struct PrototypeContractValidator {
     var effects = PrototypeEffectUses()
     var referenceDepth: [String: Int] = [:]
 
+    static func validateRequestBody(_ value: JSONValue, path: String) throws {
+        guard let contract,
+              let rule = contract.definitions["action"]?.objectFields?["variants"]?.objectFields?["request"]?
+              .objectFields?["fields"]?.objectFields?["body"]?.objectFields?["rule"]
+        else {
+            throw invalid(path, "Embedded request body contract is unavailable")
+        }
+        var validator = Self(definitions: contract.definitions, limits: contract.limits)
+        try validator.walk(value, rule: rule, path: path, depth: 0)
+    }
+
     static func validate(data: Data) throws { _ = try inspect(data: data) }
 
     static func inspect(data: Data) throws -> (JSONValue, PrototypeContractValidator) {

@@ -4,12 +4,14 @@ import { prototypeRequestStatusKeyError } from "./prototypeRequest";
 
 export interface Rule {
   kind: string;
-  pattern?: string;
   name?: string;
   empty?: boolean;
   nonblank?: boolean;
+  pattern?: string;
   exclusive?: string[];
   exactlyOne?: string[];
+  exactlyOneAtObject?: boolean;
+  preferMatchingFields?: boolean;
   dependents?: Record<string, string[]>;
   integer?: boolean;
   min?: number;
@@ -22,6 +24,7 @@ export interface Rule {
   item?: Rule;
   options?: Rule[];
   values?: (string | boolean)[];
+  minEntries?: number;
   maxEntries?: number;
   keyPattern?: string;
   fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;

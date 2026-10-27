@@ -4,6 +4,7 @@ import {
   SessionManager,
 } from "../../src/daemon/sessionManager";
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -155,6 +156,9 @@ describe("terminal release waits for its own row statement settlement (#12547)",
   });
 
   test("an older release refuses a different incarnation's unsettled own write (#12515)", async () => {
+    // A volatile intent keeps the write-first order, where a release can be superseded after its
+    // row statement was issued; a durable one writes after the commit (#11799).
+    manager.attachTerminalReleaseJournal(new NoopTerminalReleaseJournal());
     const original = manager.getSession(SESSION)!;
     const gate = Promise.withResolvers<void>();
     store.park = gate.promise;

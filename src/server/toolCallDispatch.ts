@@ -2,6 +2,7 @@ import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprot
 import { ActionableError } from "../models";
 import type { CreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 import { logger } from "../utils/logger";
+import { withAmbiguousDeviceMrtr } from "./ambiguousDeviceMrtr";
 import {
   deviceChoicePeerFor,
   withAmbiguousDeviceElicitation,
@@ -133,6 +134,8 @@ export interface McpToolCallExtra extends ToolCallExtra {
    * protocol version); read for the Tasks extension declaration (#4668).
    */
   readonly envelope?: Readonly<Record<string, unknown>>;
+  /** Client answers lifted by the SDK on a modern multi-round-trip retry. */
+  readonly inputResponses?: Readonly<Record<string, unknown>>;
   /**
    * Overrides the transport scope the call's execution registers under. Set only for work
    * running as an MCP task, which must not be cancelled when its request closes (#4668).
@@ -148,6 +151,7 @@ export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
     signal: ctx.mcpReq.signal,
     _meta: ctx.mcpReq._meta,
     ...(ctx.mcpReq.envelope !== undefined && { envelope: ctx.mcpReq.envelope }),
+    ...(ctx.mcpReq.inputResponses !== undefined && { inputResponses: ctx.mcpReq.inputResponses }),
     sendNotification: (notification) => ctx.mcpReq.notify(notification),
   };
 }
@@ -157,31 +161,33 @@ export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
  * answer with a Tasks-extension `CreateTaskResult` (#4668), but only to a request that
  * declared the extension.
  *
- * `ambiguousDeviceElicitation` is passed only by servers with a stateful client connection (the
- * stdio proxy and the direct stdio server): a stateless daemon request has no channel to ask on.
- * It turns an `ambiguous_device_target` result into a device question for a client that declared
- * elicitation (#13945).
+ * Modern servers use MRTR for the device question. `ambiguousDeviceElicitation` enables the
+ * legacy push question only for servers with a stateful client connection (#13945).
  */
 export function installToolCallDispatcher(
   server: McpServer,
   backend: ToolCallBackend<ToolCallRequest, McpToolCallExtra, McpToolCallResult | CreateTaskResult>,
-  options: { ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions } = {},
+  options: {
+    era?: "legacy" | "modern";
+    ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
+  } = {},
 ): void {
+  const dispatchBackend = options.era === "modern" ? withAmbiguousDeviceMrtr(backend) : backend;
   server.server.setRequestHandler(
     "tools/call",
-    // The SDK types `tools/call` as `CallToolResult` only; `createSdkMcpServer` passes a
-    // `CreateTaskResult` through to the wire unchanged.
+    // The SDK serves InputRequiredResult natively; createSdkMcpServer also passes our
+    // Tasks-extension CreateTaskResult through to the wire unchanged.
     async (request, ctx) =>
       (await dispatchToolCall(
         request,
         toolCallExtraFromContext(ctx),
-        options.ambiguousDeviceElicitation
+        options.era !== "modern" && options.ambiguousDeviceElicitation
           ? withAmbiguousDeviceElicitation(
               backend,
               deviceChoicePeerFor(server, ctx),
               options.ambiguousDeviceElicitation,
             )
-          : backend,
+          : dispatchBackend,
       )) as McpToolCallResult,
   );
 }

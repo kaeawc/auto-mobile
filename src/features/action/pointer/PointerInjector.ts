@@ -61,7 +61,7 @@ export interface PointerRequest {
 
 export interface PointerInjector {
   readonly route: PointerRouteId;
-  supports(features: PointerFeatures, environment: PointerEnvironment): PointerSupport;
+  supports(features: PointerFeatures, device: PointerEnvironment): PointerSupport;
   inject(request: PointerRequest, signal?: AbortSignal): Promise<void>;
 }
 

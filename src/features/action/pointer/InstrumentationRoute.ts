@@ -13,15 +13,15 @@ import { DispatchingRoute, SUPPORTED, unsupported } from "./DispatchingRoute";
  */
 export class InstrumentationRoute extends DispatchingRoute {
   readonly route = "instrumentation" as const;
-  supports(features: PointerFeatures, environment: PointerEnvironment): PointerSupport {
-    if (environment.platform !== "android") {
+  supports(features: PointerFeatures, device: PointerEnvironment): PointerSupport {
+    if (device.platform !== "android") {
       return unsupported("instrumentation injection is an Android route");
     }
     if (features.toolType === "finger") {
       return unsupported("finger touches use the accessibility route");
     }
     const needed = features.hover ? HOVER_INPUT_CAPABILITY : STYLUS_INPUT_CAPABILITY;
-    return environment.capabilities.has(needed)
+    return device.capabilities.has(needed)
       ? SUPPORTED
       : unsupported(`the connected runner does not advertise ${needed}`, needed);
   }

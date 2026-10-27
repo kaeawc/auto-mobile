@@ -10,8 +10,8 @@ import { DispatchingRoute, SUPPORTED, unsupported } from "./DispatchingRoute";
 /** Today's path: CtrlProxy accessibility `dispatchGesture`. A finger touch and nothing else. */
 export class CtrlProxyA11yRoute extends DispatchingRoute {
   readonly route = "ctrlproxy-a11y" as const;
-  supports(features: PointerFeatures, environment: PointerEnvironment): PointerSupport {
-    if (environment.platform !== "android") {
+  supports(features: PointerFeatures, device: PointerEnvironment): PointerSupport {
+    if (device.platform !== "android") {
       return unsupported("accessibility gestures are an Android route");
     }
     return isFingerOnly(features)

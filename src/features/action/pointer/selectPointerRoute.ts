@@ -24,7 +24,7 @@ export type PointerRouteChoice =
  */
 export function selectPointerRoute(
   features: PointerFeatures,
-  environment: PointerEnvironment,
+  device: PointerEnvironment,
   injectors: readonly PointerInjector[],
 ): PointerRouteChoice {
   const invalid = invalidPointerFeatures(features);
@@ -38,7 +38,7 @@ export function selectPointerRoute(
   const reasons: string[] = [];
   const missing = new Set<string>();
   for (const injector of injectors) {
-    const support = injector.supports(features, environment);
+    const support = injector.supports(features, device);
     if (support.supported) {
       return { selected: injector };
     }
@@ -62,10 +62,10 @@ export function selectPointerRoute(
 /** Throws the refusal as an {@link ActionableError}, or returns the chosen injector. */
 export function requirePointerRoute(
   features: PointerFeatures,
-  environment: PointerEnvironment,
+  device: PointerEnvironment,
   injectors: readonly PointerInjector[],
 ): PointerInjector {
-  const choice = selectPointerRoute(features, environment, injectors);
+  const choice = selectPointerRoute(features, device, injectors);
   if (choice.selected === null) {
     throw new ActionableError(choice.refusal);
   }
@@ -87,11 +87,11 @@ export interface PointerInputSummary {
 }
 
 export function derivePointerInput(
-  environment: PointerEnvironment,
+  device: PointerEnvironment,
   injectors: readonly PointerInjector[],
 ): PointerInputSummary {
   const routeFor = (features: PointerFeatures): PointerRouteId | null =>
-    selectPointerRoute(features, environment, injectors).selected?.route ?? null;
+    selectPointerRoute(features, device, injectors).selected?.route ?? null;
   const stylusRoute = routeFor({ toolType: "stylus" });
   const pressureRoute = routeFor({ toolType: "stylus", variablePressure: true });
   const hoverRoute = routeFor({ toolType: "stylus", hover: true });

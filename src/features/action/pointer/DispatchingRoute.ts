@@ -22,7 +22,7 @@ export function unsupported(reason: string, missingCapability?: string): Pointer
 export abstract class DispatchingRoute implements PointerInjector {
   abstract readonly route: PointerRouteId;
   constructor(private readonly dispatch: PointerDispatch) {}
-  abstract supports(features: PointerFeatures, environment: PointerEnvironment): PointerSupport;
+  abstract supports(features: PointerFeatures, device: PointerEnvironment): PointerSupport;
   inject(request: PointerRequest, signal?: AbortSignal): Promise<void> {
     return this.dispatch(request, signal);
   }

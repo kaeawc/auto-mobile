@@ -603,6 +603,9 @@ struct Style: Decodable {
         background != nil || gradient != nil
     }
 
+    /// Only authored press feedback installs a gesture; motion settings control its animation.
+    var hasPressScaleGesture: Bool { pressScale != nil }
+
     /// The scale a tappable node draws at: `pressScale` while pressed, 1 otherwise.
     func scale(pressed: Bool) -> Double {
         pressed ? pressScale ?? 1 : 1

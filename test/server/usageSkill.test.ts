@@ -142,6 +142,6 @@ describe("usage skill packaging", () => {
     };
     expect(manifest.files).toContain("mcp-skills");
     expect(existsSync(SKILL_FILE)).toBe(true);
-    expect(readFileSync(SKILL_FILE, "utf8")).toMatch(/^---\nname: auto-mobile-usage\n/);
+    expect(readFileSync(SKILL_FILE, "utf8")).toMatch(/^---\r?\nname: auto-mobile-usage\r?\n/);
   });
 });

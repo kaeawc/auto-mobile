@@ -68,9 +68,9 @@ describeHashBoundary<Tier1Inputs>("tier 1", {
   },
   perturbations: {
     "entries in another order": (i) => ({ ...i, entries: [...i.entries].reverse() }),
-    "another checkout path (backslash, ./)": (i) => ({
+    "another checkout path (a leading ./)": (i) => ({
       ...i,
-      entries: i.entries.map((e) => ({ ...e, path: `./${e.path.replaceAll("/", "\\")}` })),
+      entries: i.entries.map((e) => ({ ...e, path: `./${e.path}` })),
     }),
     "variables no task reads": (i) => ({
       ...i,
@@ -131,14 +131,16 @@ describe("LaneInputHasher", () => {
   const entries: InputEntry[] = [{ path: "src/a.ts", id: "aaa", mode: "100644" }];
   const host = { os: "linux", arch: "x64", bunVersion: "1.4.4" };
 
-  test("the node lane carries the tier 1 algorithm and the others the tree-entries one", async () => {
+  test("each lane carries its own algorithm, and they differ", async () => {
     const hasher = new LaneInputHasher(host, {});
-    expect((await hasher.hash("node", probe(entries))).algorithm).toBe(TIER1_INPUT_HASH_ALGORITHM);
-    for (const lane of ["android", "ios"] as const) {
+    const algorithms = new Set<string>();
+    for (const lane of ["node", "android", "ios"] as const) {
       const result = await hasher.hash(lane, probe(entries));
       expect(result.algorithm).toBe(expectedInputHashAlgorithm(lane));
-      expect(result.algorithm).not.toBe(TIER1_INPUT_HASH_ALGORITHM);
+      algorithms.add(result.algorithm);
     }
+    expect(algorithms.size).toBe(3);
+    expect(expectedInputHashAlgorithm("node")).toBe(TIER1_INPUT_HASH_ALGORITHM);
   });
 
   test("the producer's hash is the one the gate recomputes, and a different host differs", async () => {

@@ -643,6 +643,13 @@ is refused: the release already won) and deleting `supersededRows.ts`' release-d
 rebind and activity overlap repair stays and is re-modelled as the writer replacing an unwritten
 `live` desire.
 
+W5 trial (not landed): dropping the volatile final fence is a behaviour change, not a dead-code
+removal. It ends a live session on a device-loss observation that a newer confirmation would have
+overruled, and 50 tests across `supersededRowReassertRetry`, `releaseRowRetry`,
+`rowWritesRemainingCases`, `terminalReleaseReasonOnNotFoundWires` and the fault matrix encode the
+old order. W5 should be taken only with an owner decision to accept that change for volatile
+(Windows/no-journal) daemons, then rewrite those tests around rebind/activity overlap triggers.
+
 ## 7. Risks
 
 - Concurrency core: orderings that exist only as comments (a non-terminal release must

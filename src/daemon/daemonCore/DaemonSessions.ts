@@ -1,4 +1,5 @@
 import { lazyDeviceClaims, StoreDeviceClaimMirror, type DeviceClaimMirror } from "../deviceClaims";
+import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { SqliteBindingRegistry } from "../sessionBroker/registry/sqliteBindingRegistry";
 import type {
   DaemonCoreServices,
@@ -102,6 +103,7 @@ export interface DaemonSessionsHost {
   bindingExclusionFactory: () => (timer: Timer) => BindingExclusion;
   /** The open binding registry, observed only: the claims mirror never opens one. */
   bindingRegistry: () => Promise<SqliteBindingRegistry> | undefined;
+  deviceClaimMirrors: () => DeviceClaimMirrorHub;
   foreignCtrlProxyForwardEvidence: () => ForeignCtrlProxyForwardEvidence | undefined;
   deviceStateChangeNotifier: () => DeviceStateChangeNotifier;
   observerSessionRegistry: () => ObserverSessionRegistry;
@@ -127,12 +129,14 @@ export class DaemonSessions {
     );
     const claimStore = lazyDeviceClaims(() => this.host.bindingRegistry());
     const claimMirror = (platform: "android" | "ios"): StoreDeviceClaimMirror =>
-      new StoreDeviceClaimMirror({
-        platform,
-        store: claimStore,
-        timer: this.host.services.timer(),
-        daemonSessionId: this.host.identity.daemonSessionId(),
-      });
+      this.host.deviceClaimMirrors().register(
+        new StoreDeviceClaimMirror({
+          platform,
+          store: claimStore,
+          timer: this.host.services.timer(),
+          daemonSessionId: this.host.identity.daemonSessionId(),
+        }),
+      );
     const androidClaimMirror = claimMirror("android");
     return DevicePool.create({
       deviceClaimMirrors: { android: androidClaimMirror, ios: claimMirror("ios") },

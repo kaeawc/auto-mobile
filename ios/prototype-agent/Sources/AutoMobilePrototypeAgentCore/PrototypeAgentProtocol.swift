@@ -48,6 +48,7 @@ enum PrototypeAgentProtocol {
         chartCapability,
         lazyListCapability,
         loadingStatesCapability,
+        effectsCapability,
         stylePolishV2Capability,
         stringsCapability,
         semanticsCapability,
@@ -88,6 +89,9 @@ enum PrototypeAgentProtocol {
     static let scrollMotionCapability = "prototype_scroll_motion_v1"
     static let formatCapability = "prototype_format_v1"
     static let pagerStateKeyCapability = "prototype_pager_state_key_v1"
+    /// `style.effects` (#15130): all ten looks render, the shader-sampled ones falling back to no effect
+    /// on a node SwiftUI backs with a platform view, reported in `degradedEffects`.
+    static let effectsCapability = "prototype_effects_v1"
     static let lazyListCapability = "prototype_lazy_list_v1"
     /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
     static let stackCapability = "prototype_stack_v1"

@@ -30,6 +30,7 @@ const PURE_INPUT_TOOLS = [
   "dragPath",
   "highlight",
   "homeScreen",
+  "hoverAt",
   "multiTouch",
   "pinchOn",
   "recentApps",

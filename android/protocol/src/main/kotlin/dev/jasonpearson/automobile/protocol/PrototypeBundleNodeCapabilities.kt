@@ -103,15 +103,18 @@ internal object PrototypeBundleNodeCapabilities {
       caps.add("prototype_$capability")
   }
 
+  /** `{data: "/pointer"}` is a media item binding (#14192), not a per-mode pair. */
+  private fun pair(value: JsonElement?) = value is JsonObject && !value.containsKey("data")
+
+  private fun pairedImages(n: JsonObject, type: String?): Boolean =
+    (type == "image" && pair(n["asset"])) ||
+      (n["items"] as? JsonArray).orEmpty().any { pair((it as? JsonObject)?.get("image")) }
+
   private fun appearance(n: JsonObject, type: String?, caps: MutableSet<String>) {
     if ((n["filter"] as? JsonObject)?.get("tint") is JsonObject)
       caps.add("prototype_theme_modes_v1")
-    // `{data: "/pointer"}` is a media item binding (#14192), not a per-mode pair.
-    fun pair(value: JsonElement?) = value is JsonObject && !value.containsKey("data")
-    val pairedImage = type == "image" && pair(n["asset"])
     val scrim = type in setOf("bottomSheet", "drawer") && themed(n["scrim"])
-    val items = (n["items"] as? JsonArray).orEmpty().any { pair((it as? JsonObject)?.get("image")) }
-    if (pairedImage || scrim || items) caps.add("prototype_theme_modes_v1")
+    if (pairedImages(n, type) || scrim) caps.add("prototype_theme_modes_v1")
     val styles =
       listOfNotNull(n["style"] as? JsonObject) +
         (n["styleWhen"] as? JsonArray).orEmpty().mapNotNull {

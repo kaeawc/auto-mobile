@@ -1,0 +1,38 @@
+{
+  "id": "writes",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "messages": []
+  },
+  "root": {
+    "type": "text",
+    "text": "write",
+    "onTap": [
+      {
+        "type": "upsertData",
+        "path": "/data/messages",
+        "key": "/id",
+        "value": {
+          "value": {
+            "id": 1
+          }
+        },
+        "maxItems": 1
+      },
+      {
+        "type": "appendData",
+        "path": "/data/messages",
+        "value": {
+          "value": {
+            "id": 2
+          }
+        },
+        "maxItems": 2000
+      }
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "review",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "secret": "",
+      "s": ""
+    },
+    "data": {
+      "rows": []
+    },
+    "channels": {
+      "c": {
+        "kind": "websocket",
+        "url": "ws:ftp://x",
+        "via": "device"
+      }
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "secret",
+      "secure": true
+    }
+  },
+  "expectedPath": "channels.c.url",
+  "expectedMessage": "A websocket channel url must be an absolute ws or wss URL"
+}

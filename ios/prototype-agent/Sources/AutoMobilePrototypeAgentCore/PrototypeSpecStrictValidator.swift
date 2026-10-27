@@ -28,11 +28,12 @@ public enum PrototypeSpecStrictValidator {
             try repeats.expanded(root.objectFields ?? [:], path: "root")
             try PrototypeStrictSemantics.storage(fields, context: context)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
-            try PrototypeRequestValidator.validate(root, state: state)
+            try PrototypeRequestValidator.validateActions(context.actions, state: state)
             try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
                 handlers: fields["platform"],
+                channels: fields["channels"],
                 root: root,
                 state: state
             )
@@ -90,6 +91,16 @@ public enum PrototypeSpecStrictValidator {
                     "Host requests are unavailable in a library"
                 )
             }
+            if library {
+                for id in (fields["channels"]?.objectFields ?? [:]).keys.sorted()
+                    where fields["channels"]?.objectFields?[id]?.objectFields?["via"] != .string("device")
+                {
+                    throw PrototypeContractValidator.invalid(
+                        "\(PrototypeLimits.dataMemberPath("channels", key: id)).via",
+                        "Host requests are unavailable in a library"
+                    )
+                }
+            }
             if library { try secureLibrary(
                 fields,
                 nodes: context.locatedNodes,
@@ -128,6 +139,14 @@ public enum PrototypeSpecStrictValidator {
                 bindings.append((key, "\(path).state", true, request))
             }
         }
+        for (id, raw) in fields["channels"]?.objectFields ?? [:] {
+            guard let channel = raw.objectFields else { continue }
+            let at = PrototypeLimits.dataMemberPath("channels", key: id)
+            append(channel["url"], path: "\(at).url", request: true)
+            for (name, value) in channel["headers"]?.objectFields ?? [:] {
+                append(value, path: PrototypeLimits.dataMemberPath("\(at).headers", key: name), request: true)
+            }
+        }
         for action in actions {
             switch action.value["type"]?.stringValue {
             case "request":
@@ -157,7 +176,7 @@ public enum PrototypeSpecStrictValidator {
                     )
                 }
                 append(action.value["body"], path: "\(action.path).body", request: true)
-            case "setData", "appendData", "prependData":
+            case "setData", "appendData", "prependData", "upsertData":
                 append(action.value["value"], path: "\(action.path).value")
             case "emit", "platform":
                 let name = action.value["type"] == .string("emit") ? "context" : "args"

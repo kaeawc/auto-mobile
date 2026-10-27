@@ -191,6 +191,10 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
   },
+  prototype_platform_realtime_v1: {
+    ...label,
+    onTap: [{ type: "upsertData", path: "/data/rows", key: "/id", value: { value: { id: 1 } } }],
+  },
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
@@ -242,6 +246,7 @@ const containers: {
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
 const ROOT_LEVEL_GATES = [
+  "prototype_platform_realtime_device_v1",
   "prototype_storage_v1",
   "prototype_backdrop_v1",
   "prototype_design_platform_v1",

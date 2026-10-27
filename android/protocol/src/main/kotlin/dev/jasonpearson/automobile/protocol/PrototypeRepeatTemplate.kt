@@ -236,6 +236,12 @@ internal object PrototypeBindableFields {
     else visitor.node(node, path)
   }
 
+  fun <T : Any> firstAction(
+    action: JsonObject,
+    path: String,
+    visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
+  ): T? = Visitor(visit).action(action, path)
+
   private fun objects(data: JsonObject, key: String, path: String): List<Pair<JsonObject, String>> =
     (data[key] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
       (entry as? JsonObject)?.let { it to "$path.$key[$index]" }
@@ -368,6 +374,7 @@ internal object PrototypeBindableFields {
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
         "setData",
         "appendData",
+        "upsertData",
         "prependData" ->
           field(action, "path", path, PrototypeBindableKind.DATA_PATH)
             ?: binding(action["value"], "$path.value")

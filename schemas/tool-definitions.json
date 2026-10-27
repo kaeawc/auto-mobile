@@ -20098,6 +20098,34 @@
                                 },
                                 {
                                   "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "event": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": ""
+                                        },
+                                        {
+                                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["event"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "platform": {
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    }
+                                  },
+                                  "required": ["platform"],
+                                  "additionalProperties": false
                                 }
                               ]
                             }
@@ -20195,6 +20223,34 @@
                                 },
                                 {
                                   "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/6"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "event": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": ""
+                                        },
+                                        {
+                                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["event"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "platform": {
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    }
+                                  },
+                                  "required": ["platform"],
+                                  "additionalProperties": false
                                 }
                               ]
                             }
@@ -20214,9 +20270,39 @@
                             },
                             "value": {
                               "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/value"
+                            },
+                            "maxItems": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 2000
                             }
                           },
                           "required": ["type", "path", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["upsertData"]
+                            },
+                            "path": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/path"
+                            },
+                            "value": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/7/properties/value"
+                            },
+                            "key": {
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                            },
+                            "maxItems": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 2000
+                            }
+                          },
+                          "required": ["type", "path", "value", "key"],
                           "additionalProperties": false
                         },
                         {
@@ -20268,7 +20354,7 @@
                               "maximum": 3600000
                             },
                             "everyMs": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/11/properties/afterMs"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/afterMs"
                             },
                             "maxRuns": {
                               "type": "integer",
@@ -20295,7 +20381,7 @@
                               "enum": ["cancelTimer"]
                             },
                             "id": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/11/properties/id"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/12/properties/id"
                             }
                           },
                           "required": ["type", "id"],
@@ -20353,7 +20439,7 @@
                             "query": {
                               "type": "object",
                               "additionalProperties": {
-                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/headers/additionalProperties"
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties"
                               },
                               "propertyNames": {
                                 "minLength": 1
@@ -20362,7 +20448,7 @@
                             "body": {
                               "anyOf": [
                                 {
-                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/headers/additionalProperties/anyOf/1"
+                                  "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
                                 },
                                 {
                                   "type": "object",
@@ -20379,7 +20465,7 @@
                                             "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])"
                                           },
                                           "value": {
-                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/headers/additionalProperties/anyOf/1"
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
                                           },
                                           "file": {
                                             "type": "object",
@@ -20394,7 +20480,7 @@
                                             "additionalProperties": false
                                           },
                                           "filename": {
-                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/body/anyOf/1/properties/multipart/items/properties/name"
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/name"
                                           },
                                           "contentType": {
                                             "type": "string",
@@ -20419,7 +20505,7 @@
                                     "form": {
                                       "type": "object",
                                       "additionalProperties": {
-                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/headers/additionalProperties/anyOf/1"
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
                                       },
                                       "propertyNames": {
                                         "minLength": 1
@@ -20433,10 +20519,10 @@
                                   "type": "object",
                                   "properties": {
                                     "file": {
-                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/body/anyOf/1/properties/multipart/items/properties/file"
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/file"
                                     },
                                     "contentType": {
-                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/body/anyOf/1/properties/multipart/items/properties/contentType"
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/contentType"
                                     }
                                   },
                                   "required": ["file", "contentType"],
@@ -20488,7 +20574,7 @@
                               "maxItems": 32
                             },
                             "onError": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/13/properties/onSuccess"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/onSuccess"
                             }
                           },
                           "required": ["type", "url"],
@@ -20511,39 +20597,56 @@
                               "additionalProperties": {
                                 "anyOf": [
                                   {
-                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
-                                  },
-                                  {
-                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "platform": {
-                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                    "anyOf": [
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                      },
+                                      {
+                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "platform": {
+                                            "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                          }
+                                        },
+                                        "required": ["platform"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "event": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": ""
+                                              },
+                                              {
+                                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["event"],
+                                        "additionalProperties": false
                                       }
-                                    },
-                                    "required": ["platform"],
-                                    "additionalProperties": false
+                                    ]
                                   },
                                   {
-                                    "type": "object",
-                                    "properties": {
-                                      "event": {
-                                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
-                                      }
-                                    },
-                                    "required": ["event"],
-                                    "additionalProperties": false
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
                                   }
                                 ]
                               },
@@ -20684,7 +20787,7 @@
                                     "minLength": 1
                                   },
                                   "params": {
-                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/params"
+                                    "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/16/properties/params"
                                   }
                                 },
                                 "required": ["screen"],
@@ -20774,10 +20877,10 @@
                               "minLength": 1
                             },
                             "params": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/params"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/16/properties/params"
                             },
                             "transition": {
-                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/transition"
+                              "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/16/properties/transition"
                             },
                             "source": {
                               "type": "string",
@@ -20799,6 +20902,170 @@
               },
               "required": ["on"],
               "additionalProperties": false
+            },
+            "channels": {
+              "allOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["websocket", "sse"]
+                      },
+                      "url": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/url"
+                      },
+                      "protocols": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "maxItems": 4
+                      },
+                      "headers": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/14/properties/headers"
+                      },
+                      "via": {
+                        "type": "string",
+                        "enum": ["host", "device"]
+                      },
+                      "connect": {
+                        "type": "string",
+                        "enum": ["onShow", "manual"]
+                      },
+                      "statusKey": {
+                        "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                      },
+                      "reconnect": {
+                        "type": "object",
+                        "properties": {
+                          "maxAttempts": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 20
+                          },
+                          "initialDelayMs": {
+                            "type": "integer",
+                            "minimum": 100,
+                            "maximum": 60000
+                          },
+                          "maxDelayMs": {
+                            "type": "integer",
+                            "minimum": 100,
+                            "maximum": 60000
+                          }
+                        },
+                        "required": ["maxAttempts", "initialDelayMs", "maxDelayMs"],
+                        "additionalProperties": false
+                      },
+                      "decode": {
+                        "type": "string",
+                        "enum": ["json", "text"]
+                      },
+                      "routes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "when": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "pointer": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": ""
+                                        },
+                                        {
+                                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                        }
+                                      ]
+                                    },
+                                    "equals": {
+                                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/0/properties/payload"
+                                    }
+                                  },
+                                  "required": ["pointer", "equals"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "pointer": {
+                                      "$ref": "#/properties/spec/properties/channels/allOf/0/additionalProperties/properties/routes/items/properties/when/anyOf/0/properties/pointer"
+                                    },
+                                    "exists": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": ["pointer", "exists"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "event": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": ["event"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "actions": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                              },
+                              "minItems": 1,
+                              "maxItems": 32
+                            }
+                          },
+                          "required": ["actions"],
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
+                      },
+                      "onOpen": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                        },
+                        "minItems": 0,
+                        "maxItems": 32
+                      },
+                      "onClose": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                        },
+                        "minItems": 0,
+                        "maxItems": 32
+                      },
+                      "onError": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items"
+                        },
+                        "minItems": 0,
+                        "maxItems": 32
+                      }
+                    },
+                    "required": ["kind", "url"],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                  }
+                }
+              ]
             },
             "derive": {
               "type": "object",
@@ -26836,7 +27103,7 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
                     },
                     "transition": {
-                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/15/properties/transition"
+                      "$ref": "#/properties/spec/properties/platform/properties/on/additionalProperties/items/anyOf/16/properties/transition"
                     },
                     "animate": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"

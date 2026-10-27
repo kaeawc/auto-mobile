@@ -29,16 +29,19 @@ internal object PrototypeStrictPolicy {
       return PrototypeSpecError("window.layer", "Privileged window")
     if (library && window?.text("persistence") == "device")
       return PrototypeSpecError("window.persistence", "Privileged window")
-    if (library) {
-      // Located actions exclude opaque data, request bodies and emit payloads.
-      val host =
-        context.actions.firstOrNull {
-          it.value.text("type") == "request" && it.value.text("via") == "host"
-        }
-      if (host != null)
-        return PrototypeSpecError("${host.path}.via", "Host requests are unavailable in a library")
-    }
-    return if (library) secureLibraryError(spec, context) else null
+    if (!library) return null
+    return hostRequestError(context) ?: hostChannelError(spec) ?: secureLibraryError(spec, context)
+  }
+
+  private fun hostRequestError(context: PrototypeStateChecks.Context): PrototypeSpecError? {
+    // Located actions exclude opaque data, request bodies and emit payloads.
+    val host =
+      context.actions.firstOrNull {
+        it.value.text("type") == "request" && it.value.text("via") == "host"
+      }
+    if (host != null)
+      return PrototypeSpecError("${host.path}.via", "Host requests are unavailable in a library")
+    return null
   }
 
   private data class Field(val text: String, val path: String, val key: Boolean)
@@ -50,9 +53,27 @@ internal object PrototypeStrictPolicy {
     val scopes = PrototypeRepeatValidator.scopes(spec)
     val secure = secureStateKeys(scopes, context)
     if (secure.isEmpty()) return null
-    val requests = context.actions.filter { it.value.text("type") == "request" }.map { it.path }
+    val channels = (spec["channels"] as? JsonObject).orEmpty()
+    val requests =
+      context.actions.filter { it.value.text("type") == "request" }.map { it.path } +
+        channels.keys.map { PrototypeValidationPaths.keyPath("channels", it) }
+    val channelFields = mutableListOf<Field>()
+    for ((id, raw) in channels) {
+      val channel = raw.jsonObject
+      val at = PrototypeValidationPaths.keyPath("channels", id)
+      channelFields.add(Field(channel.text("url").orEmpty(), "$at.url", false))
+      for ((name, value) in (channel["headers"] as? JsonObject).orEmpty()) {
+        val path = PrototypeValidationPaths.keyPath("$at.headers", name)
+        if (value is JsonPrimitive && value.isString)
+          channelFields.add(Field(value.content, path, false))
+        else
+          (value as? JsonObject)?.text("state")?.let {
+            channelFields.add(Field(it, "$path.state", true))
+          }
+      }
+    }
     val leaked =
-      requestFields(context)
+      (requestFields(context) + channelFields)
         .sortedBy { it.path }
         .firstOrNull { field ->
           isSinkBinding(field, requests) && bindsSecure(field, scopes, secure)
@@ -89,6 +110,17 @@ internal object PrototypeStrictPolicy {
     val fields = mutableListOf<Field>()
     for (node in context.nodes) {
       PrototypeBindableFields.first<Boolean>(node.value, node.path) { raw, at, kind ->
+        val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (
+          text != null &&
+            kind in listOf(PrototypeBindableKind.REQUEST_TEXT, PrototypeBindableKind.KEY)
+        )
+          fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
+        null
+      }
+    }
+    for (action in context.actions) {
+      PrototypeBindableFields.firstAction<Boolean>(action.value, action.path) { raw, at, kind ->
         val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (
           text != null &&
@@ -146,6 +178,7 @@ internal object PrototypeStrictPolicy {
     val scanner = CapabilityScanner()
     scanner.envelope(spec)
     spec["root"]?.let { scanner.scan(it) }
+    (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
     (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
     return scanner.result
@@ -170,6 +203,7 @@ internal object PrototypeStrictPolicy {
       "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
+      "upsertData" to "data_actions",
       "prependData" to "data_actions",
       "removeData" to "data_actions",
       "platform" to "platform",
@@ -308,7 +342,7 @@ internal object PrototypeStrictPolicy {
 
     private fun skipsScan(key: String, type: String): Boolean =
       key == "payload" ||
-        (key == "value" && type !in listOf("setData", "appendData", "prependData"))
+        (key == "value" && type !in listOf("setData", "appendData", "prependData", "upsertData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement, routeAlias: Boolean) {
@@ -327,11 +361,7 @@ internal object PrototypeStrictPolicy {
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
-      if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
-      if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
-      if (PrototypeStylePolishV2Rules.required(fields))
-        result.add(PrototypeStylePolishV2Rules.CAPABILITY)
-      if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
+      polishFeatures(fields, routeAlias, result, ::need)
       val type = fields.text("type") ?: ""
       val nodeTypes =
         PrototypeSpecContract.definitions
@@ -419,6 +449,15 @@ internal object PrototypeEnvelopeFeatures {
 
   private fun MutableList<String>.content(spec: JsonObject) {
     if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text }) add("strings")
+    if (spec["channels"] != null) {
+      add("platform_realtime")
+      if (
+        (spec["channels"] as? JsonObject).orEmpty().values.any {
+          (it as? JsonObject)?.text("via") == "device"
+        }
+      )
+        add("platform_realtime_device")
+    }
     if (spec["data"] != null) add("data_model")
     if (spec["storage"] != null) add("storage")
     if ("derive" in spec) add("format")
@@ -436,6 +475,32 @@ internal object PrototypeEnvelopeFeatures {
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     if (colors?.get("light") != null || colors?.get("dark") != null) add("theme_modes")
   }
+}
+
+private fun hostChannelError(spec: JsonObject): PrototypeSpecError? {
+  for ((id, raw) in (spec["channels"] as? JsonObject).orEmpty().toSortedMap()) {
+    if ((raw as? JsonObject)?.text("via") != "device")
+      return PrototypeSpecError(
+        "${PrototypeValidationPaths.keyPath("channels", id)}.via",
+        "Host requests are unavailable in a library",
+      )
+  }
+  return null
+}
+
+/** Capabilities implied by routes, style polish, motion v3 and realtime fields on a node. */
+private fun polishFeatures(
+  fields: JsonObject,
+  routeAlias: Boolean,
+  result: MutableSet<String>,
+  need: (String) -> Unit,
+) {
+  if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
+  if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
+  if (PrototypeStylePolishV2Rules.required(fields))
+    result.add(PrototypeStylePolishV2Rules.CAPABILITY)
+  if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
+  if (PrototypeChannels.needsRealtimeCapability(fields)) need("platform_realtime")
 }
 
 /**

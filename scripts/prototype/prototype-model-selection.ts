@@ -42,6 +42,12 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
 export const prototypeModelSelection = {
   requestUploadFile: {},
   requestUploadPart: {},
+  channel: {
+    languages: ["kotlin"],
+    fieldTypes: { headers: { kotlin: "Map<String, JsonElement>" } },
+  },
+  channelReconnect: { languages: ["kotlin"] },
+  channelRoute: { languages: ["kotlin"], fieldTypes: { when: { kotlin: "JsonElement" } } },
   iconEffectTrigger: {},
   iconEffect: {},
   press: { swiftName: "PrototypePress", swiftConformances: ["Decodable", "Equatable", "Sendable"] },

@@ -20,6 +20,11 @@ enum PrototypeStrictCapabilities {
         if spec["theme"]?.objectFields?["design"]?.stringValue == "platform" { need("design_platform") }
         if spec["motion"] == .string("expressive") { result.insert(PrototypeMotionV3.capability) }
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
+        if spec["channels"] != nil {
+            need("platform_realtime")
+            if (spec["channels"]?.objectFields ?? [:]).values
+                .contains(where: { $0.objectFields?["via"] == .string("device") }) { need("platform_realtime_device") }
+        }
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }
@@ -129,7 +134,10 @@ enum PrototypeStrictCapabilities {
                     }
                 }
             }
-            if ["setData", "appendData", "prependData", "removeData"].contains(type) { need("data_actions") }
+            if ["setData", "appendData", "prependData", "upsertData", "removeData"]
+                .contains(type) { need("data_actions") }
+            if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
+                .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" { need("platform") }
@@ -142,7 +150,10 @@ enum PrototypeStrictCapabilities {
                 }
                 if key == "strings" { continue }
                 if key == "payload" ||
-                    (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
+                    (key == "value" && !["setData", "appendData", "prependData", "upsertData"].contains(type))
+                {
+                    continue
+                }
                 if key == "repeat" {
                     if child.objectFields?["derive"] != nil { need("format") }
                     if child.objectFields?["stagger"] != nil { need("window_motion") }
@@ -185,6 +196,7 @@ enum PrototypeStrictCapabilities {
         }
         if let root = spec["root"] { scan(root) }
         if let handlers = spec["platform"] { scan(handlers) }
+        for channel in (spec["channels"]?.objectFields ?? [:]).values { scan(channel) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }
         if let requires = spec["requires"]?.objectFields {

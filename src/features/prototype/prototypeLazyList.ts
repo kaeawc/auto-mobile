@@ -2,7 +2,13 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_LAZY_LIST_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { resolvePrototypeDataPointer } from "./prototypeData";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
+import {
+  mapBindableFields,
+  visitPrototypeHandlerFields,
+  record,
+  type FieldVisitor,
+  type Raw,
+} from "./prototypeTemplate";
 
 interface ListError {
   path: string;
@@ -106,20 +112,23 @@ export function prototypeLazyListLimitError(spec: unknown): ListError | undefine
 /** List and append gates visit only authored nodes/actions, never opaque JSON payloads. */
 export function prototypeLazyListFields(spec: unknown): string[] {
   const fields: string[] = [];
+  const visit: FieldVisitor = (value, actionPath, kind) => {
+    if (kind === "prependData") {
+      fields.push(actionPath);
+    }
+    if (kind === "request" && Object.hasOwn(record(value) ?? {}, "append")) {
+      fields.push(`${actionPath}.append`);
+    }
+    return value;
+  };
   walkPrototypeNodes(spec, (node, path) => {
     if (node.type === "list") {
       fields.push(path);
     }
-    mapBindableFields(node, path, (value, actionPath, kind) => {
-      if (kind === "prependData") {
-        fields.push(actionPath);
-      }
-      if (kind === "request" && Object.hasOwn(record(value) ?? {}, "append")) {
-        fields.push(`${actionPath}.append`);
-      }
-      return value;
-    });
+    mapBindableFields(node, path, visit);
   });
+  visitPrototypeHandlerFields(spec, visit);
+
   return fields;
 }
 

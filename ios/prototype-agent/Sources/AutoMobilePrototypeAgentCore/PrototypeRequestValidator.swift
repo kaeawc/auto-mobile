@@ -59,6 +59,13 @@ enum PrototypeRequestValidator {
         }
     }
 
+    /// Contract-located actions include channel callbacks and platform handlers, in host order.
+    static func validateActions(_ actions: [PrototypeLocatedValue], state: [String: JSONValue]) throws {
+        for action in actions {
+            try validateAction(action.value, path: action.path, depth: 1, state: state)
+        }
+    }
+
     static func validateList(
         _ actions: [JSONValue], path: String, depth: Int, state: [String: JSONValue]
     )
@@ -145,9 +152,9 @@ enum PrototypeRequestValidator {
         return method
     }
 
-    private static func url(_ raw: JSONValue?, path: String) throws {
+    static func url(_ raw: JSONValue?, path: String, checkLength: Bool = true) throws {
         guard case let .string(text)? = raw,
-              (1 ... PrototypeLimits.maxRequestURLLength).contains(text.utf16.count)
+              !checkLength || (1 ... PrototypeLimits.maxRequestURLLength).contains(text.utf16.count)
         else {
             throw fail(path, "Expected a URL of 1 to \(PrototypeLimits.maxRequestURLLength) characters")
         }
@@ -193,7 +200,7 @@ enum PrototypeRequestValidator {
         else { throw fail(path, "progressKey requires a declared number state key from 0 to 100") }
     }
 
-    private static func entries(_ raw: JSONValue?, path: String, isHeader: Bool) throws {
+    static func entries(_ raw: JSONValue?, path: String, isHeader: Bool) throws {
         guard let raw else { return }
         guard case let .object(fields) = raw, fields.count <= PrototypeLimits.maxRequestEntries else {
             throw fail(path, "Expected an object of at most \(PrototypeLimits.maxRequestEntries) entries")

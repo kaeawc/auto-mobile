@@ -98,7 +98,7 @@ export function prototypeRequestMetaPath(into: string): string {
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const PLACEHOLDER_URL_SCHEME = /^https?:\/\//i;
 
-function urlError(url: string): string | undefined {
+export function prototypeRequestUrlError(url: string): string | undefined {
   if (url.includes("{")) {
     return PLACEHOLDER_URL_SCHEME.test(url)
       ? undefined
@@ -158,7 +158,7 @@ function headerLineProblem(field: string, value: unknown, literal: unknown): boo
   return field === "headers" && typeof text === "string" && /[\r\n]/.test(text);
 }
 
-function literalEntryError(
+export function prototypeRequestEntryError(
   entries: unknown,
   at: string,
   field: "headers" | "query",
@@ -196,7 +196,7 @@ function requestActionError(
   action: Record<string, unknown>,
   at: string,
 ): PrototypeRequestActionError | undefined {
-  const url = typeof action.url === "string" ? urlError(action.url) : undefined;
+  const url = typeof action.url === "string" ? prototypeRequestUrlError(action.url) : undefined;
   if (url !== undefined) {
     return { path: `${at}.url`, message: url };
   }
@@ -212,8 +212,8 @@ function requestActionError(
   }
   return (
     prototypeRequestAppendError(action, at) ??
-    literalEntryError(action.headers, at, "headers") ??
-    literalEntryError(action.query, at, "query")
+    prototypeRequestEntryError(action.headers, at, "headers") ??
+    prototypeRequestEntryError(action.query, at, "query")
   );
 }
 

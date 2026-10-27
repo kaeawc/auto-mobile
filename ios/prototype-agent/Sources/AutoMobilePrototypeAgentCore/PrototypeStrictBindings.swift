@@ -99,12 +99,23 @@ enum PrototypeStrictBindings {
                 if type == "toggle",
                    state[key]?
                    .boolValue ==
-                   nil { throw PrototypeContractValidator.invalid("\(action.path).key", "Expected boolean state") }
+                   nil
+                { throw PrototypeContractValidator.invalid(
+                    "\(action.path).key",
+                    "Toggle requires a boolean state key"
+                ) }
                 if type == "increment" || type == "decrement",
                    state[key]?
                    .numberValue ==
-                   nil { throw PrototypeContractValidator.invalid("\(action.path).key", "Expected numeric state") }
-                if type == "setState", !action.operandTemplated, let operand = value["value"] {
+                   nil
+                { throw PrototypeContractValidator.invalid(
+                    "\(action.path).key",
+                    type == "increment" ? "Increment requires a numeric state key" :
+                        "Decrement requires a numeric state key"
+                ) }
+                if type == "setState", !action.operandTemplated, let operand = value["value"],
+                   operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil
+                {
                     let controls = nodes.filter { boundKeys($0.value).contains(key) }
                     if Set(controls.compactMap { $0.value["type"]?.stringValue }).count == 1 {
                         var written = state

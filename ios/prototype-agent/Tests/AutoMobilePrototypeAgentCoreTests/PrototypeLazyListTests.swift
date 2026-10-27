@@ -63,7 +63,7 @@ final class PrototypeLazyListTests: XCTestCase {
                 op: op,
                 path: write["path"]?.stringValue ?? "",
                 value: write["value"],
-                maxItems: write["maxItems"]?.numberValue
+                maxItems: write["maxItems"]?.numberValue, key: write["key"]?.stringValue
             )
             switch result {
             case let .success(applied):

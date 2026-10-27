@@ -192,6 +192,14 @@
     "swipe-actions-list-item.json",
     "swipe-actions-row.json",
     "swipe-actions-vertical-pager.json",
+    "template-chat.json",
+    "template-checkout.json",
+    "template-dashboard.json",
+    "template-feed-detail.json",
+    "template-onboarding.json",
+    "template-search.json",
+    "template-settings.json",
+    "template-tabbed-home.json",
     "text-field-actions.json",
     "text-field-options.json",
     "text-spans-max.json",
@@ -1617,6 +1625,46 @@
       "prototype_pager_options_v1",
       "prototype_swipe_actions_v1"
     ],
+    "template-chat.json": [
+      "prototype_chat_scroll_v1",
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_stack_v1",
+      "prototype_text_field_actions_v1"
+    ],
+    "template-checkout.json": [
+      "prototype_checks_v1",
+      "prototype_menus_v1",
+      "prototype_stack_v1",
+      "prototype_text_field_options_v1"
+    ],
+    "template-dashboard.json": [
+      "prototype_chart_v1",
+      "prototype_checks_v1",
+      "prototype_data_model_v1",
+      "prototype_stack_v1",
+      "prototype_timers_v1"
+    ],
+    "template-feed-detail.json": [
+      "prototype_data_model_v1",
+      "prototype_refresh_v1",
+      "prototype_stack_v1"
+    ],
+    "template-onboarding.json": [
+      "prototype_checks_v1",
+      "prototype_stack_v1",
+      "prototype_text_field_options_v1"
+    ],
+    "template-search.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_loading_states_v1",
+      "prototype_search_bar_v1",
+      "prototype_stack_v1"
+    ],
+    "template-settings.json": ["prototype_stack_v1", "prototype_storage_v1"],
+    "template-tabbed-home.json": ["prototype_emit_context_v1", "prototype_stack_v1"],
     "text-field-actions.json": [
       "prototype_text_field_actions_v1",
       "prototype_text_field_leading_icon_v1",

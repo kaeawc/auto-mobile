@@ -26,6 +26,7 @@ import {
   GUIDE_PATCH,
   GUIDE_REPEAT,
   GUIDE_STORAGE,
+  GUIDE_TEMPLATES,
   GUIDE_TIMERS,
 } from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
@@ -259,6 +260,7 @@ export function renderPrototypeGuide(): string {
   return [
     GUIDE_INTRO,
     GUIDE_STRINGS_SEMANTICS,
+    GUIDE_TEMPLATES,
     "## Limits\n\nGenerated from `schemas/prototype-spec-contract.json`.\n\n" + renderLimitsTable(),
     renderWindow(),
     renderNodes(),

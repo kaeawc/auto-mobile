@@ -1,0 +1,304 @@
+{
+  "id": "template-checkout",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "qty": 1,
+    "email": "",
+    "address": "",
+    "shipping": "standard",
+    "delivery": "2026-11-01",
+    "gift": false,
+    "confirmed": false
+  },
+  "root": {
+    "type": "stack",
+    "id": "flow",
+    "start": "cart",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "cart": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "cart_bar",
+            "title": "Cart"
+          },
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "listItem",
+                "testTag": "cart_item",
+                "headline": "Trail shoes",
+                "supporting": "$89.00 each",
+                "leadingIcon": "shopping_cart"
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "iconButton",
+                    "testTag": "qty_minus",
+                    "icon": "remove",
+                    "variant": "outlined",
+                    "contentDescription": "Fewer",
+                    "enabledWhen": {
+                      "key": "qty",
+                      "gt": 1
+                    },
+                    "onTap": [
+                      {
+                        "type": "decrement",
+                        "key": "qty"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": "{qty}",
+                    "style": {
+                      "textStyle": "titleLarge"
+                    },
+                    "testTag": "qty_value"
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "qty_plus",
+                    "icon": "add",
+                    "variant": "outlined",
+                    "contentDescription": "More",
+                    "enabledWhen": {
+                      "key": "qty",
+                      "lt": 9
+                    },
+                    "onTap": [
+                      {
+                        "type": "increment",
+                        "key": "qty"
+                      }
+                    ]
+                  }
+                ],
+                "style": {
+                  "spacing": 16
+                }
+              },
+              {
+                "type": "button",
+                "label": "Checkout",
+                "testTag": "cart_checkout",
+                "onTap": [
+                  {
+                    "type": "push",
+                    "stack": "flow",
+                    "screen": "details"
+                  }
+                ]
+              }
+            ],
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            }
+          }
+        ]
+      },
+      "details": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "details_bar",
+            "title": "Delivery",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "flow"
+                }
+              ]
+            }
+          },
+          {
+            "type": "scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "children": [
+                {
+                  "type": "textField",
+                  "testTag": "email_field",
+                  "stateKey": "email",
+                  "label": "Email",
+                  "variant": "outlined",
+                  "keyboardType": "email",
+                  "checks": [
+                    {
+                      "message": "Enter your email",
+                      "required": true
+                    },
+                    {
+                      "message": "That is not an email address",
+                      "format": "email"
+                    }
+                  ]
+                },
+                {
+                  "type": "textField",
+                  "testTag": "address_field",
+                  "stateKey": "address",
+                  "label": "Street address",
+                  "variant": "outlined",
+                  "checks": [
+                    {
+                      "message": "Enter at least 5 characters",
+                      "minLength": 5
+                    }
+                  ],
+                  "validateOn": "blur"
+                },
+                {
+                  "type": "select",
+                  "testTag": "shipping_select",
+                  "stateKey": "shipping",
+                  "label": "Shipping",
+                  "options": [
+                    {
+                      "value": "standard",
+                      "label": "Standard (5 days)"
+                    },
+                    {
+                      "value": "express",
+                      "label": "Express (2 days)"
+                    }
+                  ]
+                },
+                {
+                  "type": "datePicker",
+                  "testTag": "delivery_date",
+                  "stateKey": "delivery"
+                },
+                {
+                  "type": "switch",
+                  "testTag": "gift_switch",
+                  "stateKey": "gift",
+                  "label": "This is a gift"
+                },
+                {
+                  "type": "button",
+                  "label": "Place order",
+                  "testTag": "place_order",
+                  "onTap": [
+                    {
+                      "type": "emit",
+                      "name": "order_placed",
+                      "requireValid": ["email", "address"]
+                    },
+                    {
+                      "type": "setState",
+                      "key": "confirmed",
+                      "value": true
+                    }
+                  ],
+                  "enabledWhen": {
+                    "valid": ["email", "address"]
+                  }
+                }
+              ],
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              }
+            }
+          },
+          {
+            "type": "bottomSheet",
+            "testTag": "confirmation_sheet",
+            "openWhen": {
+              "key": "confirmed",
+              "equals": true
+            },
+            "detents": ["half"],
+            "child": {
+              "type": "column",
+              "children": [
+                {
+                  "type": "icon",
+                  "name": "check_circle",
+                  "contentDescription": "Confirmed"
+                },
+                {
+                  "type": "text",
+                  "text": "Order placed",
+                  "style": {
+                    "textStyle": "headlineSmall"
+                  },
+                  "testTag": "confirmation_title"
+                },
+                {
+                  "type": "text",
+                  "text": "A receipt is on its way to {email}.",
+                  "style": {
+                    "textStyle": "bodyMedium"
+                  }
+                },
+                {
+                  "type": "button",
+                  "label": "Done",
+                  "testTag": "confirmation_done",
+                  "onTap": [
+                    {
+                      "type": "setState",
+                      "key": "confirmed",
+                      "value": false
+                    },
+                    {
+                      "type": "setState",
+                      "key": "qty",
+                      "value": 1
+                    },
+                    {
+                      "type": "popToRoot",
+                      "stack": "flow"
+                    }
+                  ]
+                }
+              ],
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

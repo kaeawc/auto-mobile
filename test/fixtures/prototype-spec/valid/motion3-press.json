@@ -1,0 +1,19 @@
+{
+  "id": "motion3",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "on": false
+  },
+  "root": {
+    "type": "button",
+    "label": "Go",
+    "press": {
+      "scale": 0.9,
+      "alpha": 0.7
+    }
+  }
+}

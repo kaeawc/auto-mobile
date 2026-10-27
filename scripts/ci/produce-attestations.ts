@@ -14,7 +14,7 @@ import {
   LANE_INPUT_PATHS,
   LocalFileSink,
   ProduceOptions,
-  TreeEntriesInputHasher,
+  LaneInputHasher,
   UnsignedSigner,
   produceAttestations,
 } from "./attestation/produceAttestations";
@@ -110,7 +110,10 @@ if (import.meta.main) {
       const root = await resolveRepositoryRoot(exec);
       return {
         probe: new GitTreeProbe(selectVcs(existsSync, root), exec, root),
-        hasher: new TreeEntriesInputHasher(),
+        hasher: new LaneInputHasher(
+          { os: platform(), arch: arch(), bunVersion: process.versions.bun ?? null },
+          process.env,
+        ),
         signer: new UnsignedSigner(),
         sink: new CompositeSink(
           [new LocalFileSink(outDir ?? join(resolveAutoMobileBaseDir(), "attestations"))],

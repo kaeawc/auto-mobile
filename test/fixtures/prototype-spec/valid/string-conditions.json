@@ -1,0 +1,72 @@
+{
+  "id": "string-conditions",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "value": "hello"
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "as": "item",
+      "items": [
+        {
+          "x": "he"
+        },
+        {
+          "x": ""
+        }
+      ]
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Hello",
+        "visibleWhen": {
+          "all": [
+            {
+              "key": "value",
+              "contains": "{item.x}"
+            },
+            {
+              "any": [
+                {
+                  "key": "value",
+                  "lengthGt": 0
+                },
+                {
+                  "not": {
+                    "key": "value",
+                    "lengthLt": 0
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "key": "value",
+              "startsWith": "he"
+            },
+            "style": {
+              "color": "primary"
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "enabledWhen": {
+          "key": "value",
+          "lengthLt": 100
+        },
+        "label": "OK"
+      }
+    ]
+  }
+}

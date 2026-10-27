@@ -553,6 +553,47 @@ class PrototypeControllerTest {
     assertEquals(status.stacks, frames.last().stacks)
   }
 
+  private class FakeDeviceLocale(override var locales: List<String>) : PrototypeDeviceLocale
+
+  @Test
+  fun `locale changes publish a new snapshot while show override remains sticky`() = runTest {
+    val device = FakeDeviceLocale(listOf("en"))
+    val subject =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, _, _ -> },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        deviceLocale = device,
+      )
+    val localized =
+      spec()
+        .copy(
+          root = PrototypeTextNode(text = "{t:title}"),
+          strings =
+            Json.parseToJsonElement(
+              """{"default":{"title":"Hello"},"ar":{"title":"Arabic"}}""",
+            ) as kotlinx.serialization.json.JsonObject,
+        )
+    subject.show("show", localized)
+    val runtime = checkNotNull(subject.activeRuntime)
+    val before = runtime.current
+    assertEquals("Hello", runtime.renderModel().root.text)
+    device.locales = listOf("ar")
+    subject.onConfigurationChanged()
+    assertNotSame(before, runtime.current)
+    assertEquals(listOf("ar"), runtime.current.locales)
+    assertEquals("Arabic", runtime.renderModel().root.text)
+    subject.show("override", localized, locale = "en")
+    val overridden = checkNotNull(subject.activeRuntime)
+    device.locales = listOf("ar-EG")
+    val pinned = overridden.current
+    subject.onConfigurationChanged()
+    assertSame(pinned, overridden.current)
+    assertEquals("Hello", overridden.renderModel().root.text)
+    subject.show("follow", localized)
+    assertEquals("Arabic", checkNotNull(subject.activeRuntime).renderModel().root.text)
+  }
+
   @Test
   fun `idle configuration keeps mapping passes stable but always relayouts`() = runTest {
     val device = FakePrototypeDeviceAppearance()
@@ -730,8 +771,11 @@ class PrototypeControllerTest {
           reset: Boolean,
           appearance: PrototypeAppearanceOverride?,
           replaceOthers: Boolean,
+          locale: String?,
         ) {
-          launch { controller.show(requestId, spec, displayId, reset, appearance, replaceOthers) }
+          launch {
+            controller.show(requestId, spec, displayId, reset, appearance, replaceOthers, locale)
+          }
         }
 
         override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {

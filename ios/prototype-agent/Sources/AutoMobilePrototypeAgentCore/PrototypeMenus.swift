@@ -56,7 +56,7 @@ enum PrototypeMenus {
 
     private static func key(_ value: JSONValue?, _ path: String) throws {
         let text = try string(value, path)
-        guard PrototypeRepeat.isFieldName(text) else { throw fail(path, "Invalid string value") }
+        guard PrototypeContractValidator.matches("boundKey", text) else { throw fail(path, "Invalid string value") }
     }
 
     private static func array(_ value: JSONValue?, _ range: ClosedRange<Int>, _ path: String) throws -> [JSONValue] {
@@ -128,7 +128,7 @@ enum PrototypeMenus {
                 keys = ["type", "pager", "page"]
                 try validatePageAction(fields, path: path)
             case "dismiss": keys = ["type"]
-            case "setData", "appendData", "removeData":
+            case "setData", "appendData", "prependData", "removeData":
                 keys = type == "removeData" ? ["type", "path"] : ["type", "path", "value"]
                 try validateDataAction(fields, type: type, path: path)
             default: throw fail("\(path).type", "Invalid string value")
@@ -186,7 +186,9 @@ enum PrototypeMenus {
                 throw fail("\(optionPath).value", "Duplicate select option value")
             }
         }
-        if let key = fields["stateKey"]?.stringValue, state[key]?.stringValue == nil {
+        if let key = fields["stateKey"]?.stringValue, PrototypeRoutes.fields(key).isEmpty,
+           state[key]?.stringValue == nil
+        {
             throw fail("\(path).stateKey", "Select requires a string state key")
         }
     }

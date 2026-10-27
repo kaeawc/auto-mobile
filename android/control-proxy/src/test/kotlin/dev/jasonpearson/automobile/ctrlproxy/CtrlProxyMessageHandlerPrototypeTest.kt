@@ -15,6 +15,16 @@ import org.junit.Test
 
 internal class CtrlProxyMessageHandlerPrototypeTest : CtrlProxyMessageHandlerFixtures() {
   @Test
+  fun `show locale is forwarded unchanged and defaults to absent`() = runTest {
+    val spec =
+      """{"id":"locale","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"""
+    dispatch("""{"type":"show_prototype","spec":$spec,"locale":"pt-BR"}""")
+    assertEquals("pt-BR", lastCall.second[6])
+    dispatch("""{"type":"show_prototype","spec":$spec}""")
+    assertNull(lastCall.second[6])
+  }
+
+  @Test
   fun `dispatch typed prototype requests`() = runTest {
     val spec =
       """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""

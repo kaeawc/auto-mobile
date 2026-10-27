@@ -90,7 +90,10 @@ export function assetRecord(
   id: string,
   mediaType: PrototypeAssetMimeType,
   bytes = tinyAsset(mediaType),
-): { manifest: BundleManifestAsset; entry: CorpusZipEntry } {
+): {
+  manifest: Omit<BundleManifestAsset, "mediaType"> & { mediaType: PrototypeAssetMimeType };
+  entry: CorpusZipEntry;
+} {
   const sha256 = bundleSha256(bytes);
   const file = savedPrototypeAssetPath(mediaType, sha256);
   return { manifest: { id, file, sha256, mediaType }, entry: { name: file, bytes } };

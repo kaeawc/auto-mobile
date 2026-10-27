@@ -1,3 +1,4 @@
+import { parsePrototypeFeedbackLog } from "../../src/features/prototype/prototypeFeedbackLog";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { toolStructured } from "../helpers/toolResponse";
 import {
@@ -53,6 +54,89 @@ describe("prototype simulate and timer reports", () => {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
     return prototypeOutputSchema.parse(toolStructured(response));
   }
+
+  test("splash onAppear reaches native show, simulate and timer inspection on both platforms", async () => {
+    const splash = {
+      id: "splash",
+      state: { loading: true },
+      window: { placement: { type: "fullscreen" } },
+      root: {
+        type: "column",
+        onAppear: [
+          {
+            type: "startTimer",
+            id: "splash",
+            afterMs: 2000,
+            actions: [{ type: "setState", key: "loading", value: false }],
+          },
+        ],
+        children: [
+          { type: "text", text: "Content", visibleWhen: { key: "loading", equals: false } },
+        ],
+      },
+    };
+    proxy.setSupportedCommands(["prototype_timers_v1", "prototype_persistence_replay_v1"]);
+    agent.handshake.capabilities.push("prototype_timers_v1");
+    for (const device of [android, ios]) {
+      expect((await call(device, { action: "show", spec: splash })).success).toBe(true);
+      const timers = [{ id: "splash", nextFireInMs: 2000, runs: 0 }];
+      const status = {
+        id: "splash",
+        persistent: false,
+        state: { loading: true },
+        pages: {},
+        lastSequence: 0,
+        timers,
+      };
+      if (device.platform === "android") {
+        proxy.setInspectReply({ success: true, prototypes: [status] });
+      } else {
+        agent.queueReplies({ status: { ...status, shown: true } });
+      }
+      expect((await call(device, { action: "inspect" })).prototypes?.[0]?.timers).toEqual(timers);
+      if (device.platform === "android") {
+        proxy.setAdvanceClockResult({ success: true, fired: 1 });
+      } else {
+        agent.queueReplies({ fired: 1 });
+      }
+      expect(
+        await call(device, { action: "simulate", id: "splash", advanceTimeMs: 2000 }),
+      ).toMatchObject({ success: true, fired: 1 });
+      const completed = { ...status, state: { loading: false }, timers: [] };
+      if (device.platform === "android") {
+        proxy.setInspectReply({ success: true, prototypes: [completed] });
+      } else {
+        agent.queueReplies({ status: { ...completed, shown: true } });
+      }
+      expect((await call(device, { action: "inspect" })).prototypes?.[0]).toMatchObject({
+        state: { loading: false },
+        timers: [],
+      });
+    }
+    expect(proxy.getPrototypeHistory().find((entry) => entry.method === "show")).toMatchObject({
+      spec: { root: { onAppear: splash.root.onAppear } },
+    });
+    expect(agent.requests.find((entry) => entry.type === "show_prototype")?.body).toMatchObject({
+      spec: { root: { onAppear: splash.root.onAppear } },
+    });
+    expect(proxy.advanceClockRequests).toEqual([{ id: "splash", advanceTimeMs: 2000 }]);
+    expect(agent.requests.some((entry) => entry.type === "advance_prototype_clock")).toBe(true);
+  });
+
+  test("onAppear alone refuses show without timer capability before sending", async () => {
+    const spec = {
+      id: "appear",
+      window: { placement: { type: "fullscreen" } },
+      root: { type: "text", text: "Hello", onAppear: [{ type: "emit", name: "shown" }] },
+    };
+    for (const device of [android, ios]) {
+      const result = await call(device, { action: "show", spec });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("prototype_timers_v1");
+    }
+    expect(proxy.getPrototypeHistory()).toEqual([]);
+    expect(agent.requests).toEqual([]);
+  });
 
   test("simulate needs id and bounded integer advanceTimeMs", () => {
     for (const input of [
@@ -166,6 +250,55 @@ describe("prototype simulate and timer reports", () => {
     expect((await call(android, { action: "inspect" })).prototypes?.[0]?.timers).toEqual(timers);
     expect((await call(android, { action: "status" })).prototypes?.[0]?.timers).toEqual(timers);
   });
+  test("inspect returns the device's feedback log, dropping malformed entries (#14329)", async () => {
+    const reported = { id: "proto", persistent: false, state: {}, pages: {}, lastSequence: 0 };
+    const feedbackLog = [
+      { timeMs: 10, effect: "selection", nodeId: "like" },
+      { timeMs: 20, sound: "send", suppressed: true },
+    ];
+    proxy.setInspectReply({
+      success: true,
+      prototypes: [
+        {
+          ...reported,
+          feedbackLog: [
+            ...feedbackLog,
+            { timeMs: 30, effect: "tick", sound: "click" },
+            { timeMs: -1, effect: "tick" },
+            "nonsense",
+          ],
+        },
+      ],
+    });
+    expect<unknown>(
+      (await call(android, { action: "inspect" })).prototypes?.[0]?.feedbackLog,
+    ).toEqual(feedbackLog);
+    expect<unknown>(
+      (await call(android, { action: "status" })).prototypes?.[0]?.feedbackLog,
+    ).toEqual(feedbackLog);
+    proxy.setInspectReply({ success: true, prototypes: [{ ...reported, feedbackLog: [] }] });
+    expect(
+      (await call(android, { action: "inspect" })).prototypes?.[0]?.feedbackLog,
+    ).toBeUndefined();
+  });
+
+  test("iOS inspect returns the agent's feedback log (#14329)", async () => {
+    const status = { shown: true, id: "proto", pages: {}, state: {}, lastSequence: 0 };
+    agent.queueReplies({
+      status: { ...status, feedbackLog: [{ timeMs: 5, effect: "success", nodeId: "done" }] },
+    });
+    expect((await call(ios, { action: "inspect" })).prototypes?.[0]?.feedbackLog).toEqual([
+      { timeMs: 5, effect: "success", nodeId: "done" },
+    ]);
+  });
+
+  test("the feedback log keeps only the newest 64 entries (#14329)", () => {
+    const entries = Array.from({ length: 70 }, (_, index) => ({ timeMs: index, effect: "tick" }));
+    const parsed = parsePrototypeFeedbackLog(entries);
+    expect(parsed).toHaveLength(64);
+    expect(parsed?.[0]?.timeMs).toBe(6);
+  });
+
   test("iOS inspect reports timers and normalizes absent timers", async () => {
     agent.handshake.capabilities.push("prototype_timers_v1");
     const status = { shown: true, id: "proto", pages: {}, state: {}, lastSequence: 0 };

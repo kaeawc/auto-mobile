@@ -32,6 +32,13 @@ enum class PrototypeBundleErrorCode {
   unreferenced_asset,
   asset_type_mismatch,
   requires_invalid,
+  custom_shaders_unsupported;
+
+  val message: String
+    get() =
+      if (this == custom_shaders_unsupported)
+        "ProtoViewer bundles refuse custom AGSL shaders (style.shader and application/vnd.automobile.agsl); remove custom shaders."
+      else name
 }
 
 object PrototypeBundleLimits {
@@ -67,20 +74,26 @@ sealed interface PrototypeBundleReadResult {
   data class Success(val bundle: PrototypeBundle) : PrototypeBundleReadResult
 
   data class Rejected(val code: PrototypeBundleErrorCode, val path: String? = null) :
-    PrototypeBundleReadResult
+    PrototypeBundleReadResult {
+    val message: String
+      get() = code.message
+  }
 }
 
 sealed interface PrototypeBundleExportResult {
   data class Success(val bytes: ByteArray) : PrototypeBundleExportResult
 
   data class Rejected(val code: PrototypeBundleErrorCode, val path: String? = null) :
-    PrototypeBundleExportResult
+    PrototypeBundleExportResult {
+    val message: String
+      get() = code.message
+  }
 }
 
 internal class PrototypeBundleFailure(
   val code: PrototypeBundleErrorCode,
   val path: String? = null,
-) : IllegalArgumentException(code.name)
+) : IllegalArgumentException(code.message)
 
 internal fun bundleRequire(
   condition: Boolean,

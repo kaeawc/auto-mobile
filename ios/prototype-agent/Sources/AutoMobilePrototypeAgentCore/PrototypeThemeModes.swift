@@ -17,39 +17,24 @@ struct PrototypeUnitPoint: Equatable {
 }
 
 /// `style.gradient`: linear along an angle, or radial from the node's centre.
-enum PrototypeGradient: Decodable, Equatable {
-    case linear(angle: Double, stops: [PrototypeGradientStop])
-    case radial(stops: [PrototypeGradientStop])
-
+extension PrototypeGradient {
     /// The contract's stop count.
     static let stopCount = 2 ... 4
 
-    private enum CodingKeys: String, CodingKey {
-        case type, angle, stops
-    }
-
-    /// The shared validator's rules, since iOS has no other check: a known type, an angle on a
-    /// linear gradient, two to four stops, and positions inside 0...1.
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let stops = try container.decode([PrototypeGradientStop].self, forKey: .stops)
-        guard Self.stopCount.contains(stops.count) else {
+    /// The shared validator's stop-count and position rules at the decoding boundary.
+    static func validateStops<Key: CodingKey>(
+        _ stops: [PrototypeGradientStop], forKey key: Key, in container: KeyedDecodingContainer<Key>
+    )
+        throws
+    {
+        guard stopCount.contains(stops.count) else {
             throw DecodingError.dataCorruptedError(
-                forKey: .stops, in: container, debugDescription: "A gradient needs 2 to 4 stops"
+                forKey: key, in: container, debugDescription: "A gradient needs 2 to 4 stops"
             )
         }
         guard stops.allSatisfy({ stop in stop.position.map { (0 ... 1).contains($0) } ?? true }) else {
             throw DecodingError.dataCorruptedError(
-                forKey: .stops, in: container, debugDescription: "A gradient stop position must be within 0 and 1"
-            )
-        }
-        let type = try container.decode(String.self, forKey: .type)
-        switch type {
-        case "linear": self = try .linear(angle: container.decode(Double.self, forKey: .angle), stops: stops)
-        case "radial": self = .radial(stops: stops)
-        default:
-            throw DecodingError.dataCorruptedError(
-                forKey: .type, in: container, debugDescription: "Unknown gradient type \(type)"
+                forKey: key, in: container, debugDescription: "A gradient stop position must be within 0 and 1"
             )
         }
     }
@@ -206,6 +191,9 @@ enum PrototypeThemeModes {
         case let .modes(light, dark):
             if !isColor(light) { throw violation("\(path).light", message) }
             if !isColor(dark) { throw violation("\(path).dark", message) }
+        case .data:
+            // A media item binding is an image-slot form; the shared contract refuses it on a colour.
+            throw violation(path, message)
         }
     }
 

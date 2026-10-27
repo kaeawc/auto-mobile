@@ -18,6 +18,7 @@
  *       Kotlin/Swift sources at that ref via `git show`) under <version>. The
  *       release procedure runs this when it pins a new release.
  *
+ * Pattern values and source are covered by prototype_stack_patterns_v1 in the host gate sources.
  * Nothing is downloaded. A pinned version with no manifest entry fails too, so
  * a release cannot be pinned without recording its capabilities.
  */

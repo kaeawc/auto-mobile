@@ -1,0 +1,51 @@
+{
+  "spec": {
+    "id": "stack-patterns",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "transition": "zoom",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home",
+          "onTap": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "detail",
+              "source": "hero"
+            },
+            {
+              "type": "replace",
+              "stack": "nav",
+              "screen": "detail",
+              "transition": "zoom",
+              "source": "hero"
+            }
+          ],
+          "shared": {
+            "key": "hero",
+            "as": "bounds"
+          }
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail",
+          "shared": {
+            "key": "hero",
+            "as": "bounds"
+          }
+        }
+      }
+    }
+  },
+  "expectedMessage": "zoom requires source to resolve to exactly one sharedKey node",
+  "expectedPath": "root.screens[\"home\"].onTap[0].source"
+}

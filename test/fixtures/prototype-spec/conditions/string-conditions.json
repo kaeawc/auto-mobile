@@ -1,0 +1,639 @@
+[
+  {
+    "name": "contains true",
+    "condition": {
+      "key": "value",
+      "contains": "he"
+    },
+    "state": {
+      "value": "hello"
+    },
+    "expected": true
+  },
+  {
+    "name": "contains false",
+    "condition": {
+      "key": "value",
+      "contains": "x"
+    },
+    "state": {
+      "value": "hello"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains case",
+    "condition": {
+      "key": "value",
+      "contains": "he"
+    },
+    "state": {
+      "value": "Hello"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains empty value",
+    "condition": {
+      "key": "value",
+      "contains": "e"
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "contains number",
+    "condition": {
+      "key": "value",
+      "contains": "1"
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "contains boolean",
+    "condition": {
+      "key": "value",
+      "contains": "t"
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "contains decomposed",
+    "condition": {
+      "key": "value",
+      "contains": "e"
+    },
+    "state": {
+      "value": "é"
+    },
+    "expected": true
+  },
+  {
+    "name": "contains canonical",
+    "condition": {
+      "key": "value",
+      "contains": "é"
+    },
+    "state": {
+      "value": "é"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains missing",
+    "condition": {
+      "key": "value",
+      "contains": "x"
+    },
+    "state": {},
+    "expected": false
+  },
+  {
+    "name": "startsWith true",
+    "condition": {
+      "key": "value",
+      "startsWith": "he"
+    },
+    "state": {
+      "value": "hello"
+    },
+    "expected": true
+  },
+  {
+    "name": "startsWith false",
+    "condition": {
+      "key": "value",
+      "startsWith": "x"
+    },
+    "state": {
+      "value": "hello"
+    },
+    "expected": false
+  },
+  {
+    "name": "startsWith case",
+    "condition": {
+      "key": "value",
+      "startsWith": "he"
+    },
+    "state": {
+      "value": "Hello"
+    },
+    "expected": false
+  },
+  {
+    "name": "startsWith empty value",
+    "condition": {
+      "key": "value",
+      "startsWith": "e"
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "startsWith number",
+    "condition": {
+      "key": "value",
+      "startsWith": "1"
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "startsWith boolean",
+    "condition": {
+      "key": "value",
+      "startsWith": "t"
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "startsWith decomposed",
+    "condition": {
+      "key": "value",
+      "startsWith": "e"
+    },
+    "state": {
+      "value": "é"
+    },
+    "expected": true
+  },
+  {
+    "name": "startsWith canonical",
+    "condition": {
+      "key": "value",
+      "startsWith": "é"
+    },
+    "state": {
+      "value": "é"
+    },
+    "expected": false
+  },
+  {
+    "name": "startsWith missing",
+    "condition": {
+      "key": "value",
+      "startsWith": "x"
+    },
+    "state": {},
+    "expected": false
+  },
+  {
+    "name": "lengthGt 😀 0",
+    "condition": {
+      "key": "value",
+      "lengthGt": 0
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": true
+  },
+  {
+    "name": "lengthGt 😀 1",
+    "condition": {
+      "key": "value",
+      "lengthGt": 1
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": true
+  },
+  {
+    "name": "lengthGt 😀 2",
+    "condition": {
+      "key": "value",
+      "lengthGt": 2
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt 😀 3",
+    "condition": {
+      "key": "value",
+      "lengthGt": 3
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt  0",
+    "condition": {
+      "key": "value",
+      "lengthGt": 0
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt  1",
+    "condition": {
+      "key": "value",
+      "lengthGt": 1
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt  2",
+    "condition": {
+      "key": "value",
+      "lengthGt": 2
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt  3",
+    "condition": {
+      "key": "value",
+      "lengthGt": 3
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt 12 0",
+    "condition": {
+      "key": "value",
+      "lengthGt": 0
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt 12 1",
+    "condition": {
+      "key": "value",
+      "lengthGt": 1
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt 12 2",
+    "condition": {
+      "key": "value",
+      "lengthGt": 2
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt 12 3",
+    "condition": {
+      "key": "value",
+      "lengthGt": 3
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt True 0",
+    "condition": {
+      "key": "value",
+      "lengthGt": 0
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt True 1",
+    "condition": {
+      "key": "value",
+      "lengthGt": 1
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt True 2",
+    "condition": {
+      "key": "value",
+      "lengthGt": 2
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt True 3",
+    "condition": {
+      "key": "value",
+      "lengthGt": 3
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthGt missing",
+    "condition": {
+      "key": "value",
+      "lengthGt": 0
+    },
+    "state": {},
+    "expected": false
+  },
+  {
+    "name": "lengthLt 😀 0",
+    "condition": {
+      "key": "value",
+      "lengthLt": 0
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt 😀 1",
+    "condition": {
+      "key": "value",
+      "lengthLt": 1
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt 😀 2",
+    "condition": {
+      "key": "value",
+      "lengthLt": 2
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt 😀 3",
+    "condition": {
+      "key": "value",
+      "lengthLt": 3
+    },
+    "state": {
+      "value": "😀"
+    },
+    "expected": true
+  },
+  {
+    "name": "lengthLt  0",
+    "condition": {
+      "key": "value",
+      "lengthLt": 0
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt  1",
+    "condition": {
+      "key": "value",
+      "lengthLt": 1
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": true
+  },
+  {
+    "name": "lengthLt  2",
+    "condition": {
+      "key": "value",
+      "lengthLt": 2
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": true
+  },
+  {
+    "name": "lengthLt  3",
+    "condition": {
+      "key": "value",
+      "lengthLt": 3
+    },
+    "state": {
+      "value": ""
+    },
+    "expected": true
+  },
+  {
+    "name": "lengthLt 12 0",
+    "condition": {
+      "key": "value",
+      "lengthLt": 0
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt 12 1",
+    "condition": {
+      "key": "value",
+      "lengthLt": 1
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt 12 2",
+    "condition": {
+      "key": "value",
+      "lengthLt": 2
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt 12 3",
+    "condition": {
+      "key": "value",
+      "lengthLt": 3
+    },
+    "state": {
+      "value": 12
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt True 0",
+    "condition": {
+      "key": "value",
+      "lengthLt": 0
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt True 1",
+    "condition": {
+      "key": "value",
+      "lengthLt": 1
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt True 2",
+    "condition": {
+      "key": "value",
+      "lengthLt": 2
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt True 3",
+    "condition": {
+      "key": "value",
+      "lengthLt": 3
+    },
+    "state": {
+      "value": true
+    },
+    "expected": false
+  },
+  {
+    "name": "lengthLt missing",
+    "condition": {
+      "key": "value",
+      "lengthLt": 0
+    },
+    "state": {},
+    "expected": false
+  },
+  {
+    "name": "nested",
+    "condition": {
+      "all": [
+        {
+          "key": "value",
+          "contains": "a"
+        },
+        {
+          "any": [
+            {
+              "key": "value",
+              "lengthLt": 2
+            },
+            {
+              "not": {
+                "key": "value",
+                "startsWith": "z"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "state": {
+      "value": "abc"
+    },
+    "expected": true
+  },
+  {
+    "name": "contains interior",
+    "condition": {
+      "key": "value",
+      "contains": "ell"
+    },
+    "state": {
+      "value": "hello"
+    },
+    "expected": true
+  },
+  {
+    "name": "startsWith interior fails",
+    "condition": {
+      "key": "value",
+      "startsWith": "ell"
+    },
+    "state": {
+      "value": "hello"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains no canonical normalization",
+    "condition": {
+      "key": "value",
+      "contains": "é"
+    },
+    "state": {
+      "value": "é"
+    },
+    "expected": false
+  },
+  {
+    "name": "startsWith no canonical normalization",
+    "condition": {
+      "key": "value",
+      "startsWith": "é"
+    },
+    "state": {
+      "value": "é"
+    },
+    "expected": false
+  }
+]

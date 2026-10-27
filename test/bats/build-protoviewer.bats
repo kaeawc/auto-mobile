@@ -10,7 +10,10 @@ setup() {
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgent" \
     "${FIXTURE}/ios/prototype-agent/ProtoViewer" "${FIXTURE}/ios/prototype-agent/Viewer"
-  cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${FIXTURE}/scripts/ios/"
+  cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${REPO_ROOT}/scripts/ios/prototype-effects-metallib.sh" \
+    "${FIXTURE}/scripts/ios/"
+  mkdir -p "${FIXTURE}/ios/prototype-agent/Shaders"
+  touch "${FIXTURE}/ios/prototype-agent/Shaders/PrototypeEffects.metal"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
     "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/"*.xcstrings "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
@@ -25,6 +28,9 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$BUILD_LOG"
 if [[ "$*" == '--sdk iphonesimulator --show-sdk-path' ]]; then
   echo /fake/sdk
+elif [[ "${3:-}" == metal || "${3:-}" == metallib ]]; then
+  # The effects metallib step: `metal --version` probes, `metal -c ... -o air`, `metallib air -o out`.
+  [[ "${4:-}" == --version ]] || printf 'compiled\n' > "${!#}"
 elif [[ "$1 ${2:-}" == 'xcstringstool compile' ]]; then
   [[ -s "$3" && "$4" == --output-directory ]]
   mkdir -p "$5/en.lproj"
@@ -122,6 +128,33 @@ def check(value):
         for item in value:
             check(item)
 check(value)
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "ProtoViewer and Viewer plists run natively on iPad with every orientation (#15431)" {
+  run python3 - "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
+    "${REPO_ROOT}/ios/prototype-agent/Viewer/Info.plist" <<'PY'
+import plistlib
+import re
+import sys
+orientations = {
+    'UIInterfaceOrientationPortrait',
+    'UIInterfaceOrientationPortraitUpsideDown',
+    'UIInterfaceOrientationLandscapeLeft',
+    'UIInterfaceOrientationLandscapeRight',
+}
+for path in sys.argv[1:]:
+    with open(path, 'rb') as source:
+        # The Viewer template's stamping comment contains `--` flags, which expat rejects.
+        value = plistlib.loads(re.sub(rb'<!--.*?-->', b'', source.read(), flags=re.S))
+    assert value['UIDeviceFamily'] == [1, 2], path
+    assert set(value['UISupportedInterfaceOrientations~ipad']) == orientations, path
+    assert len(value['UISupportedInterfaceOrientations~ipad']) == 4, path
+    # iPhone orientations stay unchanged: no upside-down on the phone.
+    assert 'UIInterfaceOrientationPortraitUpsideDown' not in value['UISupportedInterfaceOrientations'], path
+    assert value['UIApplicationSceneManifest']['UIApplicationSupportsMultipleScenes'] is False, path
+    assert 'UIRequiresFullScreen' not in value, path
 PY
   [ "$status" -eq 0 ]
 }

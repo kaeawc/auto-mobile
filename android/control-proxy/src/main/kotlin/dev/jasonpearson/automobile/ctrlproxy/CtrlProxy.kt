@@ -47,6 +47,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPinnedShortcutPlatform
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
@@ -58,6 +59,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
@@ -85,6 +88,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.CrashData
@@ -942,7 +946,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private val prototypePlatform =
-    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform()
+    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform(this)
 
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is
@@ -1925,6 +1929,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 }
               },
             storage = prototypeStorage,
+            backdropSupport =
+              PrototypeBackdropSupport {
+                // Cross-window blur can be switched off at runtime (battery saver, developer
+                // option).
+                Build.VERSION.SDK_INT >= PrototypeBackdrops.MIN_BLUR_SDK &&
+                  getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
+              },
             windowOnScreen =
               PrototypeWindowOnScreen { displayId ->
                 try {
@@ -1956,6 +1967,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             displays = prototypeDisplays,
             clearAssets = { prototypeAssets.clear() },
             hasAsset = { prototypeAssets.lookup(it) != null },
+            validateShaders = { validatePrototypeShaderUniforms(it, prototypeAssets::lookup) },
             images = prototypeImages,
             // The host grants this appop before showing a window.layer "app" prototype.
             appLayerPermitted = {
@@ -1965,6 +1977,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             fonts = prototypeFonts,
             foreground = prototypeForeground,
             deviceAppearance = AndroidPrototypeDeviceAppearance(this),
+            deviceLocale = AndroidPrototypeDeviceLocale(this),
             hostFactory = createPrototypeHost,
             httpClients =
               PrototypeHttpClients(
@@ -2896,9 +2909,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean,
+    locale: String?,
   ) {
     launchRequestScope(requestId) {
-      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers)
+      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers, locale)
     }
   }
 

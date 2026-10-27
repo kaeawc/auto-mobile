@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberDatePickerState
@@ -224,14 +225,9 @@ internal fun RenderPrototypeTopAppBar(
       PrototypeAppBarButton(action, prototypePartTag(node.testTag, "actions.$index"), interact)
     }
   }
-  val authoredFill = node.style.source.background != null || node.style.source.gradient != null
-  val colors =
-    if (authoredFill)
-      TopAppBarDefaults.topAppBarColors(
-        containerColor = Color.Transparent,
-        scrolledContainerColor = Color.Transparent,
-      )
-    else TopAppBarDefaults.topAppBarColors()
+  val colors = prototypeTopAppBarColors(node)
+  val behavior = prototypeTopBarBehavior(node)
+  if (source.onScroll == "enterAlways" && behavior?.state?.collapsedFraction == 1f) return
   val insets = WindowInsets(0, 0, 0, 0)
   when (source.variant) {
     "centerAligned" ->
@@ -242,13 +238,51 @@ internal fun RenderPrototypeTopAppBar(
         actions,
         windowInsets = insets,
         colors = colors,
+        scrollBehavior = behavior,
       )
     "medium" ->
-      MediumTopAppBar(title, modifier, navigation, actions, windowInsets = insets, colors = colors)
+      MediumTopAppBar(
+        title,
+        modifier,
+        navigation,
+        actions,
+        windowInsets = insets,
+        colors = colors,
+        scrollBehavior = behavior,
+      )
     "large" ->
-      LargeTopAppBar(title, modifier, navigation, actions, windowInsets = insets, colors = colors)
-    else -> TopAppBar(title, modifier, navigation, actions, windowInsets = insets, colors = colors)
+      LargeTopAppBar(
+        title,
+        modifier,
+        navigation,
+        actions,
+        windowInsets = insets,
+        colors = colors,
+        scrollBehavior = behavior,
+      )
+    else ->
+      TopAppBar(
+        title,
+        modifier,
+        navigation,
+        actions,
+        windowInsets = insets,
+        colors = colors,
+        scrollBehavior = behavior,
+      )
   }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun prototypeTopAppBarColors(node: PrototypeRenderNode): TopAppBarColors {
+  val authoredFill = node.style.source.background != null || node.style.source.gradient != null
+  return if (authoredFill)
+    TopAppBarDefaults.topAppBarColors(
+      containerColor = Color.Transparent,
+      scrolledContainerColor = Color.Transparent,
+    )
+  else TopAppBarDefaults.topAppBarColors()
 }
 
 @Composable
@@ -339,19 +373,29 @@ internal fun RenderPrototypeDialog(
   content: @Composable ColumnScope.() -> Unit,
 ) {
   val source = node.source as? PrototypeDialogNode ?: return
-  if (!node.sheetOpen) return
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     Box(
       Modifier.fillMaxSize()
         .background(prototypeDialogScrimFallback(MaterialTheme.colorScheme))
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
+        .then(
+          if (node.sheetOpen)
+            Modifier.clickable {
+              interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+            }
+          else Modifier,
+        ),
     )
     Surface(
       modifier
+        .prototypeModalSurface("scale")
         .padding(horizontal = 24.dp, vertical = 24.dp)
         .widthIn(min = 280.dp, max = 560.dp)
         // Consume body taps so they never reach the scrim; the node's own onTap runs instead.
-        .clickable(remember { MutableInteractionSource() }, indication = null) {
+        .clickable(
+          remember { MutableInteractionSource() },
+          indication = null,
+          enabled = node.sheetOpen,
+        ) {
           if (!source.onTap.isNullOrEmpty())
             interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
         },
@@ -420,16 +464,16 @@ internal fun RenderPrototypeSnackbar(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeSnackbarNode ?: return
-  if (!node.sheetOpen) return
   // Leaving composition (the snackbar closed by any route) cancels the pending timeout.
-  LaunchedEffect(source.openWhen, source.durationMs) {
+  LaunchedEffect(source.openWhen, source.durationMs, node.sheetOpen) {
+    if (!node.sheetOpen) return@LaunchedEffect
     awaitSnackbarTimeout(source.durationMs) {
       interact(PrototypeInteraction.CloseModal(source.openWhen))
     }
   }
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
     Snackbar(
-      modifier.padding(12.dp),
+      modifier.prototypeModalSurface("slide").padding(12.dp),
       action =
         source.action?.let { action ->
           {
@@ -465,7 +509,13 @@ private fun PrototypeDialogTextButton(
   tag: String?,
   onClick: () -> Unit,
 ) {
-  TextButton(onClick, Modifier.semantics { tag?.let { testTag = it } }) { Text(button.label) }
+  TextButton(
+    onClick,
+    Modifier.semantics { tag?.let { testTag = it } },
+    enabled = LocalPrototypeModalInputEnabled.current,
+  ) {
+    Text(button.label)
+  }
 }
 
 /**

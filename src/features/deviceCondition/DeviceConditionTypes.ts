@@ -15,7 +15,11 @@ export const DEVICE_CONDITION_SCHEMA_VERSION = 1;
 export const DEVICE_CONDITION_MAX_LEASE_SECONDS = 86_400;
 
 /** The condition keys an injector can own. Fault keys are `faults.<name>`. */
-export type DeviceConditionKey = "rootState" | "integrityState" | `faults.${string}`;
+export type DeviceConditionKey =
+  | "rootState"
+  | "integrityState"
+  | `faults.${string}`
+  | `vehicle.${string}`;
 
 /** A request value; `"unset"` clears the condition instead of applying one. */
 export const DEVICE_CONDITION_UNSET = "unset";
@@ -112,6 +116,11 @@ export interface DeviceConditionInput {
     killApp?: DeviceConditionKillTarget | typeof DEVICE_CONDITION_UNSET;
     trimMemory?: DeviceConditionTrimTarget | typeof DEVICE_CONDITION_UNSET;
     clearPackageData?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
+  };
+  /** Automotive vehicle state (#14919), each clearable with `"unset"`. */
+  vehicle?: {
+    motion?: "parked" | "driving" | typeof DEVICE_CONDITION_UNSET;
+    nightMode?: "on" | "off" | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
   reset?: true;
@@ -250,6 +259,26 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
       .strict()
       .optional()
       .describe("Power and lifecycle fault injectors (Android only, behind the feature flag)."),
+    vehicle: z
+      .object({
+        motion: z
+          .enum(["parked", "driving", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset.",
+          ),
+        nightMode: z
+          .enum(["on", "off", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Vehicle night-mode signal on an Android Automotive emulator, restored to its prior value; or unset.",
+          ),
+      })
+      .strict()
+      .optional()
+      .describe(
+        "Vehicle state (Android Automotive emulators only; 'unsupported' elsewhere), via `cmd car_service inject-vhal-event`.",
+      ),
     expiresInSeconds: z
       .number()
       .int()
@@ -294,6 +323,13 @@ export function deviceConditionChanges(input: DeviceConditionInput): DeviceCondi
         value: DEVICE_CONDITION_APPLY,
         params: { ...value },
       });
+    }
+  }
+  const vehicle = input.vehicle ?? {};
+  for (const name of Object.keys(vehicle).sort()) {
+    const value = (vehicle as Record<string, unknown>)[name];
+    if (typeof value === "string") {
+      changes.push({ key: `vehicle.${name}`, value });
     }
   }
   return changes;

@@ -1,0 +1,51 @@
+{
+  "spec": {
+    "id": "scroll-motion",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "motion": "none",
+    "root": {
+      "type": "scroll",
+      "id": "feed",
+      "style": {
+        "height": {
+          "dp": 200
+        }
+      },
+      "child": {
+        "type": "column",
+        "children": [
+          {
+            "type": "text",
+            "text": "Hero",
+            "scrollLinked": {
+              "source": "feed",
+              "range": [0, 160]
+            },
+            "scrollTransition": {
+              "axis": "vertical",
+              "edge": {
+                "alpha": 0.5,
+                "scale": 0.88,
+                "rotation": 8
+              }
+            }
+          },
+          {
+            "type": "spacer",
+            "style": {
+              "height": {
+                "dp": 1000
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.child.children[0].scrollLinked",
+  "expectedMessage": "Expected at least one scroll output"
+}

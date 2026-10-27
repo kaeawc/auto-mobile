@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.prototype.PlatformErrorCode
 import dev.jasonpearson.automobile.prototype.PrototypePlatform as RuntimePlatform
 import dev.jasonpearson.automobile.prototype.PrototypePlatformRegistry
 import java.util.UUID
+import kotlin.math.floor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -47,6 +48,7 @@ data class PrototypeRuntimeSnapshot(
   /** The latest `scrollTo` per scroll id (#14232); the scroll performs each once. */
   val scrollRequests: Map<String, PrototypeScrollRequest> = emptyMap(),
   val platformState: JsonObject = JsonObject(emptyMap()),
+  val locales: List<String> = emptyList(),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
@@ -72,6 +74,8 @@ sealed interface PrototypeInteraction {
   data class DeviceState(val snapshot: JsonObject) : PrototypeInteraction
 
   data class TimerFire(val actions: List<PrototypeAction>) : PrototypeInteraction
+
+  data class DeadTap(val xDp: Float, val yDp: Float) : PrototypeInteraction
 
   data class PagerMotion(val pager: String, val page: Int, val scrolling: Boolean) :
     PrototypeInteraction
@@ -146,6 +150,7 @@ class PrototypeRuntime(
   private val clock: () -> Long = System::currentTimeMillis,
   private val nextSequence: () -> Long,
   private val requestDismiss: suspend () -> Boolean = { true },
+  private val beforeDismiss: (PrototypeDismissReason) -> Unit = {},
   previousPages: Map<String, Int> = emptyMap(),
   initialRevision: Long = 0L,
   private val nextRevision: (() -> Long)? = null,
@@ -174,6 +179,7 @@ class PrototypeRuntime(
   /** The device-wide cap on requests in flight; the controller shares one across its surfaces. */
   private val requestLimiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
   initialPlatformState: JsonObject = JsonObject(emptyMap()),
+  val shaderSession: PrototypeShaderSession = PrototypeShaderSession(),
   platform: RuntimePlatform = RuntimePlatform.None,
   platformLimiter: PrototypeRequestLimiter =
     PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
@@ -183,10 +189,72 @@ class PrototypeRuntime(
     PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
   }
 
+  // A runtime is owned by one show; list disposal during navigation never clears its signatures.
+  internal val listEndTriggers = PrototypeListEndTriggers()
+
   private val timerEngine =
     PrototypeTimers(clock, requestScope, exclusively) { actions ->
       handle(PrototypeInteraction.TimerFire(actions))
     }
+
+  private var appeared = emptySet<String>()
+  private var appearanceRoot: PrototypeNode? = null
+  private var hasAppearances = false
+
+  /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
+  suspend fun shown(preservingState: Boolean = false) {
+    appeared = if (preservingState) visibleAppearances().keys else emptySet()
+    if (!preservingState) handle(PrototypeInteraction.TimerFire(emptyList()))
+  }
+
+  private fun visibleAppearances(): Map<String, List<PrototypeAction>> {
+    val root = current.spec.root
+    if (appearanceRoot !== root) {
+      fun contains(node: PrototypeNode): Boolean =
+        node.onAppear != null || prototypeDescendants(node).any(::contains)
+      appearanceRoot = root
+      hasAppearances = contains(root)
+    }
+    if (!current.active || !hasAppearances) return emptyMap()
+    return buildMap {
+      fun visit(node: PrototypeRenderNode) {
+        if (!node.visible) return
+        if (node.role in PROTOTYPE_MODAL_ROLES && !node.sheetOpen) return
+        node.source?.onAppear?.let { put(node.identity, it) }
+        val children =
+          if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page))
+          else node.children
+        children.forEach(::visit)
+      }
+      visit(renderModel().root)
+    }
+  }
+
+  /** One appearance per identity per interaction, with the contract's existing nesting bound. */
+  private suspend fun runAppearances() {
+    val ran = mutableSetOf<String>()
+    repeat(PrototypeSpecValidator.MAX_PROTOTYPE_ACTION_DEPTH) {
+      val visible = visibleAppearances()
+      val entering = visible.filterKeys { it !in appeared }
+      appeared = visible.keys.toSet()
+      if (entering.isEmpty()) return
+      for ((identity, actions) in entering) {
+        if (!current.active) return
+        if (identity !in visibleAppearances()) continue
+        if (!ran.add(identity)) {
+          warn("Refused repeated onAppear at $identity within one interaction")
+          continue
+        }
+        try {
+          control(emptyMap(), actions)
+        } catch (error: IllegalArgumentException) {
+          warn("Refused onAppear at $identity: ${error.message}")
+        }
+      }
+    }
+    appeared = visibleAppearances().keys.toSet()
+    warn("onAppear action nesting limit reached")
+  }
 
   fun pauseTimers() = timerEngine.pause()
 
@@ -231,7 +299,8 @@ class PrototypeRuntime(
     emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)
   }
 
-  private val renderMapper = PrototypeRenderMapper()
+  private val renderMapper =
+    PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
 
   /** The running animations of this prototype's window, published in its window metadata. */
   @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
@@ -247,6 +316,7 @@ class PrototypeRuntime(
       snapshot.stacks,
       snapshot.shownErrors,
       snapshot.platformState,
+      snapshot.locales,
     )
 
   internal val renderMappingPasses: Int
@@ -267,6 +337,9 @@ class PrototypeRuntime(
 
   private val deviceModule =
     PrototypeDeviceModule(initialPlatformState["device"] as? JsonObject ?: JsonObject(emptyMap()))
+  /** The last haptic and sound calls this prototype made, for `inspect` (#14329). */
+  val feedbackLog = PrototypeFeedbackLog()
+
   val platformRegistry =
     PrototypePlatformRegistry(
       listOf(deviceModule) + platform.registry.modules,
@@ -301,6 +374,11 @@ class PrototypeRuntime(
     mutableSnapshot.value = current.copy(platformState = next)
   }
 
+  /** A locale-only change publishes a new snapshot so every host maps fresh text. */
+  fun updateLocales(locales: List<String>) {
+    if (current.locales != locales) mutableSnapshot.value = current.copy(locales = locales.toList())
+  }
+
   fun replace(spec: PrototypeSpec) {
     if (!current.active) return
     stateWriteValidator = null
@@ -310,7 +388,7 @@ class PrototypeRuntime(
   /** Authoritative text replacement shares its epoch handling with patch commits. */
   private fun replacementSnapshot(spec: PrototypeSpec): PrototypeRuntimeSnapshot {
     val before = current
-    val next = snapshot(spec, before.pages, before.stacks)
+    val next = snapshot(spec, before.pages, before.stacks).copy(locales = before.locales)
     val changed =
       (before.state.keys + next.state.keys).filter { key ->
         before.state[key] != next.state[key] &&
@@ -400,16 +478,16 @@ class PrototypeRuntime(
       } catch (error: Exception) {
         return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
       }
-    val changed =
-      (before.state.keys + spec.state.orEmpty().keys).filter {
-        before.state[it] != spec.state.orEmpty()[it]
-      }
     val next = replacementSnapshot(spec)
+    val changed =
+      (before.state.keys + next.state.keys).filter {
+        before.state[it] != next.state[it]
+      }
     // Validate Compose sizes with a disposable mapper so rejected candidates cannot alter the
     // runtime's resolve cache, cached model or renderMappingPasses before the snapshot is
     // committed.
     try {
-      PrototypeRenderMapper()
+      PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
         .map(next.spec, next.pages, stacks = next.stacks, shownErrors = next.shownErrors)
     } catch (error: IllegalArgumentException) {
       return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
@@ -430,7 +508,8 @@ class PrototypeRuntime(
     } catch (error: Exception) {
       Log.w("PrototypeRuntime", "Prototype patch change delivery failed", error)
     }
-    return PatchResult.Applied(revision)
+    runAppearances()
+    return PatchResult.Applied(current.revision)
   }
 
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
@@ -447,6 +526,7 @@ class PrototypeRuntime(
     if (!current.active) return
     try {
       handleInteraction(interaction)
+      runAppearances()
     } finally {
       interactionRevision = null
       // Every device write ends an interaction here, so one diff covers state, data and checks.
@@ -463,6 +543,7 @@ class PrototypeRuntime(
 
   /** Every accepted state write in one interaction shares a revision, even if a key is restored. */
   private fun writeInteractionSpec(spec: PrototypeSpec) {
+    val spec = normalizePagerState(spec)
     val changed =
       (current.state.keys + spec.state.orEmpty().keys).filter {
         current.state[it] != spec.state.orEmpty()[it]
@@ -474,6 +555,7 @@ class PrototypeRuntime(
     mutableSnapshot.value =
       current.copy(
         spec = current.spec.copy(state = spec.state),
+        pages = boundPages(spec, current.pages),
         revision = revision,
         stateRevisions = current.stateRevisions + changed.associateWith { revision },
       )
@@ -492,7 +574,7 @@ class PrototypeRuntime(
       is PrototypeInteraction.Guarded -> {
         fun find(node: PrototypeRenderNode): PrototypeRenderNode? =
           if (node.identity == interaction.identity) node
-          else node.children.firstNotNullOfOrNull(::find)
+          else node.childrenForIdentity(interaction.identity).firstNotNullOfOrNull(::find)
         val node = find(renderModel().root) ?: return
         if (node.enabled || interaction.interaction is PrototypeInteraction.Blur)
           handle(interaction.interaction)
@@ -517,6 +599,7 @@ class PrototypeRuntime(
           warn("Refused timer fire: ${error.message}")
         }
       }
+      is PrototypeInteraction.DeadTap -> deadTap(interaction)
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
       is PrototypeInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
@@ -621,7 +704,7 @@ class PrototypeRuntime(
           )
         }
         is PrototypePushAction ->
-          changeStack(action.stack, "push", action.transition) { node, path ->
+          changeStack(action.stack, "push", action.stackTransition) { node, path ->
             if (
               path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
                 !node.screens.containsKey(action.screen)
@@ -635,12 +718,13 @@ class PrototypeRuntime(
           }
         is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
         is PrototypeReplaceAction ->
-          changeStack(action.stack, "replace", action.transition) { node, path ->
+          changeStack(action.stack, "replace", action.stackTransition) { node, path ->
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
         PrototypeDismissAction -> dismiss()
         is PrototypeSetDataAction,
         is PrototypeAppendDataAction,
+        is PrototypePrependDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
         is PrototypePlatformAction -> startPlatformCall(action, touched)
@@ -749,9 +833,36 @@ class PrototypeRuntime(
     val count = pagerCounts(current.spec.root)[id] ?: return
     val page = requested.coerceIn(0, count - 1)
     if (current.pages[id] == page) return
+    val key = pagerNodes(current.spec.root)[id]?.stateKey
+    val changed = key != null && current.state[key] != PrototypeScalar.Numeric(page.toDouble())
+    if (key != null && changed)
+      writeInteractionSpec(
+        validated(current.spec, mapOf(key to PrototypeScalar.Numeric(page.toDouble()))),
+      )
     mutableSnapshot.value = current.copy(pages = current.pages + (id to page))
     // Names the pager that moved and its new page, as the iOS agent does (#11409).
     emit(kind = PrototypeEventKind.PAGE_CHANGED, name = id, payload = JsonPrimitive(page))
+    if (key != null && changed) emitStateChange(listOf(key))
+  }
+
+  private suspend fun deadTap(tap: PrototypeInteraction.DeadTap) {
+    if (current.spec.window.deadTaps != true) return
+    val top =
+      current.stacks.entries.minWithOrNull(
+        compareByDescending<Map.Entry<String, PrototypeStackSnapshot>> { it.value.path.size }
+          .thenBy { it.key },
+      )
+    emit(
+      kind = PrototypeEventKind.EMIT,
+      name = PrototypeDeadTaps.EVENT_NAME,
+      payload =
+        buildJsonObject {
+          put("stack", top?.key?.let(::JsonPrimitive) ?: JsonNull)
+          put("screen", top?.value?.path?.lastOrNull()?.let(::JsonPrimitive) ?: JsonNull)
+          put("x", roundHalfUp(tap.xDp.toDouble()))
+          put("y", roundHalfUp(tap.yDp.toDouble()))
+        },
+    )
   }
 
   /** Framework-free Back policy; the controller serializes this with other interactions. */
@@ -839,7 +950,7 @@ class PrototypeRuntime(
   /** [from] with [values] written, or [IllegalArgumentException] when the result is not valid. */
   private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec =
     PrototypeTrace.section(PrototypeTrace.VALIDATE_STATE_WRITE) {
-      val spec = from.copy(state = from.state.orEmpty() + values)
+      val spec = normalizePagerState(from.copy(state = from.state.orEmpty() + values))
       val validator =
         stateWriteValidator
           ?: PrototypeTrace.section(PrototypeTrace.PREPARE_STATE_WRITES) {
@@ -871,6 +982,7 @@ class PrototypeRuntime(
   suspend fun dismiss(reason: PrototypeDismissReason = PrototypeDismissReason.USER) =
     withContext(NonCancellable) {
       if (!current.active) return@withContext
+      beforeDismiss(reason)
       check(requestDismiss()) { "Prototype host failed to dismiss window" }
       finishDismissal(reason)
     }
@@ -925,11 +1037,11 @@ class PrototypeRuntime(
     }
 
   /**
-   * A `setData`, `appendData` or `removeData` action (#12519). The write is the shared
-   * [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose sees a new
-   * spec; a refused write (typed error, or a result the renderer cannot take) changes and emits
-   * nothing and the rest of the list still runs. An accepted write bumps the revision and reports
-   * itself as a `change` event named by the written path.
+   * A `setData`, `appendData`, `prependData` or `removeData` action (#12519). The write is the
+   * shared [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose
+   * sees a new spec; a refused write (typed error, or a result the renderer cannot take) changes
+   * and emits nothing and the rest of the list still runs. An accepted write bumps the revision and
+   * reports itself as a `change` event named by the written path.
    */
   private suspend fun writeData(action: PrototypeAction) {
     val write = dataWrite(action) ?: return
@@ -977,11 +1089,16 @@ class PrototypeRuntime(
         is PrototypeDataWriteResult.Success -> result.data
         is PrototypeDataWriteResult.Failure -> return StagedWrite.Refused(result.error)
       }
+    prototypeListDataWriteError(from, data, write.path)?.let {
+      return StagedWrite.Refused(
+        PrototypeDataWriteError(PrototypeDataWriteErrorCode.INVALID_VALUE, it.message),
+      )
+    }
     val spec = from.copy(data = data)
     // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
     // rejected write from touching the runtime's own caches, as for a patch.
     return try {
-      PrototypeRenderMapper()
+      PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
         .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
       StagedWrite.Accepted(spec)
     } catch (error: IllegalArgumentException) {
@@ -1025,7 +1142,21 @@ class PrototypeRuntime(
       is PrototypeSetDataAction ->
         value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
       is PrototypeAppendDataAction ->
-        value(action.value, action.path)?.let { PrototypeDataWrite.Append(action.path, it) }
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Append(
+            action.path,
+            it,
+            prototypeListMaxItemsFor(current.spec, action.path),
+          )
+        }
+      is PrototypePrependDataAction ->
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Prepend(
+            action.path,
+            it,
+            prototypeListMaxItemsFor(current.spec, action.path),
+          )
+        }
       is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
       else -> null
     }
@@ -1039,12 +1170,22 @@ class PrototypeRuntime(
     fun payload(value: JsonElement?) = buildJsonObject {
       put("op", write.op)
       if (value != null) put("value", value)
+      val maximum =
+        when (write) {
+          is PrototypeDataWrite.Append -> write.maxItems
+          is PrototypeDataWrite.Prepend -> write.maxItems
+          is PrototypeDataWrite.Extend -> write.maxItems
+          else -> null
+        }
+      maximum?.let { put("maxItems", it.toLong()) }
       put("revision", revision)
     }
     val value =
       when (write) {
         is PrototypeDataWrite.Set -> write.value
         is PrototypeDataWrite.Append -> write.value
+        is PrototypeDataWrite.Prepend -> write.value
+        is PrototypeDataWrite.Extend -> write.value
         is PrototypeDataWrite.Remove -> null
       }
     val full = payload(value)
@@ -1078,6 +1219,7 @@ class PrototypeRuntime(
       if (invalid == null) JsonObject(args) else null,
       invalid,
       eventData,
+      owningNodeId(current.spec, action),
     )
   }
 
@@ -1169,6 +1311,10 @@ class PrototypeRuntime(
         }
         return
       }
+      call.args?.let { args ->
+        feedbackLogEntry(call.action.call, args, result, call.nodeId, clock())
+          ?.let(feedbackLog::record)
+      }
       val error = writePlatformResult(call, result, initial, duration)
       call.action.statusKey?.let {
         if (writeStatus(it, if (error == null) "success" else "error")) emitStateChange(listOf(it))
@@ -1199,6 +1345,7 @@ class PrototypeRuntime(
     val onSuccess: List<PrototypeAction>?,
     val onError: List<PrototypeAction>?,
     val eventContext: JsonObject?,
+    val append: PrototypeRequestAppend?,
   ) {
     lateinit var job: Job
 
@@ -1253,8 +1400,8 @@ class PrototypeRuntime(
   /**
    * A `request` action: resolves its bindings against the committed state and data, moves
    * `statusKey` to `loading`, then waits for the response off the interaction. The latest request
-   * for the same `into` wins (the older one reports `cancelled`), at most
-   * [PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT] run at once, and a request that
+   * with overlapping `into` or `append.to` targets wins (the older one reports `cancelled`), at
+   * most [PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT] run at once, and a request that
    * cannot start finishes at once as an error. The response is applied by [finishRequest].
    */
   private suspend fun startRequest(action: PrototypeRequestAction, touched: MutableSet<String>) {
@@ -1276,10 +1423,11 @@ class PrototypeRuntime(
         action.onSuccess,
         action.onError,
         eventData,
+        action.append,
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
-    supersedeRequests(action.into)
+    supersedeRequests(action.into, action.append?.to)
     val resolved =
       when (val result = PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs())) {
         is PrototypeResolvedRequestResult.Failure ->
@@ -1341,13 +1489,18 @@ class PrototypeRuntime(
     started.job.start()
   }
 
-  /** A newer request to the same `into` ends the older one: it writes nothing and says so. */
-  private suspend fun supersedeRequests(into: String?) {
-    if (into == null) return
+  /** A newer request to overlapping write targets ends the older one without follow-ups. */
+  private suspend fun supersedeRequests(into: String?, appendTo: String?) {
+    val targets = listOfNotNull(into, appendTo)
+    if (targets.isEmpty()) return
     val older =
       synchronized(inFlight) {
         inFlight.values
-          .filter { it.into == into }
+          .filter { old ->
+            listOfNotNull(old.into, old.append?.to).any { target ->
+              targets.any { PrototypeDataPointer.overlaps(target, it) }
+            }
+          }
           .also { it.forEach { old -> inFlight.remove(old.requestId) } }
       }
     for (request in older) {
@@ -1356,7 +1509,7 @@ class PrototypeRuntime(
       val error =
         PrototypeRequestError(
           PrototypeRequestErrorCode.CANCELLED,
-          "Superseded by a newer request to $into",
+          "Superseded by a newer request to ${into ?: appendTo}",
         )
       sendRequestEvent(request, null, clock() - request.startedAt, error)
     }
@@ -1374,6 +1527,7 @@ class PrototypeRuntime(
     if (!registered || !current.active) return
     try {
       finishRequest(request, response)
+      runAppearances()
     } finally {
       interactionRevision = null
       // A response writes outside handle(), so a stored key it changed is recorded here (#12522).
@@ -1386,12 +1540,24 @@ class PrototypeRuntime(
    * `prototype_request` event, then `onSuccess` or `onError`.
    */
   private suspend fun finishRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
+    val writes = mutableListOf<PrototypeDataWrite>()
     val result =
-      PrototypeRequestOutcome.complete(request.into, response, ::trialDataWrites) { write ->
-        applyDataWrite(write)?.also {
-          warn("Refused request write at ${write.path}: ${it.message}")
-        }
+      PrototypeRequestOutcome.complete(
+        request.into,
+        response,
+        request.append?.let {
+          it.copy(maxItems = prototypeListMaxItemsFor(current.spec, it.to)?.toLong())
+        },
+        ::trialDataWrites,
+      ) { write ->
+        writes += write
+        null
       }
+    // The outcome stages every write before any suspendable event delivery. The controller's
+    // exclusive lock covers both this trial and the complete ordered commit.
+    for (write in writes) {
+      check(applyDataWrite(write) == null) { "A staged request write was refused at ${write.path}" }
+    }
     if (!current.active) return
     request.statusKey?.let { key ->
       val status =
@@ -1406,7 +1572,7 @@ class PrototypeRuntime(
     )
     val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
     if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
-    val writes =
+    val followUpWrites =
       try {
         plannedWrites(followUps, current.spec)
       } catch (error: IllegalArgumentException) {
@@ -1416,7 +1582,7 @@ class PrototypeRuntime(
     val previousEvent = eventData
     eventData = request.eventContext
     try {
-      run(followUps, writes)
+      run(followUps, followUpWrites)
     } finally {
       eventData = previousEvent
     }
@@ -1498,8 +1664,10 @@ class PrototypeRuntime(
     )
   }
 
-  private fun checkedNodes(): List<PrototypeNode> =
-    checkedPrototypeNodes(PrototypeDataResolver.resolve(current.spec).root)
+  private val checkedNodeCache =
+    PrototypeCheckedNodeCache(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
+
+  private fun checkedNodes(): List<PrototypeNode> = checkedNodeCache.nodes(current.spec)
 
   private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
 
@@ -1534,10 +1702,8 @@ class PrototypeRuntime(
     previousStacks: Map<String, PrototypeStackSnapshot>,
   ) =
     PrototypeRuntimeSnapshot(
-      spec,
-      pagerCounts(spec.root).mapValues { (id, count) ->
-        (previous[id] ?: 0).coerceIn(0, count - 1)
-      },
+      normalizePagerState(spec),
+      boundPages(spec, previous),
       stacks =
         stackNodes(spec.root).mapValues { (id, node) ->
           val path =
@@ -1555,6 +1721,33 @@ class PrototypeRuntime(
   }
 }
 
+private fun pagerNodes(root: PrototypeNode): Map<String, PrototypePagerNode> = buildMap {
+  fun visit(node: PrototypeNode) {
+    if (node is PrototypePagerNode) put(node.id, node)
+    prototypeDescendants(node).forEach(::visit)
+  }
+  visit(root)
+}
+
+private fun boundPages(spec: PrototypeSpec, previous: Map<String, Int>): Map<String, Int> =
+  pagerNodes(spec.root).mapValues { (id, node) ->
+    val value = node.stateKey?.let { (spec.state?.get(it) as? PrototypeScalar.Numeric)?.value }
+    (value?.coerceIn(0.0, (node.children.size - 1).toDouble())?.toInt() ?: previous[id] ?: 0)
+      .coerceIn(0, node.children.size - 1)
+  }
+
+private fun normalizePagerState(spec: PrototypeSpec): PrototypeSpec {
+  val original = spec.state ?: return spec
+  val state = original.toMutableMap()
+  for ((_, node) in pagerNodes(spec.root)) {
+    val key = node.stateKey ?: continue
+    val value = (state[key] as? PrototypeScalar.Numeric)?.value ?: continue
+    if (value.isFinite() && value % 1.0 == 0.0)
+      state[key] = PrototypeScalar.Numeric(value.coerceIn(0.0, (node.children.size - 1).toDouble()))
+  }
+  return if (state == original) spec else spec.copy(state = state)
+}
+
 private val runtimeJson = Json { classDiscriminator = "type" }
 
 internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
@@ -1568,6 +1761,7 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypePagerNode -> node.children
     is PrototypeStackNode -> node.screens.values.toList()
     is PrototypeCardNode -> node.children
+    is PrototypeListNode -> listOfNotNull(node.header) + node.children + listOfNotNull(node.footer)
     is PrototypeScrollNode -> listOf(node.child)
     is PrototypeBottomSheetNode -> listOf(node.child)
     is PrototypeDrawerNode -> listOf(node.child)
@@ -1642,3 +1836,10 @@ class PrototypeRequestLimiter(
     if (count > 0) count--
   }
 }
+
+/**
+ * One decimal, halves away from zero like Swift's `rounded()`, so both platforms report the same
+ * point.
+ */
+private fun roundHalfUp(value: Double): Double =
+  (if (value < 0) -floor(-value * 10 + 0.5) else floor(value * 10 + 0.5)) / 10

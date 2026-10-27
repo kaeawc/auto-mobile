@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeAssetContract
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.File
@@ -191,6 +192,12 @@ class SavedPrototypeDirectoryStore(
       }
     }
 
+  /** A non-empty, bounded id that is not in the device-minted `media:` namespace (#14192). */
+  private fun assetIdAcceptable(id: String): Boolean =
+    id.isNotEmpty() &&
+      id.length <= limits.assets.maxIdLength &&
+      !PrototypeAssetContract.isMediaId(id)
+
   private fun validate(request: SavedPrototypeSaveRequest): SavedPrototypeSaveResult.Rejected? {
     fun refusal(reason: SavedPrototypeRejection) =
       rejected(reason, "Invalid saved prototype: $reason.")
@@ -208,8 +215,7 @@ class SavedPrototypeDirectoryStore(
     val ids = mutableSetOf<String>()
     var total = 0L
     for (asset in request.assets) {
-      if (asset.id.isEmpty() || asset.id.length > limits.assets.maxIdLength)
-        return refusal(SavedPrototypeRejection.INVALID_ASSET_ID)
+      if (!assetIdAcceptable(asset.id)) return refusal(SavedPrototypeRejection.INVALID_ASSET_ID)
       if (!ids.add(asset.id)) return refusal(SavedPrototypeRejection.DUPLICATE_ASSET_ID)
       if (asset.mediaType !in limits.assets.mimeTypes || asset.mediaType !in extensions)
         return refusal(SavedPrototypeRejection.UNSUPPORTED_MIME_TYPE)
@@ -256,11 +262,7 @@ class SavedPrototypeDirectoryStore(
       val files = mutableMapOf<String, File>()
       var total = 0L
       for (asset in records) {
-        if (
-          asset.id.isEmpty() ||
-            asset.id.length > limits.assets.maxIdLength ||
-            asset.mediaType !in limits.assets.mimeTypes
-        )
+        if (!assetIdAcceptable(asset.id) || asset.mediaType !in limits.assets.mimeTypes)
           throw IOException("Invalid asset metadata")
         val extension = extensions[asset.mediaType] ?: throw IOException("Unknown asset MIME")
         val font = isFontMimeType(asset.mediaType)

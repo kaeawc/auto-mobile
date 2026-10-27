@@ -4,19 +4,26 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
+import dev.jasonpearson.automobile.protocol.stackTransition
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 
 private const val STACK_DURATION_MS = 300
 private const val STACK_FADE_THROUGH_MS = STACK_DURATION_MS / 2
+private const val STACK_SPATIAL_DURATION_MS = 300
+private const val STACK_EFFECTS_DURATION_MS = 150
 
 internal class PrototypeBackSeek {
   var preview by mutableStateOf<PrototypeRuntimeSnapshot?>(null)
@@ -59,6 +66,35 @@ internal fun rememberStackScrollState(identity: String): ScrollState {
       snapshotFlow { state.value }
         .collect { entry.store.save(entry.position, entry.screen, identity, it) }
     }
+  }
+  return state
+}
+
+@Composable
+internal fun rememberStackListState(
+  identity: String,
+  keys: List<String>,
+  hasHeader: Boolean,
+): LazyListState {
+  val entry = LocalStackScrollEntry.current
+  val initial =
+    remember(entry, identity) {
+      entry?.store?.readList(entry.position, entry.screen, identity)?.restore(keys, hasHeader)
+        ?: PrototypeListAnchorTarget(0, 0)
+    }
+  val state = rememberLazyListState(initial.index, initial.offset)
+  val currentKeys = rememberUpdatedState(keys)
+  val currentHeader = rememberUpdatedState(hasHeader)
+  if (entry != null) {
+    fun save() {
+      val anchor = PrototypeListAnchor.capture(state, currentKeys.value, currentHeader.value)
+      entry.store.saveList(entry.position, entry.screen, identity, anchor)
+    }
+    LaunchedEffect(state, entry, identity) {
+      snapshotFlow { PrototypeListAnchor.capture(state, currentKeys.value, currentHeader.value) }
+        .collect { entry.store.saveList(entry.position, entry.screen, identity, it) }
+    }
+    DisposableEffect(state, entry, identity) { onDispose { save() } }
   }
   return state
 }
@@ -149,6 +185,7 @@ private fun AnimatedStackContent(
   // One keyed content tree owns screen state through ordinary navigation and back previews.
   val state = remember { SeekableTransitionState(frame) }
   val kind = animation.kind
+  val axisDistance = with(LocalDensity.current) { 30.dp.roundToPx() }
   val transition = rememberTransition(state, label = "prototype stack")
   var inFlight by remember { mutableStateOf(false) }
   ReportPrototypeMotion {
@@ -196,7 +233,7 @@ private fun AnimatedStackContent(
   transition.AnimatedContent(
     modifier,
     transitionSpec = {
-      stackTransform(kind, animation.direction, rtl, animation.fadeThrough)
+      stackTransform(kind, animation.direction, rtl, animation.fadeThrough, axisDistance)
     },
     contentKey = { it.key },
     contentAlignment = alignment,
@@ -275,19 +312,33 @@ private fun stackTransform(
   direction: String,
   rtl: Boolean,
   fadeThrough: Boolean = false,
+  axisDistance: Int = 30,
 ): ContentTransform {
   val timing = tween<Float>(STACK_DURATION_MS, easing = LinearOutSlowInEasing)
   return when (kind) {
     StackTransitionKind.None -> EnterTransition.None togetherWith ExitTransition.None
     StackTransitionKind.Fade ->
       if (fadeThrough) {
-        fadeIn(tween(STACK_FADE_THROUGH_MS, delayMillis = STACK_FADE_THROUGH_MS)) togetherWith
-          fadeOut(tween(STACK_FADE_THROUGH_MS))
+        fadeIn(
+          tween(STACK_FADE_THROUGH_MS, delayMillis = STACK_FADE_THROUGH_MS),
+        ) togetherWith fadeOut(tween(STACK_FADE_THROUGH_MS))
       } else fadeIn(timing) togetherWith fadeOut(timing)
+    StackTransitionKind.FadeThrough ->
+      (fadeIn(tween(STACK_EFFECTS_DURATION_MS, delayMillis = STACK_EFFECTS_DURATION_MS)) +
+        scaleIn(
+          tween(STACK_EFFECTS_DURATION_MS, delayMillis = STACK_EFFECTS_DURATION_MS),
+          initialScale = 0.92f,
+        )) togetherWith fadeOut(tween(STACK_EFFECTS_DURATION_MS))
+    StackTransitionKind.SharedAxisX,
+    StackTransitionKind.SharedAxisY ->
+      stackAxisTransform(kind, direction == "pop", rtl, axisDistance)
     StackTransitionKind.Slide -> {
       val pop = direction == "pop"
       val slideTiming =
-        tween<androidx.compose.ui.unit.IntOffset>(STACK_DURATION_MS, easing = LinearOutSlowInEasing)
+        tween<androidx.compose.ui.unit.IntOffset>(
+          STACK_DURATION_MS,
+          easing = LinearOutSlowInEasing,
+        )
       (slideInHorizontally(slideTiming) { width ->
           stackEnterOffset(width, pop, rtl)
         } togetherWith
@@ -304,4 +355,26 @@ private fun stackTransform(
       sizeTransform = null,
     )
   }
+}
+
+private fun stackAxisTransform(
+  kind: StackTransitionKind,
+  pop: Boolean,
+  rtl: Boolean,
+  distance: Int,
+): ContentTransform {
+  val sign = (if (pop) -1 else 1) * (if (kind == StackTransitionKind.SharedAxisX && rtl) -1 else 1)
+  val timing =
+    tween<androidx.compose.ui.unit.IntOffset>(
+      STACK_SPATIAL_DURATION_MS,
+      easing = LinearOutSlowInEasing,
+    )
+  val enter =
+    if (kind == StackTransitionKind.SharedAxisX) slideInHorizontally(timing) { sign * distance }
+    else slideInVertically(timing) { sign * distance }
+  val exit =
+    if (kind == StackTransitionKind.SharedAxisX) slideOutHorizontally(timing) { -sign * distance }
+    else slideOutVertically(timing) { -sign * distance }
+  return (enter + fadeIn(tween(STACK_EFFECTS_DURATION_MS))) togetherWith
+    (exit + fadeOut(tween(STACK_EFFECTS_DURATION_MS)))
 }

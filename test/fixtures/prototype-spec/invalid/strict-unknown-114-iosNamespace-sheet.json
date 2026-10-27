@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "namespaces",
+    "window": {
+      "ios": {
+        "sheet": {
+          "sizing": "form",
+          "zzzUnknown": true
+        }
+      },
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "theme": {
+      "ios": {
+        "navigationTitle": "large"
+      },
+      "android": {
+        "indication": "none"
+      }
+    },
+    "root": {
+      "ios": {
+        "buttonStyle": "glass",
+        "tab": {
+          "role": "search"
+        },
+        "hover": "lift"
+      },
+      "android": {
+        "predictiveBack": {
+          "style": "default"
+        },
+        "indication": "ripple"
+      },
+      "type": "button",
+      "label": "Save"
+    }
+  },
+  "expectedPath": "window.ios.sheet.zzzUnknown"
+}

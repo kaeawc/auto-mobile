@@ -1,0 +1,33 @@
+{
+  "id": "feedback",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "liked": false
+  },
+  "requires": {
+    "platform": ["haptics"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Like",
+    "onTap": [
+      {
+        "type": "toggle",
+        "key": "liked"
+      },
+      {
+        "type": "platform",
+        "call": "haptics.perform",
+        "args": {
+          "effect": {
+            "value": "selection"
+          }
+        }
+      }
+    ]
+  }
+}

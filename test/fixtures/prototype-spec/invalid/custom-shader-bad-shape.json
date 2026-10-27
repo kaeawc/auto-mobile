@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "shader",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Custom effect",
+      "style": {
+        "shader": {
+          "asset": "effect",
+          "uniforms": {
+            "strength": 1
+          },
+          "source": "code"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.shader.source"
+}

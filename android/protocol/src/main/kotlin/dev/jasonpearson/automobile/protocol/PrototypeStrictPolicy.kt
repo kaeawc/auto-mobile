@@ -11,9 +11,19 @@ internal object PrototypeStrictPolicy {
     library: Boolean,
     context: PrototypeStateChecks.Context,
   ): PrototypeSpecError? {
-    if (supported != null && !supported.containsAll(required(spec))) {
-      return PrototypeSpecError("$", "Unsupported capabilities")
+    if (supported != null) {
+      val missing = required(spec) - supported
+      if (missing.isNotEmpty())
+        return PrototypeSpecError(
+          "$",
+          "Unsupported capabilities: ${missing.sorted().joinToString(", ")}",
+        )
     }
+    if (library && "prototype_custom_shaders_v1" in required(spec))
+      return PrototypeSpecError(
+        "$",
+        "ProtoViewer bundles refuse custom AGSL shaders",
+      )
     val window = spec["window"] as? JsonObject
     if (library && window?.text("layer") == "system")
       return PrototypeSpecError("window.layer", "Privileged window")
@@ -149,6 +159,7 @@ internal object PrototypeStrictPolicy {
       "carousel" to "carousel",
       "searchBar" to "search_bar",
       "chart" to "chart",
+      "list" to "lazy_list",
       "menu" to "menus",
       "tooltip" to "tooltip",
       "drawer" to "drawer",
@@ -159,6 +170,7 @@ internal object PrototypeStrictPolicy {
       "cancelTimer" to "timers",
       "setData" to "data_actions",
       "appendData" to "data_actions",
+      "prependData" to "data_actions",
       "removeData" to "data_actions",
       "platform" to "platform",
     )
@@ -183,10 +195,15 @@ internal object PrototypeStrictPolicy {
             ),
           "text_field_actions" to listOf("trailingIcon", "imeAction", "onSubmit"),
           "text_field_leading_icon" to listOf("leadingIcon"),
+          "string_conditions" to listOf("errorWhen", "errorText"),
         ),
+      "topAppBar" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
+      "bottomNav" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
+      "tabBar" to mapOf("bar_scroll" to listOf("onScroll", "scroll")),
       "pager" to
         mapOf(
           "pager_options" to listOf("axis", "pageSpacing", "peek", "pageSize"),
+          "pager_state_key" to listOf("stateKey"),
           "carousel" to listOf("indicator"),
         ),
       "scroll" to
@@ -196,11 +213,13 @@ internal object PrototypeStrictPolicy {
 
   private val fieldFeatures =
     mapOf(
+      "semantics" to "semantics",
       "checks" to "checks",
       "validateOn" to "checks",
       "enabledWhen" to "checks",
       "valid" to "checks",
       "requireValid" to "checks",
+      "onAppear" to "timers",
       "onLongPress" to "gestures",
       "onDoubleTap" to "gestures",
       "swipeActions" to "swipe_actions",
@@ -231,11 +250,14 @@ internal object PrototypeStrictPolicy {
     }
 
     fun envelope(spec: JsonObject) {
-      if (spec.text("motion") == "reduced") need("reduced_motion")
-      if (spec["data"] != null) need("data_model")
-      if (spec["storage"] != null) need("storage")
-      val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
-      if (colors?.get("light") != null || colors?.get("dark") != null) need("theme_modes")
+      PrototypeEnvelopeFeatures.collect(spec).forEach(::need)
+      if (spec.text("motion") == "expressive") result.add(PrototypeMotionV3.CAPABILITY)
+      if (
+        ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().any {
+          it.jsonPrimitive.content.startsWith("stack:")
+        }
+      )
+        need("routes")
     }
 
     fun platform(spec: JsonObject) {
@@ -249,19 +271,22 @@ internal object PrototypeStrictPolicy {
       if (spec["platform"] != null) need("platform")
     }
 
-    fun scan(value: JsonElement, field: String = "") {
+    fun scan(value: JsonElement, field: String = "", routeAlias: Boolean = false) {
       if (value is JsonArray) {
-        value.forEach { scan(it) }
+        value.forEach { scan(it, routeAlias = routeAlias) }
         return
       }
       val fields = value as? JsonObject ?: return
       if (fields.size == 1 && fields.containsKey("value")) return
-      nodeFeatures(fields)
-      scanFields(fields, field)
+      if (PrototypeStringConditions.uses(fields)) need("string_conditions")
+      val alias = routeAlias || (fields["repeat"] as? JsonObject)?.text("as") == "route"
+      nodeFeatures(fields, alias)
+      scanFields(fields, field, alias)
     }
 
-    private fun scanFields(fields: JsonObject, field: String) {
+    private fun scanFields(fields: JsonObject, field: String, routeAlias: Boolean) {
       val type = fields.text("type") ?: ""
+      if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
         if (key == "repeat") {
@@ -273,47 +298,75 @@ internal object PrototypeStrictPolicy {
         } else {
           fieldFeatures(key, child, field)
         }
-        descend(key, child)
+        descend(key, child, routeAlias)
       }
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" || (key == "value" && type !in listOf("setData", "appendData"))
+      key == "payload" ||
+        (key == "value" && type !in listOf("setData", "appendData", "prependData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
-    private fun descend(key: String, child: JsonElement) {
+    private fun descend(key: String, child: JsonElement, routeAlias: Boolean) {
       when {
-        key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key != "series" && key != "effects" -> scan(child, key)
+        key == "linkify" ->
+          (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
+        key !in listOf("series", "effects", "scrollLinked", "scrollTransition", "press") ->
+          scan(child, key, routeAlias)
       }
     }
 
-    private fun nodeFeatures(fields: JsonObject) {
+    private fun nodeFeatures(fields: JsonObject, routeAlias: Boolean) {
+      if ("shared" in fields) result.add("prototype_shared_element_v2")
       val binding =
         PrototypeBindableFields.first<Boolean>(fields, "") { raw, _, kind ->
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
+      if (PrototypeRouteRules.nodeUses(fields, routeAlias)) need("routes")
       if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")
       if (PrototypeStylePolishV2Rules.required(fields))
         result.add(PrototypeStylePolishV2Rules.CAPABILITY)
+      if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
       val type = fields.text("type") ?: ""
+      val nodeTypes =
+        PrototypeSpecContract.definitions
+          .getValue("node")
+          .jsonObject
+          .getValue("variants")
+          .jsonObject
+      if (type in nodeTypes && ("ios" in fields || "android" in fields)) need("platform_namespace")
       typeFeatures[type]?.let(::need)
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }
+      listAndRequestFeatures(type, fields)
+    }
+
+    private fun listAndRequestFeatures(type: String, fields: JsonObject) {
+      if (type == "prependData") need("lazy_list")
+      if (type == "list" || (type == "request" && fields.containsKey("append"))) {
+        need("lazy_list")
+        need("data_model")
+      }
       if (type == "request" && fields.text("via") == "device") need("network_device")
+      if (PrototypeMediaItemBindings.usedBy(fields)) need("platform_media_items")
     }
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
+      if (repeatSpec?.containsKey("derive") == true) need("format")
+      if (repeatSpec?.get("stagger") != null) need("window_motion")
       if (repeatSpec?.get("items") is JsonObject || repeatSpec?.get("key") != null)
         need("data_model")
     }
 
     private fun fieldFeatures(key: String, child: JsonElement, field: String) {
       fieldFeatures[key]?.let(::need)
+      if (key == "style" && (child as? JsonObject)?.containsKey("shader") == true)
+        need("custom_shaders")
       if (PrototypeMotionFeatures.usesMotion(key, child)) result.add("prototype_motion_v2")
+      if (key == "scrollLinked" || key == "scrollTransition") need("scroll_motion")
       if (PrototypeMotionFeatures.usesChoreography(key, child)) need("choreography")
       if (key == "data" && child is JsonPrimitive && child.isString) need("data_model")
       if (key in listOf("light", "dark") && field.isNotEmpty()) need("theme_modes")
@@ -340,4 +393,34 @@ private object PrototypeMotionFeatures {
 
   fun transitionType(child: JsonElement): String? =
     ((child as? JsonObject)?.get("type") ?: child).let { (it as? JsonPrimitive)?.content }
+}
+
+/**
+ * The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary.
+ */
+internal object PrototypeEnvelopeFeatures {
+  fun collect(spec: JsonObject): List<String> = buildList {
+    content(spec)
+    presentation(spec)
+  }
+
+  private fun MutableList<String>.content(spec: JsonObject) {
+    if ("strings" in spec || PrototypeStrings.fields(spec).any { "{t:" in it.text }) add("strings")
+    if (spec["data"] != null) add("data_model")
+    if (spec["storage"] != null) add("storage")
+    if ("derive" in spec) add("format")
+  }
+
+  private fun MutableList<String>.presentation(spec: JsonObject) {
+    for (key in listOf("window", "theme")) {
+      val block = spec[key] as? JsonObject ?: continue
+      if ("ios" in block || "android" in block) add("platform_namespace")
+    }
+    if (spec.text("motion") == "reduced") add("reduced_motion")
+    if ((spec["window"] as? JsonObject)?.get("transition") != null) add("window_motion")
+    if ((spec["window"] as? JsonObject)?.get("backdrop") != null) add("backdrop")
+    if ((spec["theme"] as? JsonObject)?.text("design") == "platform") add("design_platform")
+    val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
+    if (colors?.get("light") != null || colors?.get("dark") != null) add("theme_modes")
+  }
 }

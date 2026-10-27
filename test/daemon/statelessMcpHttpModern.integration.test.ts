@@ -17,6 +17,7 @@ import {
 } from "../../src/daemon/statelessMcpServerFactory";
 import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../src/daemon/ResourceUpdatedBroadcasterClass";
 import { installToolCallDispatcher } from "../../src/server/toolCallDispatch";
 import {
   TASKS_EXTENSION_ID,
@@ -30,6 +31,16 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import * as database from "../../src/db/database";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { createDeviceChoiceRequestStateCodec } from "../../src/server/deviceChoiceRequestState";
+import { createMcpServer } from "../../src/server";
+import { taskEligibleByName } from "../../src/server/tasks/toolCallTasks";
+import { FakeTaskManager } from "../fakes/FakeTaskManager";
+
+const requestStateTimer = new FakeTimer();
+const requestStateCodec = createDeviceChoiceRequestStateCodec({
+  timer: requestStateTimer,
+  secretProvider: { createSecret: () => new Uint8Array(32).fill(7) },
+});
 
 class CapturedResponse extends EventEmitter {
   headersSent = false;
@@ -93,7 +104,9 @@ const TASK = {
   pollIntervalMs: 1000,
 } satisfies CreateTaskResult;
 
-function endpoint(deviceChoice = false) {
+const TASK_DEVICE_PROBE = "modernTaskDeviceChoiceProbe";
+
+function endpoint(deviceChoice = false, taskManager?: FakeTaskManager) {
   return new StatelessMcpHttpEndpoint<
     McpHttpRequestLike,
     CapturedResponse,
@@ -111,11 +124,22 @@ function endpoint(deviceChoice = false) {
       throw new Error("Modern request reached legacy transport");
     },
     createServer: (req: McpHttpRequestLike, scope) => {
-      const server = createStatelessMcpServer(
-        {},
-        buildMcpRequestContext({ headers: req.headers }),
-        scope,
-      );
+      const server = taskManager
+        ? createMcpServer({
+            era: "modern",
+            stateless: true,
+            taskOwnerKey: scope.taskOwnerKey,
+            requestMcpSessionId: scope.requestMcpSessionId,
+            sessionContext: { sessionId: scope.requestScopeId },
+            taskManager,
+            taskEligibleTools: taskEligibleByName(new Set([TASK_DEVICE_PROBE])),
+            deviceChoiceRequestState: requestStateCodec,
+          })
+        : createStatelessMcpServer(
+            { deviceChoiceRequestState: requestStateCodec },
+            buildMcpRequestContext({ headers: req.headers }),
+            scope,
+          );
       // Fake feature execution, keeping the production SDK result wrapper and factory intact.
       if (!deviceChoice) {
         installToolCallDispatcher(server, {
@@ -135,8 +159,10 @@ async function exchange(
   method: string,
   params: Record<string, unknown> = {},
   deviceChoice = false,
+  sessionKey = "modern-client",
+  taskManager?: FakeTaskManager,
 ) {
-  const server = endpoint(deviceChoice);
+  const server = endpoint(deviceChoice, taskManager);
   const res = new CapturedResponse();
   await server
     .handle(
@@ -146,9 +172,10 @@ async function exchange(
           "mcp-protocol-version": "2026-07-28",
           "mcp-method": method,
           ...(typeof params.name === "string" && { "mcp-name": params.name }),
+          ...(typeof params.taskId === "string" && { "mcp-name": params.taskId }),
           accept: "text/event-stream, application/json",
           "content-type": "application/json",
-          [MCP_SESSION_KEY_HEADER]: "modern-client",
+          [MCP_SESSION_KEY_HEADER]: sessionKey,
         },
       },
       res,
@@ -187,7 +214,7 @@ test("real handler discovers Tasks from the shared modern server factory", async
   expect(frame.error).toBeUndefined();
   expect(frame.result.capabilities.extensions[TASKS_EXTENSION_ID]).toEqual({});
   expect(frame.result.capabilities.tools).toEqual({ listChanged: true });
-  expect(frame.result.capabilities.resources).toEqual({ listChanged: true });
+  expect(frame.result.capabilities.resources).toEqual({ subscribe: true, listChanged: true });
 });
 
 test("legacy server capabilities retain their original JSON bytes", async () => {
@@ -340,13 +367,14 @@ test("real modern handler asks for a device via MRTR and retries on the accepted
         },
       },
     });
-    expect(question.result.requestState).toBeUndefined();
+    expect(question.result.requestState).toBeString();
     expect(question.result.content).toBeUndefined();
 
     const result = await exchange(
       "tools/call",
       {
         ...params,
+        requestState: question.result.requestState,
         inputResponses: { deviceChoice: { action: "accept", content: { deviceId: "device-b" } } },
       },
       true,
@@ -360,10 +388,237 @@ test("real modern handler asks for a device via MRTR and retries on the accepted
   }
 });
 
+test("real modern task asks through tasks/get and only its owner can answer through tasks/update", async () => {
+  const manager = new FakeTaskManager();
+  const calls: Array<string | undefined> = [];
+  const candidates = [
+    { deviceId: "device-a", platform: "android" },
+    { deviceId: "device-b", platform: "ios" },
+  ];
+  ToolRegistry.register(
+    TASK_DEVICE_PROBE,
+    "Hermetic task device-choice probe",
+    z.object({ deviceId: z.string().optional() }),
+    async ({ deviceId }) => {
+      calls.push(deviceId);
+      return deviceId
+        ? { content: [{ type: "text", text: `used ${deviceId}` }] }
+        : {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ code: "ambiguous_device_target", candidates }),
+              },
+            ],
+          };
+    },
+  );
+  const post = (method: string, params: Record<string, unknown>, owner = "modern-client") =>
+    exchange(method, params, true, owner, manager);
+  try {
+    const created = await post("tools/call", { name: TASK_DEVICE_PROBE, arguments: {} });
+    expect(created.error).toBeUndefined();
+    expect(created.result).toMatchObject({ resultType: "task", status: "working" });
+    expect(created.result.inputRequests).toBeUndefined();
+    const taskId: string = created.result.taskId;
+    let waiting = await post("tasks/get", { taskId });
+    for (let turn = 0; turn < 20 && waiting.result.status === "working"; turn++) {
+      waiting = await post("tasks/get", { taskId });
+    }
+    expect(waiting.result).toMatchObject({
+      resultType: "complete",
+      status: "input_required",
+      inputRequests: {
+        deviceChoice: {
+          method: "elicitation/create",
+          params: {
+            mode: "form",
+            requestedSchema: {
+              required: ["deviceId"],
+              properties: {
+                deviceId: {
+                  oneOf: candidates.map(({ deviceId, platform }) => ({
+                    const: deviceId,
+                    title: `${deviceId} (${platform})`,
+                  })),
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(waiting.result.requestState).toBeUndefined();
+    expect(calls).toEqual([undefined]);
+    const answer = {
+      taskId,
+      inputResponses: { deviceChoice: { action: "accept", content: { deviceId: "device-b" } } },
+    };
+    const foreign = await post("tasks/update", answer, "foreign-owner");
+    expect(foreign.error).toEqual({
+      code: -32602,
+      message: "Failed to retrieve task: Task not found",
+    });
+    expect((await post("tasks/get", { taskId })).result.status).toBe("input_required");
+    expect((await post("tasks/update", answer)).result).toMatchObject({ resultType: "complete" });
+    let done = await post("tasks/get", { taskId });
+    for (let turn = 0; turn < 20 && done.result.status === "working"; turn++) {
+      done = await post("tasks/get", { taskId });
+    }
+    expect(done.result).toMatchObject({
+      status: "completed",
+      result: { content: [{ type: "text", text: "used device-b" }] },
+    });
+    expect(done.result.inputRequests).toBeUndefined();
+    expect(calls).toEqual([undefined, "device-b"]);
+  } finally {
+    for (const task of manager.created) {
+      await manager.cancel("modern-client", task.taskId);
+    }
+    ToolRegistry.unregister(TASK_DEVICE_PROBE);
+  }
+});
+
+for (const reason of ["tampered", "expired", "different session", "malformed"] as const) {
+  test(`real modern handler rejects ${reason} request state before tool execution`, async () => {
+    const calls: Array<string | undefined> = [];
+    const toolName = "modernInvalidStateProbe";
+    ToolRegistry.register(
+      toolName,
+      "Hermetic invalid-state probe",
+      z.object({ deviceId: z.string().optional() }),
+      async ({ deviceId }) => {
+        calls.push(deviceId);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                code: "ambiguous_device_target",
+                candidates: [
+                  { deviceId: "device-a", platform: "android" },
+                  { deviceId: "device-b", platform: "ios" },
+                ],
+              }),
+            },
+          ],
+        };
+      },
+    );
+    try {
+      const params = { name: toolName, arguments: {} };
+      const question = await exchange("tools/call", params, true);
+      const state: string = question.result.requestState;
+      expect(state).toBeString();
+      if (reason === "expired") {
+        requestStateTimer.advanceTime(600_000);
+      }
+      const result = await exchange(
+        "tools/call",
+        {
+          ...params,
+          requestState:
+            reason === "malformed" ? "invalid" : reason === "tampered" ? `${state}tampered` : state,
+          inputResponses: { deviceChoice: { action: "accept", content: { deviceId: "device-b" } } },
+        },
+        true,
+        reason === "different session" ? "other-client" : "modern-client",
+      );
+      expect(result.error).toEqual({
+        code: -32602,
+        message: "Invalid or expired requestState",
+        data: { reason: "invalid_request_state" },
+      });
+      expect(result.result).toBeUndefined();
+      expect(calls).toEqual([undefined]);
+    } finally {
+      ToolRegistry.unregister(toolName);
+    }
+  });
+}
+
 test("preparsed modern bodies above the SDK default body limit remain admitted", async () => {
   const frame = await exchange("tools/call", {
     name: "fake-task",
     arguments: { payload: "x".repeat(4 * 1024 * 1024 + 1) },
   });
   expect(frame.result.resultType).toBe("task");
+});
+
+function listenToResource(server: ReturnType<typeof endpoint>, uri: string, id: string) {
+  const res = new CapturedResponse();
+  const ack = res.nextChunk();
+  const pending = server.handle(
+    {
+      method: "POST",
+      headers: {
+        "mcp-protocol-version": "2026-07-28",
+        "mcp-method": "subscriptions/listen",
+        accept: "text/event-stream, application/json",
+        "content-type": "application/json",
+      },
+    },
+    res,
+    {
+      jsonrpc: "2.0",
+      id,
+      method: "subscriptions/listen",
+      params: {
+        notifications: { resourceSubscriptions: [uri] },
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "resource-listen-test", version: "1" },
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
+    },
+    (message, error) => {
+      throw new Error(message, { cause: error });
+    },
+  );
+  return { res, ack, pending };
+}
+
+test("real listen streams receive bridged resource updates only for their filtered URI", async () => {
+  const server = endpoint();
+  const uri = "resource://table?offset=10";
+  const unrelated = "resource://other";
+  const first = listenToResource(server, uri, "listen-resource");
+  const second = listenToResource(server, unrelated, "listen-other");
+  try {
+    const ack = JSON.parse((await first.ack).split("data: ")[1]);
+    await second.ack;
+    expect(ack).toMatchObject({
+      method: "notifications/subscriptions/acknowledged",
+      params: {
+        notifications: { resourceSubscriptions: [uri] },
+        _meta: { "io.modelcontextprotocol/subscriptionId": "listen-resource" },
+      },
+    });
+    const initialBody = first.res.body;
+    const otherChunk = second.res.nextChunk();
+    ResourceUpdatedBroadcaster.emit((subscriptions) =>
+      subscriptions.has(unrelated) ? [unrelated] : [],
+    );
+    const otherChange = JSON.parse((await otherChunk).split("data: ")[1]);
+    expect(otherChange.method).toBe("notifications/resources/updated");
+    expect(otherChange.params.uri).toBe(unrelated);
+    expect(first.res.body).toBe(initialBody);
+    const changeChunk = first.res.nextChunk();
+    ResourceUpdatedBroadcaster.emit((subscriptions) =>
+      [...subscriptions].filter((subscribed) => subscribed.startsWith("resource://table?")),
+    );
+    expect(JSON.parse((await changeChunk).split("data: ")[1])).toMatchObject({
+      method: "notifications/resources/updated",
+      params: { uri, _meta: { "io.modelcontextprotocol/subscriptionId": "listen-resource" } },
+    });
+    expect(second.res.body.match(/notifications\/resources\/updated/g)?.length).toBe(1);
+  } finally {
+    server.stopAccepting();
+    await Promise.all(server.inFlightRequests().map((request) => request.close()));
+    await Promise.all([first.pending, second.pending]);
+    server.clear();
+  }
 });

@@ -1,4 +1,5 @@
 import { prototypeAdaptiveNotes } from "./prototypeAdaptive";
+import { prototypeNamespaceNotes } from "./prototypeNamespaceNotes";
 import { designFallbackPaths } from "./prototypeDesign";
 import { prototypeStringsFallbackKeys } from "./prototypeStrings";
 import { prototypePlatformNamespaceFields } from "./prototypePlatformNamespace";
@@ -300,6 +301,15 @@ const definitions: Record<string, Rule> = contract.definitions;
  * The validator and anchor walkers are private and cannot be reused; this uses their dot/index
  * notation and walks depth first in contract field order. Validated device specs only.
  */
+function skipsOccurrences(value: unknown, rule: Rule): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    rule.name === "iosNamespace" ||
+    rule.name === "androidNamespace"
+  );
+}
+
 function occurrences(
   value: unknown,
   rule: Rule,
@@ -307,7 +317,7 @@ function occurrences(
   found: Occurrence[],
   nodeType?: string,
 ): void {
-  if (value === undefined || value === null) {
+  if (skipsOccurrences(value, rule)) {
     return;
   }
   switch (rule.kind) {
@@ -386,7 +396,7 @@ export function prototypePlatformNotes(
   const zoomNotes = prototypeZoomTransitionNotes(spec, platform, supports, osMajor);
   const foreign = platform === "android" ? "ios" : "android";
   const paths = prototypePlatformNamespaceFields(spec, foreign);
-  const namespaceNotes: PrototypePlatformNote[] = paths.length
+  const foreignNotes: PrototypePlatformNote[] = paths.length
     ? [
         {
           platform,
@@ -398,6 +408,7 @@ export function prototypePlatformNotes(
         },
       ]
     : [];
+  const namespaceNotes = [...foreignNotes, ...prototypeNamespaceNotes(spec, platform, osMajor)];
   if (platform === "android") {
     return [
       ...prototypeAdaptiveNotes(spec, platform),

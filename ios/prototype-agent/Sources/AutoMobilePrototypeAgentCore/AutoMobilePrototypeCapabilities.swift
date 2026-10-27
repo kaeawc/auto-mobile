@@ -18,6 +18,7 @@ struct ProcessInfoOSVersion: OSVersionProvider {
 /// name the version; `test/features/prototype/prototypeIosMinimumOs.test.ts` fails when they drift.
 enum PrototypeCapabilityMinimumOS {
     static let table = [
+        "prototype_platform_namespace_v1": 17,
         "prototype_icon_effects_v1": 17, "prototype_keyframes_v1": 17,
         "prototype_motion_tokens_v1": 17,
         "prototype_zoom_transition_v1": 18,

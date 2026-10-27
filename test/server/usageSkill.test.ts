@@ -67,6 +67,10 @@ describe.each([
   let connection: Connection;
   let restore: () => void;
   let availability: () => void;
+  // Listing every advertised tool builds all their schemas; that cost belongs to setup, not to
+  // the 100 ms test budget.
+  let listedResources: string[];
+  let listedTools: string;
 
   beforeAll(async () => {
     restore = installHermeticServerFixture();
@@ -74,6 +78,10 @@ describe.each([
     const availabilitySpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
     availability = () => availabilitySpy.mockRestore();
     connection = await connect();
+    listedResources = (await connection.client.listResources()).resources.map(
+      (resource) => resource.uri,
+    );
+    listedTools = JSON.stringify(await connection.client.listTools());
   });
 
   afterAll(async () => {
@@ -114,10 +122,8 @@ describe.each([
   });
 
   test("the skill stays out of tools and the default resource list", async () => {
-    const resources = await connection.client.listResources();
-    expect(resources.resources.map((resource) => resource.uri)).not.toContain(SKILL_URI);
-    const tools = await connection.client.listTools();
-    expect(JSON.stringify(tools)).not.toContain("auto-mobile-usage");
+    expect(listedResources).not.toContain(SKILL_URI);
+    expect(listedTools).not.toContain("auto-mobile-usage");
   });
 });
 

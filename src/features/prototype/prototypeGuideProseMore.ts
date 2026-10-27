@@ -218,3 +218,27 @@ export const adaptiveGuideProse = `
 
 Widths are native per platform. Android Material adaptive scaffolds split panes at expanded and use bar/rail/drawer at compact/medium/expanded. iOS horizontalSizeClass regular uses split/sidebar/inspector, compact uses stack/bottom bar/sheet. There is no shared breakpoint or \`minWidth\`; \`platformNotes\` reports the different rules on show. iOS draws Material-styled containers under every design until native platform containers are available.
 `;
+
+export const GUIDE_PLATFORM_NAMESPACES = `## Platform namespaces
+
+Choose styling in this order:
+1. Portable node/window fields express behavior on both platforms: use \`button.variant: "outlined"\`
+   for an outlined button, or \`style.cornerRadius\` for an authored corner.
+2. Portable theme tokens express a shared visual system: set \`theme.colors.primary\` once rather
+   than repeating a color on each button; use theme typography and corner tokens for shared styles.
+3. \`theme.design: "platform"\` chooses native platform treatment for covered controls (the default);
+   \`"material"\` keeps the shared Material appearance. Check design fallback notes for custom controls.
+4. Use \`ios\`/\`android\` only for semantics with no portable meaning, such as
+   \`ios: {buttonStyle: "glass"}\` or \`android: {predictiveBack: {style: "none"}}\` on a stack.
+
+Namespaces are closed objects on nodes, window and theme; each field has a contract \`why\`.
+Own-platform blocks require \`prototype_platform_namespace_v1\`. Foreign blocks are accepted and
+ignored with paths in \`platformNotes\`; unknown fields are rejected even in foreign blocks.
+iOS glass buttons need 26 and otherwise use bordered buttons; hover needs 17 and is render-only
+(no pointer input). Custom tab bars, app bars and sheets cannot apply \`tab.role\`,
+\`bottomAccessory\` (node-only), \`navigationTitle\` or \`sheet.sizing\`; these are reported as ignored.
+Window/theme namespace fields likewise have no applicable node and are reported as ignored.
+Android \`indication: "ripple"|"none"\` controls the node's clickable feedback; motion-off still wins.
+Stack \`predictiveBack.style\` uses the existing pop for \`default\`, horizontal movement with fade
+for \`crossActivity\` within the prototype activity, or snaps without predictive scrubbing for \`none\`.
+Use notes to confirm what the current renderer can apply before relying on a namespace field.`;

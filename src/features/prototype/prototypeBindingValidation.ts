@@ -593,3 +593,20 @@ export const bound = ({ located, value, item, operandTemplated }: KeyInstance<Lo
 function dynamicStateValue(value: unknown): boolean {
   return object(value)?.event !== undefined || object(value)?.platform !== undefined;
 }
+
+/** Structural-only accessory nodes cannot provide renderer targets or executable actions. */
+export function excludeAccessoryReferences(context: {
+  nodes: Located[];
+  actions: Located[];
+}): undefined {
+  const ignored = context.nodes.flatMap(({ value, path }) =>
+    object(object(value.ios)?.bottomAccessory) ? [`${path}.ios.bottomAccessory`] : [],
+  );
+  const rendered = ({ path }: Located): boolean =>
+    !ignored.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}.`) || path.startsWith(`${prefix}[`),
+    );
+  context.nodes = context.nodes.filter(rendered);
+  context.actions = context.actions.filter(rendered);
+  return undefined;
+}

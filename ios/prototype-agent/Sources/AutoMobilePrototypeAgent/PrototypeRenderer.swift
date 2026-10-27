@@ -836,13 +836,11 @@
             // "Save" to "Sa..." (#10899); a label wider than the row wraps rather than overflowing,
             // as on Android (#10912).
             .layoutPriority(1)
-            switch node.variant {
-            case "outlined", "tonal": button.buttonStyle(.bordered).tint(themePrimary)
-            case "elevated": button.buttonStyle(.bordered).tint(themePrimary)
-                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-            case "text": button.buttonStyle(.borderless).tint(themePrimary)
-            default: button.buttonStyle(.borderedProminent).tint(themePrimary)
-            }
+            button.modifier(PrototypeNamespaceButtonStyle(
+                style: node.ios?.buttonStyle,
+                variant: node.variant,
+                tint: themePrimary
+            ))
         }
 
         /// The theme's `primary`, so buttons follow the spec theme rather than the system accent (#15445).
@@ -955,6 +953,7 @@
             let shape = cornerShape
             return view
                 .animation(styleAnimation.animation("color"), value: palette.color(style?.color))
+                .modifier(PrototypeNamespaceHover(effect: node.ios?.hover))
                 .modifier(PrototypeAnimatedLayout(
                     insets: EdgeInsets(
                         top: (padding?.top ?? 0) + insets.top,

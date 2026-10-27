@@ -64,13 +64,18 @@ internal fun Modifier.prototypeBlurReplace(
   delayMs: Int,
 ): Modifier {
   if (type != "blurReplace") return this
+  val expressive =
+    if (LocalPrototypeExpressive.current)
+      prototypeExpressiveSpec<androidx.compose.ui.unit.Dp>(effects = true)
+    else null
   val radius by
     scope.transition.animateDp(
       transitionSpec = {
-        tween(
-          DELAYED_ENTER_MS,
-          delayMillis = if (targetState == EnterExitState.Visible) delayMs else 0,
-        )
+        expressive?.prototypeEnterDelay(if (targetState == EnterExitState.Visible) delayMs else 0)
+          ?: tween(
+            DELAYED_ENTER_MS,
+            delayMillis = if (targetState == EnterExitState.Visible) delayMs else 0,
+          )
       },
       label = "prototypeBlurReplace",
     ) { state ->

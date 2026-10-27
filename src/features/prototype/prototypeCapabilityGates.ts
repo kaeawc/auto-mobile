@@ -3,6 +3,7 @@ import {
   prototypeContentTransitionFields,
   prototypeContentTransitionUnsupportedMessage,
 } from "./prototypeContentTransition";
+import { prototypeRouteFields, PROTOTYPE_ROUTES_CAPABILITY } from "./prototypeRoutes";
 import { prototypeWindowMotionFields } from "./prototypeWindowMotion";
 import { PROTOTYPE_WINDOW_MOTION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
@@ -21,6 +22,8 @@ import {
 import {
   prototypeReducedMotionFields,
   prototypeSharedElementFields,
+  prototypeSharedElementV2Fields,
+  prototypeSharedElementV2UnsupportedMessage,
   prototypeReducedMotionUnsupportedMessage,
   prototypeSharedElementUnsupportedMessage,
 } from "./prototypeSharedElement";
@@ -39,6 +42,7 @@ import {
   PROTOTYPE_EFFECTS_CAPABILITY,
   PROTOTYPE_REDUCED_MOTION_CAPABILITY,
   PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
+  PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
@@ -58,6 +62,7 @@ import {
   PROTOTYPE_BACKDROP_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
   PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
+  PROTOTYPE_MEDIA_ITEMS_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
   PROTOTYPE_CHOREOGRAPHY_CAPABILITY,
   PROTOTYPE_CHART_CAPABILITY,
@@ -133,6 +138,8 @@ import {
   prototypeChoreographyFields,
   prototypeChoreographyUnsupportedMessage,
 } from "./prototypeChoreography";
+import { prototypeMotionV3Fields, prototypeMotionV3UnsupportedMessage } from "./prototypeMotionV3";
+import { PROTOTYPE_MOTION_V3_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeMotionV2Fields, prototypeMotionV2UnsupportedMessage } from "./prototypeMotionV2";
 import { prototypeLazyListFields, prototypeLazyListUnsupportedMessage } from "./prototypeLazyList";
 import { prototypeChartFields, prototypeChartUnsupportedMessage } from "./prototypeChart";
@@ -185,6 +192,11 @@ import {
   prototypePlatformNamespaceUnsupportedMessage,
 } from "./prototypePlatformNamespace";
 
+import {
+  prototypeMediaItemFields,
+  prototypeMediaItemsUnsupportedMessage,
+} from "./prototypeMediaItems";
+
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
@@ -199,6 +211,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeContentTransitionUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_ROUTES_CAPABILITY,
+    fields: prototypeRouteFields,
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_routes_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
+  {
     capability: PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
     fields: prototypeShaderFields,
     unsupportedMessage: prototypeShadersUnsupportedMessage,
@@ -208,6 +226,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: (spec) => (record(record(spec)?.theme)?.design === "platform" ? ["theme.design"] : []),
     unsupportedMessage: (_fields, platform) =>
       `The connected ${platform} renderer does not advertise ${PROTOTYPE_DESIGN_PLATFORM_CAPABILITY}. Update the renderer or use theme.design: "material". Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_MOTION_V3_CAPABILITY,
+    fields: prototypeMotionV3Fields,
+    unsupportedMessage: prototypeMotionV3UnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
@@ -340,6 +363,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeBackdropUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_MEDIA_ITEMS_CAPABILITY,
+    fields: prototypeMediaItemFields,
+    unsupportedMessage: prototypeMediaItemsUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_LOADING_STATES_CAPABILITY,
     fields: prototypeLoadingStatesFields,
     unsupportedMessage: prototypeLoadingStatesUnsupportedMessage,
@@ -404,6 +432,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_REDUCED_MOTION_CAPABILITY,
     fields: prototypeReducedMotionFields,
     unsupportedMessage: prototypeReducedMotionUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
+    fields: prototypeSharedElementV2Fields,
+    unsupportedMessage: prototypeSharedElementV2UnsupportedMessage,
   },
   {
     capability: PROTOTYPE_SHARED_ELEMENT_CAPABILITY,

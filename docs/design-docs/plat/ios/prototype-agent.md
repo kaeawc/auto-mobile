@@ -134,7 +134,7 @@ observe pointer delivery; pure session support alone does not verify that input 
 | Appearance override/inference/live re-theme (#11222)                   | `prototype_appearance_v1`; [Appearance](#appearance)                                                                                                                                                                                                                                                                                                 |
 | Bottom sheet above the keyboard                                        | [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                      |
 | Style `weight`, min/max sizes, `aspectRatio` (#11543)                  | `PrototypeSizing`, Android's order (bounds, `width`/`height`, aspect ratio); see below                                                                                                                                                                                                                                                               |
-| Style `effects` (#15128)                                               | Contract only; not advertised (`prototype_effects_v1`), so the host refuses it                                                                                                                                                                                                                                                                       |
+| Style `effects` (#15130, not device-verified)                          | `prototype_effects_v1`; [Style effects](#style-effects)                                                                                                                                                                                                                                                                                              |
 | `haptics.perform`, `sound.play` platform calls (#14329)                | `prototype_platform_haptics_v1`, `prototype_platform_sound_v1`; UIKit feedback generators (the Simulator does not render haptics) and `AudioServices` system sounds, with `feedbackLog` (last 64 calls) in `inspect`; `volume` is ignored, suppression is not detectable                                                                             |
 | Data model (#11673)                                                    | `prototype_data_model_v1`; [Data model capability](#data-model-capability)                                                                                                                                                                                                                                                                           |
 | Data actions (#12519)                                                  | `prototype_data_actions_v1`; [Data actions capability](#data-actions-capability)                                                                                                                                                                                                                                                                     |
@@ -197,7 +197,39 @@ observe pointer delivery; pure session support alone does not verify that input 
 | Appearance override/inference/live re-theme (#11222)                   | `prototype_appearance_v1`; [Appearance](#appearance)                                                                                                                                                                                                                                                                                                 |
 | Bottom sheet above the keyboard                                        | [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                      |
 | Style `weight`, min/max sizes, `aspectRatio` (#11543)                  | `PrototypeSizing`, Android's order (bounds, `width`/`height`, aspect ratio); see below                                                                                                                                                                                                                                                               |
+| Style `effects` (#15130, not device-verified)                          | `prototype_effects_v1`; [Style effects](#style-effects)                                                                                                                                                                                                                                                                                              |
+| Data model (#11673)                                                    | `prototype_data_model_v1`; [Data model capability](#data-model-capability)                                                                                                                                                                                                                                                                           |
+| Data actions (#12519)                                                  | `prototype_data_actions_v1`; [Data actions capability](#data-actions-capability)                                                                                                                                                                                                                                                                     |
+| Storage (#12522)                                                       | `prototype_storage_v1`; [Storage capability](#storage-capability)                                                                                                                                                                                                                                                                                    |
+| Request action (#12529)                                                | `prototype_network_v1` / `prototype_network_device_v1`; [Request action capability](#request-action-capability)                                                                                                                                                                                                                                      |
+| [Patch (#11675)](../android/prototype-ux.md#patch-11675)               | `prototype_patch_v1`: `/data`, `/state`, `replaceNode` in place (`PrototypeSession.patch`)                                                                                                                                                                                                                                                           |
+| Non-scalar state (`null`, array, object)                               | Refused at `show` (state is string, number or boolean)                                                                                                                                                                                                                                                                                               |
+| Foreground scoping to the shown-over app                               | Not needed: backgrounding the app hides its window                                                                                                                                                                                                                                                                                                   |
+| Accessibility identifier fallback (`node.id`)                          | Only `testTag` (and `<testTag>.<part>`); `prototype_identifier_test_tag_only_v1`                                                                                                                                                                                                                                                                     |
+| Bottom sheet swipe-dismiss, detent dragging                            | As Android: first detent, drags between detents, `dismissOnSwipe` default true; `prototype_bottom_sheet_drag_v1`                                                                                                                                                                                                                                     |
+| Built-in icons                                                         | `schemas/prototype-ios-icon-symbols.json` (reviewable: `ios/prototype-agent/ICON-SYMBOLS.md`); unmapped draw `questionmark.square`; `prototype_icon_sf_symbols_v1`                                                                                                                                                                                   |
+| Icon node `variant`                                                    | See [Material components](#material-components)                                                                                                                                                                                                                                                                                                      |
+| Feature                                                                | iOS simulator                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------                                                                                                                                                                                   |
+| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet | Supported                                                                                                                                                                                                                                                                                                                                            |
+| Replace in place; `reset: true` starts fresh                           | Supported (`prototype_show_in_place_v1`)                                                                                                                                                                                                                                                                                                             |
+| Element and bounds anchors                                             | Supported, in points (`prototype_anchor_v1`); [Anchors](#anchors)                                                                                                                                                                                                                                                                                    |
+| `pressScale`, motion, `visibleWhen`, state/actions, assets, fonts      | Supported                                                                                                                                                                                                                                                                                                                                            |
+| Material component nodes, dialog, snackbar, pickers                    | Supported; [Material components](#material-components)                                                                                                                                                                                                                                                                                               |
+| Reusable `components` / `use` (#11053)                                 | Host expands them before sending; the agent sees plain nodes                                                                                                                                                                                                                                                                                         |
+| Hidden from `layer: "app"` observe screenshots                         | Supported (#10943, #10988); host restores after capture                                                                                                                                                                                                                                                                                              |
+| `display` selector                                                     | Refused: a simulator has one screen                                                                                                                                                                                                                                                                                                                  |
+| `window.layer: "app"`                                                  | Accepted and ignored silently: window level is fixed at alert + 1                                                                                                                                                                                                                                                                                    |
+| `window.persistence: "device"`                                         | Refused: the agent dies with the app process                                                                                                                                                                                                                                                                                                         |
+| `window.chrome` (#12064)                                               | Fullscreen only, `prototype_window_chrome_v1`; see [Dismiss control](#dismiss-control). Older agents keep the bar; explicit `none` is refused with a relaunch hint                                                                                                                                                                                   |
+| `inspect`                                                              | `prototype_inspect_v1`; [Inspect](#inspect)                                                                                                                                                                                                                                                                                                          |
+| Idle TTL, dismissal on host disconnect                                 | [Expiry](#expiry)                                                                                                                                                                                                                                                                                                                                    |
+| Per-mode colours/images, gradients, role scrims (#11220)               | `prototype_theme_modes_v1`; [Light and dark values](#light-and-dark-values)                                                                                                                                                                                                                                                                          |
+| Appearance override/inference/live re-theme (#11222)                   | `prototype_appearance_v1`; [Appearance](#appearance)                                                                                                                                                                                                                                                                                                 |
+| Bottom sheet above the keyboard                                        | [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                      |
+| Style `weight`, min/max sizes, `aspectRatio` (#11543)                  | `PrototypeSizing`, Android's order (bounds, `width`/`height`, aspect ratio); see below                                                                                                                                                                                                                                                               |
 | Style `effects` (#15128)                                               | Contract only; not advertised (`prototype_effects_v1`), so the host refuses it                                                                                                                                                                                                                                                                       |
+| Device media items, `imageAsset.data` (#14192)                         | Contract only; not advertised (`prototype_platform_media_items_v1`), so the host refuses it. The device store follows                                                                                                                                                                                                                                |
 | Data model (#11673)                                                    | `prototype_data_model_v1`; [Data model capability](#data-model-capability)                                                                                                                                                                                                                                                                           |
 | Data actions (#12519)                                                  | `prototype_data_actions_v1`; [Data actions capability](#data-actions-capability)                                                                                                                                                                                                                                                                     |
 | Storage (#12522)                                                       | `prototype_storage_v1`; [Storage capability](#storage-capability)                                                                                                                                                                                                                                                                                    |
@@ -215,6 +247,61 @@ and beats that axis's size and bounds (ignored outside a row/column); `min` wins
 content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew
 (`wrapContentWidth()`/`wrapContentHeight()`), while explicit `width`/`height`/`fill` keeps alignment;
 weighted stacks mirror under RTL via SwiftUI Layout; sizes are fractional points.
+
+## Style effects
+
+`style.effects` (#15128 contract, #15130 renderer) is not device-verified. Every one of the ten
+effects renders on any iOS 17 simulator (Android's API-floor table does not apply), through
+`PrototypeEffectsView.swift`:
+
+| `type`                | SwiftUI                                                                 |
+| --------------------- | ----------------------------------------------------------------------- |
+| `noise`               | `Rectangle().fill(ShaderLibrary.noise(...))`, over the content          |
+| `gradientMesh`        | `Rectangle().fill(ShaderLibrary.gradientMesh(...))`, behind the content |
+| `shimmer`             | a `LinearGradient` band, over the content                               |
+| `glow`                | a blurred inward `strokeBorder`, over the content                       |
+| `vignette`            | a `RadialGradient`, over the content                                    |
+| `blur`                | `.blur(radius:)` on the node's own background and content               |
+| `pixelate`            | `layerEffect`                                                           |
+| `chromaticAberration` | `layerEffect`                                                           |
+| `wave`                | `distortionEffect`                                                      |
+| `ripple`              | `distortionEffect`                                                      |
+
+- **Metal presets.** `ios/prototype-agent/Shaders/PrototypeEffects.metal` holds the shaders. SwiftPM
+  does not compile `.metal`, and `ShaderLibrary` loads only precompiled libraries from a bundle or from
+  bytes, so `scripts/ios/prototype-effects-metallib.sh` compiles a metallib on every build and emits
+  `PrototypeEffectsMetallib.swift` (base64, never committed). `prototype-agent-build.sh`,
+  `prototype-viewer-build.sh` and `protoviewer-build.sh` compile it with the other sources and the
+  agent loads it with `ShaderLibrary(data:)`. The script installs the Metal Toolchain
+  (`xcodebuild -downloadComponent metalToolchain`) when Xcode 26 lacks it.
+- **Layers.** As on Android: distortions wrap the node's background and content after its corner
+  clip, in authored order; `shimmer`, `glow`, `vignette` and `noise` paint over the content inside the
+  corner shape and are not distorted; `gradientMesh` sits between the background and the content.
+  Effects never change layout, hit testing or accessibility.
+- **Shared decisions** (same defaults, colour resolution and `phase`/`animate` rules as Android; see
+  its [Effects](../android/prototype-ux.md#effects-15128-15129-prototype_effects_v1-not-device-verified)
+  section): `phase` and `animate` move only `shimmer`, `wave` and `ripple`.
+- **Time.** `TimelineView(.animation(paused:))` drives the phase and is paused under `motion: "none"`,
+  `motion: "reduced"` and Reduce Motion, so an animated effect keeps its authored `phase`. The phase
+  function (`PrototypeEffects.phase`) is unit-tested without a GPU. Differences from Android: iOS also
+  freezes under `motion: "reduced"`, and restarts an animation at its authored `phase` each time the
+  clock starts running (Android resumes where it stopped). There is no frame-budget guard on iOS, so
+  `degradedEffects` never carries reason `budget`.
+- **Platform views.** SwiftUI draws a placeholder instead of a platform-backed view inside a
+  `layerEffect` or `distortionEffect`. The platform-backed node types are text fields, search bars,
+  sliders, selects, date and time pickers, scrolls, pagers, carousels, stacks and dialogs, and any
+  descendant with an `id` (the renderer reports its menu bounds through a UIKit marker view behind
+  it). Decision on the open question: the shader-sampled effects (`pixelate`, `chromaticAberration`,
+  `wave`, `ripple`) are omitted on a node that is or holds such a view, not on the whole spec; `blur`
+  and the over-the-content effects still draw. The show reply and `get_prototype_status` /
+  `inspect_prototypes` list each omitted effect in `degradedEffects` as `{path, type, reason:
+  "platform"}`. `path` is `<node position>.style.effects[<authored index>]` with the node's position in
+  the shown tree (`root`, `root.children[1]`, `root.child`, `root.screens["home"]`); `repeat` rows are
+  already expanded there, so a row has a plain `children[k]` path where Android's has
+  `repeat[<key>]`. Nodes whose `visibleWhen` fails and inactive stack screens are skipped, as on
+  Android. A `blur` or displacement is clipped to the node's bounds.
+- **Owed device checks.** Simulator goldens against Android within a tolerance (the simulator forwards
+  Metal to the host GPU and is not pixel-exact), and which node types really draw the placeholder.
 
 ## Open decisions
 
@@ -566,14 +653,20 @@ transition as a real tap, including on part identifiers.
   `reduced`, never `off` (#15244; read through `PrototypeAccessibilityProviding`, faked in tests): `visibleWhen` transitions other than `none` become crossfades, container size, press
   scale and swipe-row settles snap, and progress indicators and shimmer rest, while alpha and color
   animations continue (`prototype_reduced_motion_v1`).
-- **Shared elements** (`prototype_shared_element_v1`, #15115): the two `visibleWhen` nodes sharing a
-  `sharedKey` use `matchedGeometryEffect(id:in:isSource:)` with one `@Namespace` per hosting root,
-  under `full` only; `PrototypeSharedElementPlan` decides per node. `reduced` crossfades the pair
-  and `off` swaps it. A pair split across hosting roots (for example a node anchored to another
-  window layer) does not match geometry.
-  The row-to-card spec in `prototype-ux.md` (Shared element morphs) is the worked example for both
-  platforms. Turning Reduce Motion on in the simulator (the `reduceMotion` display setting) gives
-  its crossfade; Android animation scales of 0 give the instant swap.
+- **Shared elements** (`prototype_shared_element_v1` and `prototype_shared_element_v2`):
+  `sharedKey` aliases `shared: {key, as: "bounds"}`; the object form and repeat templates require v2.
+  Two `visibleWhen` nodes use `matchedGeometryEffect(properties: .frame, isSource:)` in one
+  `@Namespace` per hosting root, under `full` only. `PrototypeSharedElementPlan` selects frame
+  matching for `element` and frame matching plus a crossfade for `bounds`. Both kinds crossfade
+  under `reduced` and swap under `off`. Repeat children bind `story-{item.id}` only with
+  `repeat.key: "id"`; resolved keys must be unique per side. Unmatched feed items render normally
+  and count toward the spec-wide limit of 16 resolved keys.
+  Pairs cannot nest or cross dialog/bottomSheet boundaries; a pair split across hosting roots
+  (for example an anchored window layer) does not match geometry.
+  The feed-card-to-detail-column spec in [Shared element morphs](../android/prototype-ux.md#shared-element-morphs-15115-prototype_shared_element_v1)
+  is the worked example for both platforms: the repeated card's `story-{item.id}` resolves to
+  the detail's `story-one`. Set both to `element` for identical hero content, or `bounds` for
+  changing container content. Reduce Motion gives a crossfade; `motion: "none"` gives an instant swap.
 
 ### Dismiss control
 
@@ -1062,3 +1155,5 @@ namespace objects on nodes, window and theme for native semantics. Each field ha
 `why` in the contract. Foreign blocks are ignored and reported in `platformNotes`.
 Own-platform blocks require `prototype_platform_namespace_v1`; current renderers
 ignore both blocks and do not advertise it.
+
+Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.

@@ -1,3 +1,4 @@
+import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { ActionableError } from "../../models/ActionableError";
 import { z } from "zod";
@@ -149,6 +150,15 @@ function checkStorageKey(
   claimed: { pointer: string; index: number }[],
   index: number,
 ): KeyCheck {
+  if (storageKey.startsWith("stack:")) {
+    let declared = false;
+    walkPrototypeNodes(root, (node) => {
+      if (node.type === "stack" && node.id === storageKey.slice(6)) {
+        declared = true;
+      }
+    });
+    return declared ? { bytes: 0 } : { message: "Unknown storage stack" };
+  }
   const parsed = parsePrototypeStorageKey(storageKey);
   if (!parsed) {
     return { message: "Storage keys are state:<key> or data:<pointer under /data, such as /cart>" };

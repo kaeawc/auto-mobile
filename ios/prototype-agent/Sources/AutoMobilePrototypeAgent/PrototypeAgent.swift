@@ -704,6 +704,8 @@ final class PrototypeAgent: NSObject {
         warnAboutFontAssets(for: spec)
         warnAboutUnknownThemeColors(for: spec)
         var extra = missingAssetsExtra()
+        let degraded = model.degradedEffects()
+        if !degraded.isEmpty { extra["degradedEffects"] = degraded }
         extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
         if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
         if let plan = model.backdropPlan { extra["backdrop"] = plan.mode.rawValue }
@@ -748,6 +750,12 @@ final class PrototypeAgent: NSObject {
     private func putAsset(_ message: [String: Any], result: ProtocolResult) {
         if message["mimeType"] as? String == PrototypeCustomShaders.mimeType {
             return result(false, PrototypeCustomShaders.refusal)
+        }
+        if let id = message["id"] as? String, PrototypeMediaItems.isMediaId(id) {
+            return result(
+                false,
+                "Asset ids cannot start with \(PrototypeMediaItems.idPrefix); the device mints those for its media items"
+            )
         }
         guard let id = message["id"] as? String,
               let base64 = message["dataBase64"] as? String,

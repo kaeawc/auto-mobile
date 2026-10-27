@@ -402,6 +402,7 @@ class WebSocketServer(
     add("prototype_string_conditions_v1")
     // Node animate, style scale/rotation, slideStart/slideEnd/scale transitions, zoomable images.
     add("prototype_motion_v2")
+    add("prototype_motion_v3")
     add("prototype_window_motion_v1")
     // style.effects (#15129): noise, gradientMesh, shimmer, glow, vignette, blur, pixelate,
     // chromaticAberration, wave and ripple. Every effect renders on its API floor or is omitted and
@@ -413,6 +414,7 @@ class WebSocketServer(
     add("prototype_stack_transitions_v1")
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")
+    add("prototype_shared_element_v2")
     // Line, area, bar and ring charts over /data arrays (#14209).
     add("prototype_chart_v1")
     add("prototype_lazy_list_v1")

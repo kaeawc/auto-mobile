@@ -360,9 +360,6 @@ jobs:
               # JUnitRunner Library among them) drive
               # it, so an edit to it must exercise them rather than be skipped.
               - '.github/actions/gradle-task-run/**'
-              # The shared bodies of the Android build and unit-test jobs (#11872).
-              - '.github/actions/ci-build-android-control-proxy/**'
-              - '.github/actions/ci-junit-runner-unit-tests/**'
               - 'scripts/local-dev/hot-reload.sh'
               - '.github/workflows/android*.yml'
               # This workflow controls Android-job gating, so changes to it
@@ -657,7 +654,6 @@ jobs:
               - '.github/workflows/merge.yml'
               # The shared bodies of the WebRTC jobs (#11872).
               - '.github/actions/ci-android-device-whep/**'
-              - '.github/actions/ci-build-android-control-proxy/**'
               - '.github/actions/ci-webrtc-publisher-integration/**'
 
       # Run the WebRTC integration jobs when the streaming surface is touched, OR
@@ -3191,13 +3187,29 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-      - uses: ./.github/actions/ci-junit-runner-unit-tests
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      # Only run unit tests without Emulator
+      - uses: ./.github/actions/gradle-task-run
         with:
+          gradle-tasks: ":junit-runner:test"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      - name: "Upload Heap Dumps"
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: junit-runner-heap-dumps-unit
+          path: heap-dump
+          if-no-files-found: ignore
 
   # Test isolation issue resolved in #107 and #109
   # Re-enabled in #110
@@ -3514,13 +3526,32 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-      - uses: ./.github/actions/ci-build-android-control-proxy
+
+      - uses: ./.github/actions/gradle-task-run
         with:
+          # JVM Consumer Checks compiles the release variant as its own PR
+          # signal, concurrently with the emulator lane (#11578).
+          gradle-tasks: ":control-proxy:assembleDebug :video-server:d8Dex"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      - name: "Upload CtrlProxy APK"
+        uses: actions/upload-artifact@v6
+        with:
+          name: control-proxy-apk
+          path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+
+      - name: "Upload video-server jar"
+        uses: actions/upload-artifact@v6
+        with:
+          name: video-server-jar
+          path: android/video-server/build/libs/automobile-video.jar
 
   build-playground-app:
     timeout-minutes: 20

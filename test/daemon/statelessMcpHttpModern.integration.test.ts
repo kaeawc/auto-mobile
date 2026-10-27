@@ -177,6 +177,13 @@ test("real handler serves the shared tools/list", async () => {
   expect(frame.error).toBeUndefined();
   expect(Array.isArray(frame.result.tools)).toBe(true);
   expect(frame.result.tools.length).toBeGreaterThan(0);
+  // Private: the catalog is filtered per session key, so it must never be cacheable across callers.
+  expect(frame.result).toMatchObject({ ttlMs: 5_000, cacheScope: "private" });
+});
+
+test("real handler gives server/discover a private cache hint", async () => {
+  const frame = await exchange("server/discover");
+  expect(frame.result).toMatchObject({ ttlMs: 60_000, cacheScope: "private" });
 });
 
 test("real modern tools/call preserves resultType task without content coercion", async () => {

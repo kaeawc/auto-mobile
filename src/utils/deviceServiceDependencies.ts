@@ -19,6 +19,13 @@ export const deviceServiceDependencies: readonly DeviceServiceDependency[] = [
     unavailable: "iOS Simulator photo/video media-library import and transcoding",
     preflight: "src/server/IosSimulatorMediaLibraryProvider.ts",
   },
+  {
+    tool: "siri",
+    platform: "ios",
+    resources: ["siriAndAppIntents"],
+    unavailable: "Siri activation and App Shortcut / App Intent phrases on the iOS Simulator",
+    preflight: "src/features/action/ActivateSiri.ts",
+  },
 ];
 
 export function getDeviceServiceDependencies(tool: string): readonly DeviceServiceDependency[] {

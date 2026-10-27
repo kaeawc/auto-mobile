@@ -238,6 +238,10 @@ final class ResponseContractFixtureTests: XCTestCase {
         try append("appearance_result", WebSocketResponse(type: ResponseType.appearanceResult.rawValue,
                                                           timestamp: 1_700_000_000_000, requestId: requestId,
                                                           success: true, totalTimeMs: 17, text: "dark"))
+        // The Siri envelope is a bare success/error acknowledgement (#14109).
+        try append("siri_result", WebSocketResponse(type: ResponseType.siriResult.rawValue,
+                                                    timestamp: 1_700_000_000_000, requestId: requestId,
+                                                    success: true, totalTimeMs: 17))
         // The location envelope is a bare success/error acknowledgement (#14091).
         try append("location_result", WebSocketResponse(type: ResponseType.locationResult.rawValue,
                                                         timestamp: 1_700_000_000_000, requestId: requestId,

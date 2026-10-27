@@ -416,6 +416,15 @@
       }
     },
     {
+      "name": "request_siri",
+      "builder": "CtrlProxyNavigation.requestSiri",
+      "wire": {
+        "type": "request_siri",
+        "requestId": "fixture-request-id",
+        "text": "Show my orders in Playground"
+      }
+    },
+    {
       "name": "request_appearance",
       "builder": "CtrlProxyNavigation.requestAppearance",
       "wire": {

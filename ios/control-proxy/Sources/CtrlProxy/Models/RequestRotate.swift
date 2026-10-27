@@ -15,3 +15,12 @@ public struct RequestAppearance: Decodable, Sendable {
 }
 
 extension RequestAppearance: CommandPayload {}
+
+/// Activate Siri with `text` as if it were recognized speech (#14109), for example an App
+/// Shortcut phrase. The runner replies once Siri accepted the text, not when the intent ran.
+public struct RequestSiri: Decodable, Sendable {
+    public var requestId: String?
+    public var text: String
+}
+
+extension RequestSiri: CommandPayload {}

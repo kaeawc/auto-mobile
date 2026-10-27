@@ -490,7 +490,9 @@ function imeCodePointSubsequenceMatches(
 export const IME_COMMIT_TIMEOUT = {
   baseMs: 10_000,
   perSegmentMs: 750,
-  perCharMs: 20,
+  // A rich-text editor on a loaded emulator can take well over 100 ms to apply each committed
+  // unit. A 20 ms allowance ran out partway through an 80-character URL and left it split.
+  perCharMs: 150,
   capMs: 25_000,
 } as const;
 

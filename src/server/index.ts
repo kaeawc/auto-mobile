@@ -10,6 +10,11 @@ import {
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
+import {
+  createTelemetryElicitationRecorder,
+  registerElicitationRecorder,
+} from "./elicitationOutcome";
+import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import type { AmbiguousDeviceElicitationOptions } from "./ambiguousDeviceElicitation";
 
 import { formatToolParamError } from "./toolParamError";
@@ -573,6 +578,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     toolSelectionProfileRegistry,
     listSessionTools,
   });
+  registerElicitationRecorder(createTelemetryElicitationRecorder(TelemetryRecorder.getInstance()));
   installToolCallDispatcher(
     server,
     {

@@ -148,6 +148,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   appLifecycle: entry("Control App Lifecycle", destructiveDevice),
   changeLocalization: entry("Change Locale", destructiveDevice),
   clipboard: entry("Control Clipboard", destructiveDevice),
+  siri: entry("Activate Siri", destructiveDevice),
   crashApp: entry("Crash App", destructiveDevice),
   criticalSection: entry("Run Critical Section", destructiveDevice),
   deviceSnapshot: entry("Manage Snapshot", destructiveDevice),

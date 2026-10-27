@@ -147,12 +147,18 @@ data class PrototypeRequest(
   }
 }
 
+/** The clipboard read seam, split out so [PrototypeHost] stays within the function-count limit. */
+interface PrototypeClipboardHost {
+  /** Runs [read] while the host owns input focus; the default reads directly. */
+  suspend fun <T> readClipboard(read: () -> T): T = read()
+}
+
 /**
  * Mutations suspend until executed on main (inline if already there, posted otherwise). Boolean
  * results report platform success; show/replace return false after destroy. Replace without a
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
-interface PrototypeHost {
+interface PrototypeHost : PrototypeClipboardHost {
   /** Best synchronous baseline; the Compose window size corrects it after attachment. */
   @InternalAutoMobilePrototypeApi
   fun initialDeviceState(request: PrototypeRequest): kotlinx.serialization.json.JsonObject =
@@ -187,7 +193,6 @@ interface PrototypeHost {
   /** Changes Back focusability without changing text-field or keyboard state. */
   suspend fun setStackBackEnabled(enabled: Boolean): Boolean
 
-  suspend fun <T> readClipboard(read: () -> T): T = read()
 
   /**
    * Removes immediately, allowing the app to regain focus. A window already detached counts as

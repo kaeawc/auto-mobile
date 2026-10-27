@@ -652,6 +652,8 @@ jobs:
               # exercise the job rather than being silently skipped.
               - '.github/workflows/pull_request.yml'
               - '.github/workflows/merge.yml'
+              # The shared bodies of the WebRTC jobs (#11872).
+              - '.github/actions/ci-android-device-whep/**'
 
       # Run the WebRTC integration jobs when the streaming surface is touched, OR
       # when a human explicitly opts in by labelling the PR `webrtc` or mentioning
@@ -3667,53 +3669,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
-        with:
-          name: control-proxy-apk
-          path: android/control-proxy/build/outputs/apk/debug
-
-      - name: "Download video-server jar"
-        uses: actions/download-artifact@v7
-        with:
-          name: video-server-jar
-          path: android/video-server/build/libs
-
-      - name: "Install Chrome for WHEP decoding"
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes google-chrome-stable || sudo apt-get install --yes chromium-browser
-
-      - uses: ./.github/actions/android-emulator
-        with:
-          script: |
-            cd "$GITHUB_WORKSPACE"
-            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION=1 \
-            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android \
-            AUTOMOBILE_ANDROID_H264_DEVICE_ID=emulator-5554 \
-            AUTOMOBILE_VIDEO_SERVER_JAR="$GITHUB_WORKSPACE/android/video-server/build/libs/automobile-video.jar" \
-            AUTOMOBILE_REQUIRE_VIDEO_SERVER=1 \
-              bun run test:integration:webrtc-device
-          working-directory: "./android/"
-          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
-
-      - name: "Explain WebRTC device results"
-        if: always()
-        continue-on-error: true
-        run: bash scripts/webrtc/explain-device-results.sh android
-
-      - name: "Upload WebRTC device artifacts"
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: android-webrtc-device-artifacts-${{ github.run_attempt }}
-          path: scratch/webrtc-device-integration/
-          if-no-files-found: ignore
-          retention-days: 7
+      - uses: ./.github/actions/ci-android-device-whep
 
   ios-device-webrtc:
     name: "iOS Device Capture to WHEP"

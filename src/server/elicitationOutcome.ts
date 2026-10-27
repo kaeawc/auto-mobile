@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger";
-import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
+import type { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 
 /** What a client declared in its `elicitation` capability. */
 export type ElicitationDeclared = "none" | "bare" | "form" | "url";
@@ -53,16 +53,41 @@ export function classifyElicitationDeclaration(capabilities: unknown): Elicitati
   return elicitation.url !== undefined ? "url" : "bare";
 }
 
-/** The production recorder: an info log line plus a push-only `elicitation` telemetry event. */
-export const telemetryElicitationRecorder: ElicitationRecorder = {
-  record(record) {
-    logger.info(
-      `[elicitation] ${record.toolName} era=${record.era} declared=${record.declared} ` +
-        `outcome=${record.outcome} candidates=${record.candidateCount}` +
-        (record.latencyMs === undefined ? "" : ` latencyMs=${record.latencyMs}`),
-    );
-    TelemetryRecorder.getInstance().recordElicitationEvent(record);
-  },
+function logLine(record: ElicitationRecord): string {
+  return (
+    `[elicitation] ${record.toolName} era=${record.era} declared=${record.declared} ` +
+    `outcome=${record.outcome} candidates=${record.candidateCount}` +
+    (record.latencyMs === undefined ? "" : ` latencyMs=${record.latencyMs}`)
+  );
+}
+
+/** Logs one info line per record; every process can do this without a telemetry sink. */
+export const loggingElicitationRecorder: ElicitationRecorder = {
+  record: (record) => logger.info(logLine(record)),
+};
+
+/** Logs, then pushes a push-only `elicitation` telemetry event to the given sink. */
+export function createTelemetryElicitationRecorder(
+  sink: Pick<TelemetryRecorder, "recordElicitationEvent">,
+): ElicitationRecorder {
+  return {
+    record(record) {
+      loggingElicitationRecorder.record(record);
+      sink.recordElicitationEvent(record);
+    },
+  };
+}
+
+let registered: ElicitationRecorder = loggingElicitationRecorder;
+
+/** Composition roots with a telemetry sink register it; everything else keeps logging only. */
+export function registerElicitationRecorder(recorder: ElicitationRecorder): void {
+  registered = recorder;
+}
+
+/** The recorder callers use by default: whatever the composition root registered. */
+export const defaultElicitationRecorder: ElicitationRecorder = {
+  record: (record) => registered.record(record),
 };
 
 export const noopElicitationRecorder: ElicitationRecorder = { record: () => {} };

@@ -9,7 +9,7 @@ import { deviceChoiceRequestStateSchema } from "./deviceChoiceRequestState";
 import { ambiguousDeviceCandidates, declaresFormElicitation } from "./ambiguousDeviceElicitation";
 import {
   classifyElicitationDeclaration,
-  telemetryElicitationRecorder,
+  defaultElicitationRecorder,
   type ElicitationRecorder,
 } from "./elicitationOutcome";
 import { executeWithDeviceChoice } from "./ambiguousDeviceChoice";
@@ -24,7 +24,7 @@ import type {
 /** Modern requests ask in-band; only the signing key survives the HTTP exchange. */
 export function withAmbiguousDeviceMrtr<Req extends ToolCallRequest, Result>(
   backend: ToolCallBackend<Req, McpToolCallExtra, Result>,
-  recorder: ElicitationRecorder = telemetryElicitationRecorder,
+  recorder: ElicitationRecorder = defaultElicitationRecorder,
 ): ToolCallBackend<Req, McpToolCallExtra, Result | InputRequiredResult> {
   return {
     ...backend,

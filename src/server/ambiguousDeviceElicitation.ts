@@ -11,7 +11,7 @@ import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   classifyElicitationDeclaration,
-  telemetryElicitationRecorder,
+  defaultElicitationRecorder,
   type ElicitationDeclared,
   type ElicitationOutcome,
   type ElicitationRecorder,
@@ -240,7 +240,7 @@ export function withAmbiguousDeviceElicitation<
 ): ToolCallBackend<Req, Extra, Result> {
   const timer = options.timer ?? defaultTimer;
   const timeoutMs = options.timeoutMs ?? AMBIGUOUS_DEVICE_ELICITATION_TIMEOUT_MS;
-  const recorder = options.recorder ?? telemetryElicitationRecorder;
+  const recorder = options.recorder ?? defaultElicitationRecorder;
   const declarationOf = (): ElicitationDeclared =>
     peer.declaration?.() ?? (peer.declaresElicitation() ? "form" : "none");
   return {

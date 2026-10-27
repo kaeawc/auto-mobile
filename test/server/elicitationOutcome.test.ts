@@ -7,6 +7,7 @@ import {
 } from "../../src/server/ambiguousDeviceElicitation";
 import {
   classifyElicitationDeclaration,
+  createTelemetryElicitationRecorder,
   type ElicitationRecord,
   type ElicitationRecorder,
 } from "../../src/server/elicitationOutcome";
@@ -258,5 +259,25 @@ describe("modern ask recording (#15588)", () => {
     expect(recorder.records).toMatchObject([
       { era: "modern", declared: "none", outcome: "not_offered" },
     ]);
+  });
+});
+
+describe("telemetry recorder", () => {
+  test("pushes the record to the sink it was given", () => {
+    const pushed: unknown[] = [];
+    const recorder = createTelemetryElicitationRecorder({
+      recordElicitationEvent: (event) => void pushed.push(event),
+    });
+    const record: ElicitationRecord = {
+      toolName: "probe",
+      era: "legacy",
+      declared: "form",
+      outcome: "accept",
+      candidateCount: 2,
+      atMs: 5,
+      latencyMs: 3,
+    };
+    recorder.record(record);
+    expect(pushed).toEqual([record]);
   });
 });

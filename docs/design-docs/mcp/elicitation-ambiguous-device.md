@@ -72,9 +72,11 @@ ambiguous-device refusal on a call without `deviceId` produces one `ElicitationR
 - `latencyMs`: ask to answer on the injected timer, for legacy asks and modern answers; absent for
   `not_offered` and `asked`.
 
-The production recorder writes one `[elicitation] ...` info log line and a push-only `elicitation`
-telemetry event. The `ElicitationRecorder` is injectable (`ambiguousDeviceElicitation.recorder` for the
-legacy path, an argument to `withAmbiguousDeviceMrtr`), so tests assert records with a fake.
+Every process logs one `[elicitation] ...` info line per record. The server composition root
+(`src/server/index.ts`) also registers a recorder that pushes a push-only `elicitation` telemetry event;
+the stdio proxy has no telemetry sink and logs only. The `ElicitationRecorder` is injectable
+(`ambiguousDeviceElicitation.recorder` for the legacy path, an argument to `withAmbiguousDeviceMrtr`),
+so tests assert records with a fake.
 
 ### MRTR limits (modern era)
 

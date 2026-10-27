@@ -244,6 +244,9 @@ extension PrototypeRepeat {
     {
         guard case let .object(fields) = node else { return }
         try validateEmitActions(fields["onTap"], path: "\(path).onTap", scope: scope)
+        if let linkify = fields["linkify"]?.objectFields {
+            try validateEmitActions(linkify["onTap"], path: "\(path).linkify.onTap", scope: scope, matchBindings: true)
+        }
         // Existing composite-part action locations, matching Instance.bindComponentActions.
         for part in ["navigationIcon", "confirm", "dismiss", "action"] {
             if case let .object(member)? = fields[part] {
@@ -304,17 +307,35 @@ extension PrototypeRepeat {
         }
     }
 
-    private static func validateEmitActions(_ raw: JSONValue?, path: String, scope: EmitScope?) throws {
+    private static func validateEmitActions(
+        _ raw: JSONValue?, path: String, scope: EmitScope?, matchBindings: Bool = false
+    )
+        throws
+    {
         guard case let .array(actions)? = raw else { return }
         for (index, rawAction) in actions.enumerated() {
             guard case let .object(action) = rawAction else { continue }
             let lists = action["type"] == .string("startTimer") ? ["actions"] : ["onSuccess", "onError"]
             for list in lists {
-                try validateEmitActions(action[list], path: "\(path)[\(index)].\(list)", scope: scope)
+                try validateEmitActions(
+                    action[list],
+                    path: "\(path)[\(index)].\(list)",
+                    scope: scope,
+                    matchBindings: matchBindings
+                )
             }
             guard action["type"] == .string("emit"), let context = action["context"] else { continue }
             let contextPath = "\(path)[\(index)].context"
-            let bindings = try PrototypeEmitContext.validate(context, path: contextPath)
+            // Match values are strings supplied at tap time, after the row is bound.
+            let checkedContext: JSONValue = if matchBindings, let fields = context.objectFields {
+                .object(fields.mapValues { binding in
+                    if let form = binding.objectFields, form.count == 1, form["match"] != nil {
+                        return .object(["value": .string("")])
+                    }
+                    return binding
+                })
+            } else { context }
+            let bindings = try PrototypeEmitContext.validate(checkedContext, path: contextPath)
             for name in bindings.keys.sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {
                 guard case let .object(binding)? = bindings[name] else { continue }
                 let bindingPath = PrototypeLimits.dataMemberPath(contextPath, key: name)
@@ -348,6 +369,7 @@ struct PrototypeRepeatInstance {
         bindComponentActions(&fields)
         if fields["type"] == .string("text") {
             bindList("spans", in: &fields) { bindPartFields(&$0) }
+            bindPart("linkify", in: &fields)
         }
         bindStateKeys(&fields)
         bindPartFields(&fields)
@@ -497,6 +519,14 @@ struct PrototypeRepeatInstance {
             }
         case .string("request")?:
             bindRequest(&fields)
+        case .string("platform")?:
+            bindRequest(&fields)
+            if case let .object(args)? = fields["args"] {
+                fields["args"] = .object(args.mapValues { value in
+                    guard case let .object(binding) = value else { return value }
+                    return bindDataValue(binding)
+                })
+            }
         default:
             break
         }

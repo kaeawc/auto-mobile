@@ -122,6 +122,8 @@ private fun PrototypeStyle.mergedOver(prototype: PrototypeStyle): PrototypeStyle
     border = prototype.border ?: border,
     elevation = prototype.elevation ?: elevation,
     shadowColor = prototype.shadowColor ?: shadowColor,
+    shadows = prototype.shadows ?: shadows,
+    cornerStyle = prototype.cornerStyle ?: cornerStyle,
     gradient = prototype.gradient ?: gradient,
     aspectRatio = prototype.aspectRatio ?: aspectRatio,
     offset = prototype.offset ?: offset,

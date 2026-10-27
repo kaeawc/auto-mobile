@@ -2,6 +2,11 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.prototype.PlatformCallResult
+import dev.jasonpearson.automobile.prototype.PlatformError
+import dev.jasonpearson.automobile.prototype.PlatformErrorCode
+import dev.jasonpearson.automobile.prototype.PrototypePlatform as RuntimePlatform
+import dev.jasonpearson.automobile.prototype.PrototypePlatformRegistry
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -170,6 +175,9 @@ class PrototypeRuntime(
   private val requestLimiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
   initialPlatformState: JsonObject = JsonObject(emptyMap()),
   val shaderSession: PrototypeShaderSession = PrototypeShaderSession(),
+  platform: RuntimePlatform = RuntimePlatform.None,
+  platformLimiter: PrototypeRequestLimiter =
+    PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -197,22 +205,31 @@ class PrototypeRuntime(
   private var eventData: JsonObject? = null
 
   private suspend fun deliverPlatformEvent(name: String, data: JsonObject) {
-    if (!current.active) return
-    val payload = buildJsonObject {
-      put("event", name)
-      put("data", data)
-    }
-    require(
-      payload.toString().toByteArray(Charsets.UTF_8).size <=
-        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
-    )
-    emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)
+    if (!current.active || name.substringBefore('.') !in current.spec.requires?.platform.orEmpty())
+      return
+    val previousEvent = eventData
     eventData = data
     try {
       handle(PrototypeInteraction.Tap(current.spec.platform?.on?.get(name).orEmpty()))
     } finally {
-      eventData = null
+      eventData = previousEvent
     }
+    if (!current.active) return
+    var payload = buildJsonObject {
+      put("event", name)
+      put("data", data)
+    }
+    if (
+      payload.toString().toByteArray(Charsets.UTF_8).size >
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
+    ) {
+      payload = buildJsonObject {
+        put("event", name)
+        put("data", JsonObject(emptyMap()))
+        put("truncated", true)
+      }
+    }
+    emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)
   }
 
   private val renderMapper = PrototypeRenderMapper()
@@ -245,6 +262,42 @@ class PrototypeRuntime(
   val snapshots = mutableSnapshot.asStateFlow()
   val current: PrototypeRuntimeSnapshot
     get() = snapshots.value
+
+  private val deviceModule =
+    PrototypeDeviceModule(initialPlatformState["device"] as? JsonObject ?: JsonObject(emptyMap()))
+  val platformRegistry =
+    PrototypePlatformRegistry(
+      listOf(deviceModule) + platform.registry.modules,
+    )
+  private val platformDispatcher =
+    PrototypePlatformDispatcher(
+      platformRegistry,
+      requestScope,
+      exclusively,
+      newRequestId,
+      clock,
+      ::finishPlatformCall,
+      ::deliverPlatformEvent,
+      ::publishModuleState,
+      warn,
+      platformLimiter,
+    )
+
+  /** Start streams only after the host has installed this runtime in its surface table. */
+  fun startPlatformModules() = platformDispatcher.subscribe()
+
+  /** Hosts call this under their lock before replacement, reset or dismissal. */
+  suspend fun cancelPlatformCalls() = platformDispatcher.cancel()
+
+  private fun publishModuleState(name: String, state: JsonObject) {
+    if (!current.active || (name == "device" && state.isEmpty())) return
+    val next = JsonObject(current.platformState + (name to state))
+    if (next.toString().toByteArray(Charsets.UTF_8).size > PrototypeDeviceContract.maxStateBytes) {
+      warn("Refused oversized platform state from $name")
+      return
+    }
+    mutableSnapshot.value = current.copy(platformState = next)
+  }
 
   fun replace(spec: PrototypeSpec) {
     if (!current.active) return
@@ -381,6 +434,7 @@ class PrototypeRuntime(
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
 
   fun close() {
+    platformDispatcher.close()
     platformState.close()
     mutableSnapshot.value = current.copy(active = false)
     timerEngine.cancelAll()
@@ -425,7 +479,8 @@ class PrototypeRuntime(
 
   private fun updateDeviceState(snapshot: JsonObject) {
     if (platformState.update(snapshot)) {
-      mutableSnapshot.value = current.copy(platformState = platformState.snapshot)
+      deviceModule.update(platformState.snapshot.getValue("device").jsonObject)
+      publishModuleState("device", platformState.snapshot.getValue("device").jsonObject)
     }
   }
 
@@ -586,6 +641,7 @@ class PrototypeRuntime(
         is PrototypeAppendDataAction,
         is PrototypeRemoveDataAction -> writeData(action)
         is PrototypeRequestAction -> startRequest(action, touched)
+        is PrototypePlatformAction -> startPlatformCall(action, touched)
         is PrototypeScrollToAction -> requestScroll(action)
         is PrototypeStartTimerAction -> timerEngine.start(action)
         is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
@@ -814,6 +870,7 @@ class PrototypeRuntime(
     if (!current.active) return
     storage?.record(current.spec)
     storage?.flush()
+    cancelPlatformCalls()
     close()
     emit(
       kind = PrototypeEventKind.DISMISSED,
@@ -988,6 +1045,132 @@ class PrototypeRuntime(
     else payload(null)
   }
 
+  private suspend fun startPlatformCall(
+    action: PrototypePlatformAction,
+    touched: MutableSet<String>,
+  ) {
+    val args = linkedMapOf<String, JsonElement>()
+    var invalid: String? = null
+    for ((name, binding) in action.args.orEmpty()) {
+      when (val resolved = PrototypeDataWriter.resolveValue(binding.jsonObject, bindingInputs())) {
+        is PrototypeDataValue.Resolved -> args[name] = resolved.value
+        is PrototypeDataValue.Failure -> {
+          invalid = resolved.error.message
+          break
+        }
+      }
+    }
+    // Resolve against the state before loading, matching request actions (including self-bindings).
+    action.statusKey?.let { if (writeStatus(it, "loading")) touched += it }
+    platformDispatcher.start(
+      action,
+      if (invalid == null) JsonObject(args) else null,
+      invalid,
+      eventData,
+    )
+  }
+
+  private suspend fun finishPlatformCall(
+    call: PrototypePlatformDispatcher.Pending,
+    result: PlatformCallResult,
+  ) {
+    try {
+      var error = (result as? PlatformCallResult.Failure)?.error
+      if (!current.active) {
+        if (error?.code == PlatformErrorCode.CANCELLED)
+          emit(
+            PrototypeEventKind.EMIT,
+            PrototypePlatform.CALL_EVENT_NAME,
+            buildJsonObject {
+              put("callId", call.id)
+              put("call", call.action.call)
+              put("outcome", "error")
+              put("durationMs", (clock() - call.startedAt).coerceAtLeast(0))
+              put(
+                "error",
+                buildJsonObject {
+                  put("code", "cancelled")
+                  put("message", "Prototype closed")
+                },
+              )
+            },
+          )
+        return
+      }
+      val action = call.action
+      val duration = (clock() - call.startedAt).coerceAtLeast(0)
+      fun metadata() = buildJsonObject {
+        put("outcome", if (error == null) "success" else "error")
+        put("durationMs", duration)
+        error?.let { failure ->
+          put(
+            "error",
+            buildJsonObject {
+              put("code", failure.code.wireValue)
+              put("message", failure.message.take(512))
+            },
+          )
+        }
+      }
+      action.into?.let { into ->
+        val writes = mutableListOf<PrototypeDataWrite>()
+        if (result is PlatformCallResult.Success)
+          writes += PrototypeDataWrite.Set(into, result.value)
+        writes += PrototypeDataWrite.Set(PrototypeRequests.metaPath(into), metadata())
+        val refused = trialDataWrites(writes)
+        if (refused == null) writes.forEach { applyDataWrite(it) }
+        else {
+          if (error == null)
+            error =
+              PlatformError(
+                PlatformErrorCode.PLATFORM_ERROR,
+                refused.message.take(512),
+              )
+          applyDataWrite(PrototypeDataWrite.Set(PrototypeRequests.metaPath(into), metadata()))
+        }
+      }
+      action.statusKey?.let {
+        if (writeStatus(it, if (error == null) "success" else "error")) emitStateChange(listOf(it))
+      }
+      emit(
+        PrototypeEventKind.EMIT,
+        PrototypePlatform.CALL_EVENT_NAME,
+        buildJsonObject {
+          put("callId", call.id)
+          put("call", action.call)
+          put("outcome", if (error == null) "success" else "error")
+          put("durationMs", duration)
+          error?.let { failure ->
+            put(
+              "error",
+              buildJsonObject {
+                put("code", failure.code.wireValue)
+                put("message", failure.message.take(512))
+              },
+            )
+          }
+        },
+      )
+      if (error?.code != PlatformErrorCode.CANCELLED) {
+        val actions = (if (error == null) action.onSuccess else action.onError).orEmpty()
+        if (actions.isNotEmpty() && current.active && requireValid(actions)) {
+          val previousEvent = eventData
+          eventData = call.eventContext
+          try {
+            run(actions, plannedWrites(actions, current.spec))
+          } catch (refused: IllegalArgumentException) {
+            warn("Refused platform follow-up: ${refused.message}")
+          } finally {
+            eventData = previousEvent
+          }
+        }
+      }
+    } finally {
+      interactionRevision = null
+      if (current.active) storage?.record(current.spec)
+    }
+  }
+
   // ---- request action (#12528) ----
 
   /** A started request, kept until its response settles or it is superseded or cancelled. */
@@ -1001,6 +1184,7 @@ class PrototypeRuntime(
     val startedAt: Long,
     val onSuccess: List<PrototypeAction>?,
     val onError: List<PrototypeAction>?,
+    val eventContext: JsonObject?,
   ) {
     lateinit var job: Job
 
@@ -1077,6 +1261,7 @@ class PrototypeRuntime(
         clock(),
         action.onSuccess,
         action.onError,
+        eventData,
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
@@ -1214,7 +1399,13 @@ class PrototypeRuntime(
         warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
         return
       }
-    run(followUps, writes)
+    val previousEvent = eventData
+    eventData = request.eventContext
+    try {
+      run(followUps, writes)
+    } finally {
+      eventData = previousEvent
+    }
   }
 
   private suspend fun sendRequestEvent(
@@ -1344,6 +1535,10 @@ class PrototypeRuntime(
           PrototypeStackSnapshot(path.ifEmpty { listOf(node.start) })
         },
     )
+
+  init {
+    platform.registry.modules.forEach { publishModuleState(it.name, it.state.value) }
+  }
 }
 
 private val runtimeJson = Json { classDiscriminator = "type" }

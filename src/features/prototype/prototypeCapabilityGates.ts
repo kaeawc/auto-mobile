@@ -1,3 +1,8 @@
+import {
+  prototypeStylePolishV2Fields,
+  prototypeStylePolishV2UnsupportedMessage,
+} from "./prototypeStylePolishV2";
+import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
   prototypeStackTransitionFields,
@@ -125,6 +130,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
     fields: prototypeShaderFields,
     unsupportedMessage: prototypeShadersUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STYLE_POLISH_V2_CAPABILITY,
+    fields: prototypeStylePolishV2Fields,
+    unsupportedMessage: prototypeStylePolishV2UnsupportedMessage,
   },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,

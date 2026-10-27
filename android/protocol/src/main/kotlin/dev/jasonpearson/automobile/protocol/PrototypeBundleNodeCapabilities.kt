@@ -6,6 +6,7 @@ import kotlinx.serialization.json.*
 internal object PrototypeBundleNodeCapabilities {
   fun collect(n: JsonObject): Set<String> {
     val caps = linkedSetOf<String>()
+    if (PrototypeStylePolishV2Rules.required(n)) caps.add(PrototypeStylePolishV2Rules.CAPABILITY)
     val type = text(n["type"])
     val typed =
       mapOf(
@@ -82,6 +83,8 @@ internal object PrototypeBundleNodeCapabilities {
   }
 
   private fun appearance(n: JsonObject, type: String?, caps: MutableSet<String>) {
+    if ((n["filter"] as? JsonObject)?.get("tint") is JsonObject)
+      caps.add("prototype_theme_modes_v1")
     val pairedImage = type == "image" && n["asset"] is JsonObject
     val scrim = type == "bottomSheet" && themed(n["scrim"])
     val items =
@@ -104,7 +107,19 @@ internal object PrototypeBundleNodeCapabilities {
     val paired = listOf("background", "color", "shadowColor").any { style[it] is JsonObject }
     val border = (style["border"] as? JsonObject)?.get("color") is JsonObject
     val stops = ((style["gradient"] as? JsonObject)?.get("stops") as? JsonArray).orEmpty()
-    return paired || border || stops.any { themed((it as? JsonObject)?.get("color")) }
+    val shadows =
+      (style["shadows"] as? JsonArray).orEmpty().any {
+        (it as? JsonObject)?.get("color") is JsonObject
+      }
+    val borderStops =
+      (((style["border"] as? JsonObject)?.get("gradient") as? JsonObject)?.get("stops")
+          as? JsonArray)
+        .orEmpty()
+    return shadows ||
+      borderStops.any { themed((it as? JsonObject)?.get("color")) } ||
+      paired ||
+      border ||
+      stops.any { themed((it as? JsonObject)?.get("color")) }
   }
 
   fun themed(value: JsonElement?) = value is JsonObject || (text(value)?.startsWith('#') == false)

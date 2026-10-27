@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
+import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -187,7 +188,11 @@ class PrototypeController(
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
   private val validateShaders: (PrototypeNode) -> Unit = {},
+  private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
+    dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
+  private val platformLimiter = PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight)
+
   val isShowing: Boolean
     get() = surfaces.values.any { it.host.isShowing }
 
@@ -571,6 +576,8 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        platform = platform,
+        platformLimiter = platformLimiter,
         requestScope = requestScope,
         // A response lands between interactions, never in the middle of one.
         exclusively = { block -> settleRequest(runtime, block) },
@@ -624,6 +631,7 @@ class PrototypeController(
     reused?.runtime?.flushStorage()
     // A same-id show without a reset keeps its requests in flight; a reset or another id cancels.
     if (preservePages && reused === previous) reused?.runtime?.handOverRequests(runtime)
+    reused?.runtime?.cancelPlatformCalls()
     reused?.runtime?.close()
     idle.cancel()
     val retainedRequest =
@@ -652,6 +660,7 @@ class PrototypeController(
         remove(validated.id)
         put(validated.id, surface)
       }
+    runtime.startPlatformModules()
     if (blocked) runtime.pauseTimers()
     armIdle(runtime)
     // The accepted show succeeds even if a sibling host cannot detach. Its closed runtime stays
@@ -666,6 +675,7 @@ class PrototypeController(
   /** Replacement closes silently, just as the former single runtime did. */
   private suspend fun retire(surface: Surface, notifyDismissed: Boolean = false) {
     surface.runtime.flushStorage()
+    surface.runtime.cancelPlatformCalls()
     surface.runtime.close()
     surface.idle.cancel()
     surface.foreground.release()

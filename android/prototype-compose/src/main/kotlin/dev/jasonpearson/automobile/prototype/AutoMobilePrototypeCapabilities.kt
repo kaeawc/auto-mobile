@@ -12,6 +12,9 @@ object AutoMobilePrototype {
   val capabilities: Set<String>
     get() = capabilitiesForSdk(Build.VERSION.SDK_INT)
 
+  fun capabilities(platform: PrototypePlatform): Set<String> =
+    (capabilities + platform.registry.capabilities).toSortedSet()
+
   internal fun capabilitiesForSdk(sdkInt: Int): Set<String> =
     (baseCapabilities + prototypeShaderCapabilities(sdkInt)).sorted().toSet()
 
@@ -42,6 +45,7 @@ object AutoMobilePrototype {
       "prototype_stack_transitions_v1",
       "prototype_stack_v1",
       "prototype_storage_v1",
+      "prototype_style_polish_v2",
       "prototype_swipe_actions_v1",
       "prototype_text_field_actions_v1",
       "prototype_text_field_leading_icon_v1",

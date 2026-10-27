@@ -71,6 +71,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -228,6 +229,26 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         text = text?.let(instance::interpolate),
+        linkify =
+          linkify?.let { options ->
+            val node =
+              JsonObject(
+                mapOf(
+                  "type" to JsonPrimitive("text"),
+                  "linkify" to JsonObject(mapOf("onTap" to options.onTap)),
+                ),
+              )
+            val bound =
+              PrototypeRepeatTemplate.bindNodeFields(
+                node,
+                instance.alias,
+                instance.item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
+                instance.index,
+              )
+            options.copy(
+              onTap = (bound.getValue("linkify") as JsonObject).getValue("onTap") as JsonArray,
+            )
+          },
         spans =
           spans?.map { span ->
             span.copy(

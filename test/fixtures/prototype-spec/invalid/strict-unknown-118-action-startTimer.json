@@ -1,0 +1,63 @@
+{
+  "spec": {
+    "id": "appear",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "onAppear": [
+        {
+          "type": "startTimer",
+          "id": "splash",
+          "afterMs": 2000,
+          "actions": [
+            {
+              "type": "setState",
+              "key": "show",
+              "value": false
+            }
+          ],
+          "zzzUnknown": true
+        }
+      ],
+      "type": "column",
+      "children": [
+        {
+          "onAppear": [
+            {
+              "type": "emit",
+              "name": "appeared"
+            }
+          ],
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "type": "text",
+          "text": "Splash"
+        },
+        {
+          "onAppear": [
+            {
+              "type": "emit",
+              "name": "appeared"
+            }
+          ],
+          "visibleWhen": {
+            "key": "show",
+            "equals": false
+          },
+          "type": "text",
+          "text": "Content"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onAppear[0].zzzUnknown"
+}

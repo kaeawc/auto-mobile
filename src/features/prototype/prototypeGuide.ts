@@ -9,6 +9,7 @@ import {
   PROTOTYPE_THEME_MODES_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
+  GUIDE_STRINGS_SEMANTICS,
   GUIDE_APPEARANCE,
   GUIDE_CHECKS,
   GUIDE_COMPONENTS,
@@ -21,9 +22,11 @@ import {
   GUIDE_ERRORS,
   GUIDE_GESTURES,
   GUIDE_INTRO,
+  GUIDE_TEST_SESSIONS,
   GUIDE_PATCH,
   GUIDE_REPEAT,
   GUIDE_STORAGE,
+  GUIDE_TEMPLATES,
   GUIDE_TIMERS,
 } from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
@@ -72,6 +75,8 @@ function describeRule(rule: Rule): string {
     case "boundKey":
       // A state key; inside a repeat template it may also hold placeholders (see Lists).
       return "key";
+    case "strings":
+      return "strings";
     case "screenMap":
       return `screen-name → node (${rule.min}..${rule.max} entries)`;
     case "array":
@@ -122,7 +127,7 @@ function fieldRuleValues(definition: string, field: string): string[] {
 /** Markdown limits table; every value comes from the contract's `limits`. */
 export function renderLimitsTable(): string {
   const rows = Object.entries(contract.limits).map(([name, value]) => `| \`${name}\` | ${value} |`);
-  const actionFields = ["onTap", "onLongPress", "onDoubleTap"];
+  const actionFields = ["onTap", "onLongPress", "onDoubleTap", "onAppear"];
   const items = (definitions.repeat.fields?.items.rule ?? {}) as Rule;
   for (const field of actionFields) {
     const rule = (definitions.node.variants?.box.fields?.[field].rule ?? {}) as Rule;
@@ -147,6 +152,7 @@ function renderNodes(): string {
     ...variantLines(variants, shared),
     "",
     `Pager options require \`${PROTOTYPE_PAGER_OPTIONS_CAPABILITY}\` whenever any is explicitly present (including default values): \`axis\` is horizontal (default) or vertical; \`pageSpacing\` is the dp gap (default 0); \`peek: {start?, end?}\` leaves neighbouring pages visible along the main axis (default 0 on each side, \`{}\` is a no-op); \`pageSize\` is fill (default) or \`{dp}\` for fixed-size pages. Distances are finite, spacing and peek are 0..${contract.limits.MAX_PROTOTYPE_PAGER_DP}, and fixed page size is 1e-6..${contract.limits.MAX_PROTOTYPE_PAGER_DP} (\`MAX_PROTOTYPE_PAGER_DP\`). Objects are strict. On iOS dp means points. A vertical pager cannot have any vertical scroll ancestor, including a scroll with omitted axis; a horizontal scroll ancestor is allowed. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.`,
+    "Bar scrolling requires `prototype_bar_scroll_v1` when `onScroll` or `scroll` is explicit. `topAppBar.onScroll` defaults to pinned; enterAlways hides and reveals with scroll direction; exitUntilCollapsed collapses medium/large titles to the small height. `bottomNav` and `tabBar` default to none; hide slides away and minimize draws icons only. Set `scroll` to exactly one scroll id in the same screen for an active behavior. Hidden bars leave hit testing and observation; partial bars expose drawn bounds. Reduced motion snaps between states. iOS uses custom Material bars; native platform bars are deferred.",
     "The current page is the first fully visible page (fixed-size pages snap at Start; fill uses the usual settled page). page_changed, {page}/{pageCount}, setPage and tabBar/bottomNav pager bindings keep their meaning. Fully off-screen retained neighbours stay outside the semantics tree; stable keys and neighbour retention are unchanged. Indicator and carousel remain deferred.",
   ].join("\n");
 }
@@ -156,7 +162,7 @@ function renderActions(): string {
   return [
     "## Actions",
     "",
-    "Used in `onTap`, `onLongPress`, `onDoubleTap` and searchBar `onSubmit` lists.",
+    "Used in `onTap`, `onLongPress`, `onDoubleTap`, `onAppear` and searchBar `onSubmit` lists.",
     "",
     `Gesture fields are available only on ${code(
       Object.entries(definitions.node.variants ?? {})
@@ -254,6 +260,8 @@ function renderPlatformDifferences(): string {
 export function renderPrototypeGuide(): string {
   return [
     GUIDE_INTRO,
+    GUIDE_STRINGS_SEMANTICS,
+    GUIDE_TEMPLATES,
     "## Limits\n\nGenerated from `schemas/prototype-spec-contract.json`.\n\n" + renderLimitsTable(),
     renderWindow(),
     renderNodes(),
@@ -264,6 +272,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_DATA_ACTIONS,
     GUIDE_STORAGE,
     GUIDE_TIMERS,
+    GUIDE_TEST_SESSIONS,
     GUIDE_REQUEST,
     GUIDE_EMIT_CONTEXT,
     GUIDE_CHECKS,

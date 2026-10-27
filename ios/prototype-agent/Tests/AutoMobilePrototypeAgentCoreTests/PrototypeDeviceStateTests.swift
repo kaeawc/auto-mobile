@@ -43,7 +43,7 @@ final class PrototypeDeviceStateTests: XCTestCase {
         "requires":{"platform":["device"]},"platform":{"on":{"device.changed":[
         {"type":"increment","key":"n"},
         {"type":"setData","path":"/data/pointer","value":{"event":"/pointer"}}]}},
-        "root":{"type":"text","text":"{platform:/device/sizeClass}"}}
+        "root":{"type":"text","text":"{platform:/device/widthClass}"}}
         """.utf8))
     }
 
@@ -63,6 +63,24 @@ final class PrototypeDeviceStateTests: XCTestCase {
         )
     }
 
+    func testPortableWidthClassComparisons() throws {
+        for operation in ["equals", "notEquals"] {
+            for value in ["compact", "medium", "expanded", "regular", "wide"] {
+                let data = Data("""
+                {"id":"device","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["device"]},
+                "root":{"type":"spacer","visibleWhen":{"platform":"/device/widthClass","\(operation)":"\(value)"}}}
+                """.utf8)
+                if value == "wide" {
+                    XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: data))
+                } else {
+                    XCTAssertNoThrow(try JSONDecoder().decode(PrototypeSpec.self, from: data))
+                }
+            }
+        }
+        XCTAssertEqual(state(.compact, width: 1200).snapshot["device"]?.objectFields?["widthClass"], .string("compact"))
+        XCTAssertEqual(state(.regular, width: 320).snapshot["device"]?.objectFields?["widthClass"], .string("regular"))
+    }
+
     func testNativeSnapshotAndIdiomMapping() {
         for (idiom, expected) in [
             (PrototypeDeviceIdiom.phone, "phone"),
@@ -73,10 +91,10 @@ final class PrototypeDeviceStateTests: XCTestCase {
             let device = state(.regular, idiom: idiom).snapshot["device"]?.objectFields
             XCTAssertEqual(
                 Set(device?.keys ?? [:].keys),
-                ["os", "osVersion", "idiom", "sizeClass", "windowWidth", "windowHeight", "pointer"]
+                ["os", "osVersion", "idiom", "widthClass", "windowWidth", "windowHeight", "pointer"]
             )
             XCTAssertEqual(device?["idiom"], .string(expected))
-            XCTAssertEqual(device?["sizeClass"], .string("regular"))
+            XCTAssertEqual(device?["widthClass"], .string("regular"))
             XCTAssertEqual(device?["os"], .string("ios"))
             XCTAssertEqual(device?["osVersion"], .string("26.0"))
             XCTAssertEqual(device?["windowWidth"], .number(390))
@@ -87,8 +105,8 @@ final class PrototypeDeviceStateTests: XCTestCase {
 
     func testConditionsTextAndMissingForeignKeys() throws {
         let raw = try JSONDecoder().decode(JSONValue.self, from: Data("""
-        {"type":"text","text":"{platform:/device/sizeClass}/{platform:/device/widthClass}",
-        "visibleWhen":{"platform":"/device/sizeClass","equals":"regular"}}
+        {"type":"text","text":"{platform:/device/widthClass}/{platform:/device/heightClass}",
+        "visibleWhen":{"platform":"/device/widthClass","equals":"regular"}}
         """.utf8))
         let compact = PrototypeDataResolver.resolveRoot(raw, data: nil, platform: state().snapshot).objectFields
         let regular = PrototypeDataResolver.resolveRoot(raw, data: nil, platform: state(.regular).snapshot).objectFields
@@ -96,7 +114,7 @@ final class PrototypeDeviceStateTests: XCTestCase {
         XCTAssertEqual(regular?["visibleWhen"], .object(["all": .array([])]))
         XCTAssertEqual(regular?["text"], .string("regular/"))
         for operation in ["equals", "notEquals", "gt", "lt"] {
-            let condition = JSONValue.object(["platform": .string("/device/widthClass"), operation: .number(1)])
+            let condition = JSONValue.object(["platform": .string("/device/heightClass"), operation: .number(1)])
             let root = JSONValue.object(["type": .string("text"), "visibleWhen": condition])
             let resolved = PrototypeDataResolver.resolveRoot(root, data: nil, platform: state().snapshot)
             XCTAssertEqual(

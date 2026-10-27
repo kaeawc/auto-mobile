@@ -1,0 +1,250 @@
+{
+  "id": "template-feed-detail",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "selectedTitle": "",
+    "selectedAuthor": "",
+    "selectedBody": "",
+    "liked": false,
+    "refreshing": false
+  },
+  "data": {
+    "posts": [
+      {
+        "id": "p1",
+        "title": "Shipping the demo",
+        "author": "Ana",
+        "body": "We cut scope on Friday and the demo came together over the weekend."
+      },
+      {
+        "id": "p2",
+        "title": "Offline mode lands",
+        "author": "Ben",
+        "body": "Saved prototypes now run without the laptop attached."
+      },
+      {
+        "id": "p3",
+        "title": "Design review notes",
+        "author": "Chloe",
+        "body": "Spacing is consistent, the empty states still need copy."
+      },
+      {
+        "id": "p4",
+        "title": "Weekly metrics",
+        "author": "Dev",
+        "body": "Sign-ups are up and the crash rate is flat."
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "feed",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "feed": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "feed_bar",
+            "title": "Feed"
+          },
+          {
+            "type": "scroll",
+            "testTag": "feed_scroll",
+            "style": {
+              "weight": 1
+            },
+            "refresh": {
+              "stateKey": "refreshing",
+              "onRefresh": [
+                {
+                  "type": "setState",
+                  "key": "refreshing",
+                  "value": false
+                }
+              ]
+            },
+            "child": {
+              "type": "column",
+              "repeat": {
+                "items": {
+                  "path": "/posts"
+                },
+                "as": "post",
+                "key": "id"
+              },
+              "children": [
+                {
+                  "type": "card",
+                  "testTag": "post_card",
+                  "variant": "elevated",
+                  "style": {
+                    "padding": {
+                      "start": 16,
+                      "end": 16,
+                      "top": 8,
+                      "bottom": 8
+                    }
+                  },
+                  "onTap": [
+                    {
+                      "type": "setState",
+                      "key": "selectedTitle",
+                      "value": "{post.title}"
+                    },
+                    {
+                      "type": "setState",
+                      "key": "selectedAuthor",
+                      "value": "{post.author}"
+                    },
+                    {
+                      "type": "setState",
+                      "key": "selectedBody",
+                      "value": "{post.body}"
+                    },
+                    {
+                      "type": "setState",
+                      "key": "liked",
+                      "value": false
+                    },
+                    {
+                      "type": "push",
+                      "stack": "nav",
+                      "screen": "detail"
+                    }
+                  ],
+                  "children": [
+                    {
+                      "type": "column",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "{post.title}",
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "by {post.author}",
+                          "style": {
+                            "textStyle": "bodySmall"
+                          }
+                        }
+                      ],
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 12,
+                          "bottom": 12
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "detail": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "detail_bar",
+            "title": "Post",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "text",
+                "text": "{selectedTitle}",
+                "style": {
+                  "textStyle": "headlineSmall"
+                },
+                "testTag": "detail_title"
+              },
+              {
+                "type": "text",
+                "text": "by {selectedAuthor}",
+                "style": {
+                  "textStyle": "labelMedium"
+                }
+              },
+              {
+                "type": "text",
+                "text": "{selectedBody}",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "row",
+                "children": [
+                  {
+                    "type": "iconButton",
+                    "testTag": "like_button",
+                    "icon": "favorite",
+                    "variant": "tonal",
+                    "contentDescription": "Like",
+                    "onTap": [
+                      {
+                        "type": "toggle",
+                        "key": "liked"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": "Liked",
+                    "style": {
+                      "textStyle": "labelLarge"
+                    },
+                    "visibleWhen": {
+                      "key": "liked",
+                      "equals": true
+                    }
+                  }
+                ],
+                "style": {
+                  "spacing": 8
+                }
+              }
+            ],
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            }
+          }
+        ]
+      }
+    }
+  }
+}

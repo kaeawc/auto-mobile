@@ -1783,6 +1783,12 @@
           "type": "boolean",
           "nullable": false,
           "hasDefault": true
+        },
+        {
+          "name": "locale",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -3807,12 +3813,6 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
-        },
-        {
-          "name": "degradedEffects",
-          "type": "list",
-          "nullable": true,
-          "hasDefault": true
         }
       ]
     },
@@ -4759,6 +4759,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -4789,12 +4795,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -4809,6 +4809,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -4829,6 +4841,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "bottomNav": [
@@ -4841,6 +4859,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -4875,12 +4899,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -4895,6 +4913,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -4927,6 +4957,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "bottomSheet": [
@@ -4939,6 +4975,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -4973,12 +5015,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -4993,6 +5029,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5043,6 +5091,12 @@
         "type": "boolean",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "bounds": [
@@ -5075,6 +5129,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5121,12 +5181,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5141,6 +5195,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5173,6 +5239,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "button": [
@@ -5185,6 +5257,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5219,12 +5297,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5239,6 +5311,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5277,6 +5361,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "cancelTimer": [
@@ -5297,6 +5387,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5343,12 +5439,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5363,6 +5453,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5389,6 +5491,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "carousel": [
@@ -5401,6 +5509,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5435,12 +5549,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5455,6 +5563,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5499,6 +5619,12 @@
         "type": "double",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "chart": [
@@ -5511,6 +5637,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5545,12 +5677,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5565,6 +5691,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5609,6 +5747,12 @@
         "type": "double",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "checkbox": [
@@ -5621,6 +5765,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5655,12 +5805,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5675,6 +5819,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5719,6 +5875,12 @@
         "type": "enum",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "chip": [
@@ -5731,6 +5893,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5765,12 +5933,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5785,6 +5947,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5823,6 +5997,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "column": [
@@ -5835,6 +6015,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5881,12 +6067,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5901,6 +6081,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -5933,6 +6125,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStagger",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "datePicker": [
@@ -5945,6 +6143,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -5979,12 +6183,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -5999,6 +6197,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -6035,6 +6245,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -7053,6 +7269,30 @@
         "hasDefault": true
       },
       {
+        "name": "contains",
+        "type": "object:PrototypeScalar",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "startsWith",
+        "type": "object:PrototypeScalar",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "lengthGt",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "lengthLt",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "gt",
         "type": "double",
         "nullable": true,
@@ -7139,24 +7379,30 @@
         "hasDefault": true
       }
     ],
-    "dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect": [
+    "dev.jasonpearson.automobile.protocol.PrototypeDerivedEntry": [
       {
-        "name": "path",
-        "type": "string",
+        "name": "of",
+        "type": "json",
         "nullable": false,
         "hasDefault": false
       },
       {
-        "name": "type",
-        "type": "string",
+        "name": "format",
+        "type": "json",
         "nullable": false,
         "hasDefault": false
       },
       {
-        "name": "reason",
+        "name": "locale",
         "type": "string",
-        "nullable": false,
-        "hasDefault": false
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "timeZone",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeDialogButton": [
@@ -7403,6 +7649,20 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeRequestAppend": [
+      {
+        "name": "from",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "to",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeRequires": [
       {
         "name": "platform",
@@ -7437,6 +7697,70 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollEdge": [
+      {
+        "name": "scale",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "alpha",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "rotation",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollLinked": [
+      {
+        "name": "source",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "range",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "alpha",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scale",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "offsetY",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "offsetX",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "blur",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh": [
       {
         "name": "stateKey",
@@ -7447,6 +7771,20 @@
       {
         "name": "onRefresh",
         "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeScrollTransition": [
+      {
+        "name": "axis",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "edge",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollEdge",
         "nullable": false,
         "hasDefault": false
       }
@@ -7473,6 +7811,20 @@
       {
         "name": "container",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeContainer",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeShader": [
+      {
+        "name": "asset",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "uniforms",
+        "type": "map",
         "nullable": true,
         "hasDefault": true
       }
@@ -7521,6 +7873,44 @@
         "type": "double",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeSemantics": [
+      {
+        "name": "heading",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "liveRegion",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "group",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "hint",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "traits",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSheetCondition": [
@@ -7581,6 +7971,12 @@
         "hasDefault": true
       },
       {
+        "name": "derive",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "storage",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageBlock",
         "nullable": true,
@@ -7595,6 +7991,12 @@
       {
         "name": "platform",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "strings",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       }
@@ -7621,6 +8023,12 @@
       {
         "name": "shapes",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSpecThemeShapes",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "design",
+        "type": "string",
         "nullable": true,
         "hasDefault": true
       }
@@ -7991,8 +8399,8 @@
         "hasDefault": true
       },
       {
-        "name": "degradedEffects",
-        "type": "list",
+        "name": "shaderFailures",
+        "type": "map",
         "nullable": false,
         "hasDefault": true
       },
@@ -8293,6 +8701,12 @@
         "hasDefault": true
       },
       {
+        "name": "shader",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShader",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "textStyle",
         "type": "string",
         "nullable": true,
@@ -8497,6 +8911,12 @@
       {
         "name": "chrome",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "deadTaps",
+        "type": "boolean",
         "nullable": true,
         "hasDefault": true
       }
@@ -8737,6 +9157,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -8767,12 +9193,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -8787,6 +9207,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -8843,6 +9275,12 @@
         "type": "polymorphic",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "divider": [
@@ -8855,6 +9293,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -8885,12 +9329,6 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "sharedKey",
-        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -8928,6 +9366,12 @@
         "name": "orientation",
         "type": "string",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -8993,6 +9437,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -9001,12 +9457,6 @@
       {
         "name": "span",
         "type": "int",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "sharedKey",
-        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -9101,6 +9551,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -9131,12 +9587,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9151,6 +9601,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9189,6 +9651,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "floating": [
@@ -9215,6 +9683,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9249,12 +9723,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9269,6 +9737,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9301,6 +9781,12 @@
         "type": "int",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "fullscreen": [
@@ -9321,6 +9807,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9355,12 +9847,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9375,6 +9861,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9407,6 +9905,12 @@
         "type": "object:PrototypeRepeat",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "icon": [
@@ -9419,6 +9923,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9465,12 +9975,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9485,6 +9989,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9511,6 +10027,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "iconButton": [
@@ -9523,6 +10045,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9557,12 +10085,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9577,6 +10099,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9609,6 +10143,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "image": [
@@ -9621,6 +10161,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9667,12 +10213,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -9687,6 +10227,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9725,6 +10277,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeZoomable",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "increment": [
@@ -9755,7 +10313,7 @@
         "hasDefault": false
       }
     ],
-    "listItem": [
+    "list": [
       {
         "name": "id",
         "type": "string",
@@ -9799,8 +10357,148 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
+        "name": "transition",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "axis",
         "type": "string",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "refresh",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollRefresh",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "repeat",
+        "type": "object:PrototypeRepeat",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "children",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "header",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "footer",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "spacing",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentPadding",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onEndReached",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "endThreshold",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "maxItems",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "listItem": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
       },
@@ -9819,6 +10517,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -9869,6 +10579,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "menu": [
@@ -9881,6 +10597,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -9911,12 +10633,6 @@
       {
         "name": "visibleWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "sharedKey",
-        "type": "string",
         "nullable": true,
         "hasDefault": true
       },
@@ -9945,6 +10661,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -9961,6 +10689,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "pager": [
@@ -9973,6 +10707,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10007,12 +10747,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10027,6 +10761,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10075,6 +10821,12 @@
       {
         "name": "indicator",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -10139,6 +10891,20 @@
         "hasDefault": false
       }
     ],
+    "prependData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "progress": [
       {
         "name": "id",
@@ -10149,6 +10915,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10183,12 +10955,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10203,6 +10969,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10233,6 +11011,12 @@
       {
         "name": "max",
         "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -10279,6 +11063,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -10309,12 +11099,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10329,6 +11113,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10371,6 +11167,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -10441,6 +11243,12 @@
         "hasDefault": true
       },
       {
+        "name": "append",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRequestAppend",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "statusKey",
         "type": "string",
         "nullable": true,
@@ -10481,6 +11289,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10527,12 +11341,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10547,6 +11355,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10585,6 +11405,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSwipeActions",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "scroll": [
@@ -10597,6 +11423,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10631,12 +11463,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10651,6 +11477,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10713,6 +11551,12 @@
         "type": "polymorphic",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "scrollTo": [
@@ -10749,6 +11593,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -10779,12 +11629,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10805,6 +11649,18 @@
       {
         "name": "span",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10861,6 +11717,12 @@
         "type": "polymorphic",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "segmentedButton": [
@@ -10873,6 +11735,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10907,12 +11775,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -10927,6 +11789,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -10953,6 +11827,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "select": [
@@ -10965,6 +11845,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -10999,12 +11885,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11025,6 +11905,18 @@
       {
         "name": "span",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11049,6 +11941,12 @@
       {
         "name": "label",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -11123,6 +12021,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -11153,12 +12057,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11173,6 +12071,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11235,6 +12145,12 @@
         "type": "enum",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "snackbar": [
@@ -11247,6 +12163,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11281,12 +12203,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11301,6 +12217,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11339,6 +12267,12 @@
         "type": "int",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "spacer": [
@@ -11351,6 +12285,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11385,12 +12325,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11409,6 +12343,18 @@
         "hasDefault": true
       },
       {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "safeAreaPadding",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
         "nullable": true,
@@ -11417,6 +12363,12 @@
       {
         "name": "span",
         "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -11435,6 +12387,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -11465,12 +12423,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11485,6 +12437,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11511,6 +12475,12 @@
         "type": "map",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "startTimer": [
@@ -11567,6 +12537,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -11597,12 +12573,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11617,6 +12587,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11655,6 +12637,12 @@
         "type": "boolean",
         "nullable": false,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "text": [
@@ -11667,6 +12655,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11713,12 +12707,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11733,6 +12721,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11765,6 +12765,12 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLinkifyOptions",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "textField": [
@@ -11777,6 +12783,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11811,12 +12823,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -11831,6 +12837,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -11872,6 +12890,18 @@
       },
       {
         "name": "supportingText",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "errorWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "errorText",
         "type": "string",
         "nullable": true,
         "hasDefault": true
@@ -11953,6 +12983,12 @@
         "type": "enum",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "timePicker": [
@@ -11965,6 +13001,12 @@
       {
         "name": "testTag",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
         "nullable": true,
         "hasDefault": true
       },
@@ -11999,12 +13041,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -12019,6 +13055,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -12067,6 +13115,12 @@
       {
         "name": "validateOn",
         "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }
@@ -12153,12 +13207,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "text",
         "type": "string",
         "nullable": false,
@@ -12209,6 +13257,12 @@
         "hasDefault": true
       },
       {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "contentDescription",
         "type": "string",
         "nullable": true,
@@ -12239,12 +13293,6 @@
         "hasDefault": true
       },
       {
-        "name": "sharedKey",
-        "type": "string",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
         "name": "transition",
         "type": "object:PrototypeTransition",
         "nullable": true,
@@ -12259,6 +13307,18 @@
       {
         "name": "anchor",
         "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
         "nullable": true,
         "hasDefault": true
       },
@@ -12294,6 +13354,12 @@
       },
       {
         "name": "actions",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
         "type": "list",
         "nullable": true,
         "hasDefault": true

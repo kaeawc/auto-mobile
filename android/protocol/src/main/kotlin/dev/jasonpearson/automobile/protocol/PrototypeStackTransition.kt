@@ -17,3 +17,15 @@ enum class PrototypeStackTransition(val value: String) {
     }
   }
 }
+
+/** Typed navigation transition; [PrototypeStackNode.transition] remains the shared wire slot. */
+val PrototypeStackNode.stackTransition: PrototypeStackTransition?
+  get() = transition?.type?.let(PrototypeStackTransition::fromValue)
+
+/** Typed navigation transition of a `push` action. */
+val PrototypePushAction.stackTransition: PrototypeStackTransition?
+  get() = transition?.let(PrototypeStackTransition::fromValue)
+
+/** Typed navigation transition of a `replace` action. */
+val PrototypeReplaceAction.stackTransition: PrototypeStackTransition?
+  get() = transition?.let(PrototypeStackTransition::fromValue)

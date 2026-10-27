@@ -1,0 +1,363 @@
+{
+  "spec": {
+    "id": "template-settings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "notifications": true,
+      "darkMode": false,
+      "sync": "wifi",
+      "volume": 60,
+      "resetOpen": false,
+      "saved": false
+    },
+    "storage": {
+      "version": 1,
+      "keys": [
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications",
+        "state:notifications"
+      ]
+    },
+    "root": {
+      "id": "nav",
+      "style": {
+        "width": "fill",
+        "height": "fill"
+      },
+      "type": "stack",
+      "start": "main",
+      "screens": {
+        "main": {
+          "type": "column",
+          "children": [
+            {
+              "testTag": "settings_bar",
+              "type": "topAppBar",
+              "title": "Settings"
+            },
+            {
+              "style": {
+                "weight": 1
+              },
+              "type": "scroll",
+              "axis": "vertical",
+              "child": {
+                "type": "column",
+                "children": [
+                  {
+                    "testTag": "notifications_row",
+                    "type": "listItem",
+                    "headline": "Notifications",
+                    "supporting": "Alerts and reminders",
+                    "leadingIcon": "notifications",
+                    "trailing": {
+                      "type": "switch",
+                      "stateKey": "notifications"
+                    }
+                  },
+                  {
+                    "testTag": "dark_mode_row",
+                    "type": "listItem",
+                    "headline": "Dark mode",
+                    "leadingIcon": "dark_mode",
+                    "trailing": {
+                      "type": "switch",
+                      "stateKey": "darkMode"
+                    }
+                  },
+                  {
+                    "type": "divider"
+                  },
+                  {
+                    "style": {
+                      "padding": {
+                        "top": 16,
+                        "bottom": 16,
+                        "start": 16,
+                        "end": 16
+                      },
+                      "spacing": 12
+                    },
+                    "type": "column",
+                    "children": [
+                      {
+                        "style": {
+                          "textStyle": "titleSmall"
+                        },
+                        "type": "text",
+                        "text": "Sync over"
+                      },
+                      {
+                        "testTag": "sync_group",
+                        "type": "radioGroup",
+                        "stateKey": "sync",
+                        "options": [
+                          {
+                            "value": "wifi",
+                            "label": "Wi-Fi only"
+                          },
+                          {
+                            "value": "any",
+                            "label": "Any network"
+                          }
+                        ]
+                      },
+                      {
+                        "testTag": "volume_label",
+                        "style": {
+                          "textStyle": "titleSmall"
+                        },
+                        "type": "text",
+                        "text": "Volume {volume}"
+                      },
+                      {
+                        "testTag": "volume_slider",
+                        "type": "slider",
+                        "stateKey": "volume",
+                        "min": 0,
+                        "max": 100,
+                        "step": 5
+                      }
+                    ]
+                  },
+                  {
+                    "type": "divider"
+                  },
+                  {
+                    "testTag": "about_row",
+                    "onTap": [
+                      {
+                        "type": "push",
+                        "stack": "nav",
+                        "screen": "about"
+                      }
+                    ],
+                    "type": "listItem",
+                    "headline": "About",
+                    "trailing": {
+                      "type": "icon",
+                      "name": "chevron_right"
+                    }
+                  },
+                  {
+                    "style": {
+                      "padding": {
+                        "top": 16,
+                        "bottom": 16,
+                        "start": 16,
+                        "end": 16
+                      },
+                      "spacing": 12
+                    },
+                    "type": "column",
+                    "children": [
+                      {
+                        "testTag": "save_button",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "saved",
+                            "value": true
+                          }
+                        ],
+                        "type": "button",
+                        "label": "Save"
+                      },
+                      {
+                        "testTag": "reset_button",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "resetOpen",
+                            "value": true
+                          }
+                        ],
+                        "type": "button",
+                        "label": "Reset to defaults",
+                        "variant": "outlined"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "testTag": "reset_dialog",
+              "type": "dialog",
+              "openWhen": {
+                "key": "resetOpen",
+                "equals": true
+              },
+              "title": "Reset settings?",
+              "text": "Every setting returns to its default.",
+              "confirm": {
+                "label": "Reset",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "notifications",
+                    "value": true
+                  },
+                  {
+                    "type": "setState",
+                    "key": "darkMode",
+                    "value": false
+                  },
+                  {
+                    "type": "setState",
+                    "key": "sync",
+                    "value": "wifi"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "volume",
+                    "value": 60
+                  }
+                ]
+              },
+              "dismiss": {
+                "label": "Cancel"
+              }
+            },
+            {
+              "testTag": "saved_snackbar",
+              "type": "snackbar",
+              "openWhen": {
+                "key": "saved",
+                "equals": true
+              },
+              "text": "Settings saved",
+              "action": {
+                "label": "Dismiss",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "saved",
+                    "value": false
+                  }
+                ]
+              },
+              "durationMs": 3000
+            }
+          ]
+        },
+        "about": {
+          "type": "column",
+          "children": [
+            {
+              "testTag": "about_bar",
+              "type": "topAppBar",
+              "title": "About",
+              "navigationIcon": {
+                "icon": "arrow_back",
+                "label": "Back",
+                "onTap": [
+                  {
+                    "type": "pop",
+                    "stack": "nav"
+                  }
+                ]
+              }
+            },
+            {
+              "style": {
+                "padding": {
+                  "top": 16,
+                  "bottom": 16,
+                  "start": 16,
+                  "end": 16
+                },
+                "spacing": 12
+              },
+              "type": "column",
+              "children": [
+                {
+                  "style": {
+                    "textStyle": "titleMedium"
+                  },
+                  "type": "text",
+                  "text": "Demo app 1.0"
+                },
+                {
+                  "style": {
+                    "textStyle": "bodyMedium"
+                  },
+                  "type": "text",
+                  "text": "Built at the hackathon."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "expectedPath": "storage.keys"
+}

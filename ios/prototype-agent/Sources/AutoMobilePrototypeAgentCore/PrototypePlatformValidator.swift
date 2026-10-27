@@ -78,6 +78,8 @@ enum PrototypePlatformValidator {
         "remoteNotification",
     ]
     static let reservedEmitPrefix = "prototype_"
+    /// Authored `testTag`s cannot start with this; host controls own the namespace (#15120).
+    static let reservedTestTagPrefix = "automobile-"
     static let maxArgs = 16
     static let maxHandlers = 32
     static let maxTimeoutMs = 300_000
@@ -108,6 +110,19 @@ enum PrototypePlatformValidator {
         let declared = try validateRequires(requires)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         try scan(root, path: "root", inHandler: false, declared: declared, state: state)
+    }
+
+    /// Throws at the first authored node whose `testTag` takes the host-reserved namespace.
+    static func validateTestTags(nodes: [PrototypeLocatedValue]) throws {
+        for node in nodes {
+            guard case let .string(tag)? = node.value["testTag"], tag.hasPrefix(reservedTestTagPrefix) else {
+                continue
+            }
+            throw PrototypeContractValidator.invalid(
+                "\(node.path).testTag",
+                "testTag values starting with \(reservedTestTagPrefix) are reserved for host controls"
+            )
+        }
     }
 
     // MARK: requires
@@ -245,6 +260,7 @@ enum PrototypePlatformValidator {
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)
+                    try comparison(fields, pointer: pointer, path: path)
                 }
                 if case .string(_)? = fields["event"], !inHandler {
                     throw fail("\(path).event", "{event} is only available inside a platform.on handler")
@@ -286,6 +302,25 @@ enum PrototypePlatformValidator {
             let tokens = PrototypeDataPointer.tokens(pointer)
             guard tokens.count == 2, state.contains(tokens[1]) else {
                 throw fail(path, "Unknown platform state \(pointer)")
+            }
+        }
+    }
+
+    /// Portable specs can branch on device.os; these validators have no target-platform input.
+    private static func comparison(_ fields: [String: JSONValue], pointer: String, path: String) throws {
+        let tokens = PrototypeDataPointer.tokens(pointer)
+        guard tokens.count == 2,
+              let entry = PrototypeContractValidator.platformModules[tokens[0]]?.objectFields?["state"]?
+              .objectFields?[tokens[1]]?.objectFields,
+              let overrides = entry["valueByPlatform"]?.objectFields, let base = entry["value"]
+        else { return }
+        let rule = JSONValue.object(["kind": .string("choice"), "options": .array([base] + Array(overrides.values))])
+        for operation in ["equals", "notEquals"] {
+            guard let literal = fields[operation] else { continue }
+            do {
+                try PrototypeContractValidator.validateValue(literal, rule: rule, path: "\(path).\(operation)")
+            } catch let PrototypeLoadError.invalidSpec(path, message) {
+                throw fail(path, message)
             }
         }
     }

@@ -74,6 +74,7 @@ import * as m071 from "./migrations/2026_10_12_000_rename_recording_tool_names";
 import * as m072 from "./migrations/2026_10_12_001_video_recording_capture_teardown";
 import * as m073 from "./migrations/2026_10_13_000_video_recording_recorder_daemon";
 import * as m074 from "./migrations/2026_10_15_000_device_session_activity_seq";
+import * as m076 from "./migrations/2026_10_26_000_prototype_test_sessions";
 import * as m075 from "./migrations/2026_10_18_000_mcp_tasks";
 
 /**
@@ -157,6 +158,7 @@ export const STATIC_MIGRATIONS: Readonly<Record<string, Migration>> = {
   "2026_10_13_000_video_recording_recorder_daemon": m073,
   "2026_10_15_000_device_session_activity_seq": m074,
   "2026_10_18_000_mcp_tasks": m075,
+  "2026_10_26_000_prototype_test_sessions": m076,
 };
 
 export const staticMigrationProvider: MigrationProvider = {

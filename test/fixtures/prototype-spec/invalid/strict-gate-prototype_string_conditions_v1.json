@@ -1,0 +1,79 @@
+{
+  "spec": {
+    "id": "string-conditions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "value": "hello"
+    },
+    "root": {
+      "repeat": {
+        "items": [
+          {
+            "x": "he"
+          },
+          {
+            "x": ""
+          }
+        ],
+        "as": "item"
+      },
+      "type": "column",
+      "children": [
+        {
+          "styleWhen": [
+            {
+              "when": {
+                "key": "value",
+                "startsWith": "he"
+              },
+              "style": {
+                "color": "primary"
+              }
+            }
+          ],
+          "visibleWhen": {
+            "all": [
+              {
+                "key": "value",
+                "contains": "{item.x}"
+              },
+              {
+                "any": [
+                  {
+                    "key": "value",
+                    "lengthGt": 100000
+                  },
+                  {
+                    "not": {
+                      "key": "value",
+                      "lengthLt": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "type": "text",
+          "text": "Hello"
+        },
+        {
+          "enabledWhen": {
+            "key": "value",
+            "lengthLt": 100
+          },
+          "type": "button",
+          "label": "OK"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_checks_v1"]
+  },
+  "expectedPath": "$"
+}

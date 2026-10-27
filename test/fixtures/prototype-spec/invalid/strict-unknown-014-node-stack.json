@@ -1,0 +1,53 @@
+{
+  "spec": {
+    "id": "bars",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "opacity": 100
+    },
+    "state": {
+      "tab": 0
+    },
+    "root": {
+      "id": "routes",
+      "type": "stack",
+      "start": "one",
+      "screens": {
+        "one": {
+          "type": "column",
+          "children": [
+            {
+              "type": "topAppBar",
+              "onScroll": "exitUntilCollapsed",
+              "scroll": "feed",
+              "title": "Feed",
+              "variant": "large"
+            },
+            {
+              "id": "feed",
+              "type": "scroll",
+              "axis": "vertical",
+              "child": {
+                "type": "text",
+                "text": "Feed"
+              }
+            }
+          ]
+        },
+        "two": {
+          "id": "feed",
+          "type": "scroll",
+          "axis": "vertical",
+          "child": {
+            "type": "text",
+            "text": "Feed"
+          }
+        }
+      },
+      "zzzUnknown": true
+    }
+  },
+  "expectedPath": "root.zzzUnknown"
+}

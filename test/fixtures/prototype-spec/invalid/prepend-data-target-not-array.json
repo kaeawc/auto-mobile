@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "prepend",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "rows": 1
+    },
+    "root": {
+      "type": "text",
+      "text": "Add",
+      "onTap": [
+        {
+          "type": "prependData",
+          "path": "/data/rows",
+          "value": {
+            "value": {
+              "id": 2
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].path",
+  "expectedMessage": "prependData target is not an array"
+}

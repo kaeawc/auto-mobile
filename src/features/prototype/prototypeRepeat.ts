@@ -1,4 +1,5 @@
 import { effectUses } from "./prototypeEffects";
+import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -42,6 +43,7 @@ interface Scope {
   binding: Binding;
   items: readonly Readonly<Raw>[];
   pathBound: boolean;
+  derivedFields: ReadonlySet<string>;
 }
 
 const fail = (path: string, message: string): RepeatError => ({ path, message });
@@ -196,10 +198,7 @@ function fieldError(
   if (repeated) {
     return repeated;
   }
-  if (kind === "emitName") {
-    return emptyEmitName(value, path, scope);
-  }
-  return kind === "key" ? invalidBoundKey(value, path, scope) : undefined;
+  return repeatedValueError(kind, value, path, scope);
 }
 
 /** A data action path binds only a whole `{index}` segment; `{alias.field}` is refused. */
@@ -295,20 +294,9 @@ interface Child {
 }
 
 function childrenOf(node: Raw, path: string): Child[] {
-  if (node.type === "stack") {
-    return Object.entries(record(node.screens) ?? {}).flatMap(([name, value]) => {
-      const child = record(value);
-      return child ? [{ node: child, path: `${path}.screens[${JSON.stringify(name)}]` }] : [];
-    });
-  }
-  const single = record(node.child);
-  if (single) {
-    return [{ node: single, path: `${path}.child` }];
-  }
-  const list = Array.isArray(node.children) ? (node.children as unknown[]) : [];
-  return list.flatMap((entry, index) => {
-    const child = record(entry);
-    return child ? [{ node: child, path: `${path}.children[${index}]` }] : [];
+  return prototypeNodeChildren(node).flatMap(({ value, suffix }) => {
+    const child = record(value);
+    return child ? [{ node: child, path: `${path}${suffix}` }] : [];
   });
 }
 
@@ -328,11 +316,31 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
         binding: { alias: repeat.as, index: true },
         items:
           source && typeof source.path === "string"
-            ? data.items(source.path)
-            : literal.filter((item): item is Raw => record(item) !== undefined),
+            ? derivedValidationItems(data.items(source.path), repeat.derive)
+            : derivedValidationItems(
+                literal.filter((item): item is Raw => record(item) !== undefined),
+                repeat.derive,
+              ),
         pathBound: source !== undefined,
+        derivedFields: new Set(Object.keys(record(repeat.derive) ?? {})),
       }
     : undefined;
+}
+
+function templateNodeError(node: Raw, path: string): RepeatError | undefined {
+  if (node.type === "list") {
+    return fail(path, "A list cannot sit inside a repeat template");
+  }
+  if (node.repeat !== undefined) {
+    return fail(`${path}.repeat`, "Nested repeat is not supported");
+  }
+  if (node.type === "stack") {
+    return fail(path, "Stack cannot appear inside a repeat template");
+  }
+  if (node.type === "pager") {
+    return fail(path, "Pager cannot appear inside a repeat template");
+  }
+  return undefined;
 }
 
 function templateErrors(
@@ -341,16 +349,9 @@ function templateErrors(
   state: RepeatState,
   scope?: Scope,
 ): RepeatError | undefined {
-  if (scope) {
-    if (node.repeat !== undefined) {
-      return fail(`${path}.repeat`, "Nested repeat is not supported");
-    }
-    if (node.type === "stack") {
-      return fail(path, "Stack cannot appear inside a repeat template");
-    }
-    if (node.type === "pager") {
-      return fail(path, "Pager cannot appear inside a repeat template");
-    }
+  const nesting = scope ? templateNodeError(node, path) : undefined;
+  if (nesting) {
+    return nesting;
   }
   const own = scope
     ? checkOwnFields(node, path, scope, state)
@@ -365,7 +366,12 @@ function templateErrors(
   const ownScope = scopeOf(node, path, state.data);
   const childScope = ownScope ?? scope;
   for (const child of childrenOf(node, path)) {
-    const error = templateErrors(child.node, child.path, state, childScope);
+    const error = templateErrors(
+      child.node,
+      child.path,
+      state,
+      node.type === "list" && !child.path.startsWith(`${path}.children[`) ? scope : childScope,
+    );
     if (error) {
       return error;
     }
@@ -379,7 +385,7 @@ function repeatIdentityError(
   scope: Scope | undefined,
 ): RepeatError | undefined {
   const key = record(node.repeat)?.key;
-  return scope && typeof key === "string"
+  return scope && typeof key === "string" && !scope.derivedFields.has(key)
     ? repeatKeyError(scope.items, key, `${path}.repeat.key`)
     : undefined;
 }
@@ -400,8 +406,13 @@ function repeatSourceErrors(node: Raw, path: string, state: RepeatState): Repeat
     if (!Array.isArray(items)) {
       return fail(at, "Repeat path does not resolve to an array");
     }
-    if (items.length > MAX_REPEAT_ITEMS) {
-      return fail(at, `Repeat path resolves to more than ${MAX_REPEAT_ITEMS} items`);
+    const maximum =
+      node.type === "list" ? contract.limits.MAX_PROTOTYPE_LIST_ITEMS : MAX_REPEAT_ITEMS;
+    if (items.length > maximum) {
+      return fail(at, `Repeat path resolves to more than ${maximum} items`);
+    }
+    if (node.type === "list" && typeof node.maxItems === "number" && items.length > node.maxItems) {
+      return fail(at, "List data has more items than maxItems");
     }
     const invalid = items.findIndex((item) => !record(item));
     if (invalid >= 0) {
@@ -497,7 +508,7 @@ function expandedErrors(
     return fail(at, "Expanded animated effect limit exceeded");
   }
   const scope = scopeOf(node, path, data);
-  const instances = scope ? scope.items.length : 1;
+  const instances = scope && node.type !== "list" ? scope.items.length : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
     for (const child of childrenOf(node, path)) {
@@ -568,6 +579,15 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   }
   return located.flatMap((entry) => {
     const scope = scopes.find((candidate) => entry.path.startsWith(`${candidate.path}.children[`));
+    // A derived key cannot be bound to its device-local string during host validation.
+    if (
+      scope &&
+      checkedKeyValues(entry.value).some(
+        (key) => typeof key === "string" && hasDerivedField(key, scope),
+      )
+    ) {
+      return [];
+    }
     const operandTemplated =
       scope !== undefined &&
       typeof entry.value.value === "string" &&
@@ -587,4 +607,33 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
       operandTemplated,
     }));
   });
+}
+
+/** Validation needs the projected field types, without reading a clock or formatting values. */
+function derivedValidationItems(
+  items: readonly Readonly<Raw>[],
+  derive: unknown,
+): readonly Readonly<Raw>[] {
+  const fields = Object.fromEntries(Object.keys(record(derive) ?? {}).map((name) => [name, ""]));
+  return Object.keys(fields).length ? items.map((item) => ({ ...item, ...fields })) : items;
+}
+
+function hasDerivedField(text: string, scope: Scope): boolean {
+  return templateFieldReferences(text, scope.binding).some((name) => scope.derivedFields.has(name));
+}
+
+function repeatedValueError(
+  kind: FieldKind,
+  value: string,
+  path: string,
+  scope: Scope,
+): RepeatError | undefined {
+  // Device locale and clock determine derived strings; their value-dependent checks run there.
+  if (hasDerivedField(value, scope)) {
+    return undefined;
+  }
+  if (kind === "emitName") {
+    return emptyEmitName(value, path, scope);
+  }
+  return kind === "key" ? invalidBoundKey(value, path, scope) : undefined;
 }

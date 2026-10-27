@@ -25,6 +25,8 @@ export interface ShowPrototypeMessage {
    * ignores the field and follows the device silently, so it is never sent to one.
    */
   appearance?: PrototypeAppearanceOverride;
+  /** Locale override for a spec with strings. */
+  locale?: string;
 }
 /** A fixed mode a show takes as the system setting; following the device is the absent field. */
 export type PrototypeAppearanceOverride = "light" | "dark";
@@ -198,6 +200,8 @@ export interface PrototypeResult {
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
+  /** Only a successful `show_prototype` reply for a spec with `window.backdrop` (prototype_backdrop_v1). */
+  backdrop?: "blur" | "fallback";
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
   cleared?: number;
   /**
@@ -237,6 +241,7 @@ export interface PrototypeStatusEntry {
   timers?: unknown;
   /** Last haptic and sound calls (prototype_platform_haptics_v1, _sound_v1); parsePrototypeFeedbackLog validates it. */
   feedbackLog?: unknown;
+  shaderFailures?: Record<string, string>;
 }
 
 /**

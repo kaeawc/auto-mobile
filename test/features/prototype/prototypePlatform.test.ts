@@ -300,7 +300,7 @@ describe("device platform module", () => {
     validatePrototypeSpec(
       spec(
         { requires: { platform: requires } },
-        { type: "spacer", visibleWhen: { platform: pointer, equals: "x" } },
+        { type: "spacer", visibleWhen: { platform: pointer, equals: "compact" } },
       ),
     );
 
@@ -312,16 +312,55 @@ describe("device platform module", () => {
     expect(prototypePlatformEventModule("device.changed")).toBe("device");
   });
 
-  test("width classes are Android-only and the raw size class is iOS-only", () => {
+  test("widthClass carries platform-native values under one key", () => {
     const state = device.state!;
-    expect(state.widthClass?.platforms).toEqual(["android"]);
+    expect(state.widthClass?.platforms).toEqual(["android", "ios"]);
+    expect(state.widthClass?.valueByPlatform?.ios).toEqual({
+      kind: "enum",
+      values: ["compact", "regular"],
+    });
     expect(state.heightClass?.platforms).toEqual(["android"]);
     expect(state.posture?.platforms).toEqual(["android"]);
-    expect(state.sizeClass?.platforms).toEqual(["ios"]);
+    expect(state.sizeClass).toBeUndefined();
     expect(state.widthClass?.breakpoints).toEqual([600, 840]);
     expect(state.heightClass?.breakpoints).toEqual([480, 900]);
     for (const key of ["os", "osVersion", "idiom", "windowWidth", "windowHeight", "pointer"]) {
       expect(state[key]?.platforms).toEqual(["android", "ios"]);
+    }
+  });
+
+  test.each(["compact", "medium", "expanded", "regular"])(
+    "portable widthClass comparison accepts %s",
+    (value) => {
+      for (const op of ["equals", "notEquals"]) {
+        expect(
+          validatePrototypeSpec(
+            spec(
+              { requires: { platform: ["device"] } },
+              {
+                type: "spacer",
+                visibleWhen: { platform: "/device/widthClass", [op]: value },
+              },
+            ),
+          ).success,
+        ).toBe(true);
+      }
+    },
+  );
+
+  test.each(["wide", 1, null])("widthClass comparison refuses %p", (value) => {
+    for (const op of ["equals", "notEquals"]) {
+      expect(
+        validatePrototypeSpec(
+          spec(
+            { requires: { platform: ["device"] } },
+            {
+              type: "spacer",
+              visibleWhen: { platform: "/device/widthClass", [op]: value },
+            },
+          ),
+        ).success,
+      ).toBe(false);
     }
   });
 

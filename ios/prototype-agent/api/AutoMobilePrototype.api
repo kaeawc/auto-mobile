@@ -1,4 +1,4 @@
-AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, registry: PrototypePlatformRegistry = .empty, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, options: PrototypeEmbeddedOptions = PrototypeEmbeddedOptions(), registry: PrototypePlatformRegistry = .empty, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
 AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public struct AutoMobilePrototypeView: View
 AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public var body: some View
 AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStart()
@@ -23,12 +23,15 @@ AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: [PrototypeStorageOp
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public enum PrototypeStorageOption: Sendable, Hashable
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(deviceClient: Client? = nil, hostHandler: Client? = nil)
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(images: [String: Data] = [:], fonts: [String: Data] = [:])
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(locale: String? = nil)
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let fonts: [String: Data]
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let images: [String: Data]
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let locale: String?
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static let `default` = PrototypeNetworkConfiguration()
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static let none = PrototypeAssets()
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeAssets: Sendable, Hashable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeEmbeddedOptions: Sendable, Hashable
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeNetworkConfiguration: Sendable
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public typealias Client = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: [PrototypeLoadError] case invalidSpec(path: String, message: String)

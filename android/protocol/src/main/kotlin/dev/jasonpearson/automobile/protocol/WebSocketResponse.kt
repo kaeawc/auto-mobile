@@ -903,6 +903,12 @@ data class PrototypeResult(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val cleared: Int? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val fired: Int? = null,
   /**
+   * Only the reply to a successful `show_prototype` whose spec has `window.backdrop`
+   * (`prototype_backdrop_v1`): `blur` when what is behind the window was blurred, `fallback` when
+   * the tonal fill was drawn instead.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val backdrop: String? = null,
+  /**
    * A warning, like [missingAssets]: the `style.effects` entries of a successful show this device
    * cannot draw (`prototype_effects_v1`). Omitted when empty and by older APKs.
    */
@@ -1061,6 +1067,8 @@ data class PrototypeStatusEntry(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val storage: PrototypeStorageReport? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val timers: List<PrototypeTimerReport> = emptyList(),
+  /** Node identity to permanent shader fallback reason; omitted when every shader is healthy. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shaderFailures: Map<String, String> = emptyMap(),
   /** Effects not drawn right now (`prototype_effects_v1`); absent when every effect renders. */
   @EncodeDefault(EncodeDefault.Mode.NEVER)
   val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),

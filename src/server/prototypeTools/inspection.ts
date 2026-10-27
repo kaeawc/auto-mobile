@@ -57,6 +57,7 @@ const devicePrototypeEntrySchema = z.object({
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
   feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
+  shaderFailures: z.record(z.string(), z.string()).optional().catch(undefined),
 });
 
 function parseReportedPrototypes(

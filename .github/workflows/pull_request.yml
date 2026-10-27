@@ -654,6 +654,7 @@ jobs:
               - '.github/workflows/merge.yml'
               # The shared bodies of the WebRTC jobs (#11872).
               - '.github/actions/ci-android-device-whep/**'
+              - '.github/actions/ci-webrtc-publisher-integration/**'
 
       # Run the WebRTC integration jobs when the streaming surface is touched, OR
       # when a human explicitly opts in by labelling the PR `webrtc` or mentioning
@@ -3619,44 +3620,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      # FFmpeg generates the synthetic H.264 the publisher ingests. Chrome
-      # (google-chrome) is preinstalled on ubuntu-latest and resolved by the test;
-      # fail early with a clear message if the image ever drops it.
-      - name: "Install FFmpeg and verify a browser is present"
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffmpeg -version | head -1
-          if ! command -v google-chrome >/dev/null 2>&1 \
-            && ! command -v chromium >/dev/null 2>&1 \
-            && ! command -v chromium-browser >/dev/null 2>&1; then
-            echo "::error::No Chrome/Chromium found on the runner; the WHEP decode step needs one"
-            exit 1
-          fi
-
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-
-      # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: scripts/ci/install-bun-deps.sh
-
-      # Cache the checksum-pinned MediaMTX release so only the first run downloads
-      # it. Keyed on the runner script, so a version bump there invalidates it.
-      - name: "Cache MediaMTX binary"
-        uses: actions/cache@v5
-        with:
-          path: scratch/mediamtx
-          key: mediamtx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/webrtc/run-mediamtx-publisher-integration.sh') }}
-
-      - name: "Run MediaMTX WebRTC publisher integration test"
-        shell: bash
-        run: bun run test:integration:webrtc-mediamtx
+      - uses: ./.github/actions/ci-webrtc-publisher-integration
 
   android-device-webrtc:
     name: "Android Device Capture to WHEP"

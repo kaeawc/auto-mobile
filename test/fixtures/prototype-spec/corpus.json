@@ -108,6 +108,9 @@
     "media-tab-item-data.json",
     "menu-overflow.json",
     "motion-none.json",
+    "motion-tokens-default.json",
+    "motion-tokens-fast.json",
+    "motion-tokens-slow.json",
     "motion-v2.json",
     "motion3-alpha.json",
     "motion3-expressive.json",
@@ -831,6 +834,8 @@
     "motion-animate-unknown-easing.json",
     "motion-style-rotation-over-max.json",
     "motion-style-scale-over-max.json",
+    "motion-tokens-with-duration.json",
+    "motion-tokens-with-easing.json",
     "motion-zoomable-double-tap.json",
     "motion-zoomable-max-scale-below-min.json",
     "motion3-press-nonpressable.json",
@@ -1475,6 +1480,7 @@
     "strict-gate-prototype_linkify_v1.json",
     "strict-gate-prototype_loading_states_v1.json",
     "strict-gate-prototype_menus_v1.json",
+    "strict-gate-prototype_motion_tokens_v1.json",
     "strict-gate-prototype_motion_v2.json",
     "strict-gate-prototype_motion_v3.json",
     "strict-gate-prototype_network_device_v1.json",
@@ -2580,6 +2586,9 @@
     "share-url-grapheme-path.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-url-grapheme-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-alias-item.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"]
+    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "motion-tokens-fast.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-default.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-slow.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"]
   }
 }

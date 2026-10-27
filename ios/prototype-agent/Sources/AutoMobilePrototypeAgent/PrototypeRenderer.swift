@@ -940,28 +940,38 @@
             )
         }
 
+        private var styleAnimation: PrototypeStyleAnimation {
+            PrototypeStyleAnimation(
+                animate: node.animate, scheme: model.spec?.motion,
+                motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            )
+        }
+
         private func styled(_ view: some View) -> some View {
             let padding = style?.padding
             let insets = safeAreaEdges
             let shape = cornerShape
             return view
-                .padding(EdgeInsets(
-                    top: (padding?.top ?? 0) + insets.top,
-                    leading: (padding?.start ?? 0) + insets.left,
-                    bottom: (padding?.bottom ?? 0) + insets.bottom,
-                    trailing: (padding?.end ?? 0) + insets.right
-                ))
-                .modifier(SizeModifier(
+                .animation(styleAnimation.animation("color"), value: palette.color(style?.color))
+                .modifier(PrototypeAnimatedLayout(
+                    insets: EdgeInsets(
+                        top: (padding?.top ?? 0) + insets.top,
+                        leading: (padding?.start ?? 0) + insets.left,
+                        bottom: (padding?.bottom ?? 0) + insets.bottom,
+                        trailing: (padding?.end ?? 0) + insets.right
+                    ),
                     rules: PrototypeSizeRules(
                         style: style,
                         coverSize: coverSize.map { (Double($0.width), Double($0.height)) },
                         weightedAxis: stackAxis,
                         fillsByDefault: node.type == "spacer"
                     ),
-                    alignment: contentAlignment
+                    alignment: contentAlignment,
+                    animation: styleAnimation
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
+                    styleAnimation: styleAnimation,
                     shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                         .spatial,
                     effects: PrototypeEffects.plan(
@@ -970,14 +980,13 @@
                     motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion),
                     authorsEffects: PrototypeEffects.authorsEffects(node)
                 ))
-                .opacity(style?.alpha ?? 1)
+                .modifier(PrototypeAnimatedTransform(style: style, animation: styleAnimation))
                 .modifier(PrototypeKeyframesModifier(
                     frames: node.keyframes,
                     trigger: keyframeTrigger,
                     profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile,
                     activity: model.keyframeActivity
                 ))
-                .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
                 .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(TapModifier(
@@ -1107,7 +1116,7 @@
     }
 
     @MainActor
-    private struct SizeModifier: ViewModifier {
+    struct SizeModifier: ViewModifier {
         let rules: PrototypeSizeRules
         let alignment: Alignment
 

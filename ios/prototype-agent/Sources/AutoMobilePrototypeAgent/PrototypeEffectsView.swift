@@ -6,7 +6,7 @@
     /// embedded bytes are unreadable, in which case every shader-backed effect is simply not drawn.
     enum PrototypeEffectsLibrary {
         static let library: ShaderLibrary? = Data(base64Encoded: PrototypeEffectsMetallib.base64)
-            .map { ShaderLibrary(data: $0) }
+            .flatMap { $0.isEmpty ? nil : ShaderLibrary(data: $0) }
     }
 
     /// `style.effects` (#15130) on one node, as Android's `PrototypeEffectsContent`: shader distortions

@@ -36,12 +36,12 @@ while IFS= read -r -d '' file; do
   swift_sources+=("${file}")
 done < <(find "${sources_root}/AutoMobilePrototypeAgentCore" "${sources_root}/AutoMobilePrototypeAgent" \
   -name '*.swift' -print0 | sort -z)
-# The effect presets are compiled to a metallib and embedded as bytes (#15130).
-swift_sources+=("$("${repo_root}/scripts/ios/prototype-effects-metallib.sh" "${out_dir}/effects")")
 if [[ ${#swift_sources[@]} -eq 0 ]]; then
   echo "No Swift sources under ${sources_root}" >&2
   exit 1
 fi
+# The effect presets are compiled to a metallib and embedded as bytes (#15130).
+swift_sources+=("$("${repo_root}/scripts/ios/prototype-effects-metallib.sh" "${out_dir}/effects")")
 
 xcrun --sdk iphonesimulator swiftc \
   -target "${target}" \

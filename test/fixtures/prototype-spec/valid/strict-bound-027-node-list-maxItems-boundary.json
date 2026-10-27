@@ -70,7 +70,7 @@
         }
       ]
     },
-    "maxItems": 500,
+    "maxItems": 2000,
     "children": [
       {
         "type": "text",

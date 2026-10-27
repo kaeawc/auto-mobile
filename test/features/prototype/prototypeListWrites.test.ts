@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import cases from "../../fixtures/prototype-spec/list-writes/data-writes.json";
 import {
   applyPrototypeDataWrite,
@@ -24,7 +25,8 @@ for (const fixture of cases) {
 }
 
 test("limits apply after trimming, including discarded oversized values", () => {
-  const data = { items: Array.from({ length: 480 }, (_, i) => i) };
+  const length = contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS - 20;
+  const data = { items: Array.from({ length }, (_, i) => i) };
   expect(
     applyPrototypeDataWrite(data, {
       op: "extend",
@@ -32,13 +34,13 @@ test("limits apply after trimming, including discarded oversized values", () => 
       value: Array(40).fill(1),
       maxItems: 100,
     }),
-  ).toMatchObject({ success: true, trimmed: 420 });
+  ).toMatchObject({ success: true, trimmed: length - 60 });
   expect(
     applyPrototypeDataWrite(data, { op: "extend", path: "/data/items", value: Array(40).fill(1) }),
   ).toMatchObject({ success: false, error: { code: "limit_exceeded" } });
   expect(
     applyPrototypeDataWrite(
-      { items: ["x".repeat(270000)] },
+      { items: ["x".repeat(contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES + 8000)] },
       { op: "append", path: "/data/items", value: 1, maxItems: 1 },
     ),
   ).toEqual({ success: true, data: { items: [1] }, trimmed: 1 });
@@ -138,7 +140,7 @@ test("metadata failure rolls back append even when no into body can be committed
   const result = applyPrototypeRequestOutcome(
     before,
     "/data/page",
-    response({ items: ["x".repeat(262080)] }),
+    response({ items: ["x".repeat(contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES - 64)] }),
     { from: "/items", to: "/data/items" },
   );
   expect(result).toMatchObject({

@@ -1,5 +1,9 @@
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
-import { MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
+import {
+  MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
+  MAX_PROTOTYPE_LIST_ITEMS,
+  MAX_PROTOTYPE_SPEC_BYTES,
+} from "./prototypeSpec";
 export const GUIDE_GESTURES = `## Gestures
 
 \`onLongPress\` and \`onDoubleTap\` run their action lists exactly like \`onTap\`, with no new
@@ -215,7 +219,7 @@ support it yet.
 
 \`list {repeat:{items:{path},as,key},children:[row],axis?,header?,footer?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?}\`
 is a lazy scrolling collection (needs \`prototype_lazy_list_v1\` and \`prototype_data_model_v1\`).
-The path resolves to at most 500 objects; \`key\` is required, projected and unique. Empty arrays
+The path resolves to at most ${MAX_PROTOTYPE_LIST_ITEMS} objects; \`key\` is required, projected and unique. Empty arrays
 are valid. Axis defaults to vertical; spacing/padding are nonnegative dp. One row template and
 optional header/footer each count once toward node/image limits, while per-item binding and text
 budgets still apply. Header/footer are ordinary nodes outside the row scope. Never nest lists,
@@ -225,7 +229,7 @@ Only composed rows are in \`observe\`; use \`swipeOn\` to reach more. Row keys p
 per \`(rowCount,lastRowKey)\` signature; empty/no-change pages never refire. Signature state survives
 recomposition and resets on show. \`endThreshold\` needs \`onEndReached\`. Vertical \`refresh\` uses
 scroll.refresh semantics and a declared boolean key (also needs \`prototype_refresh_v1\`).
-\`maxItems\` (1–500) requires initial data to fit; appending trims oldest rows atomically before
+\`maxItems\` (1–${MAX_PROTOTYPE_LIST_ITEMS}) requires initial data to fit; appending trims oldest rows atomically before
 final data limits. The smallest cap among lists sharing the exact data path wins.
 \`request.append:{from,to}\` (same lazy-list capability) extracts a response array from an object
 member at \`from\`, extends the existing \`/data/...\` array \`to\`, and writes the remaining response
@@ -238,7 +242,7 @@ scroll state are not yet supported. Device acceptance and benchmarks remain unve
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
 \`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
-entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most 500 items as
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most ${MAX_PROTOTYPE_DATA_ARRAY_ITEMS} items as
 for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
 \`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
 \`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`

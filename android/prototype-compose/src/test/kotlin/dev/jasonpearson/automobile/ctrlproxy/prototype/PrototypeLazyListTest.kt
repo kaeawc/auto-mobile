@@ -42,7 +42,7 @@ class PrototypeLazyListTest {
     assertTrue(PrototypeListEndTriggers().get("root.screens.feed", 3).onVisibleRange(9, 10, "ten"))
   }
 
-  internal fun spec(count: Int = 500, axis: String = "vertical"): PrototypeSpec {
+  internal fun spec(count: Int = PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS, axis: String = "vertical"): PrototypeSpec {
     val list =
       PrototypeListNode(
         testTag = "feed",
@@ -87,14 +87,15 @@ class PrototypeLazyListTest {
   }
 
   @Test
-  fun `five hundred rows count the template once and bind only on demand`() {
+  fun `rows at the list limit count the template once and bind only on demand`() {
     val model = mapPrototypeSpec(spec()).root
     assertEquals("list", model.role)
     assertEquals(listOf("Feed", "End"), model.children.map { it.text })
     val list = checkNotNull(model.list)
-    assertEquals(500, list.rows.size)
-    assertEquals("499", list.key(499))
-    assertEquals("499: Post 499", list.render(list.rows[499], 499).text)
+    val last = PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS - 1
+    assertEquals(last + 1, list.rows.size)
+    assertEquals("$last", list.key(last))
+    assertEquals("$last: Post $last", list.render(list.rows[last], last).text)
     assertEquals("Posts", model.contentDescription)
     assertTrue(model.checked)
     assertEquals(

@@ -72,12 +72,24 @@ strings; they do not share the state-key restriction.
 | Constant                             | Value           | Counting rule                                                                                                                                                                                           |
 | ------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MAX_PROTOTYPE_NODES`                | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance, except lazy `list` row templates, which count once (including when empty); list headers/footers count once. |
-| `MAX_PROTOTYPE_LIST_ITEMS`           | 500             | Maximum rows per lazy list, read from its data path; ordinary path repeats remain capped at 128.                                                                                                        |
+| `MAX_PROTOTYPE_LIST_ITEMS`           | 2000            | Maximum rows per lazy list, read from its data path; ordinary path repeats remain capped at 128.                                                                                                        |
 | `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                                                                                                                             |
 | `MAX_PROTOTYPE_IMAGES`               | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again; lazy list row templates, headers and footers count once.                                             |
 | `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                                                                                                                          |
 | `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                                                                                                                                |
 | `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.                                                                                                                  |
+
+Feed-scale budgets (#14183). Lazy-list rows live in `/data`, so `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` never sits
+below `MAX_PROTOTYPE_LIST_ITEMS`, and `list.maxItems` shares the list cap. Data may use
+`MAX_PROTOTYPE_DATA_BYTES` (786432) of the spec, which stays below `MAX_PROTOTYPE_SPEC_BYTES` so the node
+tree keeps room. `MAX_PROTOTYPE_DATA_WRITE_BYTES` equals it: later host patches re-validate the whole spec
+against the data cap, so a write cap above it would let paging grow data that no patch could survive. The
+response cap (256 KiB) stays below both. The whole-spec byte, node, depth, image, storage and in-flight limits
+are independent of row count: they bound frame size, memory and tree cost, and none of them grows with lazy
+rows. A row carries at most `MAX_PROTOTYPE_REPEAT_PATH_CELLS` / `MAX_PROTOTYPE_LIST_ITEMS` (32) scalar fields
+across a full list. Host validation is linear in rows (a 2000-row feed validates in tens of milliseconds;
+`benchmark/prototype-feed-limits.ts`). Feeds beyond these caps page or trim with `maxItems`; per-runtime
+budgets and multi-spec apps are not part of the contract.
 
 Navigation item `image` uses count toward `MAX_PROTOTYPE_IMAGES`. Assets have separate transport and
 decoded-memory limits (Asset transport). Emit payload nesting is bounded by
@@ -106,9 +118,9 @@ strings, finite numbers, booleans; no null; arbitrary object keys). `state` stay
 key present only in data fails like any undeclared key. A full `show` replaces data. CtrlProxy and the iOS
 agent advertise `prototype_data_model_v1`.
 
-Limits (`schemas/prototype-spec-contract.json`): `MAX_PROTOTYPE_DATA_BYTES` 262144,
+Limits (`schemas/prototype-spec-contract.json`): `MAX_PROTOTYPE_DATA_BYTES` 786432,
 `MAX_PROTOTYPE_DATA_DEPTH` 8 (data is depth 1; only containers add depth), `MAX_PROTOTYPE_DATA_ARRAY_ITEMS`
-500, `MAX_PROTOTYPE_DATA_POINTER_LENGTH` 256 UTF-16 units. Byte cost reuses the emit payload cost (32 bytes
+2000, `MAX_PROTOTYPE_DATA_POINTER_LENGTH` 256 UTF-16 units. Byte cost reuses the emit payload cost (32 bytes
 per number regardless of digits), so numeric-heavy data reaches the limit early.
 
 Pointers are nonempty RFC 6901 paths relative to data, matching `^(?:/(?:[^~/]|~[01])*)+$`. Split after the
@@ -1762,7 +1774,7 @@ error whose message points to `via: "device"`.
 
 | Limit                                        | Value                                                                                        |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 262144 bytes of data cost                                  |
+| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 786432 bytes of data cost                                  |
 | Response body                                | `MAX_PROTOTYPE_RESPONSE_BYTES`, 262144 bytes, 2xx only (a non-2xx body is never read)        |
 | Request `timeoutMs`                          | 1 to 30000, default 10000                                                                    |
 | Requests in flight                           | 4 per device                                                                                 |
@@ -2411,7 +2423,7 @@ contract accepts it everywhere), and the colour-role and `{light, dark}` resolut
 ## Charts (#14209, not device-verified)
 
 A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series
-reads the `/data` array at `path` (objects only, at most 500 like any data array), taking each
+reads the `/data` array at `path` (objects only, at most `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` like any data array), taking each
 point's numeric `y` member and optional `x` label member. A literal `path` must resolve to an array
 when the spec is shown, and every point must be an object with a numeric `y`. A repeat-bound path is
 bound per row. `yRange {min, max}` fixes the axis (max above min); otherwise it spans the values
@@ -2676,16 +2688,16 @@ to accessibility (Android LazyColumn/LazyRow collection info and scroll actions;
 Both the list node and `request.append` require `prototype_lazy_list_v1` together with
 `prototype_data_model_v1`.
 
-| Field                          | Contract                                                                                                                                                                          |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repeat`                       | Required `{items:{path}, as, key}`; path resolves relative to `data` to an array of objects. Literal items are forbidden.                                                         |
-| `children`                     | Exactly one row template; `{index}`, `{<as>.<field>}`, state/data bindings and ordinary repeat projection rules apply.                                                            |
-| `axis`                         | `vertical` (default) or `horizontal`.                                                                                                                                             |
-| `header`, `footer`             | Optional single ordinary nodes inside the scrolling content, outside the row repeat scope.                                                                                        |
-| `spacing`, `contentPadding`    | Nonnegative dp; gap between rows/header/footer and padding inside the scroll bounds.                                                                                              |
-| `onEndReached`, `endThreshold` | Ordinary action list; threshold 1–50 (default 3), permitted only with `onEndReached`.                                                                                             |
-| `refresh`                      | `{stateKey,onRefresh}` as on scroll: declared boolean state key, set true before actions run. Vertical lists only; also needs `prototype_refresh_v1`.                             |
-| `maxItems`                     | Optional integer 1–500, greater than `endThreshold` (default 3) when `onEndReached` is set. Initial data must fit. Appends trim the oldest rows from the start in the same write. |
+| Field                          | Contract                                                                                                                                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repeat`                       | Required `{items:{path}, as, key}`; path resolves relative to `data` to an array of objects. Literal items are forbidden.                                                                                |
+| `children`                     | Exactly one row template; `{index}`, `{<as>.<field>}`, state/data bindings and ordinary repeat projection rules apply.                                                                                   |
+| `axis`                         | `vertical` (default) or `horizontal`.                                                                                                                                                                    |
+| `header`, `footer`             | Optional single ordinary nodes inside the scrolling content, outside the row repeat scope.                                                                                                               |
+| `spacing`, `contentPadding`    | Nonnegative dp; gap between rows/header/footer and padding inside the scroll bounds.                                                                                                                     |
+| `onEndReached`, `endThreshold` | Ordinary action list; threshold 1–50 (default 3), permitted only with `onEndReached`.                                                                                                                    |
+| `refresh`                      | `{stateKey,onRefresh}` as on scroll: declared boolean state key, set true before actions run. Vertical lists only; also needs `prototype_refresh_v1`.                                                    |
+| `maxItems`                     | Optional integer 1–`MAX_PROTOTYPE_LIST_ITEMS`, greater than `endThreshold` (default 3) when `onEndReached` is set. Initial data must fit. Appends trim the oldest rows from the start in the same write. |
 
 `repeat.key` must name a projected scalar field present in every item, with unique rendered
 values. Keys preserve row identity across appends, trims and reorders. Empty lists and several
@@ -2696,8 +2708,8 @@ an axis; cross-axis scrolling is allowed. The row template cannot contain anothe
 
 The row template counts once against node/image limits, even for zero rows; header/footer count
 once each. Per-item field, state-key, action, substitution and repeat-path-cell budgets still
-apply. List paths accept up to `MAX_PROTOTYPE_LIST_ITEMS` (500), with overflow reported at
-`<list>.repeat.items.path` as `Repeat path resolves to more than 500 items`. A source longer than
+apply. List paths accept up to `MAX_PROTOTYPE_LIST_ITEMS` (2000), with overflow reported at
+`<list>.repeat.items.path` as `Repeat path resolves to more than 2000 items`. A source longer than
 `maxItems` fails there with `List data has more items than maxItems`. Ordinary repeats keep their
 128-item cap and count expanded instances.
 
@@ -2720,8 +2732,8 @@ reports `invalid_response`. The result reports `appended`, the number of respons
 Both `appendData` and request append use the smallest `maxItems` among lists whose exact data
 path matches the write target. The shared writer supports `append` (one value) and `extend`
 (array values), with optional `maxItems`; it trims from the start before checking final
-array/byte/depth limits, and reports `trimmed` (0 when none). Without a cap, the ordinary 500-item
-data-array limit applies after concatenation. `extend` rejects a non-array value with
+array/byte/depth limits, and reports `trimmed` (0 when none). Without a cap, the ordinary
+`MAX_PROTOTYPE_DATA_ARRAY_ITEMS` limit applies after concatenation. `extend` rejects a non-array value with
 `invalid_value`, a missing target with `not_found`, and a non-array target with `not_array`.
 
 A device change event names the target `/data/...` path and carries

@@ -603,7 +603,7 @@ and retries; a same-id re-show restores from the unsaved values meanwhile.
 
 | Limit                                        | Value                                                                                        |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 262144 bytes of data cost                                  |
+| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 1048576 bytes of data cost                                 |
 | Response body                                | `MAX_PROTOTYPE_RESPONSE_BYTES`, 262144 bytes, 2xx only                                       |
 | Request `timeoutMs`                          | 1 to 30000, default 10000                                                                    |
 | Requests in flight                           | 4 per device                                                                                 |

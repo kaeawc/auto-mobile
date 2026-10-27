@@ -137,16 +137,16 @@ final class PrototypeLazyListTests: XCTestCase {
     func testRequestAppendToNonArray() throws { try assertFixture("request-append-to-non-array.json") }
     func testRequestAppendToOverlap() throws { try assertFixture("request-append-to-overlap.json") }
     func testRequestAppendToPath() throws { try assertFixture("request-append-to-path.json") }
-    func testStrictBound024NodeListChildrenPlusOne() throws {
-        try assertFixture("strict-bound-024-node-list-children-plus-one.json")
+    func testStrictBound029NodeListChildrenPlusOne() throws {
+        try assertFixture("strict-bound-029-node-list-children-plus-one.json")
     }
 
-    func testStrictBound026NodeListEndThresholdPlusOne() throws {
-        try assertFixture("strict-bound-026-node-list-endThreshold-plus-one.json")
+    func testStrictBound031NodeListEndThresholdPlusOne() throws {
+        try assertFixture("strict-bound-031-node-list-endThreshold-plus-one.json")
     }
 
-    func testStrictBound027NodeListMaxItemsPlusOne() throws {
-        try assertFixture("strict-bound-027-node-list-maxItems-plus-one.json")
+    func testStrictBound032NodeListMaxItemsPlusOne() throws {
+        try assertFixture("strict-bound-032-node-list-maxItems-plus-one.json")
     }
 
     func testStrictGatePrototypeLazyListV1() throws { try assertFixture("strict-gate-prototype_lazy_list_v1.json") }

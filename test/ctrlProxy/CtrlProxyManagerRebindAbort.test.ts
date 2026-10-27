@@ -59,7 +59,7 @@ function execResult(stdout: string): ExecResult {
 
 type Handler = (command: string) => Promise<string | undefined> | string | undefined;
 
-function createHarness(handler: Handler = () => undefined) {
+function createHarness(handler: Handler = () => undefined, device: BootedDevice = testDevice) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const executed: string[] = [];
@@ -79,11 +79,11 @@ function createHarness(handler: Handler = () => undefined) {
     }
     return execResult("");
   };
-  const adb = new AdbClient(testDevice, exec, {
+  const adb = new AdbClient(device, exec, {
     retryExecutor: new DefaultRetryExecutor(timer),
     timer,
   });
-  const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
+  const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, timer);
   return { manager, executed, timer };
 }
 
@@ -328,6 +328,46 @@ describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
   });
 });
 
+describe("rebind on an automotive device with a foreground user (#14918)", () => {
+  useFakeCtrlProxyManagerHost();
+  beforeEach(() => {
+    AndroidCtrlProxyManager.resetInstances();
+  });
+
+  const automotive: BootedDevice = { ...testDevice, formFactor: "automotive" };
+  const multiUserCrashed = [
+    "User state[\n     attributes:{id=0, installedServiceCount=0}\n     Bound services:{}\n     Enabled services:{}\n     Binding services:{}\n     Crashed services:{}\n",
+    crashedCapture.replaceAll("id=0,", "id=10,"),
+  ].join("\n");
+
+  test("reads the user's dump block and removes, force-stops and re-adds for that user", async () => {
+    const { manager, executed } = createHarness((command) => {
+      if (command === "shell am get-current-user") {
+        return "10\n";
+      }
+      if (command.includes("dumpsys accessibility")) {
+        return multiUserCrashed;
+      }
+      return undefined;
+    }, automotive);
+
+    expect(await manager.rebindIfUnhealthy()).toBe(true);
+
+    const settings = executed.filter((command) => command.startsWith("shell settings"));
+    expect(settings.length).toBeGreaterThan(0);
+    expect(settings.every((command) => command.startsWith("shell settings --user 10 "))).toBe(true);
+    expect(executed).toContain(FORCE_STOP);
+    expect(executed.filter((command) => command === "shell am get-current-user")).toHaveLength(1);
+  });
+
+  test("a phone-shaped device issues no foreground-user command and no --user flag", async () => {
+    const { manager, executed } = createHarness();
+    expect(await manager.rebindIfUnhealthy()).toBe(true);
+    expect(executed.some((command) => command.includes("get-current-user"))).toBe(false);
+    expect(executed.some((command) => command.includes("--user"))).toBe(false);
+  });
+});
+
 test.each(["retry", "load", "exhausted", "stuck"] as const)(
   "shielded rebind budget: %s",
   async (mode) => {
@@ -359,6 +399,7 @@ test.each(["retry", "load", "exhausted", "stuck"] as const)(
       assertNotDrivenByOtherDaemon: async () => {},
       isAccessibilityServiceHealthy: async () => false,
       clearAvailabilityCache: () => {},
+      setupUser: async () => undefined,
     });
     const result = rebind.rebindIfUnhealthy().then(
       (value) => value,

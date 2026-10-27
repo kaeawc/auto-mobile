@@ -47,5 +47,6 @@
   "options": {
     "supportedCapabilities": ["prototype_data_model_v1"]
   },
-  "expectedPath": "$"
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_lazy_list_v1"
 }

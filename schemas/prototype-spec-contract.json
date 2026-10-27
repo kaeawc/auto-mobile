@@ -5300,20 +5300,6 @@
               },
               "optional": true
             },
-            "ios": {
-              "rule": {
-                "kind": "ref",
-                "name": "iosNamespace"
-              },
-              "optional": true
-            },
-            "android": {
-              "rule": {
-                "kind": "ref",
-                "name": "androidNamespace"
-              },
-              "optional": true
-            },
             "errorWhen": {
               "rule": {
                 "kind": "ref",
@@ -5325,6 +5311,20 @@
               "rule": {
                 "kind": "string",
                 "max": 256
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
               },
               "optional": true
             }
@@ -8399,6 +8399,19 @@
               },
               "optional": true
             },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pinned", "enterAlways", "exitUntilCollapsed"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "ios": {
               "rule": {
                 "kind": "ref",
@@ -8410,19 +8423,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "onScroll": {
-              "rule": {
-                "kind": "enum",
-                "values": ["pinned", "enterAlways", "exitUntilCollapsed"]
-              },
-              "optional": true
-            },
-            "scroll": {
-              "rule": {
-                "kind": "string"
               },
               "optional": true
             }
@@ -10767,6 +10767,12 @@
               },
               "optional": true
             },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
             "ios": {
               "rule": {
                 "kind": "ref",
@@ -10778,12 +10784,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "stateKey": {
-              "rule": {
-                "kind": "key"
               },
               "optional": true
             }
@@ -11007,6 +11007,19 @@
               },
               "optional": true
             },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "hide", "minimize"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "ios": {
               "rule": {
                 "kind": "ref",
@@ -11018,19 +11031,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "onScroll": {
-              "rule": {
-                "kind": "enum",
-                "values": ["none", "hide", "minimize"]
-              },
-              "optional": true
-            },
-            "scroll": {
-              "rule": {
-                "kind": "string"
               },
               "optional": true
             }
@@ -11249,6 +11249,19 @@
               },
               "optional": true
             },
+            "onScroll": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "hide", "minimize"]
+              },
+              "optional": true
+            },
+            "scroll": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "ios": {
               "rule": {
                 "kind": "ref",
@@ -11260,19 +11273,6 @@
               "rule": {
                 "kind": "ref",
                 "name": "androidNamespace"
-              },
-              "optional": true
-            },
-            "onScroll": {
-              "rule": {
-                "kind": "enum",
-                "values": ["none", "hide", "minimize"]
-              },
-              "optional": true
-            },
-            "scroll": {
-              "rule": {
-                "kind": "string"
               },
               "optional": true
             }

@@ -4,6 +4,11 @@ import {
   type VirtualDeviceCapabilityInventory,
   type VirtualDeviceCapabilityState,
 } from "../models/virtualDeviceCapabilities";
+import {
+  androidEmulatorAudioCapabilities,
+  iosSimulatorAudioCapabilities,
+} from "./audio/audioCapabilities";
+import type { HostAudioSnapshot } from "./audio/hostAudio";
 
 /**
  * Capabilities exposed by iOS Simulator independently of a running session.
@@ -16,6 +21,8 @@ export function iosSimulatorCapabilityInventory(
     isAvailable?: boolean;
     availabilityError?: string;
     runtime?: string;
+    /** The host's audio devices (#13626); audio entries are left out when absent or not probed. */
+    hostAudio?: HostAudioSnapshot;
   } = {},
 ): VirtualDeviceCapabilityInventory {
   const supportsBiometricControls =
@@ -72,6 +79,7 @@ export function iosSimulatorCapabilityInventory(
         source: "platform",
         reason: "iOS Simulator shares the host network stack and has no connectivity read verb.",
       },
+      ...(options.hostAudio ? iosSimulatorAudioCapabilities(options.hostAudio) : []),
     ],
   };
 }
@@ -113,6 +121,7 @@ function avdCapabilityState(
  */
 export function buildAndroidAvdCapabilityInventory(
   config: Readonly<Record<string, string | undefined>>,
+  audio?: { launchWithoutAudio: boolean; hostAudio: HostAudioSnapshot },
 ): VirtualDeviceCapabilityInventory {
   const capabilities = new Map<string, VirtualDeviceCapability>([
     [
@@ -129,6 +138,16 @@ export function buildAndroidAvdCapabilityInventory(
     const state = value && avdCapabilityState(value, definition.kind);
     if (state) {
       capabilities.set(definition.id, { id: definition.id, state, source: "avd_config" });
+    }
+  }
+
+  if (audio) {
+    for (const capability of androidEmulatorAudioCapabilities({
+      config,
+      launchWithoutAudio: audio.launchWithoutAudio,
+      host: audio.hostAudio,
+    })) {
+      capabilities.set(capability.id, capability);
     }
   }
 

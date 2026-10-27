@@ -1,3 +1,4 @@
+import { DeviceClaimMirrorHub } from "./deviceClaimMirrorHub";
 import type { DaemonSocketServer } from "./daemonSocketServer";
 import type { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { DaemonBrokerDeviceAcquisitionHandle } from "./sessionBroker/provisioning/daemonDeviceAcquisition";
@@ -15,6 +16,8 @@ import type { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
  * clears while stopping. Held in one object so `Daemon` does not carry each as its own field.
  */
 export class DaemonRuntimeState {
+  /** The device-claim mirrors of this daemon, told when its binding registry opens (#11811). */
+  readonly deviceClaimMirrors = new DeviceClaimMirrorHub();
   pidFileWritten = false;
   enteredDaemonProcess = false;
   completeIdentityPublished = false;

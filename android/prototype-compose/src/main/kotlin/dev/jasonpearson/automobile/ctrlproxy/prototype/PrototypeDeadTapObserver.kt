@@ -34,7 +34,13 @@ internal fun Modifier.prototypeDeadTapObserver(
         } else {
           rejected = rejected || strayed(change, down, size, viewConfiguration.touchSlop)
           if (!change.pressed) {
-            if (!rejected) interact(PrototypeInteraction.DeadTap(change.position.x / density, change.position.y / density))
+            if (!rejected)
+              interact(
+                PrototypeInteraction.DeadTap(
+                  change.position.x / density,
+                  change.position.y / density,
+                ),
+              )
             break
           }
         }
@@ -47,7 +53,12 @@ private fun IntSize.containsPoint(position: Offset): Boolean =
   position.x >= 0 && position.y >= 0 && position.x < width && position.y < height
 
 /** A consumed, dragged-past-slop or out-of-bounds change cannot end in a dead tap. */
-private fun strayed(change: PointerInputChange, down: PointerInputChange, size: IntSize, slop: Float) =
+private fun strayed(
+  change: PointerInputChange,
+  down: PointerInputChange,
+  size: IntSize,
+  slop: Float,
+) =
   change.isConsumed ||
     (change.position - down.position).getDistance() >= slop ||
     !size.containsPoint(change.position)

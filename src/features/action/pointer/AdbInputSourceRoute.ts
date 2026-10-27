@@ -13,9 +13,9 @@ export class AdbInputSourceRoute extends DispatchingRoute {
     if (device.platform !== "android" || features.toolType !== "stylus") {
       return unsupported("adb input stylus injects a stylus on Android only");
     }
-    if (features.hover || features.variablePressure) {
+    if (features.hover || features.variablePressure || features.extendedAxes || features.path) {
       return unsupported(
-        "adb input stylus injects constant-pressure strokes with contact; it cannot hover or vary pressure",
+        "adb input stylus injects a constant-pressure tap or straight swipe; it cannot hover, vary pressure, tilt, press buttons or draw a path",
       );
     }
     if (device.apiLevel === undefined) {

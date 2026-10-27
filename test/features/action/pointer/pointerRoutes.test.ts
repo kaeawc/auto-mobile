@@ -112,6 +112,9 @@ describe("invalidPointerFeatures", () => {
       { toolType: "stylus" as const, hover: true, variablePressure: true },
       { toolType: "mouse" as const, hover: true, variablePressure: true },
       { toolType: "mouse" as const },
+      { toolType: "mouse" as const, path: true },
+      { toolType: "stylus" as const, hover: true, extendedAxes: true },
+      { toolType: "stylus" as const, hover: true, path: true },
     ]) {
       expect(invalidPointerFeatures(features)).toBeString();
     }
@@ -220,7 +223,7 @@ describe("refusals", () => {
         "stylus input cannot be injected on this device, and a finger touch is never substituted. " +
           "ctrlproxy-a11y: accessibility dispatchGesture only produces a finger touch, not stylus; " +
           "adb-input-source: adb input stylus needs Android API 31 or newer (this device reports API 29); " +
-          "instrumentation: the connected runner does not advertise stylus_input_v1. " +
+          "instrumentation: the connected runner does not advertise stylus_input_v1: this device runs Android API 29 and the route needs Android 13 (API 33). " +
           "Use a device whose runner advertises stylus_input_v1.",
       );
     }

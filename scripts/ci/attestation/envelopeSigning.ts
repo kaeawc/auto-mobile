@@ -12,16 +12,20 @@ import { canonicalJson } from "./canonicalJson";
  */
 export const ED25519_ALGORITHM = "ed25519-v1";
 
-const DOMAIN = "auto-mobile attestation envelope v1\n";
+export const ENVELOPE_VERSION = 1;
 
-/** The exact bytes signed: key id and algorithm are bound together with the canonical payload. */
+/**
+ * The exact bytes signed: the envelope version (in the domain line), the key id and the algorithm
+ * are bound together with the canonical payload, so none of them can change after signing.
+ */
 export function envelopeSigningBytes(
   keyId: string,
   algorithm: string,
   canonicalPayload: string,
+  envelopeVersion: number = ENVELOPE_VERSION,
 ): Buffer {
   return Buffer.from(
-    `${DOMAIN}${Buffer.byteLength(keyId)}:${keyId}\n${Buffer.byteLength(algorithm)}:${algorithm}\n${canonicalPayload}`,
+    `auto-mobile attestation envelope v${envelopeVersion}\n${Buffer.byteLength(keyId)}:${keyId}\n${Buffer.byteLength(algorithm)}:${algorithm}\n${canonicalPayload}`,
     "utf8",
   );
 }
@@ -36,11 +40,12 @@ export function signEnvelopeEd25519(
   keyId: string,
   canonicalPayload: string,
   privateKey: KeyObject,
+  envelopeVersion: number = ENVELOPE_VERSION,
 ): EnvelopeSignature {
   if (privateKey.asymmetricKeyType !== "ed25519") {
     throw new Error("the producer key is not an Ed25519 key");
   }
-  const bytes = envelopeSigningBytes(keyId, ED25519_ALGORITHM, canonicalPayload);
+  const bytes = envelopeSigningBytes(keyId, ED25519_ALGORITHM, canonicalPayload, envelopeVersion);
   return {
     keyId,
     algorithm: ED25519_ALGORITHM,
@@ -53,6 +58,7 @@ export function verifyEnvelopeEd25519(
   payload: unknown,
   signature: EnvelopeSignature,
   publicKey: KeyObject,
+  envelopeVersion: number = ENVELOPE_VERSION,
 ): boolean {
   try {
     if (
@@ -66,6 +72,7 @@ export function verifyEnvelopeEd25519(
       signature.keyId,
       signature.algorithm,
       canonicalJson(payload),
+      envelopeVersion,
     );
     return verify(null, bytes, publicKey, Buffer.from(signature.value, "base64"));
   } catch {

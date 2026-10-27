@@ -297,8 +297,7 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" ||
-        (key == "value" && type !in listOf("setData", "appendData", "upsertData"))
+      key == "payload" || (key == "value" && type !in listOf("setData", "appendData", "upsertData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
     private fun descend(key: String, child: JsonElement) {

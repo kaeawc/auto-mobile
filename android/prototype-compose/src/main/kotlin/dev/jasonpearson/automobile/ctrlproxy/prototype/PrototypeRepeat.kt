@@ -44,7 +44,6 @@ import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
-import dev.jasonpearson.automobile.protocol.PrototypeUpsertDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatNodeBinding
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
@@ -74,6 +73,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeUpsertDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement

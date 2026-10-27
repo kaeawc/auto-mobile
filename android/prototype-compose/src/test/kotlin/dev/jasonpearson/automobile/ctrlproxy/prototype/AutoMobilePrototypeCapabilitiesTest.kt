@@ -29,8 +29,16 @@ class AutoMobilePrototypeCapabilitiesTest {
     }
   }
 
-  /** The test module is a placeholder no production runtime advertises. */
-  private val exclusions = setOf("prototype_platform_test_v1")
+  /**
+   * The test module is a placeholder no production runtime advertises. Realtime channels (#14261)
+   * have a validated contract and no runtime yet (#14268, #14269, #14270).
+   */
+  private val exclusions =
+    setOf(
+      "prototype_platform_test_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_realtime_device_v1",
+    )
 
   @Test
   fun `shared spec capabilities are supported`() {

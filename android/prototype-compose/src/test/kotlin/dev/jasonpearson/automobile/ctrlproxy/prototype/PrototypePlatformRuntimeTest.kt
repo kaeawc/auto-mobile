@@ -84,7 +84,7 @@ class PrototypePlatformRuntimeTest {
       root = PrototypeTextNode(text = "{platform:/test/count}"),
       data = obj("result" to JsonPrimitive("old"), "observed" to JsonPrimitive("old")),
       requires = PrototypeRequires(platform = listOf("test")),
-      platform = PrototypePlatformHandlers(handlers),
+      platform = platformHandlers(handlers),
     )
 
   private fun action(

@@ -67,7 +67,7 @@ class PrototypePlatformStateTest {
         data = buildJsonObject { put("pointer", false) },
         requires = PrototypeRequires(platform = listOf("device")),
         platform =
-          PrototypePlatformHandlers(
+          platformHandlers(
             mapOf(
               "device.changed" to
                 listOf(

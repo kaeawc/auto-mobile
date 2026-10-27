@@ -25,8 +25,8 @@ beforeAll(async () => {
   rig.timer.reset();
 });
 
-async function harness() {
-  const rig = slotAgreementRig();
+async function harness(durableJournal = true) {
+  const rig = slotAgreementRig(undefined, undefined, undefined, undefined, durableJournal);
   const session = await rig.manager.createSession("id", "fake-id", "android");
   const slots = Reflect.get(rig.manager, "sessionSlots") as ReleaseStore;
   const view: LegacyLifecycleView<Session> = rig.manager.getLegacyLifecycleView();
@@ -157,8 +157,9 @@ test("declined release restores admission and clears the op and releasing mark",
   h.settled();
 });
 
+// Write-first order (a volatile journal): a failed row leaves the session published and fenced.
 test("a failed terminal write leaves a published fence after op and mark cleanup", async () => {
-  const h = await harness();
+  const h = await harness(false);
   h.persistence.failure = "release";
   const release = h.manager.releaseSession("id", "explicit-release");
   const failure = expect(release).rejects.toThrow();

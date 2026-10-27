@@ -341,8 +341,8 @@ function installDeviceReadiness(options: McpServerOptions): void {
  */
 function sdkServerCapabilities(era: McpServerOptions["era"]): ServerCapabilities {
   return {
-    resources: era === "modern" ? {} : { subscribe: true, listChanged: true },
-    tools: {},
+    resources: era === "modern" ? { listChanged: true } : { subscribe: true, listChanged: true },
+    tools: era === "modern" ? { listChanged: true } : {},
     prompts: {},
     ...(era === "modern" && { extensions: { [TASKS_EXTENSION_ID]: {} } }),
   };

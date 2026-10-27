@@ -315,13 +315,6 @@ fun PrototypeSpecContent(
                 remember(node) { layeredPrototypeAnchorsIn(node.children) },
                 interact,
               )
-              .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
-              .semantics { testTagsAsResourceId = true },
-          ) {
-            val modals = prototypeModalLayers(root)
-            PrototypeModalPage(modals) {
-              RenderPrototypeNode(root, interact, windowRoot = true)
-              PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
             }
           }
           PrototypeExpandedSelect(root, modals, menuLayers, interact)

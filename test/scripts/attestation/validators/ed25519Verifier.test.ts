@@ -123,22 +123,34 @@ describe("everything else is ignored", () => {
   });
 
   test("a key id swapped for another registered key's", () => {
-    expect(verify(signed({ keyId: "producer-2" }), directory())).toMatchObject(unverified);
+    const other = generateKeyPairSync("ed25519").publicKey;
+    const both: Ed25519KeyDirectory = {
+      lookup: (id) =>
+        id === "producer-1"
+          ? { publicKey, identity: "alice" }
+          : id === "producer-2"
+            ? { publicKey: other, identity: "bob" }
+            : null,
+    };
+    expect(verify(signed(), both)).toMatchObject({ verified: true, identity: "alice" });
+    // The same signature value under bob's key id: the key id is signed, and bob's key differs.
+    expect(verify(signed({ keyId: "producer-2" }), both)).toMatchObject({
+      ...unverified,
+      keyId: "producer-2",
+    });
   });
 
   test.each([
-    ["the result flipped", { overall: "fail" }],
     ["the input hash", { inputHash: "b".repeat(64) }],
     ["the commit", { commitId: "other" }],
     ["a gate", { gates: [{ name: "build", status: "skip", durationSeconds: 1 }] }],
     ["the timestamp", { producedAt: "2026-10-28T00:00:00.000Z" }],
   ] as const)("a tampered payload: %s", (_, change) => {
     const tampered = { ...signed(), payload: { ...payload, ...change } };
-    // overall "fail" with a passing gate is also structurally invalid; both end unverified.
     expect(verify(tampered)).toMatchObject(unverified);
   });
 
-  test("a payload relabeled for another tier", () => {
+  test("a payload relabeled for another tier (also structurally inconsistent, so rejected as malformed)", () => {
     const relabeled = {
       ...signed(),
       payload: {
@@ -170,12 +182,34 @@ describe("everything else is ignored", () => {
     ["no signature", { ...signed(), signature: null }],
     ["a malformed signature", signed({ value: "AAAA" })],
     ["a truncated signature", signed({ value: GOLDEN_SIGNATURE.slice(0, -4) })],
-    ["an envelope version nobody signed", { ...signed(), envelopeVersion: 2 }],
+    [
+      "an envelope version nobody signed (rejected as malformed)",
+      { ...signed(), envelopeVersion: 2 },
+    ],
     ["not an envelope", { hello: "world" }],
     ["null", null],
     ["a string", "signed"],
   ])("%s", (_, raw) => {
     expect(verify(raw)).toMatchObject(unverified);
+  });
+
+  test("a result of the same shape cannot be forged through the claims", () => {
+    const verifier = new Ed25519EnvelopeVerifier(
+      directory(),
+      () =>
+        ({
+          verified: false,
+          keyId: "attacker",
+          identity: "mallory",
+          baseSha: "base",
+        }) as never,
+    );
+    expect(verifier.verify(signed())).toEqual({
+      verified: true,
+      keyId: "producer-1",
+      identity: "alice",
+      baseSha: "base",
+    });
   });
 
   test("a directory that throws is the caller's error, never a verified envelope", () => {
@@ -215,6 +249,8 @@ describe("through the trust policy", () => {
     const result = decide(envelope(), keys);
     expect(result.reasons).not.toContain("signature-unverified");
     expect(result.reasons).not.toContain("signature-algorithm-unsupported");
+    expect(result.reasons).toEqual([]);
+    expect(result.decision).not.toBe("ignore");
   });
 
   test("the wrong key is ignored", () => {

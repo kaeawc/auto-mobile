@@ -1,6 +1,7 @@
 import type { KeyObject } from "node:crypto";
 import { parseEnvelope, SUPPORTED_SIGNATURE_ALGORITHMS } from "../attestationSchema";
 import { ED25519_ALGORITHM, verifyEnvelopeEd25519 } from "../envelopeSigning";
+import { readEnvelope } from "./tierValidators";
 import type { EnvelopeVerifier, VerificationResult } from "./trustPolicy";
 
 /** The public key a producer key id names, and the identity it was issued to. */
@@ -10,8 +11,10 @@ export interface Ed25519KeyDirectory {
 
 /**
  * The verifier-bound claims (base SHA, task) the validators require. They are not part of the
- * signature: the caller that knows the pushed state (the service, or the gate for a local check)
- * supplies them, so an envelope alone can never claim them.
+ * signature. The party that actually knows the upload context (the decision service, which saw
+ * what was uploaded for which base) supplies them, so an envelope alone can never claim them. The
+ * validators compare `baseSha` with the base CI expects, which only means something when the two
+ * come from different parties: a caller that fills both from one source makes that check vacuous.
  */
 export interface VerifierClaims {
   baseSha?: string;
@@ -36,7 +39,8 @@ export class Ed25519EnvelopeVerifier implements EnvelopeVerifier {
   ) {}
 
   verify(raw: unknown): VerificationResult {
-    const parsed = parseEnvelope(raw);
+    // One snapshot, so structure and signed bytes are read from the same values.
+    const parsed = parseEnvelope(readEnvelope(raw));
     if (!parsed.ok || parsed.envelope.signature === null) {
       return UNVERIFIED("");
     }
@@ -51,6 +55,14 @@ export class Ed25519EnvelopeVerifier implements EnvelopeVerifier {
     if (!key || !verifyEnvelopeEd25519(payload, signature, key.publicKey, envelopeVersion)) {
       return UNVERIFIED(signature.keyId);
     }
-    return { verified: true, keyId: signature.keyId, identity: key.identity, ...this.claims() };
+    // Only the two claims are taken, and last-wins cannot touch the signature-bound fields.
+    const { baseSha, task } = this.claims();
+    return {
+      verified: true,
+      keyId: signature.keyId,
+      identity: key.identity,
+      ...(baseSha === undefined ? {} : { baseSha }),
+      ...(task === undefined ? {} : { task }),
+    };
   }
 }

@@ -395,7 +395,7 @@ app icon is already on the home screen. \`listSaved\` on iOS returns bundle ids 
 
 On Android or an iOS simulator with the ProtoViewer app installed, \`save\` without \`pin\` or \`icon\` imports
 the prototype into the ProtoViewer library instead, and does not need CtrlProxy or
-\`prototype_saved_v1\`. It returns \`viewer\` \`{app, libraryId, label}\`; every save is a new
+\`prototype_saved_v1\`. It returns \`viewer\` \`{app, libraryId, label}\` (plus \`display\` {key, role}, the panel it landed on, on an iPhone Duo); every save is a new
 library entry, which \`listSaved\` and \`deleteSaved\` do not see. ProtoViewer treats the entry
 as imported: its requests stay off until the user allows network in ProtoViewer, and it is not
 attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"open",id}\` with

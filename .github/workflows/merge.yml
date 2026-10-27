@@ -436,7 +436,7 @@ jobs:
         run: scripts/ci/install-bun-deps.sh
 
       - name: "Cache MediaMTX binary"
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: scratch/mediamtx
           key: mediamtx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/webrtc/run-mediamtx-publisher-integration.sh') }}

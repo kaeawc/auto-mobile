@@ -334,7 +334,7 @@ jobs:
       - name: "Upload AutoMobile daemon logs"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: automobile-daemon-logs-xctestrunner
           path: ci-logs/daemon-logs/

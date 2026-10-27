@@ -3647,7 +3647,7 @@ jobs:
       # Cache the checksum-pinned MediaMTX release so only the first run downloads
       # it. Keyed on the runner script, so a version bump there invalidates it.
       - name: "Cache MediaMTX binary"
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: scratch/mediamtx
           key: mediamtx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/webrtc/run-mediamtx-publisher-integration.sh') }}

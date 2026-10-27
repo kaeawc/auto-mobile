@@ -55,12 +55,7 @@ export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
  * check (see {@link findStaleExemptions}) so it cannot hide a later regression.
  */
 export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string>> = {
-  "android-ctrlproxy-apk": {
-    stylus_input_v1:
-      "no instrumentation injection route exists yet (#13097); the host refuses stylus pressure requests against it",
-    hover_input_v1:
-      "no instrumentation injection route exists yet (#13097); the host refuses hover requests against it",
-  },
+  "android-ctrlproxy-apk": {},
   "ios-runner": {},
   "prototype-agent-dylib": {
     prototype_chat_scroll_v1:

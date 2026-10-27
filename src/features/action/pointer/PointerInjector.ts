@@ -49,13 +49,21 @@ export interface PointerPoint {
   y: number;
   /** Milliseconds spent moving here from the previous point. */
   durationMs?: number;
-  /** Hover distance from the surface, when the route can express it. */
+  /** Hover distance from the surface, 0 (touching) to 1 (far); a stylus hover only. */
   distance?: number;
+  /** Stylus pressure 0..1 for a stroke point. */
+  pressure?: number;
+  /** Radians from the surface normal, 0..PI/2. */
+  tilt?: number;
+  /** Radians, -PI..PI. */
+  orientation?: number;
 }
 
 export interface PointerRequest {
   features: PointerFeatures;
   points: readonly PointerPoint[];
+  /** `MotionEvent` button state held for a stroke (`BUTTON_STYLUS_PRIMARY` is 32). */
+  buttons?: number;
   displayId?: number;
 }
 

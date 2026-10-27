@@ -29,6 +29,7 @@ import type { ActionCall } from "./ActionCall";
 import { resolveTapAtCoordinates } from "./TapAtCoordinate";
 import { DRAG_PATH_DEFAULT_SEGMENT_MS, assertDragPathFitsRequestBudget } from "./dragPathPlan";
 import type { PointerEnvironment, PointerInjector } from "./pointer/PointerInjector";
+import { createInstrumentationDispatch } from "./pointer/instrumentationDispatch";
 import { defaultPointerRoutes } from "./pointer/pointerRoutes";
 import { pointerCapabilities, selectPointerRoute } from "./pointer/selectPointerRoute";
 
@@ -36,7 +37,7 @@ const API_READ_TIMEOUT_MS = 5000;
 
 export interface HoverAtDependencies extends DisplayFenceDependencies {
   timer?: Timer;
-  /** Routes in preference order; the default list has no hover transport until #13097. */
+  /** Routes in preference order; the default list injects hover through the CtrlProxy instrumentation. */
   pointerInjectors?: readonly PointerInjector[];
   /** The device facts the routes decide on; the default reads the API level and the runner flags. */
   readPointerEnvironment?: (signal?: AbortSignal) => Promise<PointerEnvironment>;
@@ -50,11 +51,9 @@ function failure(error: string): HoverAtResult {
   return { success: false, error };
 }
 
-/** Dispatch for a route that has no transport yet: never reached, because no device advertises it. */
-async function noHoverTransport(): Promise<void> {
-  throw new ActionableError(
-    "No hover transport is available on this host yet (the instrumentation injection route is #13097).",
-  );
+/** Dispatch for a route a hover can never take (a finger route, the stylus shell route). */
+async function notAHoverRoute(): Promise<void> {
+  throw new ActionableError("This route cannot inject a hover.");
 }
 
 /**
@@ -77,9 +76,9 @@ export class HoverAt extends BaseVisualChange {
     this.injectors =
       dependencies.pointerInjectors ??
       defaultPointerRoutes({
-        a11y: noHoverTransport,
-        adbInputSource: noHoverTransport,
-        instrumentation: noHoverTransport,
+        a11y: notAHoverRoute,
+        adbInputSource: notAHoverRoute,
+        instrumentation: createInstrumentationDispatch(this.adb),
       });
     this.readEnvironment =
       dependencies.readPointerEnvironment ?? ((signal) => this.readDeviceEnvironment(signal));

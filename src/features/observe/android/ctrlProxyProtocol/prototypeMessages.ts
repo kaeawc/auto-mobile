@@ -239,6 +239,8 @@ export interface PrototypeStatusEntry {
   /** Device-reported `storage` block state (prototype_storage_v1, #12522); parsePrototypeStorageReport validates it. */
   storage?: unknown;
   timers?: unknown;
+  /** Last haptic and sound calls (prototype_platform_haptics_v1, _sound_v1); parsePrototypeFeedbackLog validates it. */
+  feedbackLog?: unknown;
   shaderFailures?: Record<string, string>;
 }
 

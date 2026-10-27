@@ -56,6 +56,9 @@ final class PrototypePlatformTests: XCTestCase {
                         XCTAssertEqual(rule["integer"] as? Bool, true, arg)
                         XCTAssertEqual(rule["min"] as? Double, min, arg)
                         XCTAssertEqual(rule["max"] as? Double, max, arg)
+                    case let .enumeration(values):
+                        XCTAssertEqual(rule["kind"] as? String, "enum", arg)
+                        XCTAssertEqual(Set(rule["values"] as? [String] ?? []), values, arg)
                     }
                 }
             }

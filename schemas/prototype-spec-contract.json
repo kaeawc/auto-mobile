@@ -18495,6 +18495,70 @@
       },
       "events": {},
       "state": {}
+    },
+    "haptics": {
+      "capability": "prototype_platform_haptics_v1",
+      "calls": {
+        "perform": {
+          "args": {
+            "effect": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": [
+                  "click",
+                  "tick",
+                  "heavyClick",
+                  "doubleClick",
+                  "selection",
+                  "success",
+                  "warning",
+                  "error",
+                  "impactLight",
+                  "impactMedium",
+                  "impactHeavy",
+                  "longPress"
+                ]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "sound": {
+      "capability": "prototype_platform_sound_v1",
+      "calls": {
+        "play": {
+          "args": {
+            "sound": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["click", "send", "receive", "shutter"]
+              }
+            },
+            "volume": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 100
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {

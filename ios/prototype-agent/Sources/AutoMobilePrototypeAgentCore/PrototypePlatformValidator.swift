@@ -12,6 +12,7 @@ enum PrototypePlatformValidator {
         case string(empty: Bool, maxBytes: Int)
         case boolean
         case integer(min: Double, max: Double)
+        case enumeration(Set<String>)
     }
 
     struct Argument: Equatable {
@@ -67,6 +68,12 @@ enum PrototypePlatformValidator {
         case "string": .string(empty: rule["empty"] == .bool(true),
                                maxBytes: Int(rule["maxBytes"]?.numberValue ?? Double(Int.max / 2)))
         case "boolean": .boolean
+        case "enum":
+            if case let .array(values)? = rule["values"] {
+                .enumeration(Set(values.compactMap(\.stringValue)))
+            } else {
+                preconditionFailure("platform enum argument without values")
+            }
         default: .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
         }
     }
@@ -392,6 +399,12 @@ enum PrototypePlatformValidator {
         guard fields.count <= maxArgs else { throw fail(path, "Record entry limit exceeded") }
         for name in sorted(Set(fields.keys)) {
             let at = PrototypeLimits.dataMemberPath(path, key: name)
+            // An unknown key inside a one-key form is reported at that key, as the TypeScript walk does.
+            if case let .object(form)? = fields[name], form.count == 1, let key = form.keys.first,
+               !bindingKeys.contains(key)
+            {
+                throw fail(PrototypeLimits.dataMemberPath(at, key: key), "Unknown property")
+            }
             guard case let .object(form)? = fields[name], form.count == 1, let key = form.keys.first,
                   bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
             else { throw fail(at, "Invalid union value") }
@@ -416,6 +429,10 @@ enum PrototypePlatformValidator {
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")
+            }
+        case let .enumeration(values):
+            guard case let .string(value) = literal, values.contains(value) else {
+                throw fail(path, "Invalid enum value")
             }
         }
     }

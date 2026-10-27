@@ -947,6 +947,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private val prototypePlatform by lazy {
     dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform(
+      this,
       dev.jasonpearson.automobile.prototype.AndroidPrototypeClipboard(
         this,
         object : dev.jasonpearson.automobile.prototype.PrototypeClipboardFocus {

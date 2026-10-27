@@ -1,8 +1,14 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.content.Context
 import dev.jasonpearson.automobile.prototype.*
 
-internal fun prototypeRuntimePlatform(clipboard: PrototypeClipboard? = null): PrototypePlatform =
+/** The haptics and sound modules, the clipboard, and the contract test module debug builds carry. */
+internal fun prototypeRuntimePlatform(
+  context: Context,
+  clipboard: PrototypeClipboard? = null,
+): PrototypePlatform =
   PrototypePlatform(
-    listOfNotNull(TestPlatformModule(), clipboard?.let { PrototypeClipboardModule(it) }),
+    prototypeFeedbackModules(context) +
+      listOfNotNull(TestPlatformModule(), clipboard?.let { PrototypeClipboardModule(it) }),
   )

@@ -171,6 +171,12 @@ import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtoco
 import { prototypeDrawerFields, prototypeDrawerUnsupportedMessage } from "./prototypeDrawer";
 
 import {
+  prototypeKeyframesFields,
+  prototypeKeyframesUnsupportedMessage,
+} from "./prototypeKeyframes";
+import { PROTOTYPE_KEYFRAMES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
+import {
   PROTOTYPE_STRINGS_CAPABILITY,
   PROTOTYPE_SEMANTICS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
@@ -238,6 +244,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypeRouteFields,
     unsupportedMessage: (fields) =>
       `The device does not advertise prototype_routes_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
+  {
+    capability: PROTOTYPE_KEYFRAMES_CAPABILITY,
+    fields: prototypeKeyframesFields,
+    unsupportedMessage: prototypeKeyframesUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,

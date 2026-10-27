@@ -8,6 +8,7 @@
 export const PROTOTYPE_IOS_MINIMUM_OS: Readonly<Record<string, number>> = {
   prototype_icon_effects_v1: 17,
   prototype_glass_v1: 26,
+  prototype_keyframes_v1: 17,
   prototype_zoom_transition_v1: 18,
 };
 

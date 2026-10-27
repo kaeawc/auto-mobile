@@ -1210,6 +1210,28 @@ reporter (`scripts/test-ts.sh`, `scripts/validate-bun-test-timings.sh`). It does
 Robolectric tests, so the Compose and host tests for this feature are not held to it. iOS accepts the structural contract but does not
 advertise this capability, so host preflight refuses either authored field.
 
+### One-shot keyframes
+
+Every node may carry `keyframes: {trigger, durationMs, tracks}`, gated by
+`prototype_keyframes_v1`. The trigger is exactly one declared state `{key: "liked"}`
+or a data pointer `{data: "/liked"}` relative to the data object. A value change plays
+once; mounting does not play, and a change during playback restarts from zero.
+
+`durationMs` is an integer from 100 to 3000. Tracks contain one to seven of `scale`,
+`scaleX`, `scaleY`, `rotation` (degrees), `offsetX`, `offsetY` (dp), and `alpha`.
+Each is 2–8 `[fraction, value]` points or `{points, curve?}`; fractions increase strictly
+from 0 to 1. Curves are `linear`, `standard` (default, cubic Bezier 0.2,0,0,1), and
+`spring`. Scale values are positive and alpha stays in 0–1. Both ends equal rest:
+1 for scale and alpha, 0 for rotation and offsets. The first node beyond the expanded
+16-node budget fails at its `.keyframes`, including component and repeat instances.
+
+One Compose `Animatable` drives draw-time layers, composing scale/alpha multiplicatively
+and rotation/offsets additively with style motion. Tracks do not change layout or authored
+semantics. Reduced motion drops spatial tracks and retains alpha; off disables playback.
+Finite playback contributes to the motion-active signal. The pure spring sampler uses a
+normalized damped ease derived from damping ratio 0.8 and stiffness 380, with exact endpoints.
+iOS runs one linear `KeyframeAnimator` phase per track and applies the same sampler as Android, so all three curves match across platforms. A `trigger.key` is a plain declared state key, not a per-row bound key, so every repeat instance plays on the same trigger; per-row triggers need a bound-key form and are not part of v1.
+
 ### Motion profiles (#15115, `prototype_reduced_motion_v1`)
 
 Motion runs in one of three profiles, decided identically on both platforms from the spec's

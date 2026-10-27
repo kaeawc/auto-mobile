@@ -18,6 +18,8 @@
         private let layers: PrototypeLayersViewController
         private weak var observedScene: UIWindowScene?
         private var appearanceObservation: (any UITraitChangeRegistration)?
+        var onAppearanceChange: (@MainActor (PrototypeChromeAppearance) -> Void)?
+        private var appearanceReport = PrototypeAppearanceReport()
         private var appliedAccessibility: PrototypeHostAccessibility?
 
         init(
@@ -119,7 +121,23 @@
             case .content:
                 let containerFrame = view.convert(view.bounds, to: window.screen.coordinateSpace)
                 if model.keyboardContainerFrame != containerFrame { model.keyboardContainerFrame = containerFrame }
-                if model.safeInsets != view.safeAreaInsets { model.safeInsets = view.safeAreaInsets }
+                let windowInsets = window.safeAreaInsets
+                let viewInsets = view.safeAreaInsets
+                let effective = prototypeEffectiveSafeInsets(
+                    viewFrameInWindow: view.convert(view.bounds, to: window), windowBounds: window.bounds,
+                    windowInsets: PrototypeSafeInsets(
+                        top: windowInsets.top, left: windowInsets.left,
+                        bottom: windowInsets.bottom, right: windowInsets.right
+                    ),
+                    viewInsets: PrototypeSafeInsets(
+                        top: viewInsets.top, left: viewInsets.left,
+                        bottom: viewInsets.bottom, right: viewInsets.right
+                    )
+                )
+                let safeInsets = UIEdgeInsets(
+                    top: effective.top, left: effective.left, bottom: effective.bottom, right: effective.right
+                )
+                if model.safeInsets != safeInsets { model.safeInsets = safeInsets }
             case .window:
                 if model.safeInsets != window.safeAreaInsets { model.safeInsets = window.safeAreaInsets }
             }
@@ -166,6 +184,9 @@
             if let appearance = session.appearance {
                 let style: UIUserInterfaceStyle = appearance.dark ? .dark : .light
                 if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
+                if let onAppearanceChange, let mode = appearanceReport.report(dark: appearance.dark) {
+                    onAppearanceChange(mode)
+                }
             }
             let flags = PrototypeHostAccessibility(session: session, windowShown: true)
             guard flags != appliedAccessibility else { return }

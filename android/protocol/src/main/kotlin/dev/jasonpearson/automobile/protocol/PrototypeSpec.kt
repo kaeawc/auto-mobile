@@ -458,6 +458,7 @@ data class PrototypePasteButtonNode(
   override val sharedKey: String? = null,
   override val scrollTransition: PrototypeScrollTransition? = null,
   override val scrollLinked: PrototypeScrollLinked? = null,
+  override val keyframes: JsonObject? = null,
   val into: String,
   override val ios: PrototypeIosNamespace? = null,
 ) : PrototypeNode() {

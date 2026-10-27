@@ -707,6 +707,15 @@ export const prototypeOutputSchema = z.object({
       app: z.literal("protoviewer"),
       libraryId: z.string().describe("Pass as id to open to launch this entry."),
       label: z.string(),
+      display: z
+        .object({
+          key: z.string(),
+          role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+        })
+        .optional()
+        .describe(
+          "iOS multi-screen device (iPhone Duo): the panel the app was on when it answered. Absent on single-screen devices, older apps and ambiguous sizes.",
+        ),
     })
     .optional()
     .describe(

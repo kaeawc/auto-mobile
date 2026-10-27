@@ -61,6 +61,7 @@ const fixtures: Record<string, Node> = {
     child: label,
   },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
+  prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
   prototype_stack_transitions_v1: {
     ...label,

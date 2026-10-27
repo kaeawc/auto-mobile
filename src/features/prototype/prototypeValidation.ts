@@ -20,6 +20,7 @@ import { prototypePlatformError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { effectUses } from "./prototypeEffects";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
   Rule,
@@ -44,6 +45,8 @@ interface Context {
   nodes: Located[];
   actions: Located[];
   images: number;
+  effects: number;
+  animatedEffects: number;
   /** Current nesting per bounded reference (see `nestedReferences`). */
   nesting: Record<string, number>;
 }
@@ -112,13 +115,33 @@ function visitReference(
   if (depth + 1 > contract.limits.MAX_PROTOTYPE_DEPTH) {
     return fail(path, "Tree depth limit exceeded");
   }
+  const budgetError = chargeNodeBudgets(node, path, context);
+  if (budgetError) {
+    return budgetError;
+  }
+  return walk(value, refRule(rule), path, context, depth + 1);
+}
+/** Adds a node's images and `style.effects` to the spec-wide totals; the node that crosses a limit is reported. */
+function chargeNodeBudgets(
+  node: Record<string, unknown>,
+  path: string,
+  context: Context,
+): PrototypeValidationError | undefined {
   if (node.type === "image") {
     context.images += Math.max(1, imageSlotUses(node.asset));
   }
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
   }
-  return walk(value, refRule(rule), path, context, depth + 1);
+  const uses = effectUses(node);
+  context.effects += uses.total;
+  context.animatedEffects += uses.animated;
+  if (context.effects > contract.limits.MAX_PROTOTYPE_EFFECTS) {
+    return fail(path, "Effect limit exceeded");
+  }
+  return context.animatedEffects > contract.limits.MAX_PROTOTYPE_ANIMATED_EFFECTS
+    ? fail(path, "Animated effect limit exceeded")
+    : undefined;
 }
 function visitNested(
   value: unknown,
@@ -770,6 +793,8 @@ function platformArgumentError(
     nodes: [],
     actions: [],
     images: 0,
+    effects: 0,
+    animatedEffects: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   return walk(value, rule, path, context, 0);
@@ -813,6 +838,8 @@ function validateValue(
     nodes: [],
     actions: [],
     images: 0,
+    effects: 0,
+    animatedEffects: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};

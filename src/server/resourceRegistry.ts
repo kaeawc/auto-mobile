@@ -1,4 +1,5 @@
 import {
+  ResourceNotFoundError,
   type ReadResourceResult,
   type Resource,
   type ResourceTemplateType as ResourceTemplate,
@@ -6,6 +7,7 @@ import {
 import { McpError } from "../daemon/mcpError";
 import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
+import { isSkillUri, readUsageSkillResource } from "./usageSkill";
 import { setDefaultResourceNotifier } from "../utils/NetworkState";
 import { registerResourceUpdateNotifier } from "../daemon/resourceUpdateNotifier";
 import {
@@ -473,6 +475,16 @@ class ResourceRegistryClass {
     server.server.setRequestHandler("resources/read", async (request, ctx) => {
       const { uri } = request.params;
       logger.info(`[ResourceRegistry] ReadResource request for URI: ${uri}`);
+
+      // Skill files (SEP-2640) are not `automobile:` resources; the skills extension's own
+      // read is replaced by this handler, so serve them from the same source (#15430).
+      if (isSkillUri(uri)) {
+        const skillResult = await readUsageSkillResource(uri);
+        if (skillResult) {
+          return skillResult as ReadResourceResult;
+        }
+        throw new ResourceNotFoundError(uri);
+      }
 
       // Check for common incorrect URI schemes and provide helpful error
       // messages. `automobile:` is the data-resource scheme; `ui:` is the MCP

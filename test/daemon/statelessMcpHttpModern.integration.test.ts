@@ -225,7 +225,8 @@ test("legacy server capabilities retain their original JSON bytes", async () => 
   });
   try {
     expect(JSON.stringify(server.server.getCapabilities())).toBe(
-      '{"resources":{"subscribe":true,"listChanged":true},"tools":{"listChanged":true},"prompts":{}}',
+      // The skills extension (#15430) is the one intentional addition to the legacy shape.
+      '{"resources":{"subscribe":true,"listChanged":true},"tools":{"listChanged":true},"prompts":{},"extensions":{"io.modelcontextprotocol/skills":{}}}',
     );
   } finally {
     await server.close();

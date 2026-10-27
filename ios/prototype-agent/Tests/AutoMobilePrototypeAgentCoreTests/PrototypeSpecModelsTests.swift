@@ -60,6 +60,10 @@ final class PrototypeSpecModelsTests: XCTestCase {
             let dialogButton: PrototypeDialogButton
             let border: Border
             let gradientStop: PrototypeGradientStop
+            let gradientLinear: PrototypeGradient
+            let gradientRadial: PrototypeGradient
+            let item: NavItem
+            let itemString: NavItem
         }
         let models = try JSONDecoder().decode(Migrated.self, from: data)
         XCTAssertEqual(models.placementFullscreen.type, "fullscreen")
@@ -92,6 +96,18 @@ final class PrototypeSpecModelsTests: XCTestCase {
             models.gradientStop,
             PrototypeGradientStop(color: .modes(light: "#112233", dark: "#445566"), position: 0.5)
         )
+        let stops = [
+            PrototypeGradientStop(color: .single("#112233"), position: 0),
+            PrototypeGradientStop(color: .modes(light: "#112233", dark: "#445566"), position: 1),
+        ]
+        XCTAssertEqual(models.gradientLinear, .linear(angle: 45, stops: stops))
+        XCTAssertEqual(models.gradientRadial, .radial(stops: stops))
+        XCTAssertEqual(models.item.label, "Home")
+        XCTAssertEqual(models.item.icon, "home")
+        XCTAssertEqual(models.item.image, .modes(light: "home-light", dark: "home-dark"))
+        XCTAssertEqual(models.itemString.label, "Search")
+        XCTAssertEqual(models.itemString.icon, "search")
+        XCTAssertEqual(models.itemString.image, .single("search-image"))
         guard case let .object(source) = try JSONDecoder().decode(JSONValue.self, from: data) else {
             return XCTFail("fixture is not an object")
         }
@@ -119,6 +135,45 @@ final class PrototypeSpecModelsTests: XCTestCase {
         }
         let fullscreen = try JSONDecoder().decode(Placement.self, from: Data(#"{"type":"fullscreen"}"#.utf8))
         XCTAssertNil(fullscreen.scrim)
+    }
+
+    func testGradientRejectsInvalidStopCountsAndPositionsInBothVariants() throws {
+        for type in ["linear", "radial"] {
+            for count in [0, 1, 5] {
+                let stops = Array(repeating: "{\"color\":\"#112233\"}", count: count).joined(separator: ",")
+                let data = Data("{\"type\":\"\(type)\",\"angle\":45,\"stops\":[\(stops)]}".utf8)
+                XCTAssertThrowsError(try JSONDecoder().decode(PrototypeGradient.self, from: data)) { error in
+                    guard case let DecodingError.dataCorrupted(context) = error else {
+                        return XCTFail("Expected stop-count corruption, got \(error)")
+                    }
+                    XCTAssertEqual(context.debugDescription, "A gradient needs 2 to 4 stops")
+                    XCTAssertEqual(context.codingPath.last?.stringValue, "stops")
+                }
+            }
+            for position in [-0.01, 1.01] {
+                let data = Data("""
+                {"type":"\(type)","angle":45,"stops":[
+                  {"color":"#112233","position":\(position)}, {"color":"#445566"}]}
+                """.utf8)
+                XCTAssertThrowsError(try JSONDecoder().decode(PrototypeGradient.self, from: data)) { error in
+                    guard case let DecodingError.dataCorrupted(context) = error else {
+                        return XCTFail("Expected position corruption, got \(error)")
+                    }
+                    XCTAssertEqual(context.debugDescription, "A gradient stop position must be within 0 and 1")
+                    XCTAssertEqual(context.codingPath.last?.stringValue, "stops")
+                }
+            }
+        }
+        for json in [
+            #"{"type":"unknown","stops":[]}"#,
+            "{\"type\":\"linear\",\"stops\":[{\"color\":\"#112233\"},{\"color\":\"#445566\"}]}",
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeGradient.self, from: Data(json.utf8)))
+        }
+        let item = try JSONDecoder().decode(NavItem.self, from: Data(#"{"label":"Home"}"#.utf8))
+        XCTAssertNil(item.icon)
+        XCTAssertNil(item.image)
+        XCTAssertThrowsError(try JSONDecoder().decode(NavItem.self, from: Data("{}".utf8)))
     }
 
     func testOptionalAndRequiredFieldsRetainDecodingBehavior() throws {

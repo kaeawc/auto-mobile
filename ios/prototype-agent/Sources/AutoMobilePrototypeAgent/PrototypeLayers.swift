@@ -181,6 +181,7 @@
         let model: PrototypeModel
         let layer: PrototypeHostLayer
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
         @Environment(\.layoutDirection) private var layoutDirection
         @Namespace private var sharedNamespace
         @State private var swipe = PrototypeStackSwipeState()
@@ -406,6 +407,7 @@
                 root
                     .frame(maxWidth: .infinity)
                     .frame(height: placement.height ?? PrototypeSheetFrame.defaultHeight)
+                    .background { backdrop(spec, palette: palette) }
                     .reportFrame(key: "content", model: model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge)
                     // The sheet's frame is reported from inside, so its touch rect follows the lift.
@@ -413,6 +415,7 @@
                     .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
             case "floating":
                 root
+                    .background { backdrop(spec, palette: palette) }
                     .offset(x: placement.offset?.x ?? 0, y: placement.offset?.y ?? 0)
                     .reportFrame(key: "content", model: model)
                     .padding(EdgeInsets(
@@ -423,12 +426,29 @@
             default:
                 // Fullscreen blocks the app, like the Android full-screen window.
                 ZStack(alignment: .topLeading) {
+                    backdrop(spec, palette: palette)
                     palette.scrim(placement.scrim).map { Color($0) } ?? .clear
                     root
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .contentShape(Rectangle())
                 .reportFrame(key: "content", model: model)
+            }
+        }
+
+        /// `window.backdrop` (#15126): the Material, or the tonal fill where blur is unavailable.
+        /// Nothing is drawn without one.
+        @ViewBuilder
+        private func backdrop(_ spec: PrototypeSpec, palette: PrototypePalette) -> some View {
+            if let backdrop = spec.window.backdrop {
+                PrototypeBackdropView(
+                    plan: PrototypeBackdropPlan.resolve(
+                        backdrop,
+                        osMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                        reduceTransparency: reduceTransparency
+                    ),
+                    palette: palette
+                )
             }
         }
 
@@ -585,6 +605,51 @@
             self = []
             if regions.contains(.container) { insert(.container) }
             if regions.contains(.keyboard) { insert(.keyboard) }
+        }
+    }
+
+    /// The colour layers of a `window.backdrop`: Material (or Liquid Glass) plus a light tint, or the
+    /// tonal fill (#15126).
+    private struct PrototypeBackdropView: View {
+        let plan: PrototypeBackdropPlan
+        let palette: PrototypePalette
+
+        var body: some View {
+            ZStack {
+                switch plan.mode {
+                case .blur:
+                    blurLayer
+                    if let tint { tint.opacity(PrototypeBackdropPlan.blurTintAlpha) }
+                case .fallback:
+                    (tint ?? Self.color(palette, PrototypeBackdropPlan.defaultTonalRole))
+                        .opacity(PrototypeBackdropPlan.tonalAlpha)
+                }
+            }
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+
+        private var tint: Color? {
+            plan.tint.map { Self.color(palette, $0) }
+        }
+
+        private static func color(_ palette: PrototypePalette, _ spec: String) -> Color {
+            palette.resolve(spec).map { Color($0) } ?? .clear
+        }
+
+        @ViewBuilder private var blurLayer: some View {
+            switch plan.material {
+            case .ultraThin: Rectangle().fill(.ultraThinMaterial)
+            case .thin: Rectangle().fill(.thinMaterial)
+            case .regular: Rectangle().fill(.regularMaterial)
+            case .thick: Rectangle().fill(.thickMaterial)
+            case .glass:
+                if #available(iOS 26, *) {
+                    Rectangle().fill(.clear).glassEffect(.regular, in: Rectangle())
+                } else {
+                    Rectangle().fill(.regularMaterial)
+                }
+            }
         }
     }
 #endif

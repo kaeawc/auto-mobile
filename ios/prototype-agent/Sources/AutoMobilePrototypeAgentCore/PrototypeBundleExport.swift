@@ -56,6 +56,10 @@ extension PrototypeBundle {
             do { asset = try lookup(id.string) }
             catch { throw PrototypeBundleFailure(.assetMissing) }
             guard let asset else { throw PrototypeBundleFailure(.assetMissing, id.string) }
+            if asset.mediaType == PrototypeCustomShaders.mimeType { throw PrototypeBundleFailure(
+                .customShadersUnsupported,
+                id.string
+            ) }
             try bundleRequire(PrototypeBundleManifest.validID(id.string), .manifestInvalid, id.string)
             try bundleRequire(
                 asset.mediaType.hasPrefix("font/") == font &&

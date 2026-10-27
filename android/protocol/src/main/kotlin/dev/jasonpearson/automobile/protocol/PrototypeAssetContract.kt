@@ -34,6 +34,9 @@ object PrototypeAssetContract {
   /** Largest single font asset (`font/ttf`, `font/otf`), in decoded bytes. */
   val MAX_PROTOTYPE_FONT_ASSET_BYTES: Int = limit("MAX_PROTOTYPE_FONT_ASSET_BYTES")
 
+  /** Largest UTF-8 AGSL source, in decoded bytes; rendering is Android-only and opt-in. */
+  val MAX_PROTOTYPE_SHADER_ASSET_BYTES: Int = limit("MAX_PROTOTYPE_SHADER_ASSET_BYTES")
+
   /** Most assets held at once. */
   val MAX_PROTOTYPE_ASSET_COUNT: Int = limit("MAX_PROTOTYPE_ASSET_COUNT")
 

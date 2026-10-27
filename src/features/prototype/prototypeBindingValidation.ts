@@ -4,10 +4,10 @@ import { prototypeRequestStatusKeyError } from "./prototypeRequest";
 
 export interface Rule {
   kind: string;
+  pattern?: string;
   name?: string;
   empty?: boolean;
   nonblank?: boolean;
-  pattern?: string;
   exclusive?: string[];
   exactlyOne?: string[];
   exactlyOneAtObject?: boolean;
@@ -26,6 +26,7 @@ export interface Rule {
   values?: (string | boolean)[];
   minEntries?: number;
   maxEntries?: number;
+  keyPattern?: string;
   fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;
   variants?: Record<string, Rule>;
 }
@@ -342,7 +343,7 @@ function selectionErrors(
 ): PrototypeValidationError | undefined {
   if (
     typeof value.stateKey !== "string" ||
-    (value.type !== "tabBar" && value.type !== "bottomNav")
+    (value.type !== "tabBar" && value.type !== "bottomNav" && value.type !== "pager")
   ) {
     return undefined;
   }
@@ -394,15 +395,19 @@ function refreshErrors(
   path: string,
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
-  const refresh = value.type === "scroll" ? object(value.refresh) : undefined;
+  const refresh = ["scroll", "list"].includes(String(value.type))
+    ? object(value.refresh)
+    : undefined;
   if (!refresh) {
     return undefined;
   }
   if (value.axis === "horizontal") {
-    return fail(`${path}.refresh`, "Pull-to-refresh needs a vertical scroll");
+    return fail(`${path}.refresh`, `Pull-to-refresh needs a vertical ${value.type}`);
   }
   const key = refresh.stateKey;
-  return typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean"
+  return typeof key === "string" &&
+    (Object.hasOwn(state, key) || value.type === "list") &&
+    typeof state[key] !== "boolean"
     ? fail(`${path}.refresh.stateKey`, "Refresh requires a boolean state key")
     : undefined;
 }
@@ -459,7 +464,7 @@ function boundKeys(value: Record<string, unknown>): string[] {
     value.hourKey,
     value.minuteKey,
     object(value.trailing)?.stateKey,
-    value.type === "scroll" ? object(value.refresh)?.stateKey : undefined,
+    ["scroll", "list"].includes(String(value.type)) ? object(value.refresh)?.stateKey : undefined,
     value.type === "scroll" ? value.atEndKey : undefined,
   ];
   const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))

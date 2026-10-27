@@ -1,3 +1,4 @@
+import { prototypeRequestAppendError } from "./prototypeRequestAppend";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { forbiddenHeaderOf } from "./prototypeEgressPolicy";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -210,7 +211,9 @@ function requestActionError(
     return { path: `${at}.into`, message: into };
   }
   return (
-    literalEntryError(action.headers, at, "headers") ?? literalEntryError(action.query, at, "query")
+    prototypeRequestAppendError(action, at) ??
+    literalEntryError(action.headers, at, "headers") ??
+    literalEntryError(action.query, at, "query")
   );
 }
 
@@ -231,9 +234,12 @@ export function prototypeRequestError(
 /** The first request-related static error among the structurally valid `actions`. */
 export function prototypeRequestsError(
   actions: readonly { value: Record<string, unknown>; path: string }[],
+  data?: unknown,
 ): PrototypeRequestActionError | undefined {
   for (const { value, path } of actions) {
-    const error = prototypeRequestError(value, path);
+    const error =
+      prototypeRequestError(value, path) ??
+      (value.type === "request" ? prototypeRequestAppendError(value, path, data ?? {}) : undefined);
     if (error) {
       return error;
     }

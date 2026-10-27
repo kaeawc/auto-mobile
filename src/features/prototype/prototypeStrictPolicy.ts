@@ -1,3 +1,4 @@
+import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { repeatKeyInstances } from "./prototypeRepeat";
@@ -29,6 +30,10 @@ export function prototypeStrictPolicyError(
   }
   const window = object(object(spec)?.window);
   if (options.library) {
+    const shader = prototypeShaderFields(spec)[0];
+    if (shader) {
+      return { path: "$", message: "ProtoViewer bundles refuse custom AGSL shaders" };
+    }
     if (window?.layer === "system") {
       return { path: "window.layer", message: "Privileged window layer" };
     }

@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "pager-state-key",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "page": 0
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "as": "item",
+        "items": {
+          "path": "/items"
+        }
+      },
+      "children": [
+        {
+          "type": "pager",
+          "id": "deck",
+          "stateKey": "page",
+          "children": [
+            {
+              "type": "text",
+              "text": "First"
+            },
+            {
+              "type": "text",
+              "text": "Second"
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "items": []
+    }
+  },
+  "expectedPath": "root.children[0].stateKey"
+}

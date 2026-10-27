@@ -1,3 +1,4 @@
+import { prototypeShaderUses } from "./prototypeShaders";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { mapBindableFields, record } from "./prototypeTemplate";
 
@@ -24,9 +25,15 @@ function addFont(style: unknown, fonts: Set<string>): void {
 export function collectPrototypeAssetReferences(spec: unknown): {
   images: Set<string>;
   fonts: Set<string>;
+  shaders: Set<string>;
 } {
   const images = new Set<string>();
   const fonts = new Set<string>();
+  const shaders = new Set(
+    prototypeShaderUses(spec)
+      .map(({ shader }) => shader.asset)
+      .filter((asset): asset is string => typeof asset === "string"),
+  );
   walkPrototypeNodes(spec, (node, path) => {
     mapBindableFields(node, path, (value, _at, kind) => {
       if (kind === "request") {
@@ -60,7 +67,7 @@ export function collectPrototypeAssetReferences(spec: unknown): {
       addFont(record(span)?.style, fonts);
     }
   });
-  return { images, fonts };
+  return { images, fonts, shaders };
 }
 /** Saved-layout mirroring also preserves cached IDs found in opaque JSON for dynamic uses. */
 export function collectPrototypeStrings(
@@ -77,8 +84,8 @@ export function collectPrototypeStrings(
       pending.push(...Object.values(child));
     }
   }
-  const { images, fonts } = collectPrototypeAssetReferences(value);
-  for (const id of [...images, ...fonts]) {
+  const { images, fonts, shaders } = collectPrototypeAssetReferences(value);
+  for (const id of [...images, ...fonts, ...shaders]) {
     references.add(id);
   }
 }

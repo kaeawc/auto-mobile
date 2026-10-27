@@ -23,7 +23,7 @@ class PrototypePlatformStateTest {
       for (op in listOf("equals", "notEquals", "gt", "lt")) {
         val node =
           Json.parseToJsonElement(
-              """{"type":"text","text":"{platform:/device/widthClass}:{platform:/device/sizeClass}","visibleWhen":{"platform":"/device/sizeClass","$op":1}}""",
+              """{"type":"text","text":"{platform:/device/widthClass}:{platform:/device/heightClass}","visibleWhen":{"platform":"/device/heightClass","$op":1}}""",
             )
             .jsonObject
         PrototypeDataResolver.resolveRoot(node, null, device)
@@ -32,6 +32,20 @@ class PrototypePlatformStateTest {
   }
 
   private fun objectOf(text: String) = Json.parseToJsonElement(text).jsonObject
+
+  @Test
+  fun `portable width class comparisons accept native union and reject other literals`() {
+    for (op in listOf("equals", "notEquals")) {
+      for (value in listOf("compact", "medium", "expanded", "regular", "wide")) {
+        val spec =
+          """{"id":"device","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["device"]},"root":{"type":"spacer","visibleWhen":{"platform":"/device/widthClass","$op":"$value"}}}"""
+        assertEquals(
+          value != "wide",
+          PrototypeSpecValidator.validate(spec) is PrototypeSpecValidation.Success,
+        )
+      }
+    }
+  }
 
   @Test
   fun `bundle requirements include contract module capability for declarations and reads`() {
@@ -51,7 +65,7 @@ class PrototypePlatformStateTest {
   fun `conditions and text follow platform snapshots with missing data semantics`() {
     val root =
       objectOf(
-        """{"type":"text","text":"{platform:/device/widthClass}:{platform:/device/sizeClass}","visibleWhen":{"platform":"/device/widthClass","equals":"expanded"}}""",
+        """{"type":"text","text":"{platform:/device/widthClass}:{platform:/device/heightClass}","visibleWhen":{"platform":"/device/widthClass","equals":"expanded"}}""",
       )
     val compact = objectOf("""{"device":{"widthClass":"compact"}}""")
     val expanded = objectOf("""{"device":{"widthClass":"expanded"}}""")
@@ -63,7 +77,7 @@ class PrototypePlatformStateTest {
     for ((op, expected) in
       listOf("equals" to false, "notEquals" to true, "gt" to false, "lt" to false)) {
       val condition =
-        objectOf("""{"type":"spacer","visibleWhen":{"platform":"/device/sizeClass","$op":1}}""")
+        objectOf("""{"type":"spacer","visibleWhen":{"platform":"/device/heightClass","$op":1}}""")
       val result = PrototypeDataResolver.resolveRoot(condition, null, compact)
       assertEquals(expected, "all" in result.getValue("visibleWhen").jsonObject)
     }
@@ -106,7 +120,7 @@ class PrototypePlatformStateTest {
       PrototypeDataWriter.resolveValue(objectOf("""{"event":"/pointer"}"""), inputs),
     )
     assertTrue(
-      PrototypeDataWriter.resolveValue(objectOf("""{"platform":"/device/sizeClass"}"""), inputs)
+      PrototypeDataWriter.resolveValue(objectOf("""{"platform":"/device/heightClass"}"""), inputs)
         is PrototypeDataValue.Failure,
     )
   }

@@ -101,6 +101,22 @@ class PrototypeSpecCorpusTest {
         fixture.getValue("expectedPath").jsonPrimitive.content,
         (result as PrototypeSpecValidation.Failure).error.path,
       )
+      val messageCase =
+        listOf(
+            "list-",
+            "request-append-to-",
+            "node-list",
+            "listRepeat",
+            "action-request-append",
+            "lazy_list",
+          )
+          .any(file.name::contains)
+      if (messageCase && fixture.containsKey("expectedMessage")) {
+        assertEquals(
+          fixture.getValue("expectedMessage").jsonPrimitive.content,
+          result.error.message,
+        )
+      }
     }
   }
 
@@ -192,8 +208,15 @@ class PrototypeSpecCorpusTest {
       assertEquals(type in gestureTypes, "onLongPress" in fields, type)
       assertEquals(type in gestureTypes, "onDoubleTap" in fields, type)
     }
+    // Platform namespaces are validated by the contract, then stripped before the typed decode
+    // (#15257): no renderer reads them yet, so the models deliberately omit them.
+    val stripped = setOf("ios", "android")
     for ((type, variant) in variants) {
-      assertEquals(variant.jsonObject.getValue("fields").jsonObject.keys, models[type], type)
+      assertEquals(
+        variant.jsonObject.getValue("fields").jsonObject.keys - stripped,
+        models[type],
+        type,
+      )
     }
   }
 

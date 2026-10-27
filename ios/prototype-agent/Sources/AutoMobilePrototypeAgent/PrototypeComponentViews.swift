@@ -157,6 +157,7 @@
                 }
             }
             .onChange(of: focused) { _, value in
+                if value { model.consumeDeadTap() }
                 if !value {
                     model.blur(node)
                     draft.endEditing(stored: model.state[key]?.displayString ?? "")
@@ -239,7 +240,7 @@
         }
 
         @ViewBuilder private var accessibleInput: some View {
-            let hint = PrototypeTextFieldOptions.accessibilityHint(
+            let hint = model.shownError(node).map { "Error: \($0)" } ?? PrototypeTextFieldOptions.accessibilityHint(
                 supportingText: options.supportingAccessibilityValue,
                 count: options.clip(draft.text).utf16.count,
                 maxLength: options.maxLength
@@ -259,7 +260,11 @@
                     .padding(12)
                     .overlay {
                         RoundedRectangle(cornerRadius: 4)
-                            .stroke(focused ? colors.primary : colors.fieldOutline, lineWidth: focused ? 2 : 1)
+                            .stroke(
+                                model.fieldError(node)
+                                    .isError ? .red : (focused ? colors.primary : colors.fieldOutline),
+                                lineWidth: focused ? 2 : 1
+                            )
                             .accessibilityHidden(true)
                     }
             } else {
@@ -271,9 +276,11 @@
                             .accessibilityHidden(true)
                     }
                     .overlay(alignment: .bottom) {
-                        Rectangle().fill(focused ? colors.primary : colors.fieldOutline)
-                            .frame(height: 1)
-                            .accessibilityHidden(true)
+                        Rectangle().fill(
+                            model.fieldError(node).isError ? .red : (focused ? colors.primary : colors.fieldOutline)
+                        )
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
                     }
             }
         }
@@ -288,7 +295,7 @@
                     chromedInput
                     if node.supportingText != nil || options.maxLength != nil {
                         HStack(alignment: .top) {
-                            if let supporting = node.supportingText {
+                            if let supporting = node.supportingText, !model.fieldError(node).isError {
                                 Text(supporting).accessibilityHidden(true)
                             }
                             Spacer(minLength: 8)
@@ -605,6 +612,7 @@
         let node: PrototypeNode
         let model: PrototypeModel
         let style: Style?
+        let label: String
 
         var body: some View {
             let (side, radius): (CGFloat, CGFloat) = switch node.label == nil ? node.size : nil {
@@ -617,7 +625,7 @@
                     if let symbol = prototypeSymbol(node.icon) {
                         PrototypeGlyph(symbol: symbol).font(.system(size: side >= 96 ? 36 : 22))
                     }
-                    if let label = node.label { Text(label).font(.body.weight(.medium)) }
+                    if node.label != nil { Text(label).font(.body.weight(.medium)) }
                 }
                 .foregroundColor(colors.authored(style?.color) ?? colors.primary)
                 .padding(.horizontal, node.label == nil ? 0 : 20)
@@ -680,6 +688,7 @@
     /// `<tag>.navigation` and `<tag>.actions.<index>`. Insets come only from `safeAreaPadding`.
     @MainActor
     struct PrototypeTopAppBarView: View {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.prototypePalette) private var palette
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let node: PrototypeNode
@@ -689,6 +698,12 @@
 
         var body: some View {
             let variant = node.variant ?? "small"
+            let extent = PrototypeBarScrollState.extent(variant: variant, behavior: node.onScroll)
+            let fraction = model.barScroll(node).collapse(
+                node.onScroll,
+                extent: extent,
+                reduced: reduceMotion || model.spec?.motion == "none"
+            )
             VStack(alignment: .leading, spacing: 0) {
                 ZStack {
                     if variant == "centerAligned" {
@@ -698,7 +713,7 @@
                         if let navigation = node.navigationIcon {
                             button(navigation, identifier: node.partIdentifier("navigation"))
                         }
-                        if variant == "small" {
+                        if variant == "small" || (fraction >= 1 && node.onScroll == "exitUntilCollapsed") {
                             titleText(.title3.weight(.semibold)).padding(.leading, node.navigationIcon == nil ? 12 : 4)
                         }
                         Spacer(minLength: 0)
@@ -713,8 +728,16 @@
                     titleText(variant == "large" ? .largeTitle : .title)
                         .padding(.horizontal, 16)
                         .padding(.bottom, variant == "large" ? 28 : 20)
+                        .frame(
+                            height: ["enterAlways", "exitUntilCollapsed"]
+                                .contains(node.onScroll ?? "") ? (variant == "large" ? 88 : 48) : nil,
+                            alignment: .bottomLeading
+                        )
+                        .modifier(PrototypeBarClip(fraction: node.onScroll == "exitUntilCollapsed" ? fraction : 0))
+                        .accessibilityHidden(node.onScroll == "exitUntilCollapsed" && fraction >= 1)
                 }
             }
+            .modifier(PrototypeBarClip(fraction: node.onScroll == "enterAlways" ? fraction : 0))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(style?.hasAuthoredFill ?? false ? .clear : colors.surface)
         }

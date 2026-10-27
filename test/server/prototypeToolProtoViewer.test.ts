@@ -11,12 +11,12 @@ import { PROTOVIEWER_IMPORTED_WARNING } from "../../src/features/prototype/proto
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
+import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { pinDialogTree } from "../helpers/pinDialogTree";
 import { toolStructured } from "../helpers/toolResponse";

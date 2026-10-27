@@ -14,6 +14,22 @@ internal data class PrototypeBundleReferences(
 internal object PrototypeBundleSpec {
   fun references(bytes: ByteArray): PrototypeBundleReferences {
     val value = PrototypeBundleJson.parse(bytes, spec_invalid_json, "spec.json")
+    val rawSpec = value as? JsonObject
+    if (rawSpec != null) {
+      val roots =
+        listOfNotNull(rawSpec["root"]) +
+          (rawSpec["components"] as? JsonObject).orEmpty().values.mapNotNull {
+            (it as? JsonObject)?.get("root")
+          }
+      for (root in roots) for (node in nodes(buildJsonObject { put("root", root) })) {
+        val styles =
+          listOfNotNull(node["style"] as? JsonObject) +
+            (node["styleWhen"] as? JsonArray).orEmpty().mapNotNull {
+              (it as? JsonObject)?.get("style") as? JsonObject
+            }
+        bundleRequire(styles.none { "shader" in it }, custom_shaders_unsupported, "spec.json")
+      }
+    }
     val context = PrototypeStateChecks.Context()
     bundleRequire(
       PrototypeSpecInput.validateInput(value.toString(), context)

@@ -127,6 +127,59 @@ describe("prototype appearance on the host (#11223)", () => {
     call(device, { action: "show", spec, ...extra });
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
 
+  test("locale schema is bounded and show-only", () => {
+    for (const locale of ["fr-CA", "zh-Hant-TW", "en", "en-abcdefgh-abcdefgh-abcdefgh-abcde"]) {
+      expect(prototypeSchema.safeParse({ action: "show", spec, locale }).success).toBe(true);
+    }
+    for (const locale of ["", "default", "pt_BR", "en-abcdefgh-abcdefgh-abcdefgh-abcdef"]) {
+      expect(prototypeSchema.safeParse({ action: "show", spec, locale }).success).toBe(false);
+    }
+    expect(prototypeSchema.safeParse({ action: "status", locale: "en" }).success).toBe(false);
+  });
+  test.each([android, ios])(
+    "locale reaches $platform only with strings and fallback notes are shared",
+    async (device) => {
+      client.setSupportedCommands(["prototype_strings_v1"]);
+      agent.handshake.capabilities.push("prototype_strings_v1");
+      const translated = {
+        ...spec,
+        strings: { default: { title: "Title" }, fr: {} },
+        root: { type: "text", text: "{t:title}" },
+      };
+      expect(
+        (await show(device, { spec: translated, locale: "fr-CA" })).platformNotes,
+      ).toMatchObject([
+        {
+          platform: "all",
+          construct: "strings.fallback",
+          values: ["title"],
+          detail: expect.stringContaining("fr-CA"),
+        },
+      ]);
+      const sent =
+        device.platform === "android"
+          ? client.getPrototypeHistory().at(-1)
+          : agentShows().at(-1)?.body;
+      expect(sent).toHaveProperty("locale", "fr-CA");
+      await show(device, { locale: "fr" });
+      const plain =
+        device.platform === "android"
+          ? client.getPrototypeHistory().at(-1)
+          : agentShows().at(-1)?.body;
+      expect(plain).not.toHaveProperty("locale");
+    },
+  );
+  test("locale with strings is refused by the normal capability gate", async () => {
+    client.setSupportedCommands([]);
+    const result = await show(android, {
+      locale: "fr",
+      spec: { ...spec, strings: { default: { title: "Title" } } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("prototype_strings_v1");
+    expect(client.getPrototypeHistory()).toEqual([]);
+  });
+
   describe("input", () => {
     test("appearance takes device, light or dark, on show only", () => {
       for (const appearance of ["device", "light", "dark"]) {

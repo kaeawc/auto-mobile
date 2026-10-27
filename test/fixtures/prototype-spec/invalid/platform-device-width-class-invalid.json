@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["device"]
+    },
+    "root": {
+      "type": "spacer",
+      "visibleWhen": {
+        "platform": "/device/widthClass",
+        "equals": "wide"
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.equals",
+  "expectedMessage": "Invalid enum value"
+}

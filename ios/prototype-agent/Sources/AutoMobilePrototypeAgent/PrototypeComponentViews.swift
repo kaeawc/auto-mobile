@@ -401,9 +401,10 @@
         let node: PrototypeNode
         let model: PrototypeModel
         let style: Style?
+        var cornerRadius: Double = 12
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: 12)
+            let shape = RoundedRectangle(cornerRadius: cornerRadius)
             let defaultFill = node.variant == "filled" || node.variant == nil
                 ? colors.surfaceHigh
                 : colors.surface

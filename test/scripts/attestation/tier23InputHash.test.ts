@@ -7,6 +7,7 @@ import {
   tier3InputHash,
   type LaneHashInputs,
 } from "../../../scripts/ci/attestation/tier23InputHash";
+import { tier1InputHash } from "../../../scripts/ci/attestation/tier1InputHash";
 import { describeHashBoundary } from "./hashHarness";
 
 const base = (): LaneHashInputs => ({
@@ -127,5 +128,44 @@ describe("the variable lists", () => {
     for (const name of [...TIER2_CONSUMED_ENV, ...TIER3_CONSUMED_ENV]) {
       expect(name).not.toMatch(/KEY|SECRET|PASSWORD|TOKEN|SIGN/);
     }
+  });
+});
+
+describe("known answers", () => {
+  // Pinned so a refactor that quietly changes what is hashed (and so what a producer's attestation
+  // means to the gate) fails here, rather than only ever agreeing with itself.
+  const entries = [
+    { path: "b/two.txt", id: "2".repeat(40), mode: "100644" },
+    { path: "a/one.txt", id: "1".repeat(40), mode: "100755" },
+  ];
+
+  test("tier 1", () => {
+    expect(
+      tier1InputHash({
+        entries,
+        host: { os: "linux", arch: "x64", bunVersion: "1.4.4" },
+        env: { AUTOMOBILE_TEST_MODE: "unit" },
+      }),
+    ).toBe("f6939cc4d57cb08cc3e6dd59479a22e087ada68faa16c093b4b7a59a0b85b50e");
+  });
+
+  test("tier 2", () => {
+    expect(
+      tier2InputHash({
+        entries,
+        host: { os: "linux", arch: "x64" },
+        env: { AUTOMOBILE_TARGET_SDK: "36" },
+      }),
+    ).toBe("8a63f8749892ac5123fa2ed607da2c31ffa98aac6eb7b970ed83b82d79978626");
+  });
+
+  test("tier 3", () => {
+    expect(
+      tier3InputHash({
+        entries,
+        host: { os: "darwin", arch: "arm64" },
+        env: { DEVELOPER_DIR: "/Applications/Xcode.app" },
+      }),
+    ).toBe("cadf72b6f313a17d392fa410c71c616213d0ce9c52c5d958985aa33937253087");
   });
 });

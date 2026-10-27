@@ -8,9 +8,9 @@ setup() {
 }
 
 android_env_reads() {
-  grep -rhoE '(System\.getenv|getenv|environmentVariable)\("[A-Za-z_0-9]+"\)' \
-    "$REPO_ROOT/android" --include='*.kt' --include='*.kts' --include='*.gradle' \
-    | sed -E 's/.*\("([^"]+)"\)/\1/' | sort -u
+  grep -rhoE '(getenv|environmentVariable)\([[:space:]]*"[A-Za-z_0-9]+"[[:space:]]*\)' \
+    "$REPO_ROOT/android" --include='*.kt' --include='*.kts' --include='*.gradle' --include='*.java' \
+    | sed -E 's/.*\([[:space:]]*"([^"]+)".*/\1/' | sort -u
 }
 
 listed_env() {

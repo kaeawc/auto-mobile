@@ -1,5 +1,5 @@
-import { arch, platform } from "node:os";
-import { tier3InputHash } from "../../../../scripts/ci/attestation/tier23InputHash";
+import { CI_TARGET_PLATFORM } from "../../../../scripts/ci/attestation/tier1InputHash";
+import { tier2InputHash, tier3InputHash } from "../../../../scripts/ci/attestation/tier23InputHash";
 import { beforeEach, afterEach, expect, mock, spyOn, test } from "bun:test";
 import { logger } from "../../../../src/utils/logger";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
@@ -276,10 +276,40 @@ test("gate hash matches producer's lane entries, not the repository tree ID", as
     treeHash: "tree",
     inputHash: tier3InputHash({
       entries: [{ path: "ios/a.swift", id: "123", mode: "100644" }],
-      host: { os: platform(), arch: arch() },
-      env: process.env,
+      // The iOS jobs' platform, not the Linux runner the gate runs on, and none of their variables.
+      host: { os: "darwin", arch: "arm64" },
+      env: {},
     }),
   });
+});
+
+test("the gate hashes for each lane's CI target, ignoring its own host and environment", async () => {
+  const exec = async (_cmd: string, args: string[]) => ({
+    stdout: args.includes("ls-tree")
+      ? "100644 blob 123\tandroid/a.kt\u0000100644 blob 456\tios/a.swift\u0000"
+      : "tree\n",
+  });
+  const before = process.env.AUTOMOBILE_TEST_MODE;
+  process.env.AUTOMOBILE_TEST_MODE = "set-on-the-gate-runner-only";
+  try {
+    const hasher = gitTreeInputHasher(exec);
+    const tier2 = await hasher.recompute(2, "/repo");
+    const expected = tier2InputHash({
+      entries: [
+        { path: "android/a.kt", id: "123", mode: "100644" },
+        { path: "ios/a.swift", id: "456", mode: "100644" },
+      ],
+      host: CI_TARGET_PLATFORM.android,
+      env: {},
+    });
+    expect(tier2.inputHash).toBe(expected);
+  } finally {
+    if (before === undefined) {
+      delete process.env.AUTOMOBILE_TEST_MODE;
+    } else {
+      process.env.AUTOMOBILE_TEST_MODE = before;
+    }
+  }
 });
 
 async function gateEntry(): Promise<ShadowEntry> {

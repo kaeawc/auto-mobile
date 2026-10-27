@@ -56,6 +56,26 @@ export const TIER1_CI_CONTEXT_ENV: readonly string[] = ["CI", "GITHUB_ACTIONS", 
  */
 export const TIER1_PLATFORM_INDEPENDENT_TASKS: readonly string[] = [];
 
+/**
+ * What a lane's CI target job runs on, which is what CI recomputes the hash for (#11976 review): the
+ * gate itself always runs on one Linux runner, so its own host says nothing about the iOS jobs.
+ * `os` and `arch` are Node's names (`process.platform`, `process.arch`) for the runner image. A
+ * producer's host is its own measured one, and a producer on another platform never matches.
+ */
+export const CI_TARGET_PLATFORM: Readonly<Record<AttestationLane, { os: string; arch: string }>> =
+  Object.freeze({
+    node: { os: "linux", arch: "x64" },
+    android: { os: "linux", arch: "x64" },
+    ios: { os: "darwin", arch: "arm64" },
+  });
+
+/**
+ * The consumed variables the target jobs set explicitly; every other consumed variable is unset
+ * there. Listing a variable here is what makes a producer that sets the same value match.
+ */
+export const CI_TARGET_ENV: Readonly<Record<AttestationLane, Readonly<Record<string, string>>>> =
+  Object.freeze({ node: {}, android: {}, ios: {} });
+
 export interface HostDescriptor {
   os: string;
   arch: string;

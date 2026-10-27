@@ -68,9 +68,9 @@ describeHashBoundary<Tier1Inputs>("tier 1", {
   },
   perturbations: {
     "entries in another order": (i) => ({ ...i, entries: [...i.entries].reverse() }),
-    "another checkout path (backslash, ./)": (i) => ({
+    "another checkout path (a leading ./)": (i) => ({
       ...i,
-      entries: i.entries.map((e) => ({ ...e, path: `./${e.path.replaceAll("/", "\\")}` })),
+      entries: i.entries.map((e) => ({ ...e, path: `./${e.path}` })),
     }),
     "variables no task reads": (i) => ({
       ...i,

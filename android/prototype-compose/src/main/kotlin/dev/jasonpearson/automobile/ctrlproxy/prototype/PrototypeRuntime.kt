@@ -631,7 +631,7 @@ class PrototypeRuntime(
           )
         }
         is PrototypePushAction ->
-          changeStack(action.stack, "push", action.transition) { node, path ->
+          changeStack(action.stack, "push", action.stackTransition) { node, path ->
             if (
               path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
                 !node.screens.containsKey(action.screen)
@@ -645,7 +645,7 @@ class PrototypeRuntime(
           }
         is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
         is PrototypeReplaceAction ->
-          changeStack(action.stack, "replace", action.transition) { node, path ->
+          changeStack(action.stack, "replace", action.stackTransition) { node, path ->
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
         PrototypeDismissAction -> dismiss()

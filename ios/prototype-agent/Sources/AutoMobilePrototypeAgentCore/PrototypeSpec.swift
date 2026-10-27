@@ -751,13 +751,6 @@ enum Detent: Decodable, Equatable {
     }
 }
 
-struct NavItem: Decodable {
-    let label: String
-    let icon: String?
-    /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
-    let image: PrototypeModeValue?
-}
-
 /// One `radioGroup` or `segmentedButton` choice.
 struct PrototypeOption: Decodable, Equatable {
     let value: String

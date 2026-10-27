@@ -50,6 +50,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: { ...base, theme: { design: "platform" } },
     ops: [],
   },
+  prototype_icon_effects_v1: fixture({
+    type: "icon",
+    id: "label",
+    name: "home",
+    effect: { type: "bounce" },
+  }),
   prototype_style_polish_v2: fixture({ ...label, style: { cornerStyle: "continuous" } }),
   prototype_tooltip_v1: fixture({
     type: "column",

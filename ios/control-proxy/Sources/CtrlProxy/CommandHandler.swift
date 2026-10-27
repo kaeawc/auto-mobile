@@ -70,6 +70,7 @@ final class CommandHandler: CommandHandling {
     let hingeAngleSetter: any HingeAngleSetting
     let accessibilityAuditor: any AccessibilityAuditing
     let appearanceControl: any AppearanceControlling
+    let siriControl: any SiriControlling
     let frameContext: FrameContext
     let rotationTimer: any ProxyTimer
     let hierarchyPairRecorder: (any HierarchyPairRecording)?
@@ -90,6 +91,7 @@ final class CommandHandler: CommandHandling {
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
         accessibilityAuditor: any AccessibilityAuditing = DefaultAccessibilityAuditor(),
         appearanceControl: any AppearanceControlling = DefaultAppearanceControl(),
+        siriControl: any SiriControlling = DefaultSiriControl(),
         frameContext: FrameContext = FrameContext(),
         rotationTimer: any ProxyTimer = SystemTimer(),
         hierarchyPairRecorder: (any HierarchyPairRecording)? = nil
@@ -109,6 +111,7 @@ final class CommandHandler: CommandHandling {
         self.hingeAngleSetter = hingeAngleSetter
         self.accessibilityAuditor = accessibilityAuditor
         self.appearanceControl = appearanceControl
+        self.siriControl = siriControl
         self.frameContext = frameContext
         self.rotationTimer = rotationTimer
         self.hierarchyPairRecorder = hierarchyPairRecorder
@@ -177,7 +180,7 @@ final class CommandHandler: CommandHandling {
         case .pressButton, .pressHome, .pressBack, .shake, .recentApps:
             return try await dispatchNavigation(request, startTime: startTime)
         case .action, .activateAccessibilityLink, .launchApp, .resetPermissions, .rotate, .location, .setHingeAngle,
-             .appearance, .clipboard:
+             .appearance, .siri, .clipboard:
             return try await dispatchAppAndDevice(request, startTime: startTime)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
              .setVoiceOverState, .accessibilityAudit:
@@ -308,6 +311,8 @@ final class CommandHandler: CommandHandling {
             return await handleSetHingeAngle(payload, startTime: startTime)
         case let .appearance(payload):
             return try await handleAppearance(payload, startTime: startTime)
+        case let .siri(payload):
+            return try await handleSiri(payload, startTime: startTime)
         case let .clipboard(payload):
             return try await handleClipboard(payload, startTime: startTime)
         default:

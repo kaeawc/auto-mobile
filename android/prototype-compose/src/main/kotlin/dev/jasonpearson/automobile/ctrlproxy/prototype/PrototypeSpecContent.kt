@@ -159,6 +159,7 @@ fun PrototypeRuntimeContent(
   interact: suspend (PrototypeInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
+  val capture by PrototypeIconCapture.held.collectAsState()
   val imageVersion = images?.version?.collectAsState()?.value
   val resolver = LocalContext.current.contentResolver
   val durationScale by rememberAnimatorDurationScale(resolver)
@@ -189,6 +190,7 @@ fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeShaderSession provides runtime.shaderSession,
+        LocalPrototypeIconCapture provides capture,
         LocalPrototypeExpressive provides (snapshot.spec.motion == "expressive"),
         LocalPrototypeMotion provides motion,
         LocalPrototypeScrollReduced provides (snapshot.spec.motion == "reduced"),
@@ -897,10 +899,10 @@ private fun RenderPrototypeNodeContent(
           prototypeIcon(node.iconName, variant)
         }
       if (icon != null)
-        Icon(
+        PrototypeEffectIcon(
           icon,
-          contentDescription = null,
-          modifier = modifier,
+          node = node,
+          modifier = modifier.prototypeIconEffect(node),
           tint =
             prototypeAnimatedColor(
               node,

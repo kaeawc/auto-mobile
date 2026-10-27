@@ -36,6 +36,7 @@ import type {
   CtrlProxyLocationResult,
   CtrlProxyAppearance,
   CtrlProxyAppearanceResult,
+  CtrlProxySiriResult,
   CtrlProxyActionResult,
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
@@ -1202,6 +1203,21 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     await this.applyDelay("requestLocation");
     this.checkFailure("requestLocation");
     return this.locationResult ?? { success: true, totalTimeMs: 0 };
+  }
+
+  /** Siri phrases seen, and an optional scripted result (#14109). */
+  readonly siriHistory: string[] = [];
+  siriResult?: CtrlProxySiriResult;
+
+  async requestSiri(
+    text: string,
+    _timeoutMs: number = 10000,
+    _signal?: AbortSignal,
+  ): Promise<CtrlProxySiriResult> {
+    this.siriHistory.push(text);
+    await this.applyDelay("requestSiri");
+    this.checkFailure("requestSiri");
+    return this.siriResult ?? { success: true, totalTimeMs: 0 };
   }
 
   /** Appearance requests seen (`undefined` = read only) and the simulated system appearance. */

@@ -19,15 +19,20 @@ test("every dependency has registered metadata and a literal preflight call", ()
     expect(entry.unavailable.trim().length).toBeGreaterThan(0);
     expect(existsSync(entry.preflight)).toBe(true);
     const source = readFileSync(entry.preflight, "utf8");
-    expect(source.includes(`assertEnabled(request.device, "${entry.tool}", request.signal)`)).toBe(
-      true,
-    );
+    // The device and signal come from `request` (provider) or `this.device` / `signal` (action).
+    const call = new RegExp(`assertEnabled\\(\\s*[\\w.]+,\\s*"${entry.tool}",\\s*[\\w.]+\\s*\\)`);
+    expect(call.test(source)).toBe(true);
     for (const resource of entry.resources) {
       expect(Object.hasOwn(iosDeviceResourceCatalog, resource)).toBe(true);
       expect(Object.hasOwn(iosDeviceResourceImpact, resource)).toBe(true);
       expect(Object.hasOwn(deviceResourceDescriptions, resource)).toBe(true);
     }
   }
-  expect(getDeviceServiceDependencies("putAppFile")).toEqual(deviceServiceDependencies);
+  expect(getDeviceServiceDependencies("putAppFile")).toEqual(
+    deviceServiceDependencies.filter(({ tool }) => tool === "putAppFile"),
+  );
+  expect(getDeviceServiceDependencies("siri").map(({ resources }) => resources)).toEqual([
+    ["siriAndAppIntents"],
+  ]);
   expect(getDeviceServiceDependencies("observe")).toEqual([]);
 });

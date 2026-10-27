@@ -371,6 +371,10 @@ function showAdviceOutput(
   };
 }
 
+function deviceOsMajor(device: BootedDevice): number | undefined {
+  return Number.parseInt(device.iosVersion ?? device.osVersion ?? "", 10) || undefined;
+}
+
 /** Notes describe the expanded, anchor-resolved spec actually sent to the device. */
 function platformNotesOutput(
   args: z.infer<typeof prototypeSchema>,
@@ -385,6 +389,7 @@ function platformNotesOutput(
     args.spec as PrototypeSpec,
     device.platform === "ios" ? "ios" : "android",
     (capability) => target.ios?.supportsCapability(capability) === true,
+    deviceOsMajor(device),
   );
   notes.push(...prototypeStringsFallbackNotes(args.spec as PrototypeSpec, args.locale));
   const gestures = device.platform === "ios" ? prototypeGestureFields(args.spec) : [];

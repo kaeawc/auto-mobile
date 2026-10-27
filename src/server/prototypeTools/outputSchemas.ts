@@ -346,6 +346,7 @@ export const prototypeOutputSchema = z.object({
           "node.id",
           "bottomSheet.dismissOnSwipe",
           "bottomSheet.detents",
+          "icon.effect",
           "icon.name",
           "icon.variant",
           "textField.variant",

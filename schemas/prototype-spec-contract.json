@@ -72,6 +72,76 @@
     "MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES": 65536
   },
   "definitions": {
+    "iconEffectTrigger": {
+      "kind": "object",
+      "exactlyOne": ["key", "data"],
+      "fields": {
+        "key": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": true
+        },
+        "data": {
+          "rule": {
+            "kind": "pointer"
+          },
+          "optional": true
+        }
+      }
+    },
+    "iconEffectRepeat": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "enum",
+          "values": ["infinite"]
+        },
+        {
+          "kind": "number",
+          "integer": true,
+          "min": 1,
+          "max": 20
+        }
+      ]
+    },
+    "iconEffect": {
+      "kind": "object",
+      "atMostOne": ["trigger", "repeat"],
+      "fields": {
+        "type": {
+          "rule": {
+            "kind": "enum",
+            "values": [
+              "bounce",
+              "pulse",
+              "scale",
+              "variableColor",
+              "wiggle",
+              "rotate",
+              "breathe",
+              "replace",
+              "drawOn"
+            ]
+          },
+          "optional": false
+        },
+        "trigger": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconEffectTrigger"
+          },
+          "optional": true
+        },
+        "repeat": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconEffectRepeat"
+          },
+          "optional": true
+        }
+      }
+    },
     "offset": {
       "kind": "object",
       "fields": {
@@ -4818,6 +4888,10 @@
               "rule": {
                 "kind": "key"
               },
+              "optional": true
+            },
+            "effect": {
+              "rule": { "kind": "ref", "name": "iconEffect" },
               "optional": true
             },
             "shared": {

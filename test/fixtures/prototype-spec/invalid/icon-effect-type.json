@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "icon-effects",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "flag": false
+    },
+    "data": {
+      "revision": 0
+    },
+    "root": {
+      "type": "icon",
+      "name": "home",
+      "effect": {
+        "type": "unknown"
+      }
+    }
+  },
+  "expectedPath": "root.effect.type",
+  "expectedMessage": "Invalid enum value"
+}

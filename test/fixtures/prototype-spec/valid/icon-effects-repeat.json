@@ -1,0 +1,43 @@
+{
+  "id": "icon-effects",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "flag": false
+  },
+  "data": {
+    "revision": 0
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "bounce",
+          "repeat": 1
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "bounce",
+          "repeat": 20
+        }
+      },
+      {
+        "type": "icon",
+        "name": "home",
+        "effect": {
+          "type": "bounce",
+          "repeat": "infinite"
+        }
+      }
+    ]
+  }
+}

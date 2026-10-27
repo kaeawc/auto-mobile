@@ -1,6 +1,17 @@
 // Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 
+struct IconEffectTrigger: Codable, Equatable, Sendable {
+    let key: String?
+    let data: String?
+}
+
+struct IconEffect: Codable, Equatable, Sendable {
+    let type: String
+    let trigger: IconEffectTrigger?
+    let `repeat`: PrototypeIconEffectRepeat?
+}
+
 struct PrototypePress: Decodable, Equatable, Sendable {
     let scale: Double?
     let alpha: Double?

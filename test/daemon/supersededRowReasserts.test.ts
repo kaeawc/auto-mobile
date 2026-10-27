@@ -80,13 +80,13 @@ describe("SupersededRowReasserts (#11799 W3)", () => {
     ledger.owe(session, ["b"], retries);
     expect(timer.getPendingTimeoutCount()).toBe(1);
     expect(ledger.owed(session.sessionId)?.attempt).toBe(2);
-    expect(ledger.reasonsOwedTo(session)).toEqual(["a", "b"]);
+    expect([...ledger.owed(session.sessionId)!.reasons]).toEqual(["a", "b"]);
     const revived: Incarnation = { sessionId: session.sessionId };
     ledger.owe(revived, ["c"], retries);
     // A revived incarnation starts over and is not lent the old incarnation's reasons.
     expect(ledger.owed(session.sessionId)?.attempt).toBe(1);
-    expect(ledger.reasonsOwedTo(revived)).toEqual(["c"]);
-    expect(ledger.reasonsOwedTo(session)).toEqual([]);
+    expect([...ledger.owed(session.sessionId)!.reasons]).toEqual(["c"]);
+    expect(ledger.owed(session.sessionId)?.session).toBe(revived);
     expect(timer.getPendingTimeoutCount()).toBe(1);
   });
 
@@ -179,7 +179,7 @@ describe("SupersededRowReasserts (#11799 W3)", () => {
     expect(ledger.remembered({ sessionId: session.sessionId })).toBeUndefined();
   });
 
-  test("release bookkeeping: predecessors chain, refusals and the row under a pending release", () => {
+  test("release bookkeeping: predecessors chain and refusals", () => {
     const first = releaseOf(session.sessionId, "idle-timeout");
     const second = releaseOf(session.sessionId, "device-disconnected");
     const third = releaseOf(session.sessionId, "device-killed");
@@ -191,14 +191,5 @@ describe("SupersededRowReasserts (#11799 W3)", () => {
     ledger.noteRefused(first);
     expect(ledger.wasRefused(first)).toBe(true);
     expect(ledger.wasRefused(second)).toBe(false);
-
-    ledger.noteRowUnderPendingRelease({ session, reasons: ["a"], release: second });
-    ledger.forgetRowUnder(first);
-    expect(ledger.rowUnderPendingRelease(session.sessionId)?.release).toBe(second);
-    ledger.forgetRowUnder(second);
-    expect(ledger.rowUnderPendingRelease(session.sessionId)).toBeUndefined();
-    ledger.noteRowUnderPendingRelease({ session, reasons: ["a"], release: second });
-    ledger.clearRowsUnderPendingRelease();
-    expect(ledger.rowUnderPendingRelease(session.sessionId)).toBeUndefined();
   });
 });

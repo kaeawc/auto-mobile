@@ -60,34 +60,6 @@ describe("the row of a released session (#11557)", () => {
     expect(await row()).toMatchObject({ status: "active", release_reason: null });
   }
 
-  /**
-   * The live session of a device-loss release whose terminal write is parked: the returned
-   * function lands that write (its terminal row) and runs the rewrite of the live row over it.
-   * A release no longer produces this since #11799 W5 (a volatile row that landed has won, and a
-   * durable release declines before it writes), so the late landing is driven directly; the rewrite
-   * machinery behind it is exercised unchanged until the release-driven half is deleted.
-   */
-  async function supersededReleaseWithParkedWrite(): Promise<() => void> {
-    const session = await manager.createSession(SESSION, DEVICE, "android", {
-      timeoutMs: IDLE_WINDOW_MS,
-    });
-    const settleExpected = manager.testHooks.wiring.host.superseded.expectReassert(SESSION);
-    manager.testHooks.wiring.host.superseded.remember(session, [DEVICE_LOSS]);
-    return () => {
-      void (async () => {
-        const current = (await row())!;
-        store.seed({ ...current, status: "released", release_reason: DEVICE_LOSS });
-        const rows = manager.testHooks.wiring.supersededRows;
-        if (manager.getSession(SESSION)) {
-          await rows.reassertSupersededLiveRow(session, [DEVICE_LOSS]);
-        } else {
-          // The session it spared has ended since, for a reason that is not terminal.
-          await rows.restoreNonTerminalRowOverSupersededRelease(session, [DEVICE_LOSS]);
-        }
-      })().finally(settleExpected);
-    };
-  }
-
   test("a non-terminal release whose write fails is retried on the release backoff until it lands", async () => {
     await planReleaseWithFailingWrite(2);
     expect(timer.getPendingTimeouts()).toEqual([RELEASE_RETRY_DELAY_MS]);
@@ -249,124 +221,6 @@ describe("the row of a released session (#11557)", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("a superseded release's parked terminal write that lands after the plan's release leaves the name issuable", async () => {
-    const landReleaseWrite = await supersededReleaseWithParkedWrite();
-    await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON);
-    expect(await row()).toMatchObject({ release_reason: PLAN_AUTO_RELEASE_REASON });
-
-    landReleaseWrite();
-    await settleMicrotasks();
-
-    // No terminal release ended the session: its row is the plan's again, not the device loss's.
-    expect(await row()).toMatchObject({
-      status: "released",
-      release_reason: PLAN_AUTO_RELEASE_REASON,
-    });
-    expect(releases).toEqual([PLAN_AUTO_RELEASE_REASON]);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-    const reissued = await manager.createSession(SESSION, DEVICE, "android", {
-      timeoutMs: IDLE_WINDOW_MS,
-    });
-    expect(manager.getSession(SESSION)).toBe(reissued);
-  });
-
-  test("a terminal release of the handed-off session while that write is still parked is answered from its row", async () => {
-    const landReleaseWrite = await supersededReleaseWithParkedWrite();
-    await manager.releaseSession(SESSION, `device-restart:${DEVICE}`);
-
-    // The parked write hides nothing: the row this release writes is read back as the release.
-    expect(await manager.releaseSession(SESSION, DEVICE_LOSS)).toBe(DEVICE);
-
-    landReleaseWrite();
-    await settleMicrotasks();
-    expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
-    expect(releases).toContain(DEVICE_LOSS);
-    expect(
-      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS }).then(
-        () => "issued",
-        (error: unknown) => (error instanceof Error ? error.name : String(error)),
-      ),
-    ).toBe("TerminalSessionError");
-  });
-
-  test("a peer's terminal row for the same reason, written while that write is parked, still ends the name", async () => {
-    const landReleaseWrite = await supersededReleaseWithParkedWrite();
-    await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON);
-    const released = (await row())!;
-    store.seed({ ...released, status: "released", release_reason: DEVICE_LOSS });
-
-    expect(
-      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS }).then(
-        () => "issued",
-        (error: unknown) => (error instanceof Error ? error.name : String(error)),
-      ),
-    ).toBe("TerminalSessionError");
-    landReleaseWrite();
-    await settleMicrotasks();
-    expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
-  });
-
-  test("a lookup of the name while that terminal row stands does not fence it", async () => {
-    const landReleaseWrite = await supersededReleaseWithParkedWrite();
-    await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON);
-    let lookup: Promise<string> | undefined;
-    // The row is rewritten as the session held it; the name is looked up before that lands.
-    store.duringPlainUpsert = async () => {
-      expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
-      lookup = manager.getOrCreateSession(SESSION).then(
-        () => "issued",
-        (error: unknown) => (error instanceof Error ? error.name : String(error)),
-      );
-      await settleMicrotasks(100);
-    };
-
-    landReleaseWrite();
-    await settleMicrotasks();
-
-    expect(await lookup).not.toBe("TerminalSessionError");
-    expect(await row()).toMatchObject({ release_reason: PLAN_AUTO_RELEASE_REASON });
-    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
-    expect(manager.getSession(SESSION)).not.toBeNull();
-  });
-
-  test("a rewrite still owed when the plan's release ends the session is replaced by that release's row", async () => {
-    const landReleaseWrite = await supersededReleaseWithParkedWrite();
-    store.failPlainUpserts = 1;
-    landReleaseWrite();
-    await settleMicrotasks();
-    // The scenario was driven: the terminal row landed and its rewrite failed, so it is owed.
-    expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
-    expect(timer.getPendingTimeouts()).toEqual([REWRITE_RETRY_DELAY_MS]);
-
-    await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON);
-    await settleMicrotasks();
-
-    expect(await row()).toMatchObject({
-      status: "released",
-      release_reason: PLAN_AUTO_RELEASE_REASON,
-    });
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
-  test("that replacement, when its write fails, is retried before the release's own row", async () => {
-    const landReleaseWrite = await supersededReleaseWithParkedWrite();
-    await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON);
-    store.failPlainUpserts = 1;
-
-    landReleaseWrite();
-    await settleMicrotasks();
-    expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
-    expect(timer.getPendingTimeouts()).toEqual([RELEASE_RETRY_DELAY_MS]);
-    await timer.advanceTimeAsync(RELEASE_RETRY_DELAY_MS);
-    await settleMicrotasks();
-
-    expect(await row()).toMatchObject({
-      status: "released",
-      release_reason: PLAN_AUTO_RELEASE_REASON,
-    });
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
   test("a rebind's row that lands after its session was forced out is released again", async () => {
     await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     let landRebindWrite!: () => void;
@@ -403,8 +257,8 @@ describe("the row of a released session (#11557)", () => {
   });
 
   test("a terminal row write waiting on a release stops waiting the moment that release is forced", async () => {
-    await supersededReleaseWithParkedWrite();
-    // The device-loss release's terminal write is parked past its deadline and then fails.
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
+    // A device-loss release's terminal write is parked past its deadline and then fails.
     const failParkedWrite = () =>
       manager.testHooks.wiring.releasePersistence.trackLateReleaseWrite(
         Promise.reject(new Error("SQLITE_BUSY: database is locked")),

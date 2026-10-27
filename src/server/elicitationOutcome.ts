@@ -7,11 +7,14 @@ export type ElicitationDeclared = "none" | "bare" | "form" | "url";
 export type ElicitationEra = "legacy" | "modern";
 /**
  * How an ambiguous-device question ended. `not_offered` means the client cannot be asked (no
- * capability, or url-only); `asked` is a modern question handed back to the client, whose answer
+ * capability, or url-only); `disabled` means `AUTOMOBILE_ELICITATION=off`; `remembered` means this
+ * connection already declined or cancelled the same candidate set; `asked` is a modern question handed back to the client, whose answer
  * arrives on a later request and is recorded then.
  */
 export type ElicitationOutcome =
   | "not_offered"
+  | "disabled"
+  | "remembered"
   | "asked"
   | "accept"
   | "decline"

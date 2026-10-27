@@ -74,6 +74,11 @@ does not declare elicitation, you get the `ambiguous_device_target` refusal
 above, unchanged. Unattended agents are never held open. Pass `deviceId` on the
 call to skip the question.
 
+If you decline or cancel, the same connection is not asked again for the same set
+of devices, so you are not prompted on every call; a different set of devices, a
+new connection, or an accepted answer asks again. Set `AUTOMOBILE_ELICITATION=off`
+to never ask (CI, benchmarks): the call returns the refusal immediately.
+
 When a refusal carries `retryAfterMs`, wait that long before retrying.
 Refusals do not count as session use and do not extend the session's idle window.
 

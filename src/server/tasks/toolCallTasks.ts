@@ -6,6 +6,7 @@ import type { TaskLeaseKeepalive } from "../../daemon/tasks/taskLeaseKeepalive";
 import { CLIENT_CAPABILITIES_META_KEY } from "@modelcontextprotocol/server";
 import { declaresFormElicitation } from "../ambiguousDeviceElicitation";
 import { executeWithDeviceChoice } from "../ambiguousDeviceChoice";
+import { elicitationEnabled } from "../elicitationPolicy";
 import { classifyElicitationDeclaration, defaultElicitationRecorder } from "../elicitationOutcome";
 
 /**
@@ -82,6 +83,7 @@ export function createTaskAwareToolCallExecutor(
     // asTaskCall removes the request envelope: retain its declaration before entering work.
     const canAsk =
       call.args.deviceId === undefined &&
+      elicitationEnabled() &&
       declaresFormElicitation(call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY]);
     return runAsTask(
       {

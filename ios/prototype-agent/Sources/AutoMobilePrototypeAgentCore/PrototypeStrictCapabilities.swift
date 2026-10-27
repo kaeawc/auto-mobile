@@ -9,6 +9,7 @@ enum PrototypeStrictCapabilities {
         if includeAgentGates {
             if spec["theme"] != nil { need("theme_modes") }
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
+            if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         }
         if spec["strings"] != nil { need("strings") }
         for key in ["window", "theme"] {
@@ -64,6 +65,7 @@ enum PrototypeStrictCapabilities {
             if let feature = types[type] { need(feature) }
             if fields["ios"] != nil || fields["android"] != nil { need("platform_namespace") }
             if fields["sharedKey"] != nil { need("shared_element") }
+            if fields["shared"] != nil { result.insert("prototype_shared_element_v2") }
             let navigation = ["stack", "push", "replace"].contains(type)
             if navigation, fields["transition"] != nil { need("stack_transitions") }
             if navigation,
@@ -118,6 +120,7 @@ enum PrototypeStrictCapabilities {
                     (key == "value" && !["setData", "appendData", "prependData"].contains(type)) { continue }
                 if key == "repeat" {
                     if child.objectFields?["derive"] != nil { need("format") }
+                    if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if let repeatSpec = child.objectFields,
                        repeatSpec["items"]?
                        .objectFields != nil || repeatSpec["key"] != nil { need("data_model") }; continue

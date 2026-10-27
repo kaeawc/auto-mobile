@@ -1,3 +1,5 @@
+import { prototypeWindowMotionFields } from "./prototypeWindowMotion";
+import { PROTOTYPE_WINDOW_MOTION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
 import { record } from "./prototypeTemplate";
 import { PROTOTYPE_DESIGN_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -14,6 +16,8 @@ import {
 import {
   prototypeReducedMotionFields,
   prototypeSharedElementFields,
+  prototypeSharedElementV2Fields,
+  prototypeSharedElementV2UnsupportedMessage,
   prototypeReducedMotionUnsupportedMessage,
   prototypeSharedElementUnsupportedMessage,
 } from "./prototypeSharedElement";
@@ -34,6 +38,7 @@ import {
   PROTOTYPE_EFFECTS_CAPABILITY,
   PROTOTYPE_REDUCED_MOTION_CAPABILITY,
   PROTOTYPE_SHARED_ELEMENT_CAPABILITY,
+  PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
   PROTOTYPE_STACK_PATTERNS_CAPABILITY,
@@ -336,6 +341,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeLoadingStatesUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_WINDOW_MOTION_CAPABILITY,
+    fields: prototypeWindowMotionFields,
+    unsupportedMessage: (fields) =>
+      `The connected device does not advertise prototype_window_motion_v1, required by ${fields.join(", ")}. Nothing was shown. Update the agent or remove these fields.`,
+  },
+  {
     capability: PROTOTYPE_MOTION_V2_CAPABILITY,
     fields: prototypeMotionV2Fields,
     unsupportedMessage: prototypeMotionV2UnsupportedMessage,
@@ -389,6 +400,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_REDUCED_MOTION_CAPABILITY,
     fields: prototypeReducedMotionFields,
     unsupportedMessage: prototypeReducedMotionUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
+    fields: prototypeSharedElementV2Fields,
+    unsupportedMessage: prototypeSharedElementV2UnsupportedMessage,
   },
   {
     capability: PROTOTYPE_SHARED_ELEMENT_CAPABILITY,

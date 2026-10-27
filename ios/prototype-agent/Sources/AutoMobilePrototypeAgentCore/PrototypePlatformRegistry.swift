@@ -106,4 +106,6 @@ struct PrototypeInFlightPlatformCall {
     let job: PrototypePlatformJob
     let action: PrototypeAction
     let eventData: JSONValue?
+    /// The node whose action made the call, when one node owns it (the feedback log's `nodeId`).
+    var nodeId: String?
 }

@@ -1054,6 +1054,50 @@ A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
 motion on it animates with a short spring; with `motion: "none"` or animator
 scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
+### Window and modal motion
+
+Android `prototype_window_motion_v1` gates authored `window.transition` and
+`repeat.stagger`. Window transitions are `auto` (default), `none`, `fade`, `slide`,
+or `scale`. Auto slides a sheet from its placement edge, fades and scales a
+floating surface from 0.92 to 1, and fades fullscreen content. Exit mirrors enter.
+Same-id shows update the existing window when motion is off or the incoming
+transition is `none`, preserving focus and keyboard attachment. With full or
+reduced motion and an animated transition, replacement attaches a new window
+while the outgoing window exits; focus transfers to the new window. Changes to
+display, layer or surface id also require a new window regardless of motion.
+Root Compose content animates for 300 ms; removal is scheduled through the host
+settle timer at 400 ms, independent of animation frames. Exiting windows become
+non-touchable immediately. Outgoing windows retain their hierarchy motion metadata
+and shared image/font assets until detach; service teardown drains these exits
+immediately. Dismissal events and sequence allocation retain their
+existing timing at exit start. Agent shows animate; device-persistence boot
+restoration does not. Idle TTL, last-client disconnect and service teardown remove
+windows immediately to keep teardown bounded.
+
+Bottom sheets slide from the bottom, dialogs and menus fade and scale, and
+snackbars fade and slide. Scrims fade with their surfaces. Panels remain composed
+through exit, including when removed from the authored tree; a patch reopening a
+panel cancels its exit and re-enters. `SheetDismiss` and modal button actions commit
+at exit start, so runtime state and emitted action events change immediately;
+retained visual content finishes exiting afterward with input disabled and its
+semantics cleared. A dragged sheet follows the
+pointer directly and springs to the selected detent on release. Reduced motion
+uses fades without translation, scaling or detent springs. Off motion snaps and
+keeps the settled rendering unchanged. Window and modal transitions and detent
+settles participate in the motion-active signal, following the conventions of
+#15114 (see Motion-active signal): the surface reports itself through
+`ReportPrototypeMotion` while an exit or settle runs, so `observe` never captures it mid-flight.
+
+`repeat.stagger` is an integer 0–100 ms per instance, in item order. Only template
+children with `visibleWhen` receive it. It adds to container stagger and transition
+delay through the existing enter-delay machinery, with each total capped at
+600 ms; exits are not delayed.
+
+Test-budget note: the repository's 100 ms per-test unit budget is measured only from bun's JUnit
+reporter (`scripts/test-ts.sh`, `scripts/validate-bun-test-timings.sh`). It does not cover Gradle or
+Robolectric tests, so the Compose and host tests for this feature are not held to it. iOS accepts the structural contract but does not
+advertise this capability, so host preflight refuses either authored field.
+
 ### Motion profiles (#15115, `prototype_reduced_motion_v1`)
 
 Motion runs in one of three profiles, decided identically on both platforms from the spec's
@@ -1101,18 +1145,63 @@ the second (a list row into a detail card, a thumbnail into a viewer):
 }
 ```
 
-Rules, enforced by every validator with exact paths: `sharedKey` is a key (same grammar as state
-keys). Visibility morph keys require `visibleWhen` and exactly two nodes, neither inside the other.
-A key referenced by a zoom action source instead labels exactly one node and needs no `visibleWhen`; a spec has at most 16 distinct keys; keys are rejected on a
-`repeat` node and anywhere inside its template. Shared elements across pager pages and `stack`
-screens are not supported.
+Rules, enforced by every validator with exact paths: `sharedKey` retains the state-key grammar
+and aliases `shared: {key, as: "bounds"}`. The object form requires
+`prototype_shared_element_v2`; plain `sharedKey` requires `prototype_shared_element_v1`.
+A node cannot set both and must have `visibleWhen`. Literal v2 keys allow hyphens in addition
+to the state-key characters, with a 64-character resolved limit. Literal keys pair exactly two
+nodes. Inside repeat children, a key template must reference the field named by `repeat.key`,
+without index or other-field placeholders. Each instance must resolve a distinct key; at most
+two nodes can use each resolved key. Unmatched repeat items remain ordinary cards. A spec has
+at most 16 resolved keys, including unmatched feed items. Pairs cannot nest, disagree on `as`, or cross a `dialog` or `bottomSheet`
+boundary (including two separate modals). Shared elements across pager pages and `stack` screens
+are not supported.
 
-Under `full`, bounds, size and crossfaded content animate from one node to the other. Android wraps
-the prototype in a `SharedTransitionLayout` only when a spec has a key and applies `sharedBounds`
-(not `sharedElement`: the two nodes differ in content); the morph runs on the `visibleWhen`
-transition, so it counts in the motion-active signal. Under `reduced` the pair crossfades in place
-and under `off` it swaps instantly. A pair that is visible at the same time does not morph.
-`sharedKey` needs `prototype_shared_element_v1`, which the host checks before showing.
+Under `full`, Android applies `sharedElement` for `as: "element"` (identical content, only the target
+draws) and `sharedBounds` for `as: "bounds"` (changing content, both sides crossfade), in one
+`SharedTransitionLayout`. iOS uses `matchedGeometryEffect(properties: .frame)` in one namespace;
+bounds also crossfades the two sides. The morph counts in the motion-active signal. Under
+`reduced` both kinds crossfade in place; under `off` they swap instantly. A pair visible at the
+same time keeps ordinary visibility behavior. Shape interpolation still needs `animate` on
+`cornerRadius`; image content scale snaps.
+
+A feed card expanding into a detail column uses the same spec on Android and iOS. Here the one
+feed item binds `story-{item.id}` to `story-one`; tapping it swaps the pair. More feed items may
+have unmatched keys until their corresponding detail is shown.
+
+```json
+{
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "open": false },
+  "root": {
+    "type": "box",
+    "children": [
+      {
+        "type": "column",
+        "repeat": { "items": [{ "id": "one" }], "as": "item", "key": "id" },
+        "children": [
+          {
+            "type": "card",
+            "shared": { "key": "story-{item.id}", "as": "bounds" },
+            "visibleWhen": { "key": "open", "equals": false },
+            "onTap": [{ "type": "setState", "key": "open", "value": true }],
+            "style": { "width": { "dp": 160 }, "height": { "dp": 80 } },
+            "children": [{ "type": "text", "text": "Story {item.id}" }]
+          }
+        ]
+      },
+      {
+        "type": "column",
+        "shared": { "key": "story-one", "as": "bounds" },
+        "visibleWhen": { "key": "open", "equals": true },
+        "onTap": [{ "type": "setState", "key": "open", "value": false }],
+        "style": { "width": { "dp": 320 }, "height": { "dp": 400 } },
+        "children": [{ "type": "text", "text": "Story one: the full detail" }]
+      }
+    ]
+  }
+}
+```
 
 ### Motion-active signal (#15114)
 
@@ -1656,6 +1745,41 @@ a literal `{value}` argument must satisfy), the permissions and background names
 table, so a module is added by adding its entry. The placeholder module `test` (`test.echo`,
 `test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
 vocabulary testable before any real module exists; no production runtime advertises it.
+
+**Haptics and sound (#14329).** The `haptics` module has one call,
+`haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
+`success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`
+(capability `prototype_platform_haptics_v1`). The `sound` module has `sound.play` with `sound`
+one of `click`, `send`, `receive` or `shutter` and an optional `volume`, a whole number 0-100
+(`prototype_platform_sound_v1`). Both lists are closed: a literal `{asset: ...}` sound is refused
+until the audio asset type (#14254) lands. Neither module has events or `/platform` state, needs a
+runtime permission (`VIBRATE` is a normal permission, declared by CtrlProxy) or touches personal
+data. CtrlProxy and the iOS prototype agent register both modules and advertise the capabilities;
+the embedded Compose renderer leaves modules to the app.
+
+- **Android haptics** use the `Vibrator`: from API 29 `VibrationEffect.createPredefined` (click and
+  impactMedium click; tick, selection and impactLight tick; heavyClick, impactHeavy, longPress and
+  warning heavy click; doubleClick and success double click), `error` a two-pulse waveform; below
+  API 29 a tuned one-shot or waveform. There is no tapped `View` to call
+  `performHapticFeedback(CONFIRM/REJECT)` on, so success, warning and error use these fallbacks.
+  Touch feedback off in system settings, or a device without a vibrator, is reported
+  (`suppressed` / `unavailable`). The `shutter` cue is `MediaActionSound`, `click` is the system
+  click sound effect, and `send` / `receive` are short system tones; no audio is bundled, and the
+  ringer (silent or vibrate) and the touch-sounds setting suppress them.
+- **iOS haptics** use `UIImpactFeedbackGenerator`, `UISelectionFeedbackGenerator` and
+  `UINotificationFeedbackGenerator` (doubleClick is two impacts 80 ms apart). The Simulator does
+  not render haptics but the call still succeeds and is logged; "System Haptics" off and the silent
+  switch are not detectable, so nothing is reported suppressed. Sounds are `AudioServices` system
+  sounds (click 1104, send 1001, receive 1007, shutter 1108); `volume` is ignored and the host's
+  `AVAudioSession` is never touched.
+- **`feedbackLog`.** Each shown prototype keeps its last 64 calls, oldest first, and `prototype
+  inspect` (and `status`) returns them as `feedbackLog: [{effect | sound, nodeId?, timeMs,
+  suppressed?}]`. `nodeId` is the one node whose tap, long-press or double-tap action made the
+  call, absent for a platform handler or when several nodes author the same call; `timeMs` is the
+  device clock. Failed calls are not logged; a show or dismissal clears the log.
+- **Device acceptance** is still open (`needs-device-verify`): an Android emulator tap appearing in
+  `feedbackLog` and in `dumpsys vibrator_manager`, an iOS Simulator `feedbackLog` entry, and the
+  feel on a physical device.
 
 | Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

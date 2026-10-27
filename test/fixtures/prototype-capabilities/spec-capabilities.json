@@ -26,7 +26,9 @@
   "prototype_pager_options_v1",
   "prototype_pager_state_key_v1",
   "prototype_platform_device_v1",
+  "prototype_platform_haptics_v1",
   "prototype_platform_namespace_v1",
+  "prototype_platform_sound_v1",
   "prototype_platform_test_v1",
   "prototype_platform_v1",
   "prototype_reduced_motion_v1",
@@ -36,6 +38,7 @@
   "prototype_search_bar_v1",
   "prototype_semantics_v1",
   "prototype_shared_element_v1",
+  "prototype_shared_element_v2",
   "prototype_stack_patterns_v1",
   "prototype_stack_transitions_v1",
   "prototype_stack_v1",
@@ -49,5 +52,6 @@
   "prototype_text_field_options_v1",
   "prototype_theme_modes_v1",
   "prototype_timers_v1",
-  "prototype_tooltip_v1"
+  "prototype_tooltip_v1",
+  "prototype_window_motion_v1"
 ]

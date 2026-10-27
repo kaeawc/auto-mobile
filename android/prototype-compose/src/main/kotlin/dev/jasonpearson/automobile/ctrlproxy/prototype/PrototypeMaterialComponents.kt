@@ -373,19 +373,29 @@ internal fun RenderPrototypeDialog(
   content: @Composable ColumnScope.() -> Unit,
 ) {
   val source = node.source as? PrototypeDialogNode ?: return
-  if (!node.sheetOpen) return
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     Box(
       Modifier.fillMaxSize()
         .background(prototypeDialogScrimFallback(MaterialTheme.colorScheme))
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
+        .then(
+          if (node.sheetOpen)
+            Modifier.clickable {
+              interact(PrototypeInteraction.SheetDismiss(source.openWhen))
+            }
+          else Modifier,
+        ),
     )
     Surface(
       modifier
+        .prototypeModalSurface("scale")
         .padding(horizontal = 24.dp, vertical = 24.dp)
         .widthIn(min = 280.dp, max = 560.dp)
         // Consume body taps so they never reach the scrim; the node's own onTap runs instead.
-        .clickable(remember { MutableInteractionSource() }, indication = null) {
+        .clickable(
+          remember { MutableInteractionSource() },
+          indication = null,
+          enabled = node.sheetOpen,
+        ) {
           if (!source.onTap.isNullOrEmpty())
             interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
         },
@@ -454,16 +464,16 @@ internal fun RenderPrototypeSnackbar(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeSnackbarNode ?: return
-  if (!node.sheetOpen) return
   // Leaving composition (the snackbar closed by any route) cancels the pending timeout.
-  LaunchedEffect(source.openWhen, source.durationMs) {
+  LaunchedEffect(source.openWhen, source.durationMs, node.sheetOpen) {
+    if (!node.sheetOpen) return@LaunchedEffect
     awaitSnackbarTimeout(source.durationMs) {
       interact(PrototypeInteraction.CloseModal(source.openWhen))
     }
   }
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
     Snackbar(
-      modifier.padding(12.dp),
+      modifier.prototypeModalSurface("slide").padding(12.dp),
       action =
         source.action?.let { action ->
           {
@@ -499,7 +509,13 @@ private fun PrototypeDialogTextButton(
   tag: String?,
   onClick: () -> Unit,
 ) {
-  TextButton(onClick, Modifier.semantics { tag?.let { testTag = it } }) { Text(button.label) }
+  TextButton(
+    onClick,
+    Modifier.semantics { tag?.let { testTag = it } },
+    enabled = LocalPrototypeModalInputEnabled.current,
+  ) {
+    Text(button.label)
+  }
 }
 
 /**

@@ -2624,6 +2624,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -2876,6 +2883,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3141,6 +3155,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -3367,6 +3388,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3597,6 +3625,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -3846,6 +3881,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4120,6 +4162,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4374,6 +4423,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -4634,6 +4690,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -4851,6 +4914,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5051,6 +5121,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -5412,6 +5489,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -5650,6 +5734,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -5894,6 +5985,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6121,6 +6219,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6372,6 +6477,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -6523,6 +6635,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -6597,6 +6716,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -6840,6 +6966,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7105,6 +7238,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7360,6 +7500,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -7579,6 +7726,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -7803,6 +7957,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8036,6 +8197,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8255,6 +8423,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -8507,6 +8682,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8717,6 +8899,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -8923,6 +9112,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9146,6 +9342,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9399,6 +9602,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -9545,6 +9755,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -9619,6 +9836,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -9851,6 +10075,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10101,6 +10332,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -10333,6 +10571,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10594,6 +10839,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -10868,6 +11120,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -11116,6 +11375,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -11355,6 +11621,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11607,6 +11880,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -11799,6 +12079,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -11873,6 +12160,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -11976,6 +12270,13 @@
                 "name": "androidNamespace"
               },
               "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
             }
           }
         },
@@ -12050,6 +12351,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12295,6 +12603,13 @@
             "sharedKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
               },
               "optional": true
             },
@@ -12548,6 +12863,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -12785,6 +13107,13 @@
               },
               "optional": true
             },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
             "transition": {
               "rule": {
                 "kind": "choice",
@@ -13010,6 +13339,26 @@
         }
       }
     },
+    "shared": {
+      "kind": "object",
+      "fields": {
+        "key": {
+          "rule": {
+            "kind": "string",
+            "min": 1,
+            "max": 256
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "enum",
+            "values": ["element", "bounds"]
+          },
+          "optional": false
+        }
+      }
+    },
     "window": {
       "kind": "object",
       "fields": {
@@ -13074,6 +13423,13 @@
         "deadTaps": {
           "rule": {
             "kind": "boolean"
+          },
+          "optional": true
+        },
+        "transition": {
+          "rule": {
+            "kind": "enum",
+            "values": ["auto", "none", "fade", "slide", "scale"]
           },
           "optional": true
         }
@@ -16018,6 +16374,15 @@
             }
           },
           "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
+          },
+          "optional": true
         }
       }
     },
@@ -16349,6 +16714,15 @@
           "rule": {
             "kind": "ref",
             "name": "colorValue"
+          },
+          "optional": true
+        },
+        "stagger": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
           },
           "optional": true
         }
@@ -18243,6 +18617,70 @@
           }
         }
       }
+    },
+    "haptics": {
+      "capability": "prototype_platform_haptics_v1",
+      "calls": {
+        "perform": {
+          "args": {
+            "effect": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": [
+                  "click",
+                  "tick",
+                  "heavyClick",
+                  "doubleClick",
+                  "selection",
+                  "success",
+                  "warning",
+                  "error",
+                  "impactLight",
+                  "impactMedium",
+                  "impactHeavy",
+                  "longPress"
+                ]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "sound": {
+      "capability": "prototype_platform_sound_v1",
+      "calls": {
+        "play": {
+          "args": {
+            "sound": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["click", "send", "receive", "shutter"]
+              }
+            },
+            "volume": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 100
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {

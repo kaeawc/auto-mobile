@@ -266,13 +266,18 @@ settling, pager scrolling and shared morphs) with a crossfade or snap with fade.
 other ambient/attention loops stop at rest and report no loop; color, alpha and fades still animate.
 Off makes every change instant.
 
-\`sharedKey\` requires \`prototype_shared_element_v1\`. Visibility morphs require \`visibleWhen\`
-on the same node; a key referenced as a zoom source instead labels exactly one node without that requirement.
-Keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`; each visibility morph key labels exactly two nodes, at most 16 distinct
-keys per spec. A pair cannot be ancestor/descendant, and neither a repeat carrier nor any node
-inside its template may carry a sharedKey. Authors choose visibility conditions so the pair is
-not visible together. Full motion morphs the pair's bounds between different content; reduced
-uses ordinary visibility fades and off swaps instantly.
+\`shared: {key, as: "element" | "bounds"}\` requires \`prototype_shared_element_v2\` and
+\`visibleWhen\` on the same node. Element shares identical content (a hero image); bounds shares
+a container with changing content and crossfades both sides. \`sharedKey\` remains the
+\`prototype_shared_element_v1\` bounds alias; a node cannot set both. Literal v2 keys allow
+letters, digits, underscore and hyphen, starting with a letter or underscore (1-64 characters).
+A spec has at most 16 resolved keys, including unmatched feed items. Literal keys pair exactly two nodes, neither nested in the
+other. Inside repeat children, use \`shared: {key: "story-{item.id}", as: "bounds"}\` with
+\`repeat.key: "id"\`: placeholders must name that same field; index and constant keys are refused.
+Each item resolves a distinct key, used at most twice; unmatched feed items remain ordinary cards.
+The pair must use the same as value and cannot cross a dialog or bottomSheet boundary.
+Choose visibility conditions so the pair is not visible together. Full motion morphs geometry;
+reduced uses ordinary visibility crossfades and off swaps instantly.
 
 ## Motion v2
 
@@ -413,6 +418,7 @@ very top of the screen, including under the status bar. A \`topAppBar\` or top c
 A host-owned two-finger long press (about 1 s) anywhere on the window reveals a dismiss pill for
 5 s; tapping it dismisses with reason \`user\`. Agent dismiss, a replacing show, authored dismiss,
 the session's five-minute idle TTL and last-client disconnect still work.
+\`window.transition\` (auto|none|fade|slide|scale) and \`repeat.stagger\` (0-100 ms per instance, capped at 600 ms) require \`prototype_window_motion_v1\` on Android.
 \`window.persistence: "device"\` defaults to \`bar\` and keeps its existing persistence behaviour.
 The device implementations ship separately: without the capability a device keeps the bar,
 explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successful fullscreen

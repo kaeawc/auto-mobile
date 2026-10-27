@@ -195,6 +195,10 @@ export const commonNodeShape = {
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   sharedKey: keySchema.optional(),
+  shared: z
+    .object({ key: z.string().min(1).max(256), as: z.enum(["element", "bounds"]) })
+    .strict()
+    .optional(),
   ...prototypeMotionNodeShape,
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -213,6 +217,7 @@ const repeatSchema = z
     as: keySchema,
     derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),
+    stagger: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
@@ -835,6 +840,7 @@ const windowSchema = z
     ...prototypePlatformNamespaceShape,
     placement: placementSchema,
     backdrop: prototypeBackdropSchema.optional(),
+    transition: z.enum(["auto", "none", "fade", "slide", "scale"]).optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()

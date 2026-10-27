@@ -107,6 +107,7 @@ object PrototypeSpecValidator {
     input: String,
     supportedCapabilities: Set<String>? = null,
     library: Boolean = false,
+    shareAssetIds: Set<String>? = null,
   ): PrototypeSpecValidation {
     val context = Context()
     val result = PrototypeSpecInput.validateInput(input, context)
@@ -117,6 +118,7 @@ object PrototypeSpecValidator {
         supportedCapabilities,
         library,
         context,
+        shareAssetIds,
       )
     return if (error == null) result else PrototypeSpecValidation.Failure(error)
   }
@@ -125,6 +127,7 @@ object PrototypeSpecValidator {
     input: ByteArray,
     supportedCapabilities: Set<String>? = null,
     library: Boolean = false,
+    shareAssetIds: Set<String>? = null,
   ): PrototypeSpecValidation =
     if (input.size > MAX_PROTOTYPE_SPEC_BYTES)
       PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Spec byte limit exceeded"))
@@ -136,6 +139,7 @@ object PrototypeSpecValidator {
           },
           supportedCapabilities,
           library,
+          shareAssetIds,
         )
       } catch (_: IllegalArgumentException) {
         PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Invalid UTF-8"))

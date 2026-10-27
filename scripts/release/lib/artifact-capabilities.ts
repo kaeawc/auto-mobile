@@ -56,9 +56,14 @@ export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
  * check (see {@link findStaleExemptions}) so it cannot hide a later regression.
  */
 export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string>> = {
-  "android-ctrlproxy-apk": {},
+  "android-ctrlproxy-apk": {
+    prototype_platform_share_v1:
+      "Share has a validated contract only; Android does not implement the system share sheet yet",
+  },
   "ios-runner": {},
   "prototype-agent-dylib": {
+    prototype_platform_share_v1:
+      "Share has a validated contract only; the iOS agent does not implement the system share sheet yet",
     prototype_chat_scroll_v1:
       "iOS agent only derives the bundle requirement; it does not implement chat scroll options or scrollTo",
     prototype_choreography_v1:

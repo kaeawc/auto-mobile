@@ -1,0 +1,46 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share", "test"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "secret",
+          "secure": true
+        }
+      ]
+    },
+    "state": {
+      "secret": "password"
+    },
+    "platform": {
+      "on": {
+        "test.tick": [
+          {
+            "type": "platform",
+            "call": "share.open",
+            "args": {
+              "text": {
+                "value": "{secret}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "platform.on[\"test.tick\"][0].args.text.value",
+  "expectedMessage": "Secure value cannot be bound into an action payload",
+  "options": {
+    "library": true
+  }
+}

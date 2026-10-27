@@ -184,4 +184,4 @@ AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public enum JSONValue: Codable
 AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public func encode(to encoder: Encoder) throws
 AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public init(from decoder: Decoder) throws
 AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public enum PrototypeSpecStrictValidator
-AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public static func validate(data: Data, supportedCapabilities: Set<String>? = nil, library: Bool = false) throws
+AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public static func validate(data: Data, supportedCapabilities: Set<String>? = nil, library: Bool = false, shareAssetIds: Set<String>? = nil) throws

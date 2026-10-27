@@ -3,7 +3,14 @@ import Foundation
 /// Reject-only validation of an authored spec. No renderer, I/O, storage or networking is started.
 public enum PrototypeSpecStrictValidator {
     /// Accepts by returning normally; rejects with `PrototypeLoadError.invalidSpec(path:message:)`.
-    public static func validate(data: Data, supportedCapabilities: Set<String>? = nil, library: Bool = false) throws {
+    public static func validate(
+        data: Data,
+        supportedCapabilities: Set<String>? = nil,
+        library: Bool = false,
+        shareAssetIds: Set<String>? = nil
+    )
+        throws
+    {
         do {
             let data = try PrototypeStrictJSON.prepare(data)
             let (value, context) = try PrototypeContractValidator.inspect(data: data)
@@ -66,6 +73,19 @@ public enum PrototypeSpecStrictValidator {
                     "$",
                     "Unsupported capabilities: \(PrototypeContractValidator.sorted(missing).joined(separator: ", "))"
                 )
+            }
+            if let shareAssetIds {
+                for action in context.actions
+                    where action.value["type"] == .string("platform") && action.value["call"] == .string("share.open")
+                {
+                    if let error = PrototypeShare.argumentsError(
+                        action.value["args"]?.objectFields ?? [:],
+                        path: "\(action.path).args",
+                        assets: shareAssetIds
+                    ) {
+                        throw PrototypeContractValidator.invalid(error.path, error.message)
+                    }
+                }
             }
             if library, PrototypeCustomShaders.uses(fields) {
                 throw PrototypeContractValidator.invalid(
@@ -147,7 +167,31 @@ public enum PrototypeSpecStrictValidator {
                 append(value, path: PrototypeLimits.dataMemberPath("\(at).headers", key: name), request: true)
             }
         }
+        func shareStrings(_ raw: JSONValue, path: String) {
+            switch raw {
+            case let .string(text): bindings.append((text, path, false, false))
+            case let .array(array): for (index, entry) in array.enumerated() {
+                    shareStrings(
+                        entry,
+                        path: "\(path)[\(index)]"
+                    )
+                }
+            case let .object(form): for (key, entry) in form {
+                    shareStrings(
+                        entry,
+                        path: PrototypeLimits.dataMemberPath(path, key: key)
+                    )
+                }
+            default: break
+            }
+        }
         for action in actions {
+            if action.value["type"] == .string("platform"), action.value["call"] == .string("share.open") {
+                for (name, binding) in action.value["args"]?.objectFields ?? [:] {
+                    if let literal = binding
+                        .objectFields?["value"] { shareStrings(literal, path: "\(action.path).args.\(name).value") }
+                }
+            }
             switch action.value["type"]?.stringValue {
             case "request":
                 append(action.value["url"], path: "\(action.path).url", request: true)
@@ -187,7 +231,19 @@ public enum PrototypeSpecStrictValidator {
                 break
             }
         }
-        for binding in bindings.sorted(by: { $0.path.utf16.lexicographicallyPrecedes($1.path.utf16) }) {
+        let sinks = bindings.sorted(by: { $0.path.utf16.lexicographicallyPrecedes($1.path.utf16) })
+        var expandedBytes = 0
+        for binding in sinks {
+            let scope = repeats.scopes.first { binding.path.hasPrefix("\($0.path).children[") }
+            expandedBytes += binding.text.utf8.count * max(1, scope?.items.count ?? 1)
+            if expandedBytes > 4_194_304 {
+                throw PrototypeContractValidator.invalid(
+                    binding.path,
+                    "Secure binding scan exceeds 4194304 expanded UTF-8 bytes"
+                )
+            }
+        }
+        for binding in sinks {
             let scope = repeats.scopes.first {
                 binding.path.hasPrefix("\($0.path).children[") && PrototypeRepeat
                     .segments(binding.text, alias: $0.alias)

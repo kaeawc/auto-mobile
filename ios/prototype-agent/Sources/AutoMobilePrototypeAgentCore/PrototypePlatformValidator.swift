@@ -395,16 +395,23 @@ enum PrototypePlatformValidator {
         }
         for name in sorted(Set(definition.args.keys).union(args.keys)) {
             let at = PrototypeLimits.dataMemberPath("\(path).args", key: name)
-            guard let argument = definition.args[name] else { throw fail(at, "Unknown argument") }
+            guard let argument = definition.args[name] else { throw fail(
+                at,
+                call == "share.open" && name == "title" ? "Unknown argument: use subject" : "Unknown argument"
+            ) }
             guard let binding = args[name] else {
                 if argument.optional { continue }
                 throw fail(at, "Required argument")
             }
+            if call == "share.open", ["text", "url", "subject"].contains(name) { continue }
             if case let .object(form) = binding, let literal = form["value"] {
                 try check(literal, argument.rule, path: "\(at).value")
             }
         }
         try PrototypeChannels.call(action, path: path, channels: declared.channels)
+        if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
+            throw fail(error.path, error.message)
+        }
         if let into = action["into"] { try self.into(into, path: "\(path).into") }
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
     }

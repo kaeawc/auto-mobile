@@ -29,6 +29,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_routes_v1",
             "prototype_platform_test_v1", "prototype_platform_namespace_v1",
+            "prototype_platform_share_v1", // Contract only; system share sheet runtime is owed.
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

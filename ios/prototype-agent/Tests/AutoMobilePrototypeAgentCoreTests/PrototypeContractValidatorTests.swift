@@ -155,6 +155,7 @@ final class PrototypeContractValidatorTests: XCTestCase {
         let options: Options?
 
         struct Options: Decodable {
+            let shareAssetIds: Set<String>?
             let supportedCapabilities: Set<String>?
             let library: Bool?
         }
@@ -176,11 +177,14 @@ final class PrototypeContractValidatorTests: XCTestCase {
                 try PrototypeSpecStrictValidator.validate(
                     data: data,
                     supportedCapabilities: fixture.options?.supportedCapabilities,
-                    library: fixture.options?.library ?? false
+                    library: fixture.options?.library ?? false,
+                    shareAssetIds: fixture.options?.shareAssetIds
                 )
                 XCTFail("ACCEPTED \(url.lastPathComponent)")
-            } catch let PrototypeLoadError.invalidSpec(path, _) {
+            } catch let PrototypeLoadError.invalidSpec(path, message) {
                 XCTAssertEqual(path, fixture.expectedPath, url.lastPathComponent)
+                if url.lastPathComponent.hasPrefix("share-"),
+                   let expected = fixture.expectedMessage { XCTAssertEqual(message, expected, url.lastPathComponent) }
             }
         }
         print("Checked \(invalid.count) invalid fixtures; 0 exemptions")

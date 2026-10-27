@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "text": {
+              "state": "{item.x}"
+            }
+          }
+        }
+      ]
+    },
+    "state": {
+      "message": "hi"
+    }
+  },
+  "expectedPath": "root.onTap[0].args.text.state",
+  "expectedMessage": "State key placeholder outside a repeat template"
+}

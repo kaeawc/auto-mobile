@@ -42,6 +42,7 @@ export type StatelessMcpServerBase = Pick<
   | "debug"
   | "acceptanceDiscoveryCapability"
   | "sessionToolBindingStore"
+  | "deviceChoiceRequestState"
 >;
 
 // Fetch's `Headers` strips leading and trailing HTTP whitespace from a value before sending it,

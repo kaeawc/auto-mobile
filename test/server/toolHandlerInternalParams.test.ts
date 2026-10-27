@@ -133,6 +133,16 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // MRTR state is an SDK-verified continuation payload, not tool arguments.
+      if (
+        receiver.type === "Identifier" &&
+        ((file === "ambiguousDeviceMrtr.ts" &&
+          receiver.name === "deviceChoiceRequestStateSchema") ||
+          (file === "deviceChoiceRequestState.ts" &&
+            ["sealedStateSchema", "deviceChoiceRequestStateSchema"].includes(receiver.name)))
+      ) {
+        return;
+      }
       if (!first || first.type === "SpreadElement" || !isClean(first)) {
         offenders.push(`${file}:${source.slice(0, node.start).split("\n").length}`);
       }

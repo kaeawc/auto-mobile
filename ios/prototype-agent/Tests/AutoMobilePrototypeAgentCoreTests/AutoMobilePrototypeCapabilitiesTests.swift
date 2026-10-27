@@ -29,9 +29,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_motion_v2", "prototype_choreography_v1",
             "prototype_effects_v1", "prototype_window_motion_v1",
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",
-            "prototype_platform_test_v1",
-            "prototype_chat_scroll_v1", "prototype_motion_v2", "prototype_choreography_v1",
-            "prototype_effects_v1", "prototype_platform_media_items_v1",
+            "prototype_platform_media_items_v1",
         ]
         XCTAssertTrue(supported.contains("prototype_lazy_list_v1"))
         XCTAssertTrue(exclusions.isSubset(of: required), "Exclusions must name current spec gates")

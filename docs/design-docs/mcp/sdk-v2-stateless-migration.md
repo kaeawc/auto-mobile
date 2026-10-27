@@ -318,6 +318,23 @@ unreachable is an error, never an invented status. Device-binding tools are not 
 declared until the proxy binds the session from a completed task's result.
 `notifications/tasks` push is out of scope (task polling only).
 
+## Skills extension (#15430)
+
+SDK 2.4.0's Skills over MCP extension publishes one usage skill, `auto-mobile-usage`
+(`mcp-skills/`, listed in `package.json` `files`). `createMcpServer` and the proxy call
+`attachUsageSkill`, which attaches one shared `SkillsExtension` over a lazy `SkillSource`:
+construction is synchronous because stateless servers are built per request, and the
+folder is read once on first use. A folder that cannot be read serves no skills.
+
+`attach` registers the skill file reads on the SDK's `resources/read` handler, but our
+`resources/read` handlers replace it (see "Handlers stay ours"). So the resource
+registry and the proxy answer `skill://` URIs themselves from the same source, and a
+`skill://` URI that source does not serve is a not-found error, never a forward to the
+daemon or an `automobile:` scheme suggestion. The skill is absent from `tools/list`,
+`resources/list` and `resources/templates/list`; hosts reach it only through
+the Skills extension's list and get requests. The skill also adds `extensions` to the `initialize`
+capabilities.
+
 ## Open questions and resolutions
 
 | #   | Question                                                                                                                   | Resolution                                                                                                                                                                                                              |

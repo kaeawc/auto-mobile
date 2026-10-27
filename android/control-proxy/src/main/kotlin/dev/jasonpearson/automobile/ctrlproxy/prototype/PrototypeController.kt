@@ -1134,6 +1134,7 @@ class PrototypeController(
       shaderFailures = runtime.shaderSession.failures(),
       degradedEffects =
         prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
+      feedbackLog = runtime.feedbackLog.snapshot(),
     )
   }
 

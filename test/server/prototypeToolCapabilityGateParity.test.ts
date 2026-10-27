@@ -316,6 +316,42 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_haptics_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["haptics"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "haptics.perform", args: { effect: { value: "tick" } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_sound_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["sound"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "sound.play", args: { sound: { value: "click" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_namespace_v1: fixture({
     ...label,
     ios: { hover: "lift" },

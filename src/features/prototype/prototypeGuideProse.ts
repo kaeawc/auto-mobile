@@ -373,6 +373,16 @@ explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successf
 show and subsequent host-local status report the effective value as \`lastResult.chrome\`;
 it is absent for sheet/floating windows, dismiss, failed show and adopted prototypes.
 
+## Frosted backdrop
+
+\`window.backdrop\` is \`{material, blur?, tint?}\` and blurs what is behind the window on any
+placement (not the prototype's own content). \`material\` is one of \`ultraThin\`, \`thin\`,
+\`regular\`, \`thick\` or \`glass\` (Liquid Glass, iOS 26+ only). \`blur\` is an optional whole radius in
+dp (points on iOS), 0-150. \`tint\` is one hex or role colour, not a light/dark pair. The host refuses
+the show on a device without \`prototype_backdrop_v1\`. Where the platform cannot blur, the device
+draws a tonal fill (\`tint\` at 85% alpha, else the \`surfaceContainer\` role at 85%) and \`lastResult.backdrop\` is
+\`fallback\`; otherwise it is \`blur\`.
+
 
 ## Tooltip and drawer
 

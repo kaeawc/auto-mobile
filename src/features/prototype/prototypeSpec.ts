@@ -25,6 +25,7 @@ import {
   type PrototypeJson,
 } from "./prototypeJson";
 import * as lazyList from "./prototypeLazyListSchema";
+import { prototypeBackdropSchema } from "./prototypeBackdropSchema";
 import { prototypeChartShape } from "./prototypeChartSchema";
 import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
@@ -829,6 +830,7 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
 const windowSchema = z
   .object({
     placement: placementSchema,
+    backdrop: prototypeBackdropSchema.optional(),
     chrome: z
       .enum(["none", "bar"])
       .optional()

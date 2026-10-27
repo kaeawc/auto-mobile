@@ -12076,6 +12076,13 @@
           },
           "optional": true
         },
+        "backdrop": {
+          "rule": {
+            "kind": "ref",
+            "name": "backdrop"
+          },
+          "optional": true
+        },
         "deadTaps": {
           "rule": {
             "kind": "boolean"
@@ -16909,6 +16916,34 @@
           "rule": {
             "kind": "ref",
             "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "backdrop": {
+      "kind": "object",
+      "fields": {
+        "material": {
+          "rule": {
+            "kind": "enum",
+            "values": ["ultraThin", "thin", "regular", "thick", "glass"]
+          },
+          "optional": false
+        },
+        "blur": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 150
+          },
+          "optional": true
+        },
+        "tint": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorToken"
           },
           "optional": true
         }

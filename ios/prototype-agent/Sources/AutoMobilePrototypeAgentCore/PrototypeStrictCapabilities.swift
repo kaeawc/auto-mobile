@@ -14,6 +14,7 @@ enum PrototypeStrictCapabilities {
         if spec["data"] != nil { need("data_model") }
         if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }
+        if spec["window"]?.objectFields?["backdrop"] != nil { need("backdrop") }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
            colors["light"] != nil || colors["dark"] != nil { need("theme_modes") }
         func scan(_ value: JSONValue, field: String = "") {

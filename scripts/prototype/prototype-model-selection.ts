@@ -38,6 +38,7 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
 export const prototypeModelSelection = {
   shadow: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   fadeEdges: {},
+  backdrop: { languages: ["kotlin"] },
   semantics: { languages: ["kotlin"] },
   imageFilter: { swiftConformances: ["Decodable", "Equatable", "Sendable"] },
   // tooltipCaret/drawerEdge are enum rules: native node fields use strings, as for existing enums.
@@ -178,5 +179,6 @@ export const prototypeTypeRefs = {
   imageAsset: { kotlin: "PrototypeModeValue", swift: "PrototypeModeValue" },
   semantics: { swift: "PrototypeSemantics" },
   effect: { kotlin: "JsonObject" },
+  colorToken: { kotlin: "String" },
   listRepeat: { kotlin: "PrototypeRepeat" },
 } as const satisfies TypeRefs;

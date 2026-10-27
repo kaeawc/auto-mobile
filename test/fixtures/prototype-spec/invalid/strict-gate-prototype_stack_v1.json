@@ -89,7 +89,12 @@
     }
   },
   "options": {
-    "supportedCapabilities": ["prototype_data_model_v1", "prototype_linkify_v1"]
+    "supportedCapabilities": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_linkify_v1"
+    ]
   },
   "expectedPath": "$"
 }

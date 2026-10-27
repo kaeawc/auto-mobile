@@ -70,6 +70,7 @@ enum PrototypeAgentProtocol {
         clearStorageRequest,
         storageCapability,
         "prototype_pager_state_key_v1",
+        backdropCapability,
         timersCapability,
         "prototype_platform_v1",
         "prototype_platform_device_v1",
@@ -192,6 +193,9 @@ enum PrototypeAgentProtocol {
     /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
     /// beside `storageCapability` because the host checks request types against `capabilities`.
     static let clearStorageRequest = "clear_prototype_storage"
+    /// `window.backdrop` (#15126): SwiftUI Material behind the window (Liquid Glass for `glass` on
+    /// iOS 26+), a tonal fill where blur is unavailable, and `backdrop: blur|fallback` in the show reply.
+    static let backdropCapability = "prototype_backdrop_v1"
     static let timersCapability = "prototype_timers_v1"
     static let advanceClockRequest = "advance_prototype_clock"
     /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts

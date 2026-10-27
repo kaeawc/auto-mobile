@@ -65,6 +65,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** The window blur-behind radius a request asks for; only a real-blur plan has one. */
+internal fun backdropBlurPx(request: PrototypeRequest, density: Float): Int =
+  request.backdrop
+    ?.takeIf { it.mode == PrototypeBackdropMode.BLUR }
+    ?.let { (it.radiusDp * density).toInt() } ?: 0
+
 const val MIN_TOUCH_THROUGH_SETTLE_MILLIS = 100L
 const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
 
@@ -128,6 +134,8 @@ data class PrototypeRequest(
   /** Navigation takes Back even without an editable field; IME handling stays separate. */
   val hasStackBack: Boolean = false,
   val onHostBack: (suspend () -> Unit)? = null,
+  /** `window.backdrop` as resolved for this show (#15126); null without one. */
+  val backdrop: PrototypeBackdropPlan? = null,
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
   val focusable: Boolean
@@ -366,6 +374,7 @@ class DefaultPrototypeHost(
           hasStackBack = request.hasStackBack,
           opaque = prototypeWindowOpaque(request),
           surfaceId = request.surfaceId,
+          blurBehindRadiusPx = backdropBlurPx(request, target.density()),
         )
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -539,6 +548,7 @@ class DefaultPrototypeHost(
         hasStackBack = current.request.hasStackBack,
         opaque = prototypeWindowOpaque(current.request),
         surfaceId = current.request.surfaceId,
+        blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)

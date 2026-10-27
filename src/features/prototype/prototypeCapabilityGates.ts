@@ -38,6 +38,7 @@ import {
   PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
+  PROTOTYPE_BACKDROP_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
   PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
   PROTOTYPE_MOTION_V2_CAPABILITY,
@@ -155,6 +156,8 @@ import {
   prototypeStringConditionsFields,
   prototypeStringConditionsUnsupportedMessage,
 } from "./prototypeStringConditions";
+
+import { prototypeBackdropFields, prototypeBackdropUnsupportedMessage } from "./prototypeBackdrop";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -277,6 +280,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_SEARCH_BAR_CAPABILITY,
     fields: prototypeSearchBarFields,
     unsupportedMessage: prototypeSearchBarUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_BACKDROP_CAPABILITY,
+    fields: prototypeBackdropFields,
+    unsupportedMessage: prototypeBackdropUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_LOADING_STATES_CAPABILITY,

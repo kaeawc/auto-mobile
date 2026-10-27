@@ -220,6 +220,8 @@ data class PrototypeWindow(
   val chrome: String? = null,
   /** Opt-in window-local dead-tap events; coordinates never include field contents. */
   val deadTaps: Boolean? = null,
+  /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
+  val backdrop: PrototypeBackdrop? = null,
 )
 
 /**

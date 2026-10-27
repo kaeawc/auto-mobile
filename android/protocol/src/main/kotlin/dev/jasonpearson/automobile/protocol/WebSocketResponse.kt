@@ -902,6 +902,12 @@ data class PrototypeResult(
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val cleared: Int? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val fired: Int? = null,
+  /**
+   * Only the reply to a successful `show_prototype` whose spec has `window.backdrop`
+   * (`prototype_backdrop_v1`): `blur` when what is behind the window was blurred, `fallback` when
+   * the tonal fill was drawn instead.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val backdrop: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 @OptIn(ExperimentalSerializationApi::class)

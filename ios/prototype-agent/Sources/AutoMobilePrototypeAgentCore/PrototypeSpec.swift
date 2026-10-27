@@ -362,8 +362,9 @@ struct WindowSpec: Decodable {
     let opacity: Int?
     let chrome: String?
     let deadTaps: Bool?
+    let backdrop: BackdropSpec?
 
-    private enum CodingKeys: String, CodingKey { case placement, opacity, chrome, deadTaps }
+    private enum CodingKeys: String, CodingKey { case placement, opacity, chrome, deadTaps, backdrop }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -371,6 +372,7 @@ struct WindowSpec: Decodable {
         opacity = try container.decodeIfPresent(Int.self, forKey: .opacity)
         deadTaps = try container.decodeIfPresent(Bool.self, forKey: .deadTaps)
         chrome = try container.decodeIfPresent(String.self, forKey: .chrome)
+        backdrop = try container.decodeIfPresent(BackdropSpec.self, forKey: .backdrop)
         if let chrome, chrome != "none", chrome != "bar" {
             throw DecodingError.dataCorruptedError(
                 forKey: .chrome,

@@ -257,6 +257,11 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: { ...base, storage: { version: 1, keys: ["state:liked"] } },
     ops: [],
   },
+  // A window-level field: a patch cannot change the window, so only the show half applies.
+  prototype_backdrop_v1: {
+    minimalSpec: { ...base, window: { ...base.window, backdrop: { material: "thin" } } },
+    ops: [],
+  },
   prototype_network_v1: fixture({
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],

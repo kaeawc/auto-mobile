@@ -1,6 +1,6 @@
 {
   "spec": {
-    "id": "linkify-timeline",
+    "id": "linkify-repeat",
     "window": {
       "placement": {
         "type": "fullscreen"
@@ -8,87 +8,101 @@
       "opacity": 100
     },
     "data": {
+      "last": 0,
       "posts": [
         {
-          "id": "p1",
-          "body": "Hello @ana, see #launch https://example.com"
+          "id": "a",
+          "body": "@ana",
+          "count": 3
+        },
+        {
+          "id": "b",
+          "body": "@bob",
+          "count": 7
         }
       ]
     },
     "state": {
-      "profileHandle": ""
+      "liked_a": false,
+      "liked_b": false,
+      "handle_a": "",
+      "handle_b": "",
+      "number": 0
     },
     "root": {
-      "id": "nav",
-      "type": "stack",
-      "start": "home",
-      "screens": {
-        "home": {
-          "type": "column",
-          "children": [
-            {
-              "id": "post",
-              "type": "text",
-              "text": "Hello @ana, see #launch https://example.com",
-              "linkify": {
-                "kinds": ["mention", "hashtag", "url"],
-                "style": {
-                  "color": "primary",
-                  "fontWeight": 600
+      "repeat": {
+        "items": {
+          "path": "/posts"
+        },
+        "as": "post"
+      },
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{post.body}",
+          "linkify": {
+            "kinds": ["mention"],
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "handle_{post.id}",
+                "value": {
+                  "match": "text",
+                  "zzzUnknown": true
+                }
+              },
+              {
+                "type": "toggle",
+                "key": "liked_{post.id}"
+              },
+              {
+                "type": "setState",
+                "key": "number",
+                "value": "{post.count}"
+              },
+              {
+                "type": "emit",
+                "name": "tap_{post.id}_{index}",
+                "payload": {
+                  "item": "id",
+                  "text": "{post.id}",
+                  "match": "text"
                 },
-                "onTap": [
-                  {
-                    "type": "setState",
-                    "key": "profileHandle",
-                    "value": {
-                      "match": "text",
-                      "zzzUnknown": true
-                    }
+                "context": {
+                  "id": {
+                    "item": "id"
                   },
-                  {
-                    "type": "emit",
-                    "name": "link_tapped",
-                    "context": {
-                      "kind": {
-                        "match": "kind"
-                      },
-                      "text": {
-                        "match": "text"
-                      }
-                    }
+                  "index": {
+                    "index": true
                   },
-                  {
-                    "type": "push",
-                    "stack": "nav",
-                    "screen": "profile"
-                  }
-                ]
-              }
-            },
-            {
-              "type": "text",
-              "text": "{data:/posts/0/body}",
-              "linkify": {
-                "kinds": ["mention"],
-                "onTap": [
-                  {
-                    "type": "setData",
-                    "path": "/data/posts/0/id",
+                  "match": {
+                    "match": "kind"
+                  },
+                  "liked": {
+                    "state": "liked_{post.id}"
+                  },
+                  "literal": {
                     "value": {
+                      "item": "id",
+                      "text": "{post.id}",
                       "match": "text"
                     }
                   }
-                ]
+                }
+              },
+              {
+                "type": "setData",
+                "path": "/data/last",
+                "value": {
+                  "item": "count"
+                }
               }
-            }
-          ]
-        },
-        "profile": {
-          "type": "text",
-          "text": "Profile {profileHandle}"
+            ]
+          }
         }
-      }
+      ]
     }
   },
-  "expectedPath": "root.screens[\"home\"].children[0].linkify.onTap[0].value.zzzUnknown"
+  "expectedPath": "root.children[0].linkify.onTap[0].value.zzzUnknown"
 }

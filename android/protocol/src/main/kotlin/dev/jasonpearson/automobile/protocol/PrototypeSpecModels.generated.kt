@@ -31,6 +31,13 @@ data class PrototypeFadeEdges(
 )
 
 @Serializable
+data class PrototypeBackdrop(
+  val material: String,
+  val blur: Int? = null,
+  val tint: String? = null,
+)
+
+@Serializable
 data class PrototypeSemantics(
   val heading: Boolean? = null,
   val group: Boolean? = null,

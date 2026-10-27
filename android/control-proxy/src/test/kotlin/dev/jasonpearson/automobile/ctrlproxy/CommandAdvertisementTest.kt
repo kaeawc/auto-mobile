@@ -82,6 +82,7 @@ class CommandAdvertisementTest {
       "prototype_emit_context_v1",
       "prototype_checks_v1",
       "prototype_appearance_v1",
+      "prototype_backdrop_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
       "prototype_patch_v1",

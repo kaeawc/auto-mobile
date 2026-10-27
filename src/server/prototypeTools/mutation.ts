@@ -1,3 +1,4 @@
+import { shownBackdrop } from "../../features/prototype/prototypeBackdrop";
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
@@ -597,6 +598,7 @@ function supersededResult(
       ? { chrome: placed.chrome }
       : {}),
     ...shownAppearance(args.action, result),
+    ...shownBackdrop(args.action, result),
     success: result.success,
     ...(result.error ? { error: result.error } : {}),
     ...(result.totalTimeMs === undefined ? {} : { totalTimeMs: result.totalTimeMs }),

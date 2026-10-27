@@ -355,6 +355,7 @@
         "test/**/*.ts",
         "tsconfig.json",
         "tsconfig.test.json",
+        "tsconfig.test-*.json",
         "scripts/typecheck-baseline.sh",
         "scripts/lib/host-heavy-run.sh",
         "scripts/lib/host-slots.sh",

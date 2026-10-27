@@ -10,6 +10,8 @@ export {
   type CtrlProxyManager,
   type CtrlProxySetupResult,
 } from "./CtrlProxyManagerContracts";
+import { foreignForwardError } from "./foreignForwardError";
+import { createSetupUserResolver } from "./setupUser";
 import * as fs from "fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ENV, readEnvBool, readEnvRaw } from "../config/env";
@@ -84,6 +86,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private readonly rebind: AndroidCtrlProxyRebind;
   private readonly compatibility: AndroidCtrlProxyCompatibility;
   private readonly apkInstaller: AndroidCtrlProxyApkInstaller;
+  /** The foreground user on an automotive device, otherwise undefined (#14918). */
+  private readonly setupUser = createSetupUserResolver({
+    adb: () => this.adb,
+    device: () => this.device,
+    timer: () => this.timer,
+    onUserChanged: () => this.clearAvailabilityCache(),
+  });
+
   private createAndroidCtrlProxyAccessibility(): AndroidCtrlProxyAccessibility {
     const manager = this;
     return new AndroidCtrlProxyAccessibility({
@@ -108,6 +118,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       clearAvailabilityCache: () => this.clearAvailabilityCache(),
       enableViaSettings: () => this.enableViaSettings(),
       getApiLevel: () => this.getApiLevel(),
+      setupUser: () => this.setupUser(),
     });
   }
 
@@ -126,6 +137,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       },
       isAccessibilityServiceHealthy: () => this.isAccessibilityServiceHealthy(),
       clearAvailabilityCache: () => this.clearAvailabilityCache(),
+      setupUser: () => this.setupUser(),
     });
   }
 
@@ -206,6 +218,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       grantLocalNetworkAfterInstall: () => this.grantLocalNetworkAfterInstall(),
       statusInspectionDeviceError: (error) => this.statusInspectionDeviceError(error),
       getApiLevel: () => this.getApiLevel(),
+      setupUser: () => this.setupUser(),
       get device() {
         return manager.device;
       },
@@ -385,29 +398,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (finding.kind === "none") {
       return;
     }
-    const ports = finding.ports.join(", ");
-    if (finding.kind === "foreign") {
-      throw new DeviceOwnedByOtherDaemonError(
-        this.device.deviceId,
-        finding.clientPids[0],
-        `CtrlProxy adb forward on port${finding.ports.length === 1 ? "" : "s"} ${ports} ` +
-          `is owned by another process. ${finding.message} Stop the owning daemon or use ` +
-          "another device.",
-      );
-    }
-    if (finding.ports.length === 0) {
-      throw new CtrlProxyForwardOwnershipUnreadableError(this.device.deviceId, finding.reason);
-    }
-    const remedy = finding.ports
-      .map((port) => `\`adb -s ${this.device.deviceId} forward --remove tcp:${port}\``)
-      .join(", ");
-    throw new DeviceOwnedByOtherDaemonError(
-      this.device.deviceId,
-      undefined,
-      `CtrlProxy forward ownership could not be established (${finding.reason}); ` +
-        `${finding.message} If no other daemon uses this device, remove the stale forward with ` +
-        `${remedy} and retry.`,
-    );
+    throw foreignForwardError(this.device.deviceId, finding);
   }
 
   /**

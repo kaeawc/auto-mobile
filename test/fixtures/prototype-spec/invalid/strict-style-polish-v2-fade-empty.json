@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "scroll",
+      "fadeEdges": {},
+      "child": {
+        "type": "text",
+        "text": "x"
+      }
+    }
+  },
+  "expectedPath": "root.fadeEdges",
+  "expectedMessage": "At least one fade edge is required"
+}

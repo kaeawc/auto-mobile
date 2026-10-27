@@ -44,6 +44,8 @@ import {
   type IosSimulatorDisplayChange,
 } from "./IosSimulatorDisplayConfig";
 import {
+  androidResultMessage,
+  setFactoryDisplayConfig,
   accessibilityValuesOf,
   displayFieldsOf,
   mergeGeometryChange,
@@ -168,6 +170,8 @@ export interface SetDisplayConfigInput extends AccessibilityDisplayValues, Displ
    * Both platforms: restore each accessibility display preference this tool changed.
    */
   reset?: boolean;
+  /** With `reset`: also force platform defaults whatever baselines were recorded (#15337). */
+  factory?: boolean;
 }
 
 /** Process-lifetime baseline for the first night-mode value this tool replaces. */
@@ -637,6 +641,9 @@ export class DisplayConfig {
 
   /** Apply a font scale, density, and/or theme change, or reset to defaults. */
   async setConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
+    if (input.factory === true && input.reset === true) {
+      return setFactoryDisplayConfig(this, this.device.platform);
+    }
     const refusal = this.refuseSetInput(input);
     if (refusal) {
       return refusal;
@@ -648,6 +655,15 @@ export class DisplayConfig {
       return this.setWithGeometry(input);
     }
     return this.setNonGeometry(input);
+  }
+
+  /** Forget every recorded baseline: theme, accessibility preferences and Simulator text size. */
+  clearBaselines(): void {
+    this.themeBaselines.delete(this.device.deviceId);
+    this.accessibility().clearBaseline();
+    if (this.device.platform === "ios") {
+      this.iosSimulator().clearBaseline();
+    }
   }
 
   private geometry(adb: AdbExecutor): AndroidDisplayGeometry {
@@ -796,7 +812,7 @@ export class DisplayConfig {
     }
 
     const error = errors.length > 0 ? errors.join("; ") : undefined;
-    const message = this.androidResultMessage(input.reset, expectedTheme, error);
+    const message = androidResultMessage(input.reset, expectedTheme, error);
     return {
       success: error === undefined,
       deviceId: this.device.deviceId,
@@ -834,24 +850,6 @@ export class DisplayConfig {
     if (restoredTheme !== undefined && appliedTheme === restoredTheme) {
       this.themeBaselines.delete(this.device.deviceId);
     }
-  }
-
-  private androidResultMessage(
-    reset: boolean | undefined,
-    theme: DisplayTheme | undefined,
-    error: string | undefined,
-  ): string | undefined {
-    if (error !== undefined) {
-      return error;
-    }
-    if (!reset) {
-      return undefined;
-    }
-    const nightMode =
-      theme === undefined
-        ? "night mode left unchanged (no night-mode baseline was recorded by displayConfig)"
-        : `night mode restored to ${theme} (changed earlier by displayConfig)`;
-    return `Reset font scale and density to device defaults; ${nightMode}.`;
   }
 
   private async readValues(adb: AdbExecutor): Promise<DisplayConfigValues> {

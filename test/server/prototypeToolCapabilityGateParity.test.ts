@@ -35,6 +35,29 @@ const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+  prototype_style_polish_v2: fixture({ ...label, style: { cornerStyle: "continuous" } }),
+  prototype_tooltip_v1: fixture({
+    type: "column",
+    id: "label",
+    children: [
+      { type: "spacer", id: "target" },
+      {
+        type: "tooltip",
+        text: "Tip",
+        anchorTo: "target",
+        openWhen: { key: "liked", equals: true },
+      },
+    ],
+  }),
+  prototype_drawer_v1: fixture({
+    ...{
+      type: "drawer",
+      edge: "start",
+      openWhen: { key: "liked", equals: true },
+      child: { type: "spacer" },
+    },
+    id: "label",
+  }),
   prototype_theme_modes_v1: fixture({
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -105,6 +128,16 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     children: [{ type: "spacer" }],
   }),
   prototype_motion_v2: fixture({ ...label, animate: { durationMs: 300 } }),
+  prototype_effects_v1: fixture({ ...label, style: { effects: [{ type: "noise" }] } }),
+  prototype_reduced_motion_v1: { minimalSpec: { ...base, motion: "reduced" }, ops: [] },
+  prototype_shared_element_v1: fixture({
+    type: "box",
+    id: "label",
+    children: [
+      { ...label, id: "first", sharedKey: "hero", visibleWhen: { key: "liked", equals: true } },
+      { ...label, id: "second", sharedKey: "hero", visibleWhen: { key: "liked", equals: false } },
+    ],
+  }),
   prototype_stack_transitions_v1: {
     ...fixture({
       type: "stack",
@@ -192,6 +225,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       requires: { permissions: [{ name: "camera", purpose: "Scan a code" }] },
     },
     ops: [],
+  },
+  prototype_platform_device_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["device"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/device/os}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
   },
   prototype_platform_test_v1: {
     minimalSpec: {

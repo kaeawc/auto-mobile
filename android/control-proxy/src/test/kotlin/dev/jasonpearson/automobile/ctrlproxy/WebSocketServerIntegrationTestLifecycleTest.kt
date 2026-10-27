@@ -312,7 +312,7 @@ internal class WebSocketServerIntegrationTestLifecycleTest :
       }
 
       waitFor { server.getConnectionCount() == 1 }
-      withTimeout(1000) { server.awaitClientConnection() }
+      withTimeout(CONNECTION_WAIT_MS) { server.awaitClientConnection() }
 
       firstClient.cancel()
       firstClient.join()
@@ -337,10 +337,17 @@ internal class WebSocketServerIntegrationTestLifecycleTest :
       }
 
       waitFor { server.getConnectionCount() == 1 }
-      withTimeout(1000) { reconnectWait.await() }
+      withTimeout(CONNECTION_WAIT_MS) { reconnectWait.await() }
 
       replacementClient.cancel()
       replacementClient.join()
     }
+  }
+
+  private companion object {
+    // Real loopback sockets on a runner that is also running the rest of the control-proxy suite:
+    // the old 1 s ceiling expired under load (TimeoutCancellationException) while the test passed
+    // alone. It bounds a hang, not the expected time, so a generous value costs nothing.
+    const val CONNECTION_WAIT_MS = 15_000L
   }
 }

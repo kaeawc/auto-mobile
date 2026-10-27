@@ -20,6 +20,7 @@ const PURE_INPUT_TOOLS: ReadonlySet<string> = new Set([
   "dragPath",
   "highlight",
   "homeScreen",
+  "hoverAt",
   "multiTouch",
   "pinchOn",
   "recentApps",

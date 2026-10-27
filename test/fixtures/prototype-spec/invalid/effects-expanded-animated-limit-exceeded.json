@@ -1,0 +1,63 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "t",
+          "style": {
+            "effects": [
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              },
+              {
+                "type": "noise",
+                "animate": {
+                  "periodMs": 1000
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "repeat": {
+        "items": [
+          {
+            "id": 0
+          },
+          {
+            "id": 1
+          },
+          {
+            "id": 2
+          }
+        ],
+        "as": "item"
+      }
+    }
+  },
+  "expectedPath": "root.repeat",
+  "expectedMessage": "Expanded animated effect limit exceeded"
+}

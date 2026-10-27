@@ -14,6 +14,16 @@
         private(set) var showRevision = 0
         /// Transient presentation only; never written to or reported as spec state.
         var expandedSelect: PrototypeNode?
+        @ObservationIgnored private var nodeFocusAnchors: [ObjectIdentifier: PrototypeOverlayFocusAnchor] = [:]
+
+        func focusAnchor(for node: PrototypeNode) -> PrototypeOverlayFocusAnchor {
+            let key = ObjectIdentifier(node)
+            if let found = nodeFocusAnchors[key] { return found }
+            let anchor = PrototypeOverlayFocusAnchor()
+            nodeFocusAnchors[key] = anchor
+            return anchor
+        }
+
         var menuBounds: [ObjectIdentifier: CGRect] = [:]
         private(set) var state: [String: JSONValue] = [:]
         /// Which swipe-actions row is open; opening one closes the others. Presentation only.
@@ -54,7 +64,7 @@
             if let selected = expandedSelect {
                 let root = next.spec?.root
                 let blocker = root?.openModals(state: next.state, pages: next.pages)
-                    .last { ["dialog", "menu"].contains($0.type) }
+                    .last { $0.blocksUnderlyingPage }
                 if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
                     (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
                 {
@@ -106,6 +116,10 @@
             keyboardFrame = frame
         }
 
+        /// Whether a native presentation from the overlay root is up; set by the agent. Such a
+        /// presentation avoids the keyboard itself, so the lift stays 0 (#15464).
+        @ObservationIgnored var nativePresentationActive: () -> Bool = { false }
+
         /// Points a bottom sheet is raised above the keyboard; 0 for every other placement.
         var keyboardLift: Double {
             let placement = spec?.window.placement
@@ -116,7 +130,8 @@
                     PrototypeRect(x: $0.minX, y: $0.minY, width: $0.width, height: $0.height)
                 },
                 windowOriginY: keyboardContainerFrame.map { Double($0.minY) } ?? Double(windowOrigin.y),
-                windowHeight: keyboardContainerFrame.map { Double($0.height) } ?? Double(windowSize.height)
+                windowHeight: keyboardContainerFrame.map { Double($0.height) } ?? Double(windowSize.height),
+                nativePresentationActive: nativePresentationActive()
             )
         }
 
@@ -125,6 +140,33 @@
 
         @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
         @ObservationIgnored var onEmbeddedEvent: (@MainActor (PrototypeEvent) -> Void)?
+        /// Modules registered by the owning runtime; the device seam remains built in.
+        @ObservationIgnored let platformRegistry: PrototypePlatformRegistry
+        @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
+            let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
+            driver.onComplete = { [weak self] id, result, duration in
+                self?.apply(activity: false) { $0.completePlatformCall(id, result, durationMs: duration) }
+            }
+            driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
+            driver.onEvent = { [weak self] event in
+                self?.apply(activity: false) { session in
+                    do { return try session.deliverPlatformEvent(event.event, data: event.data) }
+                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                }
+            }
+            return driver
+        }()
+
+        private func updatePlatformState(_ snapshot: [String: JSONValue]) {
+            var combined = snapshot
+            combined.merge(deviceState.snapshot) { _, device in device }
+            apply(activity: false) { session in
+                do { try session.setPlatformState(combined) }
+                catch { NSLog("Prototype platform state failed: %@", String(describing: error)) }
+                return []
+            }
+        }
+
         /// Runs the `request` actions the session starts and cancels (#12529).
         @ObservationIgnored var requestDriver: PrototypeRequestDriver?
         @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
@@ -140,6 +182,23 @@
         /// Authored timers are non-activity transitions, shared by every host.
         @ObservationIgnored private lazy var timers = PrototypeTimers(clock: clock) { [weak self] actions in
             self?.apply(activity: false) { $0.run(actions) }
+        }
+
+        @ObservationIgnored private lazy var deviceState =
+            PrototypeDeviceStateStore(clock: clock) { [weak self] name, data in
+                self?.apply(activity: false) { session in
+                    do { return try session.deliverPlatformEvent(name, data: data) }
+                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                }
+            }
+
+        @ObservationIgnored private var lastDeviceState: PrototypeDeviceState?
+        @ObservationIgnored var syncDeviceState: (() -> Void)?
+
+        func updateDeviceState(_ state: PrototypeDeviceState) {
+            lastDeviceState = state
+            guard deviceState.update(state) else { return }
+            updatePlatformState(platformRegistry.snapshot)
         }
 
         func pauseTimers() { timers.pause() }
@@ -184,8 +243,10 @@
         init(
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
-            storage: PrototypeStorageCoordinator? = nil
+            storage: PrototypeStorageCoordinator? = nil,
+            registry: PrototypePlatformRegistry = .empty
         ) {
+            platformRegistry = registry
             self.clock = clock
             self.mode = mode
             self.storage = storage
@@ -238,18 +299,37 @@
         ) {
             // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
             // them on a same-geometry re-show would leave the prototype passing every touch through.
+            syncDeviceState?()
             var next = session
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
+            let seeded: PrototypeSpec
+            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
+                platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
+            ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             next.show(
-                prepared?.spec ?? spec, reset: reset, appearance: appearance, specBytes: specBytes,
+                seeded, reset: reset, appearance: appearance, specBytes: specBytes,
                 restoredState: prepared?.state
             )
             // A show that replaces another prototype cancels that one's requests.
+            let platformCommands = next.takePlatformCommands()
+            let lifecycleEvents = next.takePlatformLifecycleEvents()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
             publish(next, replacingSpec: true)
+            let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+            for var event in lifecycleEvents {
+                event.wireTimestamp = timestamp
+                onEmbeddedEvent?(event)
+                onEvent?(event.wireObject(timestamp: timestamp))
+            }
+            platformDriver.perform(platformCommands)
+            // Keep consuming the module stream for the model lifetime: cancelling an AsyncStream
+            // iterator terminates it. Hidden sessions drop events; the next show seeds fresh state.
+            platformDriver.subscribe()
+            deviceState.reset()
+            if let lastDeviceState { updateDeviceState(lastDeviceState) }
             timers.perform(timerCommands)
             requestDriver?.perform(requestCommands)
             expandedSelect = nil
@@ -315,6 +395,12 @@
 
         @discardableResult
         func popTopmostStack() -> Bool {
+            if spec?.root.openModals(state: state, pages: pages, stacks: stacks)
+                .contains(where: { $0.type == "drawer" }) == true
+            {
+                apply { $0.popTopmostStack() }
+                return true
+            }
             guard stackPopTarget != nil else { return false }
             apply { $0.popTopmostStack() }
             return true
@@ -427,6 +513,7 @@
             // `transition` adds the `appearance_changed` a state or page change caused.
             var next = session
             let events = next.transition(transition)
+            let platformCommands = next.takePlatformCommands()
             let requestCommands = next.takeRequestCommands()
             let timerCommands = next.takeTimerCommands()
             publish(next)
@@ -450,6 +537,7 @@
                 onVisibilityChange?(false)
             }
             timers.perform(timerCommands)
+            platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)
         }
 
@@ -473,6 +561,8 @@
             if !timerSnapshots.isEmpty { status["timers"] = timerSnapshots.map(\.wireObject) }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
+            if let platform = session.spec?
+                .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
             if let id = spec?.id, let storage {
                 storage.flush()

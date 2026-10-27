@@ -42,6 +42,12 @@ export const DEVICES_ENV = {
     min: 1,
     doc: "Positive integer cap on concurrently booted Android emulators.",
   },
+  ANDROID_BOOT_BUDGET_VCPUS: {
+    name: "AUTOMOBILE_ANDROID_BOOT_BUDGET_VCPUS",
+    kind: "string",
+    default: "fixed (2 cores per emulator)",
+    doc: "`configured` budgets each emulator at the vCPU count its AVD resolved to (hardware-qemu.ini) when sizing the boot limit; any other value keeps two cores per emulator.",
+  },
   IOS_SIM_BOOT_CONCURRENCY: {
     name: "AUTOMOBILE_IOS_SIM_BOOT_CONCURRENCY",
     kind: "int",

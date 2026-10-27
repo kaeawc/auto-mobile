@@ -8,6 +8,11 @@ testing with automatic refresh when screen content changes.
 - **Automatic View Hierarchy Capture**: Automatically detects when screen content changes and marks
   hierarchy for refresh
 - **On-Demand Extraction**: Extracts fresh hierarchy only when requested after content changes
+- **Wrapper Pruning (API 30+)**: Bounds-only wrapper nodes are promoted or dropped before the tree
+  is sent. Baseline accessibility actions (select, accessibility focus) and compat span extras do
+  not count as content. A node with a resource id, text, content description, test tag, click or
+  long-click handler is never dropped. `adb shell setprop debug.automobile.prune_wrappers false`
+  turns it off (or `true` turns it on below API 30); restart the service to apply it.
 - **Optional Debug Dump**: Writes hierarchy to app-scoped storage accessible via ADB when enabled
 - **Broadcast Communication**: Alternative broadcast-based communication
 - **Single Command Interface**: Only exposes one operation - get latest view hierarchy

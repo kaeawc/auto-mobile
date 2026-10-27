@@ -8,7 +8,7 @@ enum PrototypeRequestValidator {
     /// Every key under which a node holds an action list.
     private static let actionLists: Set<String> = ["onTap", "onLongPress", "onDoubleTap", "onSubmit", "onRefresh"]
     private static let methods = Set(PrototypeRequestMethod.allCases.map(\.rawValue))
-    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index"]
+    private static let bindingKeys: Set<String> = ["state", "data", "value", "item", "index", "platform", "event"]
     private static let headerName = try? NSRegularExpression(pattern: "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
     private static let templatedURL = try? NSRegularExpression(pattern: "^https?://", options: .caseInsensitive)
 
@@ -50,7 +50,7 @@ enum PrototypeRequestValidator {
         }
     }
 
-    private static func validateList(
+    static func validateList(
         _ actions: [JSONValue], path: String, depth: Int, state: [String: JSONValue]
     )
         throws
@@ -75,8 +75,8 @@ enum PrototypeRequestValidator {
             }
             try validateList(nested, path: "\(path).actions", depth: depth + 1, state: state)
         }
-        guard action["type"] == .string("request") else { return }
-        try validateUnrepeated(action, path: path, state: state)
+        guard action["type"] == .string("request") || action["type"] == .string("platform") else { return }
+        if action["type"] == .string("request") { try validateUnrepeated(action, path: path, state: state) }
         for list in ["onSuccess", "onError"] {
             guard let raw = action[list] else { continue }
             guard case let .array(followUps) = raw, (1 ... PrototypeLimits.maxFollowUpActions).contains(followUps.count)
@@ -206,11 +206,12 @@ enum PrototypeRequestValidator {
         }
     }
 
-    /// Exactly one of `state`, `data`, `value`, `item`, `index: true`.
+    /// One structured value binding, including platform state and handler-scoped event data.
     private static func binding(_ raw: JSONValue, path: String) throws {
         guard case let .object(form) = raw, form.count == 1, let key = form.keys.first,
               bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
-        else { throw fail(path, "Expected one value binding: state, data, value, item or index") }
+        else { throw fail(path, "Expected one value binding: state, data, value, item, index, platform or event")
+        }
     }
 
     private static func fail(_ path: String, _ message: String) -> DecodingError {

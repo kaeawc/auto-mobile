@@ -62,9 +62,6 @@ export interface SessionAcquisitionHost {
     execution: SessionExecutionMetadata | undefined,
   ): Session | null;
   readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
-  unlessBeingReplaced(
-    release: SessionReleaseSnapshot | undefined,
-  ): SessionReleaseSnapshot | undefined;
   terminalReleaseFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -352,9 +349,8 @@ export class SessionAcquisition {
     }
 
     const persisted = await this.host.readPersistedSession(sessionId);
-    const persistedTerminalRelease = this.host.unlessBeingReplaced(
-      persisted && this.host.terminalReleaseFromPersisted(sessionId, persisted),
-    );
+    const persistedTerminalRelease =
+      persisted && this.host.terminalReleaseFromPersisted(sessionId, persisted);
     if (persistedTerminalRelease) {
       this.host.sessionSlots.setTerminalSnapshot(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
@@ -385,9 +381,8 @@ export class SessionAcquisition {
     persisted: DeviceSession | undefined,
   ): Promise<DeviceSession | undefined> {
     persisted = await this.host.terminalizeExpiredPersistedSession(persisted);
-    const terminalRelease = this.host.unlessBeingReplaced(
-      persisted && this.host.terminalReleaseFromPersisted(sessionId, persisted),
-    );
+    const terminalRelease =
+      persisted && this.host.terminalReleaseFromPersisted(sessionId, persisted);
     if (terminalRelease) {
       this.host.sessionSlots.setTerminalSnapshot(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
@@ -414,9 +409,9 @@ export class SessionAcquisition {
   ): Promise<Session> {
     let persisted = await this.host.readPersistedSession(sessionId);
     this.host.refusePlanLabelSessionOutsideItsRun(sessionId, persisted);
-    const persistedTerminalRelease = this.host.unlessBeingReplaced(
-      persisted ? this.host.terminalReleaseFromPersisted(sessionId, persisted) : undefined,
-    );
+    const persistedTerminalRelease = persisted
+      ? this.host.terminalReleaseFromPersisted(sessionId, persisted)
+      : undefined;
     if (persistedTerminalRelease) {
       this.host.sessionSlots.setTerminalSnapshot(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);

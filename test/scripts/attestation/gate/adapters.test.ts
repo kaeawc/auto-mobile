@@ -20,7 +20,7 @@ import { runAttestationGate } from "../../../../scripts/ci/attestation/gate/gate
 import type { AttestationRecord, ShadowEntry } from "../../../../scripts/ci/attestation/gate/ports";
 import {
   produceAttestations,
-  TreeEntriesInputHasher,
+  LaneInputHasher,
 } from "../../../../scripts/ci/attestation/produceAttestations";
 import { ShadowStore } from "../../../../scripts/ci/attestation/shadow/recorder";
 import { AttestationServiceClient } from "../../../../scripts/ci/attestation/transport/serviceClient";
@@ -382,7 +382,7 @@ test("produce -> parse -> transport -> validate -> gate -> store remains shadow-
     dirtyPaths: async () => [],
     inputEntries: async () => [{ path: "src/a.ts", id: "blob", mode: "100644" }],
   };
-  const hasher = new TreeEntriesInputHasher();
+  const hasher = new LaneInputHasher({ os: "test", arch: "x64", bunVersion: null }, {});
   const produced = await produceAttestations({
     lanes: [
       {

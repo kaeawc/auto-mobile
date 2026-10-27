@@ -363,6 +363,9 @@ describe("daemon command characterization with fake I/O", () => {
       const session = buildSession({
         sessionId: "fake",
         assignedDevice: "device",
+        stableDeviceId: "Pixel",
+        deviceGeneration: 2,
+        previousDeviceId: "old-device",
         createdAt: 1,
         lastUsedAt: 2,
         expiresAt: 3,
@@ -407,6 +410,9 @@ describe("daemon command characterization with fake I/O", () => {
           JSON.stringify({
             sessionId: "fake",
             assignedDevice: "device",
+            deviceGeneration: 2,
+            stableDeviceId: "Pixel",
+            previousDeviceId: "old-device",
             createdAt: 1,
             lastUsedAt: 2,
             expiresAt: 3,

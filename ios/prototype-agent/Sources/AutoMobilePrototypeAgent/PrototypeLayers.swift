@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+    import GameController
     import SwiftUI
     import UIKit
 
@@ -26,6 +27,7 @@
             page = UIHostingController(rootView: PrototypeRootView(model: model, layer: .page))
             top = UIHostingController(rootView: PrototypeRootView(model: model, layer: .top))
             super.init(nibName: nil, bundle: nil)
+            model.syncDeviceState = { [weak self] in self?.syncDeviceState() }
         }
 
         @available(*, unavailable)
@@ -39,6 +41,15 @@
 
         override func viewDidLoad() {
             super.viewDidLoad()
+            let center = NotificationCenter.default
+            for name in [Notification.Name.GCMouseDidConnect, Notification.Name.GCMouseDidDisconnect] {
+                center.addObserver(self, selector: #selector(pointerChanged(_:)), name: name, object: nil)
+            }
+            registerForTraitChanges(
+                [UITraitHorizontalSizeClass.self, UITraitUserInterfaceIdiom.self]
+            ) { (controller: PrototypeLayersViewController, _: UITraitCollection) in
+                controller.syncDeviceState()
+            }
             view.backgroundColor = .clear
             for host in [page, top] {
                 // Only `PrototypeKeyboardLift` moves anything for the keyboard (#11042), and the window's
@@ -64,6 +75,35 @@
             escape.delaysTouchesEnded = false
             escape.delegate = self
             view.addGestureRecognizer(escape)
+        }
+
+        override func viewWillLayoutSubviews() {
+            syncDeviceState()
+            super.viewWillLayoutSubviews()
+        }
+
+        @objc
+        private func pointerChanged(_: Notification) { syncDeviceState() }
+
+        private func syncDeviceState() {
+            loadViewIfNeeded()
+            let idiom: PrototypeDeviceIdiom
+            #if targetEnvironment(macCatalyst)
+                idiom = .mac
+            #else
+                switch traitCollection.userInterfaceIdiom {
+                case .pad: idiom = .pad
+                case .mac: idiom = .mac
+                case .vision: idiom = .vision
+                default: idiom = .phone
+                }
+            #endif
+            model.updateDeviceState(PrototypeDeviceState(
+                idiom: idiom,
+                horizontalSizeClass: traitCollection.horizontalSizeClass == .regular ? .regular : .compact,
+                windowWidth: view.bounds.width, windowHeight: view.bounds.height,
+                systemVersion: UIDevice.current.systemVersion, pointer: GCMouse.current != nil
+            ))
         }
 
         func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
@@ -142,6 +182,7 @@
         let layer: PrototypeHostLayer
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.layoutDirection) private var layoutDirection
+        @Namespace private var sharedNamespace
         @State private var swipe = PrototypeStackSwipeState()
         @GestureState private var swipeActive = false
 
@@ -221,6 +262,7 @@
             }
             // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
             .environment(\.colorScheme, palette.dark ? .dark : .light)
+            .environment(\.prototypeSharedNamespace, sharedNamespace)
             .environment(\.prototypePalette, palette)
             .environment(\.prototypeTypography, PrototypeTypography(theme: model.spec?.theme?.typography))
             .environment(\.prototypeShapes, PrototypeShapes(theme: model.spec?.theme?.shapes))
@@ -273,7 +315,10 @@
         private func cancelEdgeSwipe() {
             swipe.cancel()
             guard model.stackDrag?.settling != true else { return }
-            withAnimation(.easeOut(duration: 0.2)) { model.stackDrag = nil }
+            withAnimation(
+                PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
+                    ? .easeOut(duration: 0.2) : nil
+            ) { model.stackDrag = nil }
         }
 
         private func edgeSwipeEnded(_ value: DragGesture.Value) {

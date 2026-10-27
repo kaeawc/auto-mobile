@@ -363,6 +363,8 @@ export function bindingErrors(
 
 /** Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean. */
 const MODAL_NAMES: Record<string, string | undefined> = {
+  tooltip: "Tooltip",
+  drawer: "Drawer",
   bottomSheet: "Sheet",
   dialog: "Dialog",
   menu: "Menu",

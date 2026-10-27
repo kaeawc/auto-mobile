@@ -798,6 +798,7 @@
     /// unbound it is indeterminate.
     @MainActor
     struct PrototypeProgressView: View {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.prototypePalette) private var palette
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let node: PrototypeNode
@@ -808,6 +809,7 @@
                 model.state[$0]?.numberValue ?? 0,
                 max: node.max
             ) }
+            let animated = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).spatial
             if node.variant == "circular" {
                 if let fraction {
                     ZStack {
@@ -820,13 +822,19 @@
                     .accessibilityElement()
                     .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
                     .accessibilityAddTraits(.updatesFrequently)
-                } else {
+                } else if animated {
                     ProgressView().progressViewStyle(.circular)
+                } else {
+                    Circle().trim(from: 0, to: 0.3)
+                        .stroke(colors.primary, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 40, height: 40)
+                        .accessibilityLabel("In progress")
                 }
             } else if let fraction {
                 ProgressView(value: fraction).progressViewStyle(.linear)
             } else {
-                IndeterminateBar()
+                IndeterminateBar(animated: animated)
             }
         }
     }
@@ -834,12 +842,15 @@
     /// SwiftUI's linear `ProgressView` has no indeterminate form, so the sweep is drawn here.
     @MainActor
     private struct IndeterminateBar: View {
+        let animated: Bool
         @Environment(\.prototypePalette) private var palette
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         var body: some View {
-            TimelineView(.animation) { context in
+            TimelineView(.animation(paused: !animated)) { context in
                 GeometryReader { proxy in
-                    let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.5) / 1.5
+                    let phase = animated
+                        ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.5) / 1.5
+                        : 0.5
                     let width = proxy.size.width * 0.3
                     Capsule()
                         .fill(colors.primary)
@@ -992,12 +1003,25 @@
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         private var colors: ComponentColors { ComponentColors(palette: palette) }
         let model: PrototypeModel
+        @State private var retainedDrawers: [PrototypeNode] = []
 
         var body: some View {
             let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks) ?? []
+            let displayed = modals + retainedDrawers.filter { old in !modals.contains { $0 === old } }
             ZStack {
-                ForEach(Array(modals.enumerated()), id: \.offset) { index, node in
-                    if node.type == "menu" {
+                ForEach(Array(displayed.enumerated()), id: \.element.identity) { index, node in
+                    if node.type == "tooltip" {
+                        PrototypeTooltipOverlay(node: node, model: model, hitKey: "modal.\(index)")
+                    } else if node.type == "drawer" {
+                        PrototypeDrawerOverlay(
+                            node: node,
+                            model: model,
+                            isOpen: modals.contains { $0 === node },
+                            hitKey: "modal.\(index)"
+                        ) {
+                            retainedDrawers.removeAll { $0 === node }
+                        }
+                    } else if node.type == "menu" {
                         PrototypeMenuOverlay(node: node, model: model)
                             .reportFrame(key: "modal.\(index)", model: model)
                     } else if node.type == "dialog" {
@@ -1036,6 +1060,13 @@
                 {
                     PrototypeSelectOverlay(node: selected, model: model)
                         .reportFrame(key: "modal.select", model: model)
+                }
+            }
+            .onChange(of: modals.map(\.identity), initial: true) { _, _ in
+                for drawer in modals
+                    where drawer.type == "drawer" && !retainedDrawers.contains(where: { $0 === drawer })
+                {
+                    retainedDrawers.append(drawer)
                 }
             }
             .onChange(of: modals.dialogIdentities) { before, _ in

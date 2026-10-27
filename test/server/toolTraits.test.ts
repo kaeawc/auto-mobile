@@ -66,6 +66,7 @@ describe("tool traits replace the navigation recorder's name lists (#11825)", ()
         "tapAny",
         "dragAndDrop",
         "dragPath",
+        "hoverAt",
         "selectAllText",
         "pressButton",
         "systemTray",

@@ -1,6 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../logger";
-import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 import {
   androidAvdConfigurationSchema,
   androidAvdConfigurationKeys,
@@ -8,6 +8,7 @@ import {
 } from "../../models/AndroidAvdConfiguration";
 import { dirname, join } from "node:path";
 import { buildAndroidAvdCapabilityInventory } from "../virtualDeviceCapabilities";
+import { hostAudioSnapshot } from "../audio/defaultHostAudioProbe";
 import type { VirtualDeviceCapabilityInventory } from "../../models/virtualDeviceCapabilities";
 
 /** Minimum guest memory required by modern Play Store system images. */
@@ -30,6 +31,13 @@ export interface AvdConfig {
   screenDensity?: number;
   /** Configured guest memory in megabytes. */
   ramSizeMb?: number;
+  /**
+   * Guest memory the emulator actually gave the last launch, from `hardware-qemu.ini` (#15475).
+   * It can exceed `ramSizeMb`: the system image sets a floor. Absent until the AVD has launched.
+   */
+  effectiveRamMb?: number;
+  /** CPU cores of the last launch, from `hardware-qemu.ini`; absent until the AVD has launched. */
+  effectiveCpuCores?: number;
   /** Whether config.ini contains an unrecognized guest-memory value. */
   ramSizeInvalid?: boolean;
   /** Whether the AVD's GPU is explicitly enabled in config.ini. */
@@ -277,10 +285,31 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
 
     try {
       const content = await this.readFileFn(configPath, "utf-8");
-      return parseAvdConfig(content);
+      return {
+        ...parseAvdConfig(content),
+        ...(await this.readEffectiveHardware(avdName, dirname(configPath))),
+      };
     } catch (error) {
       logger.warn(`Failed to read AVD config for ${avdName}: ${error}`);
       return null;
+    }
+  }
+
+  /** The emulator's launch-time view of RAM and cores; best effort, absent before a first launch. */
+  private async readEffectiveHardware(
+    avdName: string,
+    avdDirectory: string,
+  ): Promise<Pick<AvdConfig, "effectiveRamMb" | "effectiveCpuCores">> {
+    const qemuPath = join(avdDirectory, "hardware-qemu.ini");
+    if (!this.existsFn(qemuPath)) {
+      return {};
+    }
+    try {
+      return parseEffectiveHardware(await this.readFileFn(qemuPath, "utf-8"));
+    } catch (error) {
+      // The configured values still describe the AVD; the effective ones are an optional extra.
+      logger.warn(`Failed to read hardware-qemu.ini for ${avdName}: ${error}`);
+      return {};
     }
   }
 
@@ -313,6 +342,23 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
       return [];
     }
   }
+}
+
+/** Parse the effective `hw.ramSize` (MiB, no unit suffix) and `hw.cpu.ncore` from hardware-qemu.ini. */
+export function parseEffectiveHardware(
+  content: string,
+): Pick<AvdConfig, "effectiveRamMb" | "effectiveCpuCores"> {
+  const props = parseKeyValueProperties(content);
+  const positiveInt = (value: string | undefined): number | undefined => {
+    const parsed = value !== undefined && /^\d+$/.test(value) ? Number(value) : undefined;
+    return parsed !== undefined && parsed > 0 ? parsed : undefined;
+  };
+  const effectiveRamMb = positiveInt(props.get("hw.ramSize"));
+  const effectiveCpuCores = positiveInt(props.get("hw.cpu.ncore"));
+  return {
+    ...(effectiveRamMb === undefined ? {} : { effectiveRamMb }),
+    ...(effectiveCpuCores === undefined ? {} : { effectiveCpuCores }),
+  };
 }
 
 /**
@@ -354,7 +400,10 @@ export function parseAvdConfig(content: string): AvdConfig {
     ...parseApiMetadata(props),
     ...parseSystemImageMetadata(props),
     ...parseArchitecture(props),
-    capabilityInventory: buildAndroidAvdCapabilityInventory(Object.fromEntries(props)),
+    capabilityInventory: buildAndroidAvdCapabilityInventory(Object.fromEntries(props), {
+      launchWithoutAudio: readEnvRaw(ENV.EMULATOR_AUDIO) === "false",
+      hostAudio: hostAudioSnapshot(),
+    }),
   };
 }
 

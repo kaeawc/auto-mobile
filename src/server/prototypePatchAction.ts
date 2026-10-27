@@ -1,3 +1,4 @@
+import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -22,6 +23,10 @@ import {
   prototypeAccessibilityOutput,
   type PrototypeAccessibilityFinding,
 } from "../features/prototype/prototypeAccessibilityLint";
+import {
+  prototypePlaceholderOutput,
+  type PrototypePlaceholderFinding,
+} from "../features/prototype/prototypePlaceholderLint";
 import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 
 export interface PrototypePatchQueue {
@@ -74,6 +79,8 @@ export interface PrototypePatchOutput {
   warning?: string;
   accessibilityFindings?: PrototypeAccessibilityFinding[];
   accessibilityFindingsTotal?: number;
+  placeholderFindings?: PrototypePlaceholderFinding[];
+  placeholderFindingsTotal?: number;
 }
 const failure = (error: string): PrototypePatchOutput => ({ success: false, error });
 
@@ -187,13 +194,16 @@ async function finishPatch(
   }
   deps.retire(result);
   const output = successfulPatchOutput(fields.revision, committed, args.id);
-  const warning = [output.warning, ...prototypeTimerWarnings(applied.spec)]
+  const degraded = prototypeDegradedEffectsOutput(result.degradedEffects);
+  const warning = [output.warning, degraded.warning, ...prototypeTimerWarnings(applied.spec)]
     .filter(Boolean)
     .join(" ");
   return {
     ...output,
+    ...degraded,
     ...(warning ? { warning } : {}),
     ...prototypeAccessibilityOutput(applied.spec),
+    ...prototypePlaceholderOutput(applied.spec),
   };
 }
 

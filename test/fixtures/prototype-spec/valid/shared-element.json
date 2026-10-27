@@ -1,0 +1,34 @@
+{
+  "id": "shared",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "Hero",
+        "sharedKey": "hero",
+        "visibleWhen": {
+          "key": "open",
+          "equals": true
+        }
+      },
+      {
+        "type": "text",
+        "text": "Hero",
+        "sharedKey": "hero",
+        "visibleWhen": {
+          "key": "open",
+          "equals": false
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "noise",
+            "animate": {
+              "periodMs": 399
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].animate.periodMs",
+  "expectedMessage": "Invalid number value"
+}

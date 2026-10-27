@@ -1,0 +1,24 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": true
+  },
+  "root": {
+    "type": "drawer",
+    "edge": "end",
+    "openWhen": {
+      "key": "open",
+      "equals": true
+    },
+    "child": {
+      "type": "text",
+      "text": "Navigation"
+    },
+    "dismissOnSwipe": false
+  }
+}

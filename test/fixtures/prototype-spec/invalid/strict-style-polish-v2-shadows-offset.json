@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "style-polish",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "active": true
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "shadows": [
+          {
+            "color": "#000000",
+            "radius": 20,
+            "offset": {
+              "x": 1001,
+              "y": 0
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.shadows[0].offset.x",
+  "expectedMessage": "Invalid number value"
+}

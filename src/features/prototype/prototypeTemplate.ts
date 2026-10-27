@@ -396,6 +396,10 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   },
+  tooltip: (node, path, visit) => {
+    mapField(node, "text", path, "text", visit);
+    mapList(node, "onDismiss", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  },
   dialog: (node, path, visit) => {
     mapField(node, "title", path, "text", visit);
     mapField(node, "text", path, "text", visit);
@@ -443,6 +447,10 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
   const copy = { ...node };
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
+    mapObject(copy, "linkify", path, (options, optionsPath) => {
+      mapActions(options, optionsPath, visit);
+      return options;
+    });
     mapList(copy, "spans", path, (span, spanPath) => {
       mapField(span, "text", spanPath, "text", visit);
       mapActions(span, spanPath, visit);

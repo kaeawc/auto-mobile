@@ -200,6 +200,19 @@ export interface PrototypeResult {
   appearance?: PrototypeAppearance;
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
   cleared?: number;
+  /**
+   * Warning, not a failure (prototype_effects_v1): `style.effects` entries the device did not draw,
+   * with `reason` "api" (below the effect's API floor) or "budget" (froze over the frame budget).
+   * Absent when every effect renders and on devices that predate it.
+   */
+  degradedEffects?: PrototypeDegradedEffect[];
+}
+
+/** One `style.effects` entry the device omitted or froze (#15129). */
+export interface PrototypeDegradedEffect {
+  path: string;
+  type: string;
+  reason: string;
 }
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */

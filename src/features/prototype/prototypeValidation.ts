@@ -1,3 +1,5 @@
+import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
+import { prototypeSharedElementError } from "./prototypeSharedElement";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -17,8 +19,10 @@ import { prototypeChartError } from "./prototypeChart";
 import { prototypeRequestsError } from "./prototypeRequest";
 import { prototypePlatformError } from "./prototypePlatform";
 import { prototypeLinkifyError } from "./prototypeLinkify";
+import { prototypeTooltipError } from "./prototypeTooltip";
 import { prototypeChatScrollError } from "./prototypeChatScroll";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { effectUses } from "./prototypeEffects";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 import {
   Rule,
@@ -43,6 +47,8 @@ interface Context {
   nodes: Located[];
   actions: Located[];
   images: number;
+  effects: number;
+  animatedEffects: number;
   /** Current nesting per bounded reference (see `nestedReferences`). */
   nesting: Record<string, number>;
 }
@@ -111,13 +117,33 @@ function visitReference(
   if (depth + 1 > contract.limits.MAX_PROTOTYPE_DEPTH) {
     return fail(path, "Tree depth limit exceeded");
   }
+  const budgetError = chargeNodeBudgets(node, path, context);
+  if (budgetError) {
+    return budgetError;
+  }
+  return walk(value, refRule(rule), path, context, depth + 1);
+}
+/** Adds a node's images and `style.effects` to the spec-wide totals; the node that crosses a limit is reported. */
+function chargeNodeBudgets(
+  node: Record<string, unknown>,
+  path: string,
+  context: Context,
+): PrototypeValidationError | undefined {
   if (node.type === "image") {
     context.images += Math.max(1, imageSlotUses(node.asset));
   }
   if (context.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(path, "Image limit exceeded");
   }
-  return walk(value, refRule(rule), path, context, depth + 1);
+  const uses = effectUses(node);
+  context.effects += uses.total;
+  context.animatedEffects += uses.animated;
+  if (context.effects > contract.limits.MAX_PROTOTYPE_EFFECTS) {
+    return fail(path, "Effect limit exceeded");
+  }
+  return context.animatedEffects > contract.limits.MAX_PROTOTYPE_ANIMATED_EFFECTS
+    ? fail(path, "Animated effect limit exceeded")
+    : undefined;
 }
 function visitNested(
   value: unknown,
@@ -260,7 +286,8 @@ function objectConstraint(
   if (rule.atLeastOne && Object.keys(data).length === 0) {
     return fail(path, "At least one selector field is required");
   }
-  return undefined;
+  const kind = ["style", "fadeEdges", "imageFilter"].find((name) => rule === definitions[name]);
+  return prototypeStylePolishV2ObjectError(data, kind ?? "", path);
 }
 /** `exactlyOne` picks one form of a union-like object; `dependents` ties optional fields to a trigger. */
 function formConstraint(
@@ -768,6 +795,8 @@ function platformArgumentError(
     nodes: [],
     actions: [],
     images: 0,
+    effects: 0,
+    animatedEffects: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   return walk(value, rule, path, context, 0);
@@ -776,6 +805,19 @@ function platformArgumentError(
 /** Motion and choreography share one set of located nodes. */
 function motionErrors(nodes: Located[]): PrototypeValidationError | undefined {
   return prototypeMotionV2Error(nodes) ?? prototypeChoreographyError(nodes);
+}
+
+/** Cross-node references share the component-expanded tree and repeat cardinalities. */
+function nodeReferenceErrors(
+  context: Context,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeTooltipError(context.nodes, repeats) ??
+    prototypeChatScrollError(context.nodes, context.actions) ??
+    pagerErrors(context) ??
+    stackErrors(context)
+  );
 }
 
 /** Action, container and state checks, after the layout checks pass. */
@@ -795,9 +837,7 @@ function behaviourErrors(
     motionErrors(context.nodes) ??
     prototypeChartError(context.nodes, data.data) ??
     prototypeLinkifyError(value) ??
-    prototypeChatScrollError(context.nodes, context.actions) ??
-    pagerErrors(context) ??
-    stackErrors(context) ??
+    nodeReferenceErrors(context, repeats) ??
     stateTypeErrors(value, context, data, repeats)
   );
 }
@@ -811,12 +851,15 @@ function validateValue(
     nodes: [],
     actions: [],
     images: 0,
+    effects: 0,
+    animatedEffects: 0,
     nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
+    prototypeSharedElementError(context.nodes) ??
     layoutErrors(value, context, repeats) ??
     behaviourErrors(value, context, data, repeats, componentTimers);
   if (error) {

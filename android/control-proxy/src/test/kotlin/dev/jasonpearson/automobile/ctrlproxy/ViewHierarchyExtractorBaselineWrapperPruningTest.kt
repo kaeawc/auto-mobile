@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
@@ -107,6 +106,59 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
   }
 
   @Test
+  fun `enabled never drops or flattens a node a selector can name or a tap can reach`() {
+    val enabled = ViewHierarchyExtractor(pruneBaselineWrappers = true)
+    val relevant =
+      mapOf<String, (UIElementInfo) -> UIElementInfo>(
+        "resource-id" to { it.copy(resourceId = "app:id/row") },
+        "text" to { it.copy(text = "Label") },
+        "content-desc" to { it.copy(contentDesc = "Close") },
+        "test-tag" to { it.copy(testTag = "row") },
+        "unique-id" to { it.copy(uniqueId = "u1") },
+        "role" to { it.copy(role = "button") },
+        "state-description" to { it.copy(stateDescription = "On") },
+        "hint-text" to { it.copy(hintText = "Search") },
+        "scrollable" to { it.copy(scrollable = "true") },
+        "focusable" to { it.copy(focusable = "true") },
+        "checkable" to { it.copy(checkable = "true") },
+        "clickable flag" to { it.copy(clickable = "true") },
+        "long-clickable flag" to { it.copy(longClickable = "true") },
+        "click action" to { it.copy(actions = baselineActions + "click") },
+        "long-click action" to { it.copy(actions = baselineActions + "long_click") },
+      )
+    for ((name, mark) in relevant) {
+      val leaf = mark(baselineNode())
+      assertEquals("$name leaf", listOf(leaf), enabled.optimizeHierarchy(leaf))
+      val parent = mark(baselineNode(children = listOf(baselineNode(), UIElementInfo(text = "x"))))
+      val kept = enabled.optimizeHierarchy(parent).single()
+      assertEquals("$name parent keeps its own fields", parent.copy(children = kept.children), kept)
+      assertEquals(
+        "$name parent keeps the text child",
+        listOf(UIElementInfo(text = "x")),
+        kept.children,
+      )
+    }
+  }
+
+  @Test
+  fun `a window root keeps its bounds while its baseline wrappers are pruned`() {
+    val bounds = dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds(0, 0, 1080, 2400)
+    val label = UIElementInfo(text = "Label")
+    val root =
+      baselineNode(children = listOf(baselineNode(children = listOf(label)), baselineNode()))
+        .copy(bounds = bounds)
+
+    val pruned = ViewHierarchyExtractor(pruneBaselineWrappers = true).optimizeWindowRoot(root)
+
+    assertEquals(listOf(root.copy(children = listOf(label))), pruned)
+    assertEquals(
+      "without pruning the window root follows the legacy path",
+      ViewHierarchyExtractor(pruneBaselineWrappers = false).optimizeHierarchy(root),
+      ViewHierarchyExtractor(pruneBaselineWrappers = false).optimizeWindowRoot(root),
+    )
+  }
+
+  @Test
   fun `interactive baseline-only parent keeps its text child`() {
     val wrapper =
       baselineNode(children = listOf(UIElementInfo(text = "Tab label"))).copy(clickable = "true")
@@ -164,40 +216,66 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
   }
 
   @Test
-  fun `property enables pruning only for exact lowercase true`() {
-    for (value in listOf("true", "false", "TRUE", "True", "1", "", " true", "true ", null)) {
-      val reads = mutableListOf<String>()
-      val warnings = mutableListOf<String>()
+  fun `pruning is on from API 30 and off below it by default`() {
+    for ((sdkInt, expected) in
+      listOf(24 to false, 29 to false, 30 to true, 33 to true, 36 to true, 37 to true)) {
       val enabled =
         readBaselineWrapperPruningEnabled(
-          readProperty = { key ->
-            reads += key
-            value
-          },
-          warn = { message, _ -> warnings += message },
+          readProperty = { null },
+          sdkInt = sdkInt,
+          warn = { _, _ -> },
         )
-
-      assertEquals(value == "true", enabled)
-      assertEquals(listOf(BASELINE_WRAPPER_PRUNING_PROPERTY), reads)
-      assertTrue(warnings.isEmpty())
+      assertEquals("sdk $sdkInt", expected, enabled)
     }
   }
 
   @Test
-  fun `unavailable or blocked system property warns and defaults off`() {
+  fun `property overrides the API default only for exact lowercase true or false`() {
+    for (sdkInt in listOf(28, 36)) {
+      for (value in listOf("true", "false", "TRUE", "False", "1", "", " true", "true ", null)) {
+        val reads = mutableListOf<String>()
+        val warnings = mutableListOf<String>()
+        val enabled =
+          readBaselineWrapperPruningEnabled(
+            readProperty = { key ->
+              reads += key
+              value
+            },
+            sdkInt = sdkInt,
+            warn = { message, _ -> warnings += message },
+          )
+
+        val expected =
+          when (value) {
+            "true" -> true
+            "false" -> false
+            else -> sdkInt >= 30
+          }
+        assertEquals("sdk $sdkInt value '$value'", expected, enabled)
+        assertEquals(listOf(BASELINE_WRAPPER_PRUNING_PROPERTY), reads)
+        assertTrue(warnings.isEmpty())
+      }
+    }
+  }
+
+  @Test
+  fun `unavailable or blocked system property warns and keeps the API default`() {
     for (failure in
       listOf(ClassNotFoundException("SystemProperties"), SecurityException("blocked"))) {
-      val warnings = mutableListOf<Pair<String, Throwable>>()
-      val enabled =
-        readBaselineWrapperPruningEnabled(
-          readProperty = { throw failure },
-          warn = { message, error -> warnings += message to error },
-        )
+      for ((sdkInt, expected) in listOf(29 to false, 36 to true)) {
+        val warnings = mutableListOf<Pair<String, Throwable>>()
+        val enabled =
+          readBaselineWrapperPruningEnabled(
+            readProperty = { throw failure },
+            sdkInt = sdkInt,
+            warn = { message, error -> warnings += message to error },
+          )
 
-      assertFalse(enabled)
-      assertEquals(1, warnings.size)
-      assertTrue(warnings.single().first.contains(BASELINE_WRAPPER_PRUNING_PROPERTY))
-      assertSame(failure, warnings.single().second)
+        assertEquals(expected, enabled)
+        assertEquals(1, warnings.size)
+        assertTrue(warnings.single().first.contains(BASELINE_WRAPPER_PRUNING_PROPERTY))
+        assertSame(failure, warnings.single().second)
+      }
     }
   }
 

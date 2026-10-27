@@ -826,7 +826,8 @@
 
         // MARK: Style
 
-        /// A card draws the authored uniform radius (a theme token resolves to one); without it, Material's 12 pt (#15445).
+        /// A card draws the authored uniform radius (a theme token resolves to one); without it,
+        /// Material's 12 pt (#15445).
         private var cornerShape: PrototypeStyleShape {
             var radius = style?.cornerRadius.map(shapes.resolve)
             if node.type == "card" {

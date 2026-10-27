@@ -75,6 +75,7 @@ object AutoMobilePrototype {
       "prototype_timers_v1",
       "prototype_tooltip_v1",
       "prototype_window_motion_v1",
+      "prototype_platform_namespace_v1",
       "prototype_zoom_transition_v1",
     )
 }

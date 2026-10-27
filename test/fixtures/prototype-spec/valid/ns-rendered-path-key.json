@@ -1,0 +1,30 @@
+{
+  "id": "namespace-path",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "screen.ios.bottomAccessory",
+    "screens": {
+      "screen.ios.bottomAccessory": {
+        "type": "scroll",
+        "id": "visible",
+        "child": {
+          "type": "button",
+          "label": "End",
+          "onTap": [
+            {
+              "type": "scrollTo",
+              "scroll": "visible",
+              "to": "end"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

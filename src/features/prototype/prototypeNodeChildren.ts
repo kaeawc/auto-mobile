@@ -10,6 +10,7 @@ export function prototypeNodeChildren(
       children.push({ value, suffix });
     }
   };
+  // bottomAccessory is validated structurally, but neither renderer draws its nodes.
   for (const [key, value] of Object.entries(node)) {
     if (key === "child" || (node.type === "list" && ["header", "footer"].includes(key))) {
       add(value, `.${key}`);

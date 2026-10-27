@@ -415,7 +415,7 @@ internal object PrototypeStrictPolicy {
     }
 
     private fun skipsScan(key: String, type: String): Boolean =
-      key == "payload" ||
+      key in listOf("ios", "android", "payload") ||
         (key == "value" && type !in listOf("setData", "appendData", "prependData", "upsertData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.

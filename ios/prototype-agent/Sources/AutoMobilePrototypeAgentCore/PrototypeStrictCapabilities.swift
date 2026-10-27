@@ -146,7 +146,7 @@ enum PrototypeStrictCapabilities {
                 need("platform")
                 if fields["call"] == .string("share.open") { need("platform_share") }
             }
-            for (key, child) in fields {
+            for (key, child) in fields where !["ios", "android"].contains(key) {
                 if key == "form", field == "body" {
                     for binding in (child.objectFields ?? [:]).values {
                         scan(binding)

@@ -725,36 +725,6 @@ indirect enum Condition: Decodable, Equatable {
     }
 }
 
-/// A `bottomSheet` height stop: half or all of the sheet's container, or a fixed size in points.
-enum Detent: Decodable, Equatable {
-    case half
-    case full
-    case points(Double)
-
-    private struct Fixed: Decodable {
-        let points: Double
-        private enum CodingKeys: String, CodingKey { case points = "dp" }
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let keyword = try? container.decode(String.self) {
-            self = keyword == "full" ? .full : .half
-        } else {
-            self = try .points(container.decode(Fixed.self).points)
-        }
-    }
-
-    /// Android's `prototypeSheetHeights`: a fixed detent never exceeds its container.
-    func height(in container: Double) -> Double {
-        switch self {
-        case .half: container / 2
-        case .full: container
-        case let .points(value): min(value, container)
-        }
-    }
-}
-
 /// One `radioGroup` or `segmentedButton` choice.
 struct PrototypeOption: Decodable, Equatable {
     let value: String
@@ -764,6 +734,7 @@ struct PrototypeOption: Decodable, Equatable {
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
 final class PrototypeNode: Decodable {
     let into: String?
+    let ios: IosNamespace?
     /// Structural identity retained across data-driven tree rebuilds.
     let nodePath: String
     let type: String
@@ -928,7 +899,6 @@ final class PrototypeNode: Decodable {
     let yRange: PrototypeChartRange?
     let xLabels: String?
     let goal: Double?
-
     /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
     var isInteractive: Bool {
         onTap != nil || onLongPress != nil || onDoubleTap != nil
@@ -936,7 +906,7 @@ final class PrototypeNode: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case scrollTransition, scrollLinked
-        case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
+        case ios, into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition, keyframes, animate
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
@@ -978,6 +948,7 @@ final class PrototypeNode: Decodable {
         press = try container.decodeIfPresent(PrototypePress.self, forKey: .press)
         styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
         visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
+        ios = try container.decodeIfPresent(IosNamespace.self, forKey: .ios)
         shared = try container.decodeIfPresent(Shared.self, forKey: .shared)
         sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey)
         animate = try container.decodeIfPresent(Animate.self, forKey: .animate)

@@ -360,6 +360,7 @@ sealed class PrototypeNode {
   abstract val scrollLinked: PrototypeScrollLinked?
   abstract val onAppear: List<PrototypeAction>?
   abstract val semantics: PrototypeSemantics?
+  abstract val android: PrototypeAndroidNamespace?
   abstract val keyframes: JsonObject?
 }
 
@@ -387,6 +388,7 @@ data class PrototypeBoxNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
@@ -418,6 +420,7 @@ data class PrototypeRowNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val swipeActions: PrototypeSwipeActions? = null,
   val children: List<PrototypeNode>,
@@ -450,6 +453,7 @@ data class PrototypeColumnNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
@@ -479,6 +483,7 @@ data class PrototypeFlowNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
@@ -507,6 +512,7 @@ data class PrototypeGridNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
@@ -540,6 +546,7 @@ data class PrototypeCarouselNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
@@ -572,6 +579,7 @@ data class PrototypeTextNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val text: String? = null,
   val spans: List<PrototypeTextSpan>? = null,
@@ -604,6 +612,7 @@ data class PrototypeImageNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
   val asset: PrototypeModeValue,
@@ -637,6 +646,7 @@ data class PrototypeIconNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val effect: PrototypeIconEffect? = null,
   val name: String,
@@ -666,6 +676,7 @@ data class PrototypeSpacerNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
 ) : PrototypeNode()
 
@@ -691,6 +702,7 @@ data class PrototypeTextFieldNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val placeholder: String? = null,
@@ -736,6 +748,7 @@ data class PrototypeSwitchNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val label: String? = null,
@@ -766,6 +779,7 @@ data class PrototypeCheckboxNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val label: String? = null,
@@ -796,6 +810,7 @@ data class PrototypeButtonNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val label: String,
   val variant: String = "filled",
@@ -825,6 +840,7 @@ data class PrototypeRadioGroupNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
@@ -855,6 +871,7 @@ data class PrototypeSelectNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
@@ -883,6 +900,7 @@ data class PrototypeListItemNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val headline: String,
   val supporting: String? = null,
@@ -914,6 +932,7 @@ data class PrototypeSliderNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val label: String? = null,
@@ -947,6 +966,7 @@ data class PrototypeChipNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val label: String,
   val variant: String? = null,
@@ -978,6 +998,7 @@ data class PrototypeCardNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val variant: String = "filled",
   val children: List<PrototypeNode>,
@@ -1006,6 +1027,7 @@ data class PrototypeIconButtonNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val icon: String,
   val variant: String = "standard",
@@ -1035,6 +1057,7 @@ data class PrototypeFabNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val icon: String,
   val label: String? = null,
@@ -1065,6 +1088,7 @@ data class PrototypeSegmentedButtonNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
@@ -1093,6 +1117,7 @@ data class PrototypeTopAppBarNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val title: String,
   val variant: String = "small",
@@ -1125,6 +1150,7 @@ data class PrototypeDividerNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val orientation: String = "horizontal",
 ) : PrototypeNode()
@@ -1152,6 +1178,7 @@ data class PrototypeBadgeNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val text: String? = null,
 ) : PrototypeNode()
@@ -1182,6 +1209,7 @@ data class PrototypeProgressNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val variant: String = "linear",
   val stateKey: String? = null,
@@ -1214,6 +1242,7 @@ data class PrototypeDialogNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val openWhen: PrototypeSheetCondition,
   val title: String? = null,
@@ -1246,6 +1275,7 @@ data class PrototypeMenuNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val openWhen: PrototypeSheetCondition,
   val items: List<PrototypeMenuItem>,
@@ -1278,6 +1308,7 @@ data class PrototypeSnackbarNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val openWhen: PrototypeSheetCondition,
   val text: String,
@@ -1308,6 +1339,7 @@ data class PrototypeTimePickerNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val hourKey: String,
   val minuteKey: String,
@@ -1340,6 +1372,7 @@ data class PrototypeDatePickerNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val checks: List<PrototypeCheck>? = null,
@@ -1369,6 +1402,7 @@ data class PrototypeScrollNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val axis: String = "vertical",
   val refresh: PrototypeScrollRefresh? = null,
@@ -1406,6 +1440,7 @@ data class PrototypePagerNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val children: List<PrototypeNode>,
   val axis: String? = null,
@@ -1438,6 +1473,7 @@ data class PrototypeTabBarNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
@@ -1469,6 +1505,7 @@ data class PrototypeBottomNavNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val items: List<PrototypeItem>,
   val pager: String? = null,
@@ -1499,6 +1536,7 @@ data class PrototypeBottomSheetNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val child: PrototypeNode,
   val openWhen: PrototypeSheetCondition,
@@ -1530,6 +1568,7 @@ data class PrototypeSearchBarNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val stateKey: String,
   val placeholder: String? = null,
@@ -1563,6 +1602,7 @@ data class PrototypeStackNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val start: String,
   val screens: Map<String, PrototypeNode>,
@@ -1596,6 +1636,7 @@ data class PrototypeChartNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val variant: String,
   val series: List<PrototypeChartSeries>,
@@ -1626,6 +1667,7 @@ data class PrototypeTooltipNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val openWhen: PrototypeSheetCondition,
   val text: String,
@@ -1657,6 +1699,7 @@ data class PrototypeDrawerNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val child: PrototypeNode,
   val edge: String,
@@ -1687,6 +1730,7 @@ data class PrototypeListNode(
   override val scrollLinked: PrototypeScrollLinked? = null,
   override val onAppear: List<PrototypeAction>? = null,
   override val semantics: PrototypeSemantics? = null,
+  override val android: PrototypeAndroidNamespace? = null,
   override val keyframes: JsonObject? = null,
   val axis: String = "vertical",
   val refresh: PrototypeScrollRefresh? = null,
@@ -1739,6 +1783,25 @@ data class PrototypeScrollLinked(
 )
 
 @Serializable
+data class PrototypeIosPresentationNamespaceTab(
+  val role: String,
+)
+
+@Serializable
+data class PrototypeIosPresentationNamespaceSheet(
+  val sizing: String,
+)
+
+@Serializable
+data class PrototypeIosPresentationNamespace(
+  val buttonStyle: String? = null,
+  val tab: PrototypeIosPresentationNamespaceTab? = null,
+  val sheet: PrototypeIosPresentationNamespaceSheet? = null,
+  val hover: String? = null,
+  val navigationTitle: String? = null,
+)
+
+@Serializable
 data class PrototypeIosNamespaceTab(
   val role: String,
 )
@@ -1751,6 +1814,7 @@ data class PrototypeIosNamespaceSheet(
 @Serializable
 data class PrototypeIosNamespace(
   val buttonStyle: String? = null,
+  val bottomAccessory: PrototypeNode? = null,
   val tab: PrototypeIosNamespaceTab? = null,
   val sheet: PrototypeIosNamespaceSheet? = null,
   val hover: String? = null,

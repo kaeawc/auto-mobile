@@ -945,14 +945,14 @@ class PrototypeController(
           outcome.degradedEffects,
         )
       else
-      sink.sendShownNavigation(
-        requestId,
-        missing,
-        appearance,
-        outcome.pages.orEmpty(),
-        outcome.stacks.orEmpty(),
-        outcome.hiddenReason,
-      )
+        sink.sendShownNavigation(
+          requestId,
+          missing,
+          appearance,
+          outcome.pages.orEmpty(),
+          outcome.stacks.orEmpty(),
+          outcome.hiddenReason,
+        )
     } else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)
   }

@@ -62,8 +62,6 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
   },
   "ios-runner": {},
   "prototype-agent-dylib": {
-    prototype_platform_namespace_v1:
-      "Only glass node fields are implemented; other iOS namespace fields remain refused",
     prototype_platform_share_v1:
       "Share has a validated contract only; the iOS agent does not implement the system share sheet yet",
     prototype_chat_scroll_v1:

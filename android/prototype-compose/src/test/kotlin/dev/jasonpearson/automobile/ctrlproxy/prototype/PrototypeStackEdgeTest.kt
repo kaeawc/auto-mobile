@@ -71,6 +71,62 @@ class PrototypeStackEdgeTest {
   }
 
   @Test
+  fun `pop to root uses the return screen source instead of the nested top source`() {
+    val snapshot =
+      snapshot()
+        .copy(
+          stacks = mapOf("nav" to PrototypeStackSnapshot(listOf("home", "detail", "next"))),
+          stackEdges =
+            mapOf(
+              "nav" to
+                snapshot().stackEdges.getValue("nav") +
+                  PrototypeStackEdge("next", PrototypeStackTransition.ZOOM, "nextHero"),
+            ),
+        )
+    val change =
+      snapshot.stackNavigationChange(
+        "nav",
+        "pop",
+        PrototypeStackEdge("home", null, null),
+        listOf("home"),
+      )
+    assertEquals("hero", change.source)
+    assertEquals(PrototypeStackTransition.ZOOM, change.override)
+    assertEquals(2 to "next", change.zoomTarget)
+  }
+
+  @Test
+  fun `pop to root falls back to the declared pattern when return edge is not zoom`() {
+    val snapshot =
+      snapshot()
+        .copy(
+          stacks = mapOf("nav" to PrototypeStackSnapshot(listOf("home", "detail", "next"))),
+          stackEdges =
+            mapOf(
+              "nav" to
+                listOf(
+                  PrototypeStackEdge("home", null, null),
+                  PrototypeStackEdge("detail", PrototypeStackTransition.SLIDE, null),
+                  PrototypeStackEdge("next", PrototypeStackTransition.ZOOM, "nextHero"),
+                ),
+            ),
+        )
+    val change =
+      snapshot.stackNavigationChange(
+        "nav",
+        "pop",
+        PrototypeStackEdge("home", null, null),
+        listOf("home"),
+      )
+    assertNull(change.override)
+    assertNull(change.source)
+    assertEquals(
+      StackTransitionKind.SharedAxisY,
+      resolveStackAnimation(PrototypeStackTransition.SHARED_AXIS_Y, change, true, false).kind,
+    )
+  }
+
+  @Test
   fun `same id replacement retains only matching prefixes`() {
     val snapshot = snapshot()
     assertEquals(snapshot.stackEdges, snapshot.retainedStackEdges(snapshot.stacks))

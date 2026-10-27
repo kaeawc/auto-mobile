@@ -131,6 +131,15 @@ enum PrototypeStackPatterns {
                     "zoom requires source to resolve to exactly one sharedKey node"
                 )
             }
+            let stack = nodes.first { $0.value["type"] == .string("stack") && $0.value["id"] == action.value["stack"] }
+            guard let stack, nodes.contains(where: {
+                ($0.value["shared"]?.objectFields?["key"] ?? $0.value["sharedKey"]) == .string(source) &&
+                    $0.path.hasPrefix("\(stack.path).screens[")
+            }) else {
+                throw PrototypeContractValidator.invalid(
+                    "\(action.path).source", "zoom source must be inside the target stack's screens"
+                )
+            }
         }
         return Set(zooms.compactMap { $0.value["source"]?.stringValue })
     }

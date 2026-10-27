@@ -16,8 +16,28 @@ enum PrototypeZoomNavigation {
         return osMajor >= 18 && transition == .zoom ? .zoom : .push
     }
 
-    static func hasSource(in node: PrototypeNode) -> Bool {
-        node.resolvedSharedKey != nil || node.childEntries(path: "root").contains { hasSource(in: $0.node) }
+    static func hasZoom(in node: PrototypeNode, root: PrototypeNode) -> Bool {
+        var nodes: [PrototypeNode] = []
+        var actions: [PrototypeAction] = []
+        PrototypeStateValidator.collect(root, nodes: &nodes, actions: &actions)
+        return actions.flatMap(\.flattened).contains {
+            ["push", "replace"].contains($0.type) && $0.stack == node.id &&
+                ($0.transition ?? PrototypeStackTransition(rawValue: node.transition ?? "")) == .zoom
+        }
+    }
+
+    static func destinations(_ entries: [PrototypeStackEntry]) -> [PrototypeStackEntry] {
+        entries.dropFirst().filter { $0.zoomSource != nil }
+    }
+
+    /// A native dismissal removes the dismissed segment, including composed screens on top of it.
+    /// The root is always the first model entry; replacing it never retains a removed origin.
+    static func popCount(_ entries: [PrototypeStackEntry], keeping next: [PrototypeStackEntry]) -> Int {
+        let destinations = destinations(entries)
+        guard next.count < destinations.count, next == Array(destinations.prefix(next.count)),
+              let destination = next.last ?? entries.first,
+              let index = entries.firstIndex(where: { $0.id == destination.id }) else { return 0 }
+        return entries.count - index - segment(entries, startingAt: destination).count
     }
 
     /// Consecutive non-zoom screens stay in the existing renderer. Only a zoom entry opens a

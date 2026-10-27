@@ -38,6 +38,17 @@ internal object PrototypeStackPatternRules {
           } != 1
       )
         return fail("$path.source", "zoom requires source to resolve to exactly one sharedKey node")
+      val stack =
+        context.nodes.firstOrNull {
+          it.value.text("type") == "stack" && it.value.text("id") == action.text("stack")
+        }
+      val inside =
+        context.nodes.any {
+          ((it.value["shared"] as? JsonObject)?.text("key") ?: it.value.text("sharedKey")) ==
+            source && it.path.startsWith("${stack?.path}.screens[")
+        }
+      if (!inside)
+        return fail("$path.source", "zoom source must be inside the target stack's screens")
     }
     return null
   }

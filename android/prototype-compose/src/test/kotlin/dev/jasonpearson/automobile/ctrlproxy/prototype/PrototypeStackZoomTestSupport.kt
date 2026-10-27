@@ -26,7 +26,7 @@ internal fun stackZoomInkBounds(root: SemanticsNodeInteraction): Rect {
   return Rect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
 }
 
-internal fun stackZoomRuntime(motion: String) =
+internal fun stackZoomRuntime(motion: String, transition: String = "zoom") =
   PrototypeRuntime(
     PrototypeSpec(
       id = "zoom",
@@ -36,7 +36,7 @@ internal fun stackZoomRuntime(motion: String) =
         PrototypeStackNode(
           id = "nav",
           start = "home",
-          transition = PrototypeTransition("zoom"),
+          transition = PrototypeTransition(transition),
           screens =
             mapOf(
               "home" to

@@ -134,7 +134,10 @@ internal fun PrototypeStackContent(
   val reducedMotion = LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED
   val animation = resolveStackAnimation(source.stackTransition, change, motion, reducedMotion)
   val rtl = prototypeRtl()
-  PrototypeStackSharedRoot(source) {
+  PrototypeStackSharedRoot(
+    animation.kind == StackTransitionKind.Zoom && change?.source != null,
+    modifier,
+  ) { stackModifier ->
     AnimatedStackContent(
       frame,
       source,
@@ -143,7 +146,7 @@ internal fun PrototypeStackContent(
       preview,
       runtime,
       seek,
-      modifier,
+      stackModifier,
       animation,
       rtl,
       node.style.alignment,
@@ -282,6 +285,10 @@ private suspend fun settleStack(
 ) {
   val animated = kind != StackTransitionKind.None
   suspend fun go(frame: StackFrame) {
+    // Attach and measure the selected source before AnimatedContent introduces the target.
+    if (kind == StackTransitionKind.Zoom && state.currentState != frame) {
+      withFrameNanos {}
+    }
     if (animated) state.animateTo(frame) else state.snapTo(frame)
   }
   if (!settle.previewing) return go(settle.current)

@@ -31,11 +31,13 @@
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
-            if #available(iOS 18, *), PrototypeZoomNavigation.hasSource(in: node), PrototypeZoomNavigation.resolve(
-                osMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-                profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile,
-                transition: .zoom
-            ) == .zoom {
+            if #available(iOS 18, *), PrototypeZoomNavigation.hasZoom(in: node, root: model.spec?.root ?? node),
+               PrototypeZoomNavigation.resolve(
+                   osMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                   profile: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).profile,
+                   transition: .zoom
+               ) == .zoom
+            {
                 PrototypeNativeZoomStack(node: node, model: model)
             } else {
                 PrototypeStackView(node: node, model: model)
@@ -48,12 +50,11 @@
         let node: PrototypeNode
         let model: PrototypeModel
         @Namespace private var namespace
-        @State private var origin: PrototypeStackEntry?
         private var id: String { node.id ?? "" }
         private var entries: [PrototypeStackEntry] { model.stackEntries[id] ?? [] }
-        private var root: PrototypeStackEntry? { origin ?? entries.first }
+        private var root: PrototypeStackEntry? { entries.first }
         private var destinations: [PrototypeStackEntry] {
-            entries.filter { $0.zoomSource != nil && $0.id != root?.id }
+            PrototypeZoomNavigation.destinations(entries)
         }
 
         var body: some View {
@@ -67,9 +68,8 @@
                 }
             }
             .environment(\.prototypeZoomNamespace, namespace)
-            .onChange(of: entries, initial: true) { _, next in
-                if origin == nil || next.first?.zoomSource == nil { origin = next.first }
-                if destinations.isEmpty || next.last?.id != destinations.last?.id { model.nativeZoomStacks.remove(id) }
+            .onChange(of: entries, initial: true) { _, _ in
+                if destinations.isEmpty { model.nativeZoomStacks.remove(id) }
                 else { model.nativeZoomStacks.insert(id) }
             }
             .onDisappear { model.nativeZoomStacks.remove(id) }
@@ -85,14 +85,9 @@
         }
 
         private func navigateBack(_ next: [PrototypeStackEntry]) {
-            guard entries.last?.id == destinations.last?.id, next.count < destinations.count,
-                  let path = model.stacks[id]?.path, path.count > 1 else { return }
-            // A native pop returns to the preceding segment, including its composed destinations.
-            let destination = next.last ?? root
-            guard let destination, let index = entries.firstIndex(where: { $0.id == destination.id }) else { return }
-            let segment = PrototypeZoomNavigation.segment(entries, startingAt: entries[index])
-            let targetDepth = index + segment.count
-            model.run((targetDepth ..< path.count).map { _ in PrototypeAction(
+            let count = PrototypeZoomNavigation.popCount(entries, keeping: next)
+            guard count > 0 else { return }
+            model.run((0 ..< count).map { _ in PrototypeAction(
                 type: "pop",
                 name: nil,
                 payload: nil,

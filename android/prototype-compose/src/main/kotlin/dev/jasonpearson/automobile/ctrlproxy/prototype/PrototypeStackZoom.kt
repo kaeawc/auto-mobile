@@ -8,7 +8,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 
 internal data class PrototypeStackZoomScope(
@@ -20,18 +19,22 @@ internal data class PrototypeStackZoomScope(
 
 internal val LocalPrototypeStackZoom = compositionLocalOf<PrototypeStackZoomScope?> { null }
 
-/** A stack owns its coordinate space, independent of visibility pairs elsewhere in the tree. */
+/** Reuse the surrounding coordinate space; a standalone zoom keeps parent data on its Box. */
 @Composable
-internal fun PrototypeStackSharedRoot(root: PrototypeNode, content: @Composable () -> Unit) {
-  if (!remember(root) { prototypeHasSharedKey(root) }) {
-    content()
+internal fun PrototypeStackSharedRoot(
+  zoom: Boolean,
+  modifier: Modifier,
+  content: @Composable (Modifier) -> Unit,
+) {
+  if (!zoom || LocalPrototypeSharedTransition.current != null) {
+    content(modifier)
     return
   }
   SharedTransitionScope { sharedModifier ->
     val scope = this
-    Box(sharedModifier, propagateMinConstraints = true) {
+    Box(modifier.then(sharedModifier), propagateMinConstraints = true) {
       ReportPrototypeMotion { scope.isTransitionActive }
-      CompositionLocalProvider(LocalPrototypeSharedTransition provides scope) { content() }
+      CompositionLocalProvider(LocalPrototypeSharedTransition provides scope) { content(Modifier) }
     }
   }
 }
@@ -49,10 +52,10 @@ internal fun PrototypeStackZoomScreen(
       LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL
   val key = change?.source
   val zoom =
-    if (enabled) {
+    if (enabled && key != null) {
       PrototypeStackZoomScope(
         key,
-        key != null && change.zoomTarget == target,
+        change.zoomTarget == target,
         root.identity,
         visibility,
       )
@@ -65,8 +68,7 @@ internal fun Modifier.prototypeStackZoomNode(node: PrototypeRenderNode): Modifie
   val zoom = LocalPrototypeStackZoom.current ?: return this
   val key =
     if (zoom.destination && node.identity == zoom.rootIdentity) zoom.key
-    else
-      node.source?.resolvedSharedKey?.takeIf { node.source.visibleWhen == null || it == zoom.key }
+    else node.source?.resolvedSharedKey?.takeIf { it == zoom.key }
   return prototypeStackZoomBounds(key)
 }
 

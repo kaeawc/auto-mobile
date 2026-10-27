@@ -132,7 +132,7 @@ rounded to one decimal in window-local dp (points on iOS). Reports include count
 up to 200 points per screen and a 48-unit grid. There is no screenshot overlay yet.
 
 Stack transition patterns: \`sharedAxisX\`, \`sharedAxisY\`, \`fadeThrough\` and \`zoom\` (and a push/replace
-\`source\`) require \`prototype_stack_patterns_v1\`; zoom needs a source naming exactly one shared key.
+\`source\`) require \`prototype_stack_patterns_v1\`; zoom needs a source naming exactly one shared key inside the target stack's screens.
 With \`prototype_zoom_transition_v1\`, zoom morphs source-to-root on Android and uses native
 interactive zoom on iOS 18+. Older agents keep fadeThrough (Android) or platform push (iOS 17);
 platformNotes reports the fallback. The new capability reports rendering, not spec acceptance.

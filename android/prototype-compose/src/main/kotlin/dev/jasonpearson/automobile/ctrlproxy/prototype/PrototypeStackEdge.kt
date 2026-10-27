@@ -10,11 +10,15 @@ data class PrototypeStackEdge(
   val source: String?,
 )
 
-internal fun PrototypeRuntimeSnapshot.stackPopChange(id: String): PrototypeStackChange {
+/** Reverse the edge above the returned screen, rather than a discarded nested edge. */
+internal fun PrototypeRuntimeSnapshot.stackPopChange(
+  id: String,
+  targetDepth: Int = stacks.getValue(id).path.size - 1,
+): PrototypeStackChange {
   val path = stacks.getValue(id).path
   val edge =
-    stackEdges[id]?.lastOrNull()?.takeIf {
-      it.screen == path.last() && it.transition == PrototypeStackTransition.ZOOM
+    stackEdges[id]?.getOrNull(targetDepth)?.takeIf {
+      it.screen == path.getOrNull(targetDepth) && it.transition == PrototypeStackTransition.ZOOM
     }
   return PrototypeStackChange(
     id,
@@ -32,7 +36,7 @@ internal fun PrototypeRuntimeSnapshot.stackNavigationChange(
   edge: PrototypeStackEdge,
   path: List<String>,
 ): PrototypeStackChange =
-  if (direction == "pop") stackPopChange(id)
+  if (direction == "pop") stackPopChange(id, path.size)
   else
     PrototypeStackChange(
       id,

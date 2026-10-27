@@ -636,14 +636,14 @@ transition as a real tap, including on part identifiers.
   `prototype_stack_patterns_v1` gates sharedAxisX/Y, fadeThrough, zoom and push/replace source.
   Shared axes compose 30-point directional travel with opacity (X mirrors in RTL; both reverse on
   pop). FadeThrough fades out first, then fades/scales in from 0.92. Zoom requires an action source
-  naming exactly one authored sharedKey node, exempt from visibility pairing. `prototype_zoom_transition_v1` advertises native source-to-root container zoom on Android and
+  naming exactly one authored sharedKey node inside the target stack's screens, exempt from visibility pairing. `prototype_zoom_transition_v1` advertises native source-to-root container zoom on Android and
   native interactive navigation zoom on iOS 18+. iOS 17 keeps platform push; older Android agents
   keep fadeThrough. The new capability reports rendering only; patterns v1 remains the authoring gate. `platformNotes`
   reports OS/capability fallbacks and non-interactive sharedAxisX/Y and fadeThrough pops.
   A simultaneous drag beginning within 20 points of the leading window edge scrubs platform and slide,
   including parallax and dimming. Release commits past half width or when predicted end translation
   passes half width; otherwise it animates back without mutating the session. Fade/none retain the
-  60-point release-to-pop policy; composed patterns do too; iOS 18 native zoom owns its interactive pop. Pop targeting follows visible screens and modal precedence.
+  60-point release-to-pop policy; composed patterns do too; iOS 18 native zoom owns its interactive pop while a native destination is present, including composed screens above it. A native pop removes that destination and its composed segment from the model. Replacing the root resets the native origin. Pop targeting follows visible screens and modal precedence.
   Back-stack entries stay mounted, transparent, non-interactive and accessibility-hidden, preserving
   scroll positions on pop within the bounded stack depth; removed entries are released after motion.
   Navigation posts a screen-changed accessibility notification targeting the new native screen

@@ -1175,6 +1175,7 @@
     "spec-version.json",
     "stack-patterns-zoom-ambiguous.json",
     "stack-patterns-zoom-missing.json",
+    "stack-patterns-zoom-outside-stack.json",
     "stack-patterns-zoom-shared-v2-ambiguous.json",
     "stack-patterns-zoom-shared-v2-template.json",
     "stack-patterns-zoom-unresolved.json",

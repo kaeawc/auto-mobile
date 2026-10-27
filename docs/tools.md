@@ -53,6 +53,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | ↔️ <code>swipeAt</code>       | Swipe between two screen points                                                              |
 | 🫳 <code>dragAndDrop</code>   | Drag and drop element                                                                        |
 | 〰️ <code>dragPath</code>      | Drag a finger along a timed path                                                             |
+| 🖱️ <code>hoverAt</code>       | Hover a stylus or mouse over a path with no contact (Android)                                |
 | 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                |
 | 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                          |
 | ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                            |
@@ -186,6 +187,25 @@ separate `select` key exists. Android only; not yet verified on a TV image
 - ⌨️ Compact observations fold soft-keyboard keys into one `keyboard: { visible: true, package: "…" }` summary plus at most one skeleton row (`<ime> | Keyboard (…) | input`). The row appears only with at least one bounded accessible descendant.
 - 📸 Screenshot paths are kept for **at least 10 minutes after return** unless evicted early under capacity pressure; each path has a `screenshotExpiresAt`/`expiresAt` (host epoch ms, not a promise). Retention starts at **128 MiB** and scales by 64 MiB per active device up to 1 GiB, within a limit of **4096 files**. Each device’s newest 3 screenshots (counting its incoming frame) are evicted only as a last resort, and a capture is admitted even if nothing fits. The byte limits and per-device allowance are [configurable](using/environment-variables.md#screenshot-retention). After a restart, existing files get a process-start grace of ten minutes.
 - 🧹 `holdSessionOnFailure` keeps plan sessions instead of auto-releasing them.
+
+### hoverAt
+
+Hover enter, move and exit over `points` with no contact (Android only; the reasons iOS is refused are in the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md)). It takes the `dragPath` point shape
+(`x`, `y`, per-point `durationMs`) plus an optional per-point `distance` (stylus only), and the same
+`coordinateSpace`, `display`, `snapshotId` and `layer`.
+
+`toolType` chooses who hovers, and apps see the difference:
+
+| `toolType`         | What the app receives                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `stylus` (default) | `ACTION_HOVER_*` with `TOOL_TYPE_STYLUS`, `SOURCE_STYLUS` and an `AXIS_DISTANCE` value    |
+| `mouse`            | `ACTION_HOVER_*` with `TOOL_TYPE_MOUSE` and `SOURCE_MOUSE`; no distance; desktop-style UI |
+
+It needs the `hover_input_v1` runner capability. A device or runner without it, and iOS, are refused before
+anything is sent with the missing capability named, and a hover is never turned into a touch. No runner
+advertises the capability yet (the instrumentation injection route is #13097), so today the tool reports that
+refusal; the semantics above are the documented intent and still need on-device confirmation (#13082).
 
 ### prototype
 

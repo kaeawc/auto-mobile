@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "feedback",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["haptics"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "sound.play",
+          "args": {
+            "sound": {
+              "value": "click"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].call"
+}

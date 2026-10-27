@@ -37,15 +37,13 @@ class FakeRecorder implements ElicitationRecorder {
   }
 }
 
-class FakeBackend implements ToolCallBackend<
-  ToolCallRequest,
-  McpToolCallExtra & { readonly signal: AbortSignal },
-  typeof success
-> {
+type Outcome = typeof success | typeof refusal;
+
+class FakeBackend implements ToolCallBackend<ToolCallRequest, McpToolCallExtra, Outcome> {
   readonly progressFailureMessage = "unused";
   calls = 0;
-  result: typeof success = success;
-  async execute(call: ToolCall<McpToolCallExtra & { readonly signal: AbortSignal }>) {
+  result: Outcome = success;
+  async execute(call: ToolCall<McpToolCallExtra>) {
     this.calls++;
     return call.args.deviceId === undefined ? this.result : success;
   }
@@ -79,7 +77,7 @@ describe("classifyElicitationDeclaration", () => {
 describe("legacy ask recording (#15588)", () => {
   const ambiguous = () => {
     const backend = new FakeBackend();
-    backend.result = refusal as unknown as typeof success;
+    backend.result = refusal;
     return backend;
   };
   function run(
@@ -93,24 +91,21 @@ describe("legacy ask recording (#15588)", () => {
       declaration: () => "form",
       elicit: async (_params, signal) => {
         timer.advanceTime(7);
-        if (peer.answer === "never") {
-          await new Promise((_resolve, reject) =>
+        const answer = peer.answer;
+        if (answer === "never") {
+          return new Promise<ElicitResult>((_resolve, reject) =>
             signal.addEventListener("abort", () => reject(new Error("aborted"))),
           );
         }
-        if (peer.answer instanceof Error) {
-          throw peer.answer;
+        if (answer instanceof Error) {
+          throw answer;
         }
-        return peer.answer ?? { action: "cancel" };
+        return answer ?? { action: "cancel" };
       },
       ...peer,
     };
     const backend = withAmbiguousDeviceElicitation(ambiguous(), fullPeer, { timer, recorder });
-    const result = backend.execute(
-      makeCall({}, {}, callSignal?.signal) as ToolCall<
-        McpToolCallExtra & { readonly signal: AbortSignal }
-      >,
-    );
+    const result = backend.execute(makeCall({}, {}, callSignal?.signal));
     return { timer, recorder, result };
   }
 
@@ -197,12 +192,8 @@ describe("legacy ask recording (#15588)", () => {
       elicit: async () => ({ action: "cancel" }),
     };
     const named = withAmbiguousDeviceElicitation(new FakeBackend(), peer, { recorder });
-    await named.execute(
-      makeCall({ deviceId: "x" }) as ToolCall<McpToolCallExtra & { readonly signal: AbortSignal }>,
-    );
-    await named.execute(
-      makeCall({}) as ToolCall<McpToolCallExtra & { readonly signal: AbortSignal }>,
-    );
+    await named.execute(makeCall({ deviceId: "x" }));
+    await named.execute(makeCall({}));
     expect(recorder.records).toEqual([]);
   });
 });
@@ -232,8 +223,8 @@ describe("modern ask recording (#15588)", () => {
   }
   const refusingBackend = () => {
     const backend = new FakeBackend();
-    backend.result = refusal as unknown as typeof success;
-    return backend as unknown as ToolCallBackend<ToolCallRequest, McpToolCallExtra, typeof success>;
+    backend.result = refusal;
+    return backend;
   };
 
   test("records asked when the question is handed back", async () => {

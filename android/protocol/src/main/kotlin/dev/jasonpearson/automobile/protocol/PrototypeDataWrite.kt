@@ -109,7 +109,7 @@ object PrototypeDataWriter {
         is PrototypeDataWrite.Prepend,
         is PrototypeDataWrite.Extend ->
           update(current, tokens) { target ->
-            val window = arrayWindow(write, target as JsonArray)
+            val window = PrototypeDataArrayWindow.window(write, target as JsonArray)
             trimmed = window.second
             window.first
           }
@@ -125,54 +125,6 @@ object PrototypeDataWriter {
     }
     return PrototypeDataWriteResult.Success(next, trimmed)
   }
-
-  /** JSON identity uses numeric value and exact strings, including nested identity objects. */
-  private fun sameKey(left: JsonElement, right: JsonElement): Boolean =
-    when {
-      left is JsonArray && right is JsonArray ->
-        left.size == right.size && left.indices.all { sameKey(left[it], right[it]) }
-      left is JsonObject && right is JsonObject ->
-        left.keys == right.keys && left.keys.all { sameKey(left.getValue(it), right.getValue(it)) }
-      else -> left == right || PrototypeDataValues.equal(left, right)
-    }
-
-  private fun arrayWindow(write: PrototypeDataWrite, target: JsonArray): Pair<JsonArray, Int> {
-    val incoming =
-      when (write) {
-        is PrototypeDataWrite.Extend -> write.value as JsonArray
-        is PrototypeDataWrite.Prepend -> write.value as JsonArray
-        is PrototypeDataWrite.Upsert -> listOf(write.value)
-        else -> listOf((write as PrototypeDataWrite.Append).value)
-      }
-    val combined =
-      if (write is PrototypeDataWrite.Upsert) {
-        val key = PrototypeDataPointer.resolve(write.value, write.key)
-        val index = target.indexOfFirst {
-          PrototypeDataPointer.resolve(it, write.key)?.let { candidate ->
-            key != null && sameKey(candidate, key)
-          } == true
-        }
-        target.toMutableList().also {
-          if (index < 0) it.add(write.value) else it[index] = write.value
-        }
-      } else if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
-    val maximum = maximum(write)
-    val trimmed =
-      if (maximum == null) 0 else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
-    val rows =
-      if (write is PrototypeDataWrite.Prepend) combined.dropLast(trimmed)
-      else combined.drop(trimmed)
-    return JsonArray(rows) to trimmed
-  }
-
-  private fun maximum(write: PrototypeDataWrite): Double? =
-    when (write) {
-      is PrototypeDataWrite.Upsert -> write.maxItems?.toDouble()
-      is PrototypeDataWrite.Append -> write.maxItems?.toDouble()
-      is PrototypeDataWrite.Extend -> write.maxItems?.toDouble()
-      is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
-      else -> null
-    }
 
   private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
     if (
@@ -196,7 +148,7 @@ object PrototypeDataWriter {
         PrototypeDataWriteErrorCode.INVALID_VALUE,
         "$name needs an array value",
       )
-    val maxItems = maximum(write) ?: return null
+    val maxItems = PrototypeDataArrayWindow.maximum(write) ?: return null
     return if (
       !positiveSafeInteger(maxItems) ||
         ((write is PrototypeDataWrite.Upsert || write is PrototypeDataWrite.Append) &&
@@ -362,4 +314,55 @@ sealed interface PrototypeDataValue {
   data class Resolved(val value: JsonElement) : PrototypeDataValue
 
   data class Failure(val error: PrototypeDataWriteError) : PrototypeDataValue
+}
+
+/** The row window an append, prepend, extend or upsert leaves after `maxItems` trims it. */
+internal object PrototypeDataArrayWindow {
+  /** JSON identity uses numeric value and exact strings, including nested identity objects. */
+  private fun sameKey(left: JsonElement, right: JsonElement): Boolean =
+    when {
+      left is JsonArray && right is JsonArray ->
+        left.size == right.size && left.indices.all { sameKey(left[it], right[it]) }
+      left is JsonObject && right is JsonObject ->
+        left.keys == right.keys && left.keys.all { sameKey(left.getValue(it), right.getValue(it)) }
+      else -> left == right || PrototypeDataValues.equal(left, right)
+    }
+
+  fun window(write: PrototypeDataWrite, target: JsonArray): Pair<JsonArray, Int> {
+    val incoming =
+      when (write) {
+        is PrototypeDataWrite.Extend -> write.value as JsonArray
+        is PrototypeDataWrite.Prepend -> write.value as JsonArray
+        is PrototypeDataWrite.Upsert -> listOf(write.value)
+        else -> listOf((write as PrototypeDataWrite.Append).value)
+      }
+    val combined =
+      if (write is PrototypeDataWrite.Upsert) {
+        val key = PrototypeDataPointer.resolve(write.value, write.key)
+        val index = target.indexOfFirst {
+          PrototypeDataPointer.resolve(it, write.key)?.let { candidate ->
+            key != null && sameKey(candidate, key)
+          } == true
+        }
+        target.toMutableList().also {
+          if (index < 0) it.add(write.value) else it[index] = write.value
+        }
+      } else if (write is PrototypeDataWrite.Prepend) incoming + target else target + incoming
+    val maximum = maximum(write)
+    val trimmed =
+      if (maximum == null) 0 else (combined.size.toLong() - maximum).coerceAtLeast(0.0).toInt()
+    val rows =
+      if (write is PrototypeDataWrite.Prepend) combined.dropLast(trimmed)
+      else combined.drop(trimmed)
+    return JsonArray(rows) to trimmed
+  }
+
+  fun maximum(write: PrototypeDataWrite): Double? =
+    when (write) {
+      is PrototypeDataWrite.Upsert -> write.maxItems?.toDouble()
+      is PrototypeDataWrite.Append -> write.maxItems?.toDouble()
+      is PrototypeDataWrite.Extend -> write.maxItems?.toDouble()
+      is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
+      else -> null
+    }
 }

@@ -121,7 +121,7 @@ final class PrototypeContractValidatorTests: XCTestCase {
         XCTAssertFalse(valid.isEmpty)
         for url in valid {
             let data = try Data(contentsOf: url)
-            if url.lastPathComponent.hasPrefix("custom-shader") {
+            if url.lastPathComponent.contains("shader") {
                 XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
                 XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(data: data, supported: supported))
                 continue

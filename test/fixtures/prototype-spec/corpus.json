@@ -1103,6 +1103,8 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-on-appear-prototype_timers_v1.json",
+    "strict-gate-prepend-prototype_lazy_list_v1.json",
     "strict-gate-prototype_backdrop_v1.json",
     "strict-gate-prototype_bar_scroll_v1.json",
     "strict-gate-prototype_carousel_v1.json",

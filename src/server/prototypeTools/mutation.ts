@@ -1,6 +1,10 @@
 import { shownBackdrop } from "../../features/prototype/prototypeBackdrop";
 import { cachedPrototypeShaderAssetProblem } from "../../features/prototype/prototypeShaders";
 import { defaultPrototypeAssetCache } from "../../features/prototype/prototypeAssetCache";
+import {
+  type DegradedEffect,
+  prototypeDegradedEffectsOutput,
+} from "../../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
@@ -701,9 +705,17 @@ function missingAssetsOutput(
   warnings: readonly (string | undefined)[],
   landedWarning?: string,
   spec?: unknown,
-): { missingAssets?: string[]; warning?: string } {
+): {
+  missingAssets?: string[];
+  warning?: string;
+  degradedEffects?: DegradedEffect[];
+} {
+  const degraded: ReturnType<typeof prototypeDegradedEffectsOutput> = result.success
+    ? prototypeDegradedEffectsOutput(result.degradedEffects)
+    : {};
   const warning = [
     ...warnings,
+    degraded.warning,
     result.success ? landedWarning : undefined,
     ...(result.success ? prototypeTimerWarnings(spec) : []),
   ]
@@ -713,6 +725,7 @@ function missingAssetsOutput(
     ...(result.success && result.missingAssets?.length
       ? { missingAssets: result.missingAssets }
       : {}),
+    ...degraded,
     ...(warning ? { warning } : {}),
   };
 }

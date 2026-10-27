@@ -114,34 +114,112 @@ None of these changes a default by itself. Items 2 and 3 are labelled `needs-dev
 
 ## 6. Device measurement plan (#15478, `needs-device-verify`)
 
-Not run: manual tests are paused. The protocol extends the one in the optimization doc and
-`scripts/android/benchmark-emulator-resources.sh`.
+Not run: manual tests are paused. This section is a run sheet for a lane that holds a clean device
+slot. It extends the protocol in the optimization doc. Read-only host sampling is
+`scripts/android/emulator-host-cost-sample.sh`; `scripts/android/benchmark-emulator-resources.sh`
+stays the guest-side snapshot collector.
 
-**Rules.** Dedicated research AVDs, deleted afterwards. Never `emulator-5554`, the resident daemon
-or another lane's emulators. Hold image, emulator build, host load, framebuffer and snapshot state
-constant; settle before sampling; repeat baseline, treatment, baseline; one change at a time.
+### 6.1 Rules
 
-**Gaps in the existing sampler to close first.** It records `ps` `pcpu` and RSS. Use the cumulative
-CPU time delta over the window instead of `pcpu`, and a unique-memory figure: `footprint -p` or
-`phys_footprint` on macOS, `smaps_rollup` PSS on Linux. RSS counts shared pages.
+Dedicated research AVDs named `am-cost-<api>-<n>`, deleted afterwards. Never `emulator-5554`, the
+resident daemon, another lane's emulator or the owner's protected emulator. Hold system image,
+emulator build, host load, framebuffer and snapshot state constant; one change at a time; baseline,
+treatment, baseline; at least three repeats of each arm. Use only emulator ports 5700-5720 (even
+numbers), so a stray `adb` serial can never be another lane's device.
 
-**Matrix.**
+### 6.2 Metrics (what the sampler writes)
 
-| Step | Measurement                                                                                                                                | Levers                                                                                                                                                                 |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Baseline: CPU-seconds and time-to-quiet for cold boot and quick-boot restore; 5-10 minutes idle CPU and unique memory                      | none                                                                                                                                                                   |
-| 2    | Host levers                                                                                                                                | `cpuCores` 2 vs 4; `gpuMode` `auto`, `swiftshader`, `swangle`, `lavapipe`, `host` where available; `-no-audio`; cameras off; `-no-boot-anim`; display size and density |
-| 3    | Snapshots: exit time and bytes written with and without `-no-snapshot-save`; quick-boot restore against cold boot                          | `-no-snapshot-save`, `-no-snapshot-load`                                                                                                                               |
-| 4    | Concurrency: per-emulator settled cost at 1, 2 and 4 emulators; compare with the gate's estimate                                           | the winning levers from 2 and 3                                                                                                                                        |
-| 5    | Breakage per candidate: startDevice and runner start, observe, screenshot, launch and terminate, tapOn, sendKeys, video, notification path | each candidate                                                                                                                                                         |
+| Metric                | Definition                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------- |
+| `cpu_seconds_delta`   | Cumulative CPU time of the `qemu-system-*` process at the last sample minus the first       |
+| `cpu_percent_of_core` | `cpu_seconds_delta / window_seconds`, in percent of one core (not the decaying `ps` figure) |
+| `unique_kib_avg/peak` | macOS `footprint` physical footprint; Linux `smaps_rollup` `Pss`. Never RSS (shared pages)  |
+| time-to-boot          | seconds from process start to `sys.boot_completed=1`                                        |
+| time-to-quiet         | seconds from process start until three consecutive 30 s windows each burn at most 1.0 CPU-s |
+| exit seconds, bytes   | wall time from `adb emu kill` to process exit; bytes added under the AVD directory          |
 
-Run on macOS arm64 and on Linux with KVM; the existing evidence is macOS arm64 only. For the
-effective-RAM question, record `hw.ramSize` from `hardware-qemu.ini` after each launch at several
-configured values on API 35 and API 37.
+### 6.3 Preflight
 
-**Decision rule.** A default changes only for a lever that moves host CPU or unique memory outside
-run-to-run noise on both hosts, leaves step 5 green, and has a restore path. Otherwise the result
-is an opt-in profile or nothing.
+1. `uname -sm`, `sysctl -n hw.ncpu hw.memsize` (macOS) or `nproc; free -m` (Linux),
+   `emulator -version`, `avdmanager list target`; record them in `host.txt`.
+2. Host quiet: `uptime` load below 1.0 and no other emulator or Gradle process of this user
+   (`pgrep -fl 'qemu-system|gradle'` empty). If not quiet, wait; do not measure on a busy host.
+3. `adb devices` lists nothing in 5700-5720. Free disk at least 20 GiB (snapshots are 2-4 GiB each).
+4. Create the AVDs (one per image level you measure; API 35 and API 37 for the RAM question):
+   `avdmanager create avd -n am-cost-37-1 -k "system-images;android-37;google_apis;arm64-v8a" -d pixel_8`
+   (use `x86_64` images on Linux).
+
+### 6.4 Run template
+
+One run is one launch with the arm's flags, a fixed observation window and a clean exit. Evidence
+goes under `scratch/emulator-host-cost/<host>/<date>/<step>-<arm>-<repeat>/`.
+
+```bash
+run=scratch/emulator-host-cost/$HOST/$(date +%F)/s2-cpu2-r1; mkdir -p "$run"
+port=5700; serial=emulator-$port
+emulator -avd am-cost-37-1 -port $port -no-window -no-boot-anim -no-snapshot-save \
+  <arm flags> > "$run/emulator.log" 2>&1 &
+pid=$!
+start=$(date +%s)
+adb -s $serial wait-for-device
+adb -s $serial shell 'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done'
+echo "time_to_boot=$(( $(date +%s) - start ))" > "$run/timings.txt"
+# fixed window, started right after boot completes; 5 minutes unless the step says otherwise
+scripts/android/emulator-host-cost-sample.sh $pid "$run" 60 5
+adb -s $serial shell dumpsys meminfo > "$run/guest-meminfo.txt"
+exit_start=$(date +%s); adb -s $serial emu kill; wait $pid
+echo "exit_seconds=$(( $(date +%s) - exit_start ))" >> "$run/timings.txt"
+du -sk ~/.android/avd/am-cost-37-1.avd > "$run/avd-kib-after.txt"
+```
+
+Take `avd-kib-before.txt` the same way before each launch; the bytes written are the difference.
+Time-to-quiet is computed offline from the CPU-seconds column of `cost-samples.csv` (keep the
+sample interval at 5 s so 30 s is six rows). Never use a PID or serial you did not start.
+
+### 6.5 Matrix
+
+| Step | Measurement                                                                                                                                   | Arm flags (added to the template)                                                                                 |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 1    | Baseline: cold boot (`-no-snapshot-load`) and quick-boot restore; 10 min idle CPU and unique memory                                           | none                                                                                                              |
+| 2a   | vCPUs: `hw.cpu.ncore` 2 vs 4 (edit `config.ini`, then restore it)                                                                             | none                                                                                                              |
+| 2b   | Renderer                                                                                                                                      | `-gpu auto`, `-gpu swiftshader_indirect`, `-gpu host` (macOS and Linux with a GPU); on Linux also `-gpu lavapipe` |
+| 2c   | Audio, cameras, boot animation                                                                                                                | `-no-audio`; `-camera-back none -camera-front none`; remove `-no-boot-anim` for the control                       |
+| 2d   | Display: size and density (`hw.lcd.width`, `hw.lcd.height`, `hw.lcd.density`)                                                                 | none                                                                                                              |
+| 3    | Snapshots: exit seconds and bytes written with and without `-no-snapshot-save`; quick-boot restore vs cold boot                               | `-no-snapshot-save` vs omit it; `-no-snapshot-load`                                                               |
+| 4    | Concurrency: per-emulator settled cost at 1, 2 and 4 emulators started 30 s apart (ports 5700, 5702, 5704, 5706); compare with the gate model | the winners of steps 2 and 3                                                                                      |
+| 5    | Breakage per candidate (below)                                                                                                                | each candidate                                                                                                    |
+
+For the effective-RAM question (#15475), on API 35 and API 37 set `hw.ramSize` to 1536, 2048, 3072
+and 4096, launch once each, and record `hw.ramSize` from `hardware-qemu.ini` in the AVD directory
+and `MemTotal` from `adb shell cat /proc/meminfo`.
+
+**Step 5, breakage check.** Each candidate must pass these through a private daemon bound to the
+research serial, with every call naming its `deviceId`: `startDevice` and runner start; `observe`
+with a screenshot; `launchApp` and `terminateApp` on the Settings app; `tapOn`; `sendKeys` into a
+text field; `videoRecording` start and stop; a posted notification appearing in the tray. A candidate
+that fails or is flaky once in three is rejected, and the failing call goes in the results.
+
+### 6.6 Results
+
+One row per run in `results.csv` (columns: `host, step, arm, repeat, api, time_to_boot_s,
+time_to_quiet_s, cpu_seconds_delta, cpu_percent_of_core, unique_kib_avg, unique_kib_peak, exit_s,
+bytes_written_kib, step5_pass`), and a summary table per step in this note: arm means, the spread
+(max minus min) of the baseline repeats, and the difference.
+
+### 6.7 Stop conditions and cleanup
+
+Abort a run, record why, and do not retry blindly when the host load average rises above 4 during
+the window, another process starts an emulator, free disk falls under 10 GiB, or the emulator
+exits on its own. Cleanup after every session: `kill <pid>` of the emulators you started only (by
+the PIDs you recorded), `avdmanager delete avd -n am-cost-37-1`, and remove any restored
+`config.ini` edits.
+
+### 6.8 Decision rule
+
+A default changes only for a lever whose host CPU or unique-memory difference exceeds twice the
+baseline spread on both hosts, that leaves step 5 green, and that has a restore path. Otherwise the
+result is an opt-in profile or nothing. Run on macOS arm64 and on Linux with KVM; the existing
+evidence is macOS arm64 only.
 
 ## Out of scope
 

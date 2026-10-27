@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.ctrlproxy.pointer.PointerInjectionSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
@@ -310,6 +311,15 @@ class WebSocketServer(
     add("tap_double_v1")
     // request_two_finger_swipe honours fingerCount (2-5); older services perform two fingers.
     add("multi_finger_gesture_v1")
+    // PointerInstrumentation injects a stylus (tool type, pressure, tilt, buttons) through
+    // UiAutomation, which accessibility dispatchGesture cannot, and hover enter/move/exit (#13097).
+    // Hosts require the flag before sending either. Only where `am instrument --no-restart` exists
+    // (see PointerInjectionSupport); device-unverified until the probe in the design note runs, so
+    // releases stay gated by the manual test.
+    if (PointerInjectionSupport.advertised(options.sdkInt())) {
+      add("stylus_input_v1")
+      add("hover_input_v1")
+    }
     // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
     // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the
     // reply when this flag is present, so an older runner never costs them a timeout.

@@ -112,6 +112,13 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
  * walks always use `path.repeat[index].children[template]` to preserve validation paths. Without a
  * `repeat` this is the plain child list.
  */
+private fun hasSingleChild(node: PrototypeNode): Boolean =
+  node is PrototypeScrollNode ||
+    node is PrototypeBottomSheetNode ||
+    node is PrototypeDrawerNode ||
+    node is PrototypeDialogNode ||
+    node is PrototypeSearchBarNode
+
 internal fun prototypeChildEntries(
   node: PrototypeNode,
   path: String,
@@ -131,12 +138,7 @@ internal fun prototypeChildEntries(
   val children = prototypeDescendants(node)
   val repeat = node.repeatSpec()
   if (repeat == null) {
-    val single =
-      node is PrototypeScrollNode ||
-        node is PrototypeBottomSheetNode ||
-        node is PrototypeDrawerNode ||
-        node is PrototypeDialogNode ||
-        node is PrototypeSearchBarNode
+    val single = hasSingleChild(node)
     return children.mapIndexed { index, child ->
       PrototypeChildEntry(child, if (single) "$path.child" else "$path.children[$index]")
     }
@@ -720,6 +722,17 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
             )
           },
       )
+    is PrototypeStartTimerAction -> copy(actions = actions.map { it.bound(instance) })
+    is PrototypeCancelTimerAction -> this
+    is PrototypeRequestAction -> boundRequest(instance)
+    is PrototypeToggleAction -> copy(key = instance.interpolate(key))
+    is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
+    is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
+    else -> boundDataAction(instance) ?: this
+  }
+
+private fun PrototypeAction.boundDataAction(instance: RepeatInstance): PrototypeAction? =
+  when (this) {
     is PrototypeSetDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypePrependDataAction ->
@@ -727,13 +740,7 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
-    is PrototypeStartTimerAction -> copy(actions = actions.map { it.bound(instance) })
-    is PrototypeCancelTimerAction -> this
-    is PrototypeRequestAction -> boundRequest(instance)
-    is PrototypeToggleAction -> copy(key = instance.interpolate(key))
-    is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
-    is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
-    else -> this
+    else -> null
   }
 
 /** Only a whole `{index}` segment binds in a data path; the validator refuses anything else. */
@@ -772,15 +779,15 @@ private fun RepeatInstance.interpolateScalar(scalar: PrototypeScalar): Prototype
   if (scalar is PrototypeScalar.Text) interpolateTyped(scalar.value) else scalar
 
 /**
- * A string that is exactly one placeholder keeps the item's own type (so `equals: "{item.id}"` can
- * match a numeric state value); anything else renders to text.
- */
-/**
  * A substring operand always binds as text, so `contains: "{item.n}"` matches the rendered number.
  */
 private fun RepeatInstance.interpolateText(scalar: PrototypeScalar): PrototypeScalar =
   if (scalar is PrototypeScalar.Text) PrototypeScalar.Text(interpolate(scalar.value)) else scalar
 
+/**
+ * A string that is exactly one placeholder keeps the item's own type (so `equals: "{item.id}"` can
+ * match a numeric state value); anything else renders to text.
+ */
 private fun RepeatInstance.interpolateTyped(text: String): PrototypeScalar {
   val only = PrototypeRepeatTemplate.segments(text, alias).singleOrNull()
   val typed =

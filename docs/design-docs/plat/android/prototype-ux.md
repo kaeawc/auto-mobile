@@ -2076,14 +2076,13 @@ limits. Missing/non-array targets and invalid writes leave input unchanged.
 
 Runtime work remains owed: WebSocket/SSE transport, host/device dispatch, routing and atomic
 frame writes, reconnect/backoff, send queues, counters/events, inspection, simulation and
-foreground/background/patch/reset/dismiss lifecycle. Pure TS and Kotlin rules replay shared
+foreground/background/patch/reset/dismiss lifecycle. Pure TS, Kotlin and Swift rules replay shared
 backoff and coalescing vectors under `test/fixtures/prototype-spec/realtime/`. Reconnect uses
 full jitter: `floor(random * min(maxDelayMs, initialDelayMs * 2^(attempt-1)))`, with defaults of
 8 attempts, 500 ms initial delay and 30000 ms maximum delay; exhausted attempts consume no
 random value. Within one 50 ms flush window, consecutive frames made only of `setData` and
 `setState` to the same set of targets collapse to the last frame. Appends and all other actions
-remain ordered and are never coalesced. These are contract rules without runtime integration;
-Swift twins of the pure backoff and coalescing functions remain owed.
+remain ordered and are never coalesced. These are contract rules without runtime integration.
 
 ## Data, storage and network (#12531)
 

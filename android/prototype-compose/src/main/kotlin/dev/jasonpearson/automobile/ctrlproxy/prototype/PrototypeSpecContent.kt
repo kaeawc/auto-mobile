@@ -249,7 +249,8 @@ fun PrototypeSpecContent(
           LocalPrototypeDrawerLayers provides remember { PrototypeDrawerLayers() },
           LocalPrototypeTooltipTargets provides remember(root) { prototypeTooltipTargets(root) },
           LocalPrototypeTargetFocus provides remember { mutableMapOf() },
-          LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+          LocalPrototypeRetainedSubtrees provides
+            remember(root) { prototypeRetainedSubtrees(root) },
           LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
         ) {
           PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))

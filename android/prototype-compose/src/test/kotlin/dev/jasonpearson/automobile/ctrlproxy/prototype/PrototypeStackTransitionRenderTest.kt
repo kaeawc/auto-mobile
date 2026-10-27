@@ -304,7 +304,11 @@ class PrototypeStackTransitionRenderTest {
   @Test
   fun `an instant push override does not disable the following pop animation`() {
     val runtime = show()
-    act(runtime, PrototypePushAction("nav", "detail", PrototypeStackTransition.NONE.value), frames = 1)
+    act(
+      runtime,
+      PrototypePushAction("nav", "detail", PrototypeStackTransition.NONE.value),
+      frames = 1,
+    )
     assertEquals(0, count("home"))
     assertEquals(0, runtime.motionActivity.snapshot().active)
     act(runtime, PrototypePopAction("nav"))

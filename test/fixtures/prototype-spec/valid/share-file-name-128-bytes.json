@@ -1,0 +1,32 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Share",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "share.open",
+        "args": {
+          "files": {
+            "value": [
+              {
+                "asset": "file",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+                "mimeType": "text/plain"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

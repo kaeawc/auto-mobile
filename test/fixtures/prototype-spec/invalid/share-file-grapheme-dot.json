@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "files": {
+              "value": [
+                {
+                  "asset": "file",
+                  "name": ".́x",
+                  "mimeType": "text/plain"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.files.value[0].name",
+  "expectedMessage": "Share file name must be 1 to 128 UTF-8 bytes, with no leading dot, separators or controls"
+}

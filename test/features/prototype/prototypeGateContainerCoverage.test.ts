@@ -216,6 +216,10 @@ const fixtures: Record<string, Node> = {
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,
   prototype_platform_media_items_v1: mediaImage,
+  prototype_platform_share_v1: {
+    ...label,
+    onTap: [{ type: "platform", call: "share.open", args: { text: { value: "Hi" } } }],
+  },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.

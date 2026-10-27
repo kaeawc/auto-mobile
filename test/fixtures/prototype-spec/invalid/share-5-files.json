@@ -1,0 +1,56 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "files": {
+              "value": [
+                {
+                  "asset": "file",
+                  "name": "a",
+                  "mimeType": "text/plain"
+                },
+                {
+                  "asset": "file",
+                  "name": "a",
+                  "mimeType": "text/plain"
+                },
+                {
+                  "asset": "file",
+                  "name": "a",
+                  "mimeType": "text/plain"
+                },
+                {
+                  "asset": "file",
+                  "name": "a",
+                  "mimeType": "text/plain"
+                },
+                {
+                  "asset": "file",
+                  "name": "a",
+                  "mimeType": "text/plain"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.files.value",
+  "expectedMessage": "Share files must contain 1 to 4 items"
+}

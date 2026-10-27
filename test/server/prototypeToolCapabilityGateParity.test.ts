@@ -475,6 +475,23 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     }),
     with: ["prototype_data_model_v1"],
   },
+  prototype_platform_share_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["share"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "share.open", args: { text: { value: "Hi" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_test_v1: {
     minimalSpec: {
       ...base,

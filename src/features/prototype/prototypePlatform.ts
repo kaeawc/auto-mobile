@@ -4,6 +4,7 @@ import {
   prototypeChannelCallError,
   prototypeRealtimeFields,
 } from "./prototypeChannels";
+import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -315,7 +316,13 @@ function argumentsError(
     const at = memberPath(`${path}.args`, name);
     const declared = Object.hasOwn(definition.args, name) ? definition.args[name] : undefined;
     if (!declared) {
-      return { path: at, message: "Unknown argument" };
+      return {
+        path: at,
+        message:
+          action.call === "share.open" && name === "title"
+            ? "Unknown argument: use subject"
+            : "Unknown argument",
+      };
     }
     if (!Object.hasOwn(args, name)) {
       if (!declared.optional) {
@@ -366,6 +373,12 @@ function callError(
   const args = argumentsError(action, path, call.definition, check);
   if (args) {
     return args;
+  }
+  if (action.call === "share.open") {
+    const error = prototypeShareArgumentsError(record(action.args) ?? {}, `${path}.args`);
+    if (error) {
+      return error;
+    }
   }
   const into = typeof action.into === "string" ? intoError(action.into) : undefined;
   return into ? { path: `${path}.into`, message: into } : undefined;
@@ -667,7 +680,11 @@ function argumentValueError(
   }
   const binding = record(value);
   if (binding && Object.hasOwn(binding, "value")) {
-    const error = check(binding.value, rule, `${at}.value`);
+    // Share retains its portable string diagnostics; JSON envelopes still use the contract walk.
+    const error =
+      action.call === "share.open" && rule.kind === "string"
+        ? undefined
+        : check(binding.value, rule, `${at}.value`);
     if (error) {
       return error;
     }

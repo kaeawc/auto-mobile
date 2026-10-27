@@ -89,14 +89,18 @@ and 8192 characters respectively. Daemon logger wiring reads only the active tra
 `trace=<traceId>` to messages. Private tracestate and baggage values are never added to logs;
 requests without a trace and the 2025 path retain their existing log format.
 
-Modern discovery advertises `tools.listChanged` and `resources.listChanged`. Each endpoint
+Modern discovery advertises `tools.listChanged`, `resources.listChanged` and `resources.subscribe`. Each endpoint
 lazily creates one in-memory event bus on its first modern request and bridges the process-wide
-list-change broadcaster onto it. All per-request SDK handlers share that bus, so
-`subscriptions/listen` can acknowledge and filter tools/resources list changes across requests.
+list-change and resource-update broadcasters onto it. All per-request SDK handlers share that bus, so
+`subscriptions/listen` can acknowledge and filter tools/resources list changes and resource updates across requests.
+Resource-update resolvers receive the union of exact URIs on open listen streams, including page URIs;
+the bridge publishes each affected subscribed URI once and the SDK filters delivery per stream.
+Tracking is limited to 256 distinct URIs per stream and 4,096 URI memberships across streams
+(shared URIs count once per stream). Over-limit streams receive HTTP 429 before acknowledgement,
+with one warning per endpoint bridge lifetime; stream closure releases their memberships.
 The bridge detaches once admission stops and all requests close, or when the endpoint is cleared.
 Listen streams use the same cancellation index, shutdown snapshot, disconnect abort, and
-endpoint keepalive as other modern requests; SDK keepalive is disabled. Resource-URI updates
-are not bridged and modern resources do not advertise `subscribe`. Cache hints remain private,
+endpoint keepalive as other modern requests; SDK keepalive is disabled. Cache hints remain private,
 with a 5s tools-list TTL for clients without a listen stream. The stdio proxy keeps its existing
 hand-built server and does not read this flag.
 

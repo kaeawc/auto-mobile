@@ -605,14 +605,10 @@ function validateAwaitEventInput(
 
 /** status and inspect show nothing on the device: reads (#10965). The rest are control. */
 export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
-  
   "status",
- 
   "inspect",
- 
   "listSaved",
   "screenMap",
-,
   "testSessionBegin",
   "testSessionEnd",
   "testSessionReport",

@@ -606,6 +606,7 @@
         let node: PrototypeNode
         let model: PrototypeModel
         let style: Style?
+        let label: String
 
         var body: some View {
             let (side, radius): (CGFloat, CGFloat) = switch node.label == nil ? node.size : nil {
@@ -618,7 +619,7 @@
                     if let symbol = prototypeSymbol(node.icon) {
                         PrototypeGlyph(symbol: symbol).font(.system(size: side >= 96 ? 36 : 22))
                     }
-                    if let label = node.label { Text(label).font(.body.weight(.medium)) }
+                    if node.label != nil { Text(label).font(.body.weight(.medium)) }
                 }
                 .foregroundColor(colors.authored(style?.color) ?? colors.primary)
                 .padding(.horizontal, node.label == nil ? 0 : 20)

@@ -682,7 +682,9 @@ class PrototypeRenderModelTest {
         decoded,
         (roundTrip as PrototypeSpecValidation.Success).spec,
       )
-      mapPrototypeSpec(decoded)
+      // Derived values format through android.icu, which a plain JVM test cannot run; the
+      // prototype-compose Robolectric tests map them.
+      if (!file.readText().contains("\"derive\"")) mapPrototypeSpec(decoded)
     }
   }
 }

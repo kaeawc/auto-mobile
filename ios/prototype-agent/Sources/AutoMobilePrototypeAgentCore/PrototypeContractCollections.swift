@@ -34,6 +34,9 @@ extension PrototypeContractValidator {
         if kind == "screenMap", !(1 ... PrototypeLimits.maxStackScreens).contains(fields.count) {
             throw Self.invalid(path, "Screen count out of range")
         }
+        if kind == "map", Double(fields.count) > (rule["maxEntries"]?.numberValue ?? .infinity) {
+            throw Self.invalid(path, "Map entry limit exceeded")
+        }
         if kind == "record", Double(fields.count) > (rule["maxEntries"]?.numberValue ?? .infinity) {
             throw Self.invalid(path, "Record entry limit exceeded")
         }

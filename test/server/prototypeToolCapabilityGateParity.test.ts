@@ -63,6 +63,16 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
   },
   prototype_semantics_v1: fixture({ ...label, semantics: { heading: true } }),
+  prototype_format_v1: fixture({
+    type: "column",
+    id: "label",
+    repeat: {
+      items: [{ n: 1 }],
+      as: "item",
+      derive: { nText: { of: { item: "n" }, format: { number: {} } } },
+    },
+    children: [{ type: "text", text: "{item.nText}" }],
+  }),
   prototype_theme_modes_v1: fixture({
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },

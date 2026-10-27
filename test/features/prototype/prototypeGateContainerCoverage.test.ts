@@ -37,6 +37,15 @@ const fixtures: Record<string, Node> = {
   },
   prototype_strings_v1: { ...label, text: "{t:title}" },
   prototype_semantics_v1: { ...label, semantics: { heading: true } },
+  prototype_format_v1: {
+    type: "column",
+    repeat: {
+      items: [{ n: 1 }],
+      as: "item",
+      derive: { nText: { of: { item: "n" }, format: { number: {} } } },
+    },
+    children: [label],
+  },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },

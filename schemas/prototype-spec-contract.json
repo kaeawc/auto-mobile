@@ -7,6 +7,9 @@
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
     "pointer": "^(?:/(?:[^~/]|~[01])*)+$(?![\\s\\S])",
+    "currencyCode": "^[A-Z]{3}$(?![\\s\\S])",
+    "formatLocale": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$(?![\\s\\S])",
+    "formatTimeZone": "^[A-Za-z_]+([/+-][A-Za-z0-9_+-]+)*$(?![\\s\\S])",
     "stringKey": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
     "localeTag": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
   },
@@ -10912,6 +10915,17 @@
           },
           "optional": true
         },
+        "derive": {
+          "rule": {
+            "kind": "map",
+            "maxEntries": 32,
+            "item": {
+              "kind": "ref",
+              "name": "derivedEntry"
+            }
+          },
+          "optional": true
+        },
         "strings": {
           "rule": {
             "kind": "strings"
@@ -13735,6 +13749,17 @@
             "kind": "key"
           },
           "optional": true
+        },
+        "derive": {
+          "rule": {
+            "kind": "map",
+            "maxEntries": 8,
+            "item": {
+              "kind": "ref",
+              "name": "repeatDerivedEntry"
+            }
+          },
+          "optional": true
         }
       }
     },
@@ -14499,6 +14524,267 @@
           "rule": {
             "kind": "enum",
             "values": ["forward", "reverse", "center"]
+          },
+          "optional": true
+        }
+      }
+    },
+    "valueFormat": {
+      "kind": "object",
+      "fields": {
+        "number": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "minFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              },
+              "maxFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              },
+              "grouping": {
+                "rule": {
+                  "kind": "boolean"
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "compact": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["short", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "currency": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "code": {
+                "rule": {
+                  "kind": "string",
+                  "pattern": "currencyCode"
+                },
+                "optional": false
+              }
+            }
+          },
+          "optional": true
+        },
+        "percent": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "minFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              },
+              "maxFraction": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 0,
+                  "max": 20
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "date": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["short", "medium", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "time": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["short", "medium", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "relative": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "style": {
+                "rule": {
+                  "kind": "enum",
+                  "values": ["narrow", "short", "long"]
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        }
+      },
+      "exactlyOne": ["number", "compact", "currency", "percent", "date", "time", "relative"]
+    },
+    "derivedEntry": {
+      "kind": "object",
+      "fields": {
+        "of": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "data": {
+                "rule": {
+                  "kind": "pointer"
+                },
+                "optional": true
+              },
+              "state": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": true
+              },
+              "value": {
+                "rule": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "number"
+                    },
+                    {
+                      "kind": "string",
+                      "empty": true
+                    }
+                  ]
+                },
+                "optional": true
+              }
+            },
+            "exactlyOne": ["data", "state", "value"]
+          },
+          "optional": false
+        },
+        "format": {
+          "rule": {
+            "kind": "ref",
+            "name": "valueFormat"
+          },
+          "optional": false
+        },
+        "locale": {
+          "rule": {
+            "kind": "string",
+            "max": 35,
+            "pattern": "formatLocale"
+          },
+          "optional": true
+        },
+        "timeZone": {
+          "rule": {
+            "kind": "string",
+            "max": 128,
+            "pattern": "formatTimeZone"
+          },
+          "optional": true
+        }
+      }
+    },
+    "repeatDerivedEntry": {
+      "kind": "object",
+      "fields": {
+        "of": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "item": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": true
+              },
+              "value": {
+                "rule": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "number"
+                    },
+                    {
+                      "kind": "string",
+                      "empty": true
+                    }
+                  ]
+                },
+                "optional": true
+              }
+            },
+            "exactlyOne": ["item", "value"]
+          },
+          "optional": false
+        },
+        "format": {
+          "rule": {
+            "kind": "ref",
+            "name": "valueFormat"
+          },
+          "optional": false
+        },
+        "locale": {
+          "rule": {
+            "kind": "string",
+            "max": 35,
+            "pattern": "formatLocale"
+          },
+          "optional": true
+        },
+        "timeZone": {
+          "rule": {
+            "kind": "string",
+            "max": 128,
+            "pattern": "formatTimeZone"
           },
           "optional": true
         }
@@ -15346,40 +15632,79 @@
       "state": {
         "os": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["android", "ios"] }
+          "value": {
+            "kind": "enum",
+            "values": ["android", "ios"]
+          }
         },
-        "osVersion": { "platforms": ["android", "ios"], "value": { "kind": "string", "max": 64 } },
+        "osVersion": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "max": 64
+          }
+        },
         "idiom": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "enum", "values": ["phone", "tablet", "foldable", "desktop"] }
+          "value": {
+            "kind": "enum",
+            "values": ["phone", "tablet", "foldable", "desktop"]
+          }
         },
         "widthClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [600, 840]
         },
         "heightClass": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["compact", "medium", "expanded"] },
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "medium", "expanded"]
+          },
           "breakpoints": [480, 900]
         },
         "sizeClass": {
           "platforms": ["ios"],
-          "value": { "kind": "enum", "values": ["compact", "regular"] }
+          "value": {
+            "kind": "enum",
+            "values": ["compact", "regular"]
+          }
         },
         "windowWidth": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "windowHeight": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "number", "integer": true, "min": 0, "max": 65535 }
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 65535
+          }
         },
         "posture": {
           "platforms": ["android"],
-          "value": { "kind": "enum", "values": ["flat", "tabletop", "book"] }
+          "value": {
+            "kind": "enum",
+            "values": ["flat", "tabletop", "book"]
+          }
         },
-        "pointer": { "platforms": ["android", "ios"], "value": { "kind": "boolean" } }
+        "pointer": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
       }
     }
   },

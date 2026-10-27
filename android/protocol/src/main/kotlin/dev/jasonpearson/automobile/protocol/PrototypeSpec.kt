@@ -26,6 +26,7 @@ data class PrototypeRepeat(
   val `as`: String,
   val itemsPath: String? = null,
   val key: String? = null,
+  val derive: Map<String, PrototypeDerivedEntry>? = null,
 )
 
 @Serializable
@@ -33,6 +34,7 @@ private data class PrototypeRepeatWire(
   val items: JsonElement,
   val `as`: String,
   val key: String? = null,
+  val derive: Map<String, PrototypeDerivedEntry>? = null,
 )
 
 /** Keeps the source pointer in `items.path`, never as a wire-level `itemsPath` member. */
@@ -49,7 +51,7 @@ object PrototypeRepeatSerializer :
     val items =
       if (source == null) json.decodeFromJsonElement<List<Map<String, PrototypeScalar>>>(wire.items)
       else emptyList()
-    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key)
+    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key, wire.derive)
   }
 
   override fun toJson(value: PrototypeRepeat): JsonElement {
@@ -57,7 +59,7 @@ object PrototypeRepeatSerializer :
     val items =
       value.itemsPath?.let { buildJsonObject { put("path", it) } }
         ?: json.encodeToJsonElement(value.items)
-    return json.encodeToJsonElement(PrototypeRepeatWire(items, value.`as`, value.key))
+    return json.encodeToJsonElement(PrototypeRepeatWire(items, value.`as`, value.key, value.derive))
   }
 }
 
@@ -298,6 +300,7 @@ data class PrototypeSpec(
   /** `none` opts out of prototype animation; absent or `standard` follows the system scale. */
   val motion: String? = null,
   val data: JsonObject? = null,
+  val derive: Map<String, PrototypeDerivedEntry>? = null,
   /** The state keys and `/data` pointers the device keeps across shows (#12522). */
   val storage: PrototypeStorageBlock? = null,
   /** What the spec needs from the platform before show (#14294). */

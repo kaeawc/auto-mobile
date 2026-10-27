@@ -432,8 +432,8 @@ internal object PrototypeBindableFields {
         "tooltip" -> visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
-            part(entry, entryPath)
-              ?: visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+            visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+              ?: part(entry, entryPath)
           }
         "select" ->
           visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
@@ -583,6 +583,7 @@ internal object PrototypeRepeatValidator {
     val alias: String,
     val items: List<JsonObject>,
     val pathBound: Boolean = false,
+    val derivedNames: Set<String> = emptySet(),
   )
 
   fun validate(
@@ -622,6 +623,13 @@ internal object PrototypeRepeatValidator {
     path: String,
   ): List<Pair<JsonObject, Int?>> {
     val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") }
+    if (
+      scope != null &&
+        checkedKeys(value).any { key ->
+          PrototypeRepeatTemplate.fieldReferences(key, scope.alias).any { it in scope.derivedNames }
+        }
+    )
+      return emptyList()
     if (scope == null || checkedKeys(value).none { hasPlaceholder(it, scope.alias) }) {
       return listOf(value to null)
     }

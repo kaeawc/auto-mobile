@@ -239,6 +239,7 @@ internal object PrototypeStrictPolicy {
         need("strings")
       if (spec["data"] != null) need("data_model")
       if (spec["storage"] != null) need("storage")
+      if ("derive" in spec) need("format")
       val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
       if (colors?.get("light") != null || colors?.get("dark") != null) need("theme_modes")
     }
@@ -316,6 +317,7 @@ internal object PrototypeStrictPolicy {
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
+      if (repeatSpec?.containsKey("derive") == true) need("format")
       if (repeatSpec?.get("items") is JsonObject || repeatSpec?.get("key") != null)
         need("data_model")
     }

@@ -6,6 +6,10 @@ import {
 import { PROTOTYPE_STYLE_POLISH_V2_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
+  prototypeFormatFields,
+  prototypeFormatUnsupportedMessage,
+} from "./prototypeFormatCapability";
+import {
   prototypeStackTransitionFields,
   prototypeStackTransitionsUnsupportedMessage,
 } from "./prototypeStackTransitions";
@@ -13,6 +17,7 @@ import {
   PROTOTYPE_TIMERS_CAPABILITY,
   PROTOTYPE_EFFECTS_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
+  PROTOTYPE_FORMAT_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
@@ -169,6 +174,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_SEMANTICS_CAPABILITY,
     fields: prototypeSemanticsFields,
     unsupportedMessage: prototypeSemanticsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_FORMAT_CAPABILITY,
+    fields: prototypeFormatFields,
+    unsupportedMessage: prototypeFormatUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_THEME_MODES_CAPABILITY,

@@ -1,4 +1,5 @@
 import { prototypeStylePolishV2ObjectError } from "./prototypeStylePolishV2";
+import { prototypeDerivedError } from "./prototypeDerivedValidation";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeStrictPolicyError, type PrototypeStrictOptions } from "./prototypeStrictPolicy";
 import { prototypeStrictJson } from "./prototypeStrictJson";
@@ -359,6 +360,9 @@ function visitMap(
   if (!data) {
     return fail(path, "Expected object");
   }
+  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Map entry limit exceeded");
+  }
   for (const key of Object.keys(data).sort()) {
     const childPath = keyPath(path, key);
     if (!prototypeContractPatterns.stateKey.test(key)) {
@@ -429,7 +433,9 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || !prototypeContractPatterns.blankText.test(value)) &&
-    value.length <= (rule.max ?? Infinity),
+    value.length <= (rule.max ?? Infinity) &&
+    (!rule.pattern ||
+      new RegExp(contract.patterns[rule.pattern as keyof typeof contract.patterns]).test(value)),
   pointer: isPrototypeDataPointer,
   key: (value) => typeof value === "string" && prototypeContractPatterns.stateKey.test(value),
   boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
@@ -788,6 +794,7 @@ function layoutErrors(
     gridSpanErrors(context) ??
     swipeActionsErrors(context) ??
     prototypeLazyListError(context.nodes) ??
+    prototypeDerivedError(value, context.nodes) ??
     repeatErrors(value, repeats) ??
     prototypeStorageError(value)
   );

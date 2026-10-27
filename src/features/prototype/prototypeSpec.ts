@@ -1,6 +1,7 @@
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
+import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
 import * as timers from "./prototypeTimerSchema";
 import { prototypeStringsSchema } from "./prototypeStrings";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
@@ -202,6 +203,7 @@ const repeatSchema = z
       z.object({ path: pointerSchema }).strict(),
     ]),
     as: keySchema,
+    derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),
   })
   .strict();
@@ -863,6 +865,7 @@ const specSchema = z
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
+    derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();

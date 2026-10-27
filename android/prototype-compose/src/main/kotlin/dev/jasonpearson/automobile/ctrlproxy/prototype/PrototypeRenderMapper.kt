@@ -9,7 +9,10 @@ import java.util.IdentityHashMap
 import kotlinx.serialization.json.JsonObject
 
 /** Static validation and repeat binding belong to one resolved root, with identity-based keys. */
-internal class PrototypeRenderCache(val root: PrototypeNode) {
+internal class PrototypeRenderCache(
+  val root: PrototypeNode,
+  private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+) {
   private val entries =
     IdentityHashMap<PrototypeNode, MutableMap<String, List<PrototypeChildEntry>>>()
 
@@ -20,15 +23,20 @@ internal class PrototypeRenderCache(val root: PrototypeNode) {
   fun children(node: PrototypeNode, path: String): List<PrototypeChildEntry> =
     entries
       .getOrPut(node) { mutableMapOf() }
-      .getOrPut(path) { validatedPrototypeChildren(node, path) }
+      .getOrPut(path) { validatedPrototypeChildren(node, path, formatter) }
 }
 
 /**
  * One snapshot mapping, shared by the controller and Compose. Each actual pass computes all values
  * bottom-up, then interns against the preceding pass; it never guesses a node's state dependencies.
  */
-internal class PrototypeRenderMapper {
+internal class PrototypeRenderMapper(
+  private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+) {
   private val lock = Any()
+  private val checked = PrototypeCheckedNodeCache(formatter)
+  private var locale: java.util.Locale? = null
+  private var zone: String? = null
   private var authoredSpec: PrototypeSpec? = null
   private var sourceLocales: List<String>? = null
   private var sourceStrings: JsonObject? = null
@@ -62,6 +70,14 @@ internal class PrototypeRenderMapper {
     locales: List<String> = emptyList(),
   ): PrototypeRenderModel =
     synchronized(lock) {
+      val currentLocale = java.util.Locale.getDefault()
+      val currentZone = java.util.TimeZone.getDefault().id
+      if (locale != currentLocale || zone != currentZone) {
+        cache = null
+        previousModel = null
+        locale = currentLocale
+        zone = currentZone
+      }
       val resolved = resolveLocked(spec, platform, locales)
       previousModel?.let { model ->
         if (
@@ -76,7 +92,8 @@ internal class PrototypeRenderMapper {
       }
       PrototypeTrace.section(PrototypeTrace.MAP_RENDER_TREE) {
         val static =
-          cache?.takeIf { it.root === resolved.root } ?: PrototypeRenderCache(resolved.root)
+          cache?.takeIf { it.root === resolved.root }
+            ?: PrototypeRenderCache(resolved.root, formatter)
         val mapping =
           PrototypeNodeMapping(
             state = resolved.state.orEmpty(),
@@ -86,11 +103,13 @@ internal class PrototypeRenderMapper {
             stacks = stacks,
             validity =
               prototypeValidity(
-                checkedPrototypeNodes(resolved.root, resolved.data),
+                checked.nodes(resolved),
                 resolved.state.orEmpty(),
               ),
             shownErrors = shownErrors,
             data = resolved.data,
+            derive = resolved.derive.orEmpty(),
+            formatter = formatter,
           )
         val model = prototypeRenderModel(resolved, mapping.map(resolved.root, "root"))
         cache = static

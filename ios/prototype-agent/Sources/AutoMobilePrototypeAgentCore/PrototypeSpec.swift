@@ -87,6 +87,7 @@ struct PrototypeSpec: Decodable {
     let window: WindowSpec
     let state: [String: JSONValue]?
     let data: [String: JSONValue]?
+    let derive: [String: PrototypeDerivedEntry]?
     let theme: PrototypeTheme?
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
     /// unless the system reduces motion (#10442). See `PrototypeMotion`.
@@ -104,7 +105,7 @@ struct PrototypeSpec: Decodable {
     private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage, requires, platform, strings
+        case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -127,6 +128,7 @@ struct PrototypeSpec: Decodable {
         }
         try PrototypeLazyList.validateLimits(root: container.decode(JSONValue.self, forKey: .root), data: data)
         if let data { try PrototypeLimits.guardData(data) }
+        derive = try container.decodeIfPresent([String: PrototypeDerivedEntry].self, forKey: .derive)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -147,7 +149,9 @@ struct PrototypeSpec: Decodable {
             root: raw,
             state: menuState ?? [:]
         )
-        root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:], strings: strings, locales: locales)
+        root = try Self.buildRoot(
+            raw, data: data, menuState: menuState ?? [:], strings: strings, locales: locales, derive: derive
+        )
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
         // boolean state values, so a null, array or object fails the show everywhere.
@@ -171,7 +175,8 @@ struct PrototypeSpec: Decodable {
     /// errors. It depends on `data` and the initial state only, so a data write reruns it.
     private static func buildRoot(
         _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue],
-        strings: JSONValue?, locales: [String], platform: [String: JSONValue] = [:]
+        strings: JSONValue?, locales: [String], platform: [String: JSONValue] = [:],
+        derive: [String: PrototypeDerivedEntry]? = nil
     )
         throws -> PrototypeNode
     {
@@ -180,6 +185,8 @@ struct PrototypeSpec: Decodable {
             nodes: stringNodes(raw)
         )
         try PrototypeLazyList.validate(root: raw, data: data, state: menuState)
+        let rawDerive = try derive.map { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode($0)) }
+        try PrototypeDerivedValidator.validate(derive: rawDerive, root: raw, data: data)
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeRequestValidator.validate(raw, state: menuState)
@@ -187,12 +194,20 @@ struct PrototypeSpec: Decodable {
         try PrototypeMenus.validateAuthoredText(raw)
         try PrototypeLoadingStates.validate(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
-        try PrototypeLimits.guardSubstitutedText(raw, data: data)
+        let formatContext = PrototypeDerivedContext(entries: derive ?? [:], data: data)
+        try PrototypeLimits.guardSubstitutedText(raw, data: data, derived: formatContext, state: menuState)
         let bound = PrototypeDataResolver.resolveRoot(raw, data: data, platform: platform)
         let resolved = strings
             .map { PrototypeStrings.resolve(bound, strings: $0, locales: locales, data: data) } ?? bound
         try PrototypeLimits.guardTree(resolved)
-        let expanded = PrototypeRepeat.expand(resolved)
+        try PrototypeRepeat.validateDerivedRows(
+            resolved, formatter: formatContext.formatter, environment: formatContext.environment
+        )
+        let expanded = PrototypeRepeat.expand(
+            resolved,
+            formatter: formatContext.formatter,
+            environment: formatContext.environment
+        )
         try PrototypePagerOptions.validate(expanded)
         try PrototypeSwipe.validate(expanded)
         try PrototypeCarousel.validate(expanded)
@@ -219,6 +234,7 @@ struct PrototypeSpec: Decodable {
         window = spec.window
         self.state = state ?? spec.state
         self.data = data
+        derive = spec.derive
         theme = spec.theme
         motion = spec.motion
         storage = spec.storage
@@ -244,7 +260,8 @@ struct PrototypeSpec: Decodable {
         try PrototypeLazyList.validateLimits(root: raw, data: data)
         if let data { try PrototypeLimits.guardData(data) }
         let rebuilt = try Self.buildRoot(
-            raw, data: data, menuState: state ?? [:], strings: strings, locales: locales, platform: platformState
+            raw, data: data, menuState: state ?? [:], strings: strings, locales: locales,
+            platform: platformState, derive: derive
         )
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
@@ -281,7 +298,8 @@ struct PrototypeSpec: Decodable {
             menuState: state ?? [:],
             strings: strings,
             locales: locales,
-            platform: platformState
+            platform: platformState,
+            derive: derive
         )
         try PrototypeStacks.validate(root: rebuilt)
         try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)

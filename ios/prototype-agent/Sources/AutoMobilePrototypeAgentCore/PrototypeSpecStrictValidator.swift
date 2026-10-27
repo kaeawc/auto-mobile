@@ -15,6 +15,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
             try PrototypeLazyList.validate(root: root, data: modelData, state: state)
             try PrototypeLazyList.validateAppend(actions: context.actions, data: modelData)
+            try PrototypeDerivedValidator.validate(derive: fields["derive"], root: root, data: modelData)
             try PrototypeStrictSemantics.layout(context)
             var repeats = PrototypeStrictRepeats(data: modelData)
             try repeats.templates(root.objectFields ?? [:], path: "root")

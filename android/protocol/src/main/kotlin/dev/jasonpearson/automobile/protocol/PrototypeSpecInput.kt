@@ -153,6 +153,7 @@ internal object PrototypeSpecInput {
     PrototypeLazyListRules.limitError(value)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
       ?: gridSpanErrors(context)
+      ?: PrototypeDerivedRules.error(value, context)
       ?: PrototypeLazyListRules.error(context)
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
@@ -178,6 +179,8 @@ internal object PrototypeSpecInput {
           },
         )
       }
+      "map",
+      "record",
       "screenMap" ->
         JsonObject(
           (value as JsonObject).mapValues { (_, child) ->

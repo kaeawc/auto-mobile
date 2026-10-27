@@ -1052,6 +1052,43 @@ known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\
 those requests. A saved prototype launched with no host connected gets no reverse either.
 On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are refused as
 \`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
+
+
+## Value formatters (#14227)
+
+Use top-level \`derive: {priceText: {of: {data: "/price"}, format: {currency: {code: "USD"}}}}\`
+and read \`{derived:priceText}\` in text node text, contentDescription, rich-text spans,
+button/FAB labels, topAppBar title, badge text, dialog title/text, and snackbar text.
+Other text-kind fields (request url/headers/body, check messages, and
+select/segmented/menu/searchBar labels) validate unknown names but show tokens literally on devices.
+There are at most 32 names (state-key syntax); unknown reads fail validation.
+\`of\` chooses exactly one data pointer, state key or literal \`{value: number|string}\`.
+Inside a repeat, \`repeat.derive\` supports at most 8 names, with \`of: {item: "field"}\`
+or a literal value; the resulting strings bind as \`{item.priceText}\` using your alias.
+Names cannot collide with original row fields; derived fields cannot reference each other.
+Host validation checks field references; device-dependent key and emit-name value checks wait for the renderer.
+
+\`format\` has exactly one key with an object: \`number {minFraction?,maxFraction?,grouping?}\`,
+\`compact {style?:short|long}\`, \`currency {code:USD}\`, \`percent {minFraction?,maxFraction?}\`,
+\`date {style?:short|medium|long}\`, \`time {style?:short|medium|long}\`, or
+\`relative {style?:narrow|short|long}\`. Fraction digits are integers 0..20;
+min cannot exceed max. Grouping true/default respects locale minimum grouping digits;
+false disables grouping entirely. Compact, currency, and percent respect locale minimum grouping digits.
+Compact defaults short, date medium,
+time short, relative long. Currency codes are three uppercase letters and use CLDR minor units.
+Number kinds require finite numbers; percent inputs are ratios (0.256 means 25.6%).
+Date/time/relative accept integer epoch milliseconds, YYYY-MM-DD (midnight UTC),
+or ISO date-times with seconds and Z or an explicit +hh:mm offset; fractional seconds work.
+Invalid or missing inputs display empty text. Optional entry \`locale\` (BCP 47, <=35 characters)
+and \`timeZone\` (IANA id, <=128) override device defaults.
+
+Relative time uses an injected clock snapshot, truncates toward zero, and picks the largest
+elapsed unit: seconds, minutes (60 s), hours (60 min), days (24 h), months (30 d), years (365 d).
+Under one second uses localized now. Exact English fixtures normalize U+202F/U+00A0 to spaces;
+foreign currency symbols, narrow relative text, now wording and non-English CLDR data can vary
+by engine and use structural comparisons. Set locale, zone and clock for deterministic previews.
+Both derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
+\`dateTime\`, \`duration\`, \`plural\`, and \`fileSize\` are unsupported follow-ups.
 `;
 
 export const GUIDE_TIMERS = `### Timers

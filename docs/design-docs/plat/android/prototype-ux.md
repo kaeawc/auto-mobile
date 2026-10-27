@@ -2981,3 +2981,74 @@ without stacks. The event uses normal sequence allocation, state, pages and
 stacks. The payload never includes typed text. Authored emits cannot use the
 reserved `prototype_` prefix. Disabling the option or closing the runtime stops
 reporting.
+
+## Value formatters (#14227)
+
+Optional `derive` maps up to 32 STATE_KEY names to strict
+`{of, format, locale?, timeZone?}` entries. `of` contains exactly one of
+`{data: "/pointer"}` (relative to data), `{state: "key"}`, or
+`{value: number|string}`. Every text field supporting `{data:/pointer}` also
+accepts `{derived:name}`; undeclared names are validation errors, unused entries
+are allowed, and malformed braces remain literal. Devices render these tokens in
+text node text, contentDescription, rich-text spans, button/FAB labels, topAppBar
+title, badge text, dialog title/text, and snackbar text. Other text-kind fields
+(request url/headers/body, check messages, select/segmented/menu/searchBar labels)
+validate unknown names but display the token literally on devices.
+
+`repeat.derive` maps at most 8 names to the same entry shape with `of` restricted
+to `{item: "field"}` or `{value: number|string}`. It projects strings onto each
+original row for `{item.createdAtText}` (using the repeat's actual alias).
+Names cannot collide with any original item field, including non-scalar data
+fields. Derived entries do not read other derived entries. Host validation checks projected
+field references without evaluating device-local strings; value-dependent checks
+on derived repeat keys and emit names are deferred to the renderer. Missing source fields
+are allowed and format as empty strings.
+
+`format` contains exactly one of these keys, each containing a strict object:
+
+| Kind     | Options and defaults                                       | Input                                       |
+| -------- | ---------------------------------------------------------- | ------------------------------------------- |
+| number   | minFraction?, maxFraction? (integers 0..20), grouping=true | finite number                               |
+| compact  | style=short (short or long)                                | finite number                               |
+| currency | code required, three uppercase ISO-4217 letters            | finite number                               |
+| percent  | minFraction?, maxFraction? (0..20)                         | ratio, so 0.256 is 25.6% with maxFraction=1 |
+| date     | style=medium (short, medium, long)                         | epoch milliseconds or ISO string            |
+| time     | style=short (short, medium, long)                          | epoch milliseconds or ISO string            |
+| relative | style=long (narrow, short, long)                           | epoch milliseconds or ISO string            |
+
+minFraction must not exceed maxFraction when both are supplied. Omitted numeric
+fraction options use Intl/CLDR defaults (currency respects minor units, including
+zero for JPY). Number grouping true/default respects the locale's minimum grouping
+digits; false disables grouping entirely. Compact, currency, and percent also
+respect locale minimum grouping digits. Locale defaults to the device locale; timeZone defaults to the
+device zone. Overrides accept a simple BCP 47 tag of at most 35 characters and an
+IANA zone identifier of at most 128 characters. Shape validation does not prove
+that the current engine supports a locale or zone.
+
+Epoch milliseconds must be finite integers within the Date range. Strings are
+`YYYY-MM-DD` (midnight UTC) or `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / a signed
+`hh:mm` offset. Hours must be 00–23 and minutes/seconds 00–59; hour 24 and
+leap second 60 are rejected. Invalid calendar dates, unzoned date-times, wrong types and
+missing pointers display as the empty string. The host's pure formatter returns
+undefined for invalid inputs; its resolver converts that to an empty string.
+
+Relative formatting takes an injected nowMs snapshot; it never reads the real
+clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
+year=365 days, month=30 days, day=24 hours, hour=60 minutes, minute=60 seconds,
+second=1000 ms. Truncate toward zero. Under one second uses localized "now".
+There are no weeks or calendar-month arithmetic. Callers resolve entry locale
+and zone overrides before formatting, and keep the clock snapshot fixed when
+reproducible output is required.
+
+`prototype_format_v1` gates either derive map, including empty maps, before show
+or the complete patch result. Renderers must implement this capability before
+advertising it. Shared `derive/formatters.json` cases define parity: normalize
+U+202F and U+00A0 to plain space before comparisons. Exact cases pin supported
+English output; structural cases allow documented CLDR differences in foreign
+currency symbols, narrow relative abbreviations, zero-relative wording and
+non-English data. Add engine overrides only after measuring an actual platform
+difference; the fixture note records the divergence policy and unit thresholds.
+
+`dateTime`, `duration`, `plural`, and `fileSize` remain follow-ups and are invalid
+format kinds. No dependencies are needed: the host uses Intl.NumberFormat,
+Intl.DateTimeFormat and Intl.RelativeTimeFormat.

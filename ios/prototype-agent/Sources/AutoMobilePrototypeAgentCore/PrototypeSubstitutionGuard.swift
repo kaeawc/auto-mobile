@@ -2,8 +2,15 @@ import Foundation
 
 extension PrototypeLimits {
     /// Checks authored fields before either data resolution or repeat expansion allocates text.
-    static func guardSubstitutedText(_ root: JSONValue, data: [String: JSONValue]?) throws {
-        var guarder = PrototypeSubstitutionGuard(data: data)
+    static func guardSubstitutedText(
+        _ root: JSONValue,
+        data: [String: JSONValue]?,
+        derived: PrototypeDerivedContext? = nil,
+        state: [String: JSONValue] = [:]
+    )
+        throws
+    {
+        var guarder = PrototypeSubstitutionGuard(data: data, derived: derived, state: state)
         try guarder.visit(root, path: "root", scope: nil)
     }
 }
@@ -15,11 +22,15 @@ private struct PrototypeSubstitutionGuard {
     }
 
     let data: [String: JSONValue]?
+    let derived: PrototypeDerivedContext?
+    let state: [String: JSONValue]
     private var repeats: PrototypeRepeatData
     private var total = 0
 
-    init(data: [String: JSONValue]?) {
+    init(data: [String: JSONValue]?, derived: PrototypeDerivedContext?, state: [String: JSONValue]) {
         self.data = data
+        self.derived = derived
+        self.state = state
         repeats = PrototypeRepeatData(data: data)
     }
 
@@ -61,8 +72,21 @@ private struct PrototypeSubstitutionGuard {
             source = spec["items"]
         }
         guard case let .array(items)? = source else { return Scope(alias: alias, items: []) }
+        let derive = (
+            try? spec["derive"]
+                .map { try JSONDecoder().decode([String: PrototypeDerivedEntry].self, from: JSONEncoder().encode($0)) }
+        ) ??
+            [:]
         return Scope(alias: alias, items: items.map { item in
-            if case let .object(fields) = item { return fields }
+            if case let .object(fields) = item {
+                guard let derived else { return fields }
+                return PrototypeDerivedValues.project(
+                    fields,
+                    derive: derive,
+                    formatter: derived.formatter,
+                    environment: derived.environment
+                )
+            }
             return [:]
         })
     }
@@ -77,7 +101,13 @@ private struct PrototypeSubstitutionGuard {
         var bound = authored
         var dataRecognized = false
         if text {
-            let substitution = PrototypeDataText.substitutionLength(authored, data: data)
+            let dataSubstitution = PrototypeDataText.substitutionLength(authored, data: data)
+            let spans = PrototypeDerivedText.spans(authored)
+            // Derived values are bounded at render time; only their authored tokens count here.
+            let substitution = (
+                recognized: dataSubstitution.recognized || !spans.isEmpty,
+                length: dataSubstitution.length
+            )
             if substitution.length > PrototypeLimits.maxSubstitutedTextLength {
                 throw PrototypeLimits.violation(fieldPath, "Substituted text length limit exceeded")
             }

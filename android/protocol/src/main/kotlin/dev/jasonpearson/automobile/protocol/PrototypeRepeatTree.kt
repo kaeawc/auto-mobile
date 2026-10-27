@@ -45,7 +45,12 @@ internal object PrototypeRepeatTree {
     val items =
       if (pointer != null) data.items(pointer)
       else (repeat["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-    return Scope(path, alias, items, source != null)
+    val names = (repeat["derive"] as? JsonObject)?.keys.orEmpty()
+    // Only copy rows when derived fields are added; the projected list is otherwise shared.
+    val projected =
+      if (names.isEmpty()) items
+      else items.map { JsonObject(it + names.associateWith { JsonPrimitive("") }) }
+    return Scope(path, alias, projected, source != null, names)
   }
 
   fun repeatSourceError(
@@ -80,6 +85,7 @@ internal object PrototypeRepeatTree {
     if (scope.items.any { !it.containsKey(key) }) {
       return fail(at, "Unknown repeat field ${JsonPrimitive(key)}")
     }
+    if (key in scope.derivedNames) return null
     val seen = mutableMapOf<String, Int>()
     val numbers = mutableMapOf<Double, Int>()
     for ((index, item) in scope.items.withIndex()) {

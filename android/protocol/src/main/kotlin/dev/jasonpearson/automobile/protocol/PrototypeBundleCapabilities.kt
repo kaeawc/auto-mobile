@@ -12,6 +12,7 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_strings_v1")
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
+    if ("derive" in spec) caps.add("prototype_format_v1")
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     val scrim = (((spec["window"] as? JsonObject)?.get("placement") as? JsonObject)?.get("scrim"))
     if (
@@ -66,6 +67,7 @@ internal object PrototypeBundleCapabilities {
     )
       caps.add("prototype_loading_states_v1")
     val repeat = node["repeat"] as? JsonObject
+    if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
     if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
       caps.add("prototype_data_model_v1")
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->

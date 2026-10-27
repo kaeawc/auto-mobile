@@ -238,7 +238,8 @@ class PrototypeRuntime(
     emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)
   }
 
-  private val renderMapper = PrototypeRenderMapper()
+  private val renderMapper =
+    PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
 
   /** The running animations of this prototype's window, published in its window metadata. */
   @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
@@ -425,7 +426,7 @@ class PrototypeRuntime(
     // runtime's resolve cache, cached model or renderMappingPasses before the snapshot is
     // committed.
     try {
-      PrototypeRenderMapper()
+      PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
         .map(next.spec, next.pages, stacks = next.stacks, shownErrors = next.shownErrors)
     } catch (error: IllegalArgumentException) {
       return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
@@ -1023,7 +1024,7 @@ class PrototypeRuntime(
     // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
     // rejected write from touching the runtime's own caches, as for a patch.
     return try {
-      PrototypeRenderMapper()
+      PrototypeRenderMapper(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
         .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
       StagedWrite.Accepted(spec)
     } catch (error: IllegalArgumentException) {
@@ -1573,8 +1574,10 @@ class PrototypeRuntime(
     )
   }
 
-  private fun checkedNodes(): List<PrototypeNode> =
-    checkedPrototypeNodes(PrototypeDataResolver.resolve(current.spec).root, current.spec.data)
+  private val checkedNodeCache =
+    PrototypeCheckedNodeCache(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
+
+  private fun checkedNodes(): List<PrototypeNode> = checkedNodeCache.nodes(current.spec)
 
   private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
 

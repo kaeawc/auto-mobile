@@ -15,7 +15,9 @@ struct PagerPosition: Equatable {
 func interpolatePrototypeText(
     _ text: String,
     state: [String: JSONValue],
-    pager: PagerPosition?
+    pager: PagerPosition?,
+    derived: PrototypeDerivedContext? = nil,
+    derivedOnly: Bool = false
 )
     -> String
 {
@@ -31,7 +33,10 @@ func interpolatePrototypeText(
         }
         let key = String(String.UnicodeScalarView(scalars[(index + 1) ..< (end - 1)]))
         let token = String(String.UnicodeScalarView(scalars[index ..< end]))
-        let value = resolveInterpolation(key: key, state: state, pager: pager)
+        let value: String?
+        if key.hasPrefix("derived:") {
+            value = derived?.resolve(String(key.dropFirst(8)), state: state)
+        } else { value = derivedOnly ? nil : resolveInterpolation(key: key, state: state, pager: pager) }
         if let value, value.utf16.count <= PrototypeLimits.maxSubstitutedTextLength - substitutedLength {
             substitutedLength += value.utf16.count
             out.append(contentsOf: value.unicodeScalars)
@@ -48,7 +53,11 @@ private func interpolationTokenEnd(_ scalars: [Unicode.Scalar], from start: Int)
     guard scalars[start] == "{", start + 1 < scalars.count, isInterpolationKeyStart(scalars[start + 1]) else {
         return nil
     }
-    var index = start + 2
+    var first = start + 1
+    let prefix = Array("derived:".unicodeScalars)
+    if scalars[first...].starts(with: prefix) { first += prefix.count }
+    guard first < scalars.count, isInterpolationKeyStart(scalars[first]) else { return nil }
+    var index = first + 1
     while index < scalars.count, isInterpolationKeyPart(scalars[index]) {
         index += 1
     }
@@ -100,15 +109,16 @@ extension PrototypeNode {
     func accessibilityLabel(
         state: [String: JSONValue],
         pager: PagerPosition?,
-        tappable: Bool
+        tappable: Bool,
+        derived: PrototypeDerivedContext? = nil
     )
         -> String?
     {
         let authored = (semantics?.label ?? contentDescription).map {
-            interpolatePrototypeText($0, state: state, pager: pager)
+            interpolatePrototypeText($0, state: state, pager: pager, derived: derived)
         }
         if let authored, !authored.isEmpty { return authored }
-        let shown = plainText(state: state, pager: pager)
+        let shown = plainText(state: state, pager: pager, derived: derived)
         if !shown.isEmpty { return shown }
         if type == "icon", tappable, let name, !name.isEmpty { return name }
         // Icon-only controls (#10439): an extended FAB's label, else the icon name.

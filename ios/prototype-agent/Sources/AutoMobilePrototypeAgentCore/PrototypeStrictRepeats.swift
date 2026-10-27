@@ -114,18 +114,38 @@ struct PrototypeStrictRepeats {
                     ) }
                     for segment in segments {
                         if case let .field(name) = segment, !scope.items.allSatisfy({ $0[name] != nil }) {
-                            throw PrototypeContractValidator.invalid(at, "Unknown repeat field")
+                            throw PrototypeContractValidator.invalid(
+                                at,
+                                "Unknown repeat field \(PrototypeContractValidator.quoted(name))"
+                            )
                         }
                     }
-                    if keyField, PrototypeRoutes.fields(text).isEmpty {
+                    if keyField {
                         for (index, item) in scope.items.enumerated() {
-                            let bound = PrototypeRepeatInstance(alias: scope.alias, item: item, index: index)
-                                .interpolate(text)
-                            if !PrototypeContractValidator.primitive(.string(bound), rule: ["kind": .string("key")]) {
+                            let instance = PrototypeRepeatInstance(alias: scope.alias, item: item, index: index)
+                            let bound = instance.interpolate(text)
+                            let invalidRepeatPart = segments.contains { segment in
+                                if case let .field(name) = segment {
+                                    return !PrototypeContractValidator.matches(
+                                        "pathKey",
+                                        "_" + instance.interpolate("{\(scope.alias).\(name)}")
+                                    )
+                                }
+                                return false
+                            }
+                            if invalidRepeatPart || !PrototypeContractValidator.primitive(
+                                .string(bound),
+                                rule: ["kind": .string(scope.alias == "route" || PrototypeRoutes.fields(text)
+                                        .isEmpty ? "key" : "boundKey")]
+                            ) {
                                 let at = scope
                                     .pathBound ? "\(scope.path).repeat.items.path" :
                                     "\(scope.path).repeat.items[\(index)]"
-                                throw PrototypeContractValidator.invalid(at, "Invalid bound key")
+                                throw PrototypeContractValidator.invalid(
+                                    at,
+                                    "Bound state key \(PrototypeContractValidator.quoted(bound)) is invalid" +
+                                        (scope.pathBound ? " (repeat item \(index))" : "")
+                                )
                             }
                         }
                     }
@@ -133,13 +153,19 @@ struct PrototypeStrictRepeats {
                        !scope.items
                        .allSatisfy({ $0[text] != nil })
                     {
-                        throw PrototypeContractValidator.invalid(path, "Unknown repeat field")
+                        throw PrototypeContractValidator.invalid(
+                            path,
+                            "Unknown repeat field \(PrototypeContractValidator.quoted(text))"
+                        )
                     }
-                } else if keyField, PrototypeRoutes.fields(text).isEmpty, !PrototypeContractValidator.primitive(
-                    child,
+                } else if keyField, !PrototypeContractValidator.primitive(
+                    .string(
+                        PrototypeRepeat.segments(text, alias: "route")
+                            .map { if case let .literal(text) = $0 { text } else { "r" } }.joined()
+                    ),
                     rule: ["kind": .string("key")]
                 ) {
-                    throw PrototypeContractValidator.invalid(at, "Key placeholder outside repeat")
+                    throw PrototypeContractValidator.invalid(at, "State key placeholder outside a repeat template")
                 }
             } else {
                 try fields(

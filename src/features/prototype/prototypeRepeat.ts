@@ -1,3 +1,4 @@
+import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { effectUses } from "./prototypeEffects";
 import { PrototypeRepeatData } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -13,6 +14,7 @@ import {
   record,
   renderScalar,
   STATE_KEY,
+  BOUND_STATE_KEY_PATTERN,
   templateFieldReferences,
   templateSegments,
   type Binding,
@@ -84,13 +86,24 @@ function emptyEmitName(name: string, path: string, scope: Scope): RepeatError | 
 
 /** A state key must bind to a literal key for every item; the failing item is reported. */
 function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError | undefined {
-  if (templateFieldReferences(key, { alias: "route", index: false }).length) return undefined;
+  const pattern =
+    scope.binding.alias !== "route" &&
+    templateFieldReferences(key, { alias: "route", index: false }).length
+      ? BOUND_STATE_KEY_PATTERN
+      : STATE_KEY;
   if (!hasPlaceholder(key, scope.binding)) {
-    return STATE_KEY.test(key) ? undefined : fail(path, "Invalid key value");
+    return pattern.test(key) ? undefined : fail(path, "Invalid key value");
   }
   for (let index = 0; index < scope.items.length; index++) {
     const bound = bindText(key, instance(scope, scope.items[index], index));
-    if (!STATE_KEY.test(bound)) {
+    const invalidRepeatPart = templateSegments(key, scope.binding).some(
+      (segment) =>
+        segment.kind === "field" &&
+        !prototypeContractPatterns.pathKey.test(
+          `_${renderScalar(scope.items[index][segment.name])}`,
+        ),
+    );
+    if (invalidRepeatPart || !pattern.test(bound)) {
       return fail(
         scope.pathBound
           ? `${scope.path}.repeat.items.path`
@@ -263,8 +276,11 @@ function literalPlaceholderError(
   }
   if (
     kind === "key" &&
-    !templateFieldReferences(value, { alias: "route", index: false }).length &&
-    !STATE_KEY.test(value)
+    !STATE_KEY.test(
+      templateSegments(value, { alias: "route", index: false })
+        .map((segment) => (segment.kind === "literal" ? segment.text : "r"))
+        .join(""),
+    )
   ) {
     return fail(path, "State key placeholder outside a repeat template");
   }

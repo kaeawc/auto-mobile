@@ -67,6 +67,7 @@ final class PrototypeContractValidatorTests: XCTestCase {
             "exact-selector-depth.json",
             "floating-element-anchor.json",
             "tooltip-element-anchor.json",
+            "routes-literal-anchor-selector.json",
         ]
         let inventory = try JSONDecoder().decode(
             Inventory.self,

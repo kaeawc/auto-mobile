@@ -53,13 +53,23 @@ internal object PrototypeRepeatFields {
     path: String,
     scope: Scope,
   ): PrototypeSpecError? {
-    if (PrototypeRouteRules.fields(key).isNotEmpty()) return null
+    val pattern =
+      if (scope.alias != "route" && PrototypeRouteRules.fields(key).isNotEmpty())
+        PrototypeSpecContract.patterns.getValue("boundKey")
+      else stateKeyPattern
     if (segments.all { it is PrototypeRepeatSegment.Literal }) {
-      return if (stateKeyPattern.matches(key)) null else fail(path, "Invalid key value")
+      return if (pattern.matches(key)) null else fail(path, "Invalid key value")
     }
     for ((index, item) in scope.items.withIndex()) {
       val bound = PrototypeRepeatTokens.bind(segments, scope.alias, item, index)
-      if (!stateKeyPattern.matches(bound)) {
+      val invalidRepeatPart =
+        segments.filterIsInstance<PrototypeRepeatSegment.Field>().any {
+          !PrototypeSpecContract.pathKeyPattern.matches(
+            "_" +
+              PrototypeRepeatTemplate.bind("{${scope.alias}.${it.name}}", scope.alias, item, index),
+          )
+        }
+      if (invalidRepeatPart || !pattern.matches(bound)) {
         return fail(
           if (scope.pathBound) "${scope.path}.repeat.items.path"
           else "${scope.path}.repeat.items[$index]",

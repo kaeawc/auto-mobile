@@ -54,3 +54,31 @@ test("opaque route-looking payloads do not require the route capability", () => 
     }),
   ).not.toContain("prototype_routes_v1");
 });
+
+test("route validation scales across 60 stacks with 32 screens each", async () => {
+  const { prototypeRoutesError } = await import("../../../src/features/prototype/prototypeRoutes");
+  const { walkPrototypeNodes } =
+    await import("../../../src/features/prototype/prototypeNodeChildren");
+  const spec = {
+    root: {
+      type: "column",
+      children: Array.from({ length: 60 }, (_, stack) => ({
+        type: "stack",
+        id: `nav${stack}`,
+        start: "s0",
+        routes: {},
+        screens: Object.fromEntries(
+          Array.from({ length: 32 }, (_, screen) => [
+            `s${screen}`,
+            { type: "text", text: "x", visibleWhen: { key: "k", equals: "x" } },
+          ]),
+        ),
+      })),
+    },
+  };
+  const nodes: { value: Record<string, unknown>; path: string }[] = [];
+  walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
+  const started = performance.now();
+  expect(prototypeRoutesError(spec, nodes, [])).toBeUndefined();
+  expect(performance.now() - started).toBeLessThan(1000);
+});

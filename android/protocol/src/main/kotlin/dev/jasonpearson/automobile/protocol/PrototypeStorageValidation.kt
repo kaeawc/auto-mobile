@@ -11,21 +11,23 @@ internal object PrototypeStorageValidation {
   fun error(spec: JsonObject, enforceBytes: Boolean = true): PrototypeSpecError? {
     val storage = spec["storage"] as? JsonObject ?: return null
     val keys = storage["keys"] as? JsonArray ?: return null
+    val context = PrototypeStateChecks.Context()
+    if (keys.any { it.jsonPrimitive.content.startsWith("stack:") }) {
+      // Reuse the contract visitor to collect declared stack nodes.
+      PrototypeStructuralWalk.walk(
+        spec,
+        PrototypeSpecContract.definitions.getValue("spec").jsonObject,
+        "",
+        context,
+        0,
+      )
+    }
     val pointers = mutableListOf<String>()
     var bytes = 0
     for ((index, raw) in keys.withIndex()) {
       val key = raw.jsonPrimitive.content
       val path = "storage.keys[$index]"
       if (key.startsWith("stack:")) {
-        val context = PrototypeStateChecks.Context()
-        // Reuse the contract visitor to collect declared stack nodes.
-        PrototypeStructuralWalk.walk(
-          spec,
-          PrototypeSpecContract.definitions.getValue("spec").jsonObject,
-          "",
-          context,
-          0,
-        )
         if (
           context.nodes.none {
             it.value["type"] == JsonPrimitive("stack") &&

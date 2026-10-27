@@ -33,8 +33,11 @@ internal object PrototypeRepeatLiteralChecks {
     if (
       kind == PrototypeBindableKind.KEY &&
         text != null &&
-        PrototypeRouteRules.fields(text).isEmpty() &&
-        !stateKeyPattern.matches(text)
+        !stateKeyPattern.matches(
+          PrototypeRepeatTemplate.segments(text, "route").joinToString("") {
+            if (it is PrototypeRepeatSegment.Literal) it.text else "r"
+          },
+        )
     )
       fail(fieldPath, "State key placeholder outside a repeat template")
     else if (kind.isDataPath() && text != null && PrototypeRepeatTemplate.dataPathHasIndex(text))

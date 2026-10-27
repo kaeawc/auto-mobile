@@ -226,6 +226,16 @@ internal object PrototypeBindableFields {
     return visitor.node(node, path)
   }
 
+  fun <T : Any> routeFirst(
+    node: JsonObject,
+    path: String,
+    visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
+  ): T? {
+    val visitor = Visitor(visit)
+    return if (path.startsWith("platform.on[")) visitor.action(node, path)
+    else visitor.node(node, path)
+  }
+
   private fun objects(data: JsonObject, key: String, path: String): List<Pair<JsonObject, String>> =
     (data[key] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
       (entry as? JsonObject)?.let { it to "$path.$key[$index]" }
@@ -414,8 +424,7 @@ internal object PrototypeBindableFields {
     }
 
     fun actions(data: JsonObject, path: String): T? {
-      for (field in
-        listOf("onTap", "onLongPress", "onDoubleTap", "onDismiss", "onEnter", "onBack")) {
+      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
         for ((action, actionPath) in objects(data, field, path)) {
           action(action, actionPath)?.let {
             return it
@@ -426,12 +435,20 @@ internal object PrototypeBindableFields {
     }
 
     fun node(node: JsonObject, path: String): T? {
-      for ((name, raw) in (node["routes"] as? JsonObject).orEmpty()) {
-        actions(raw.jsonObject, memberPath("$path.routes", name))?.let {
+      Components(this).node(node, path)?.let {
+        return it
+      }
+      if ((node["type"] as? JsonPrimitive)?.content == "scroll")
+        actionLists(node, listOf("onStartReached"), path)?.let {
           return it
         }
+      for ((name, raw) in (node["routes"] as? JsonObject).orEmpty().toSortedMap()) {
+        actionLists(raw.jsonObject, listOf("onEnter", "onBack"), memberPath("$path.routes", name))
+          ?.let {
+            return it
+          }
       }
-      return Components(this).node(node, path)
+      return null
     }
   }
 
@@ -460,11 +477,15 @@ internal object PrototypeBindableFields {
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
         "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
-        "tooltip" -> visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
+        "tooltip" ->
+          visitor.field(node, "text", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "onDismiss", path).firstNotNullOfOrNull { (entry, at) ->
+              visitor.action(entry, at)
+            }
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
-            part(entry, entryPath)
-              ?: visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+            visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+              ?: part(entry, entryPath)
           }
         "select" ->
           visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
@@ -525,13 +546,13 @@ internal object PrototypeBindableFields {
           return it
         }
       }
-      (node["refresh"] as? JsonObject)?.let { refresh ->
-        visitor.field(refresh, "stateKey", "$path.refresh", PrototypeBindableKind.KEY)?.let {
+      (node["openWhen"] as? JsonObject)?.let { openWhen ->
+        visitor.field(openWhen, "key", "$path.openWhen", PrototypeBindableKind.KEY)?.let {
           return it
         }
       }
-      return (node["openWhen"] as? JsonObject)?.let { openWhen ->
-        visitor.field(openWhen, "key", "$path.openWhen", PrototypeBindableKind.KEY)
+      return (node["refresh"] as? JsonObject)?.let { refresh ->
+        visitor.field(refresh, "stateKey", "$path.refresh", PrototypeBindableKind.KEY)
       }
     }
 
@@ -582,8 +603,8 @@ internal object PrototypeBindableFields {
           visitor.condition(entry["when"], "$entryPath.when")
         }
         ?: visitor.actions(node, path)
-        ?: refreshActions(node, path)
         ?: swipeParts(node, path)
+        ?: refreshActions(node, path)
         ?: keys(node, path)
     }
   }

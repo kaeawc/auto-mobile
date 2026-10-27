@@ -26,17 +26,23 @@ internal object PrototypeRouteRules {
           if (!namePattern.matches(key))
             return PrototypeSpecError(keyPath("$at.params", key), "Invalid route param name")
         }
-        for ((index, action) in (route["onBack"] as? JsonArray).orEmpty().withIndex()) {
-          val entry = action.jsonObject
+        if (name == stack.text("start") && (route["params"] as? JsonObject).orEmpty().isNotEmpty())
+          return PrototypeSpecError("$at.params", "Start screen cannot declare route params")
+        for (action in context.actions) {
           if (
-            entry.text("type") == "pop" &&
-              entry["stack"] == stack["id"] &&
-              entry["force"] != JsonPrimitive(true)
+            action.path.startsWith("$at.onBack[") &&
+              action.value.text("type") == "pop" &&
+              action.value["stack"] == stack["id"] &&
+              action.value["force"] != JsonPrimitive(true)
           )
-            return PrototypeSpecError(
-              "$at.onBack[$index]",
-              "Direct onBack pop requires force: true",
-            )
+            return PrototypeSpecError(action.path, "Direct onBack pop requires force: true")
+          if (
+            action.path.startsWith("$at.onEnter[") &&
+              action.value.text("type") in listOf("push", "replace") &&
+              action.value["stack"] == stack["id"] &&
+              action.value.text("screen") == name
+          )
+            return PrototypeSpecError(action.path, "onEnter cannot navigate to its own screen")
         }
       }
     }
@@ -74,33 +80,46 @@ internal object PrototypeRouteRules {
           return PrototypeSpecError(path, "Missing route param ${JsonPrimitive(name)}")
       }
     }
-    for ((node, path) in context.nodes) {
-      if ((node["repeat"] as? JsonObject)?.text("as") == "route")
-        return PrototypeSpecError("$path.repeat.as", "route is reserved for route params")
-      val owners = stacks.flatMap { stack ->
-        (stack.value["screens"] as? JsonObject).orEmpty().keys.map { screen ->
-          val prefix = "${stack.path}.screens[${JsonPrimitive(screen)}]"
-          listOf(prefix, keyPath("${stack.path}.routes", screen)) to
-            (((stack.value["routes"] as? JsonObject)?.get(screen) as? JsonObject)?.get("params")
-              as? JsonObject)
-        }
+    val owners = stacks.flatMap { stack ->
+      (stack.value["screens"] as? JsonObject).orEmpty().keys.map { screen ->
+        val prefix = "${stack.path}.screens[${JsonPrimitive(screen)}]"
+        listOf(prefix, keyPath("${stack.path}.routes", screen)) to
+          (((stack.value["routes"] as? JsonObject)?.get(screen) as? JsonObject)?.get("params")
+            as? JsonObject)
       }
+    }
+    val ownerByPath = owners.flatMap { owner -> owner.first.map { it to owner } }.toMap()
+    val usesRoutes = uses(spec, context)
+    val aliases =
+      context.nodes
+        .filter { (it.value["repeat"] as? JsonObject)?.text("as") == "route" }
+        .map { "${it.path}.children[" }
+    val entries = context.nodes + context.actions.filter { it.path.startsWith("platform.on[") }
+    for ((node, path) in entries) {
+      if (usesRoutes && (node["repeat"] as? JsonObject)?.text("as") == "route")
+        return PrototypeSpecError("$path.repeat.as", "route is reserved for route params")
       val error =
-        PrototypeBindableFields.first<PrototypeSpecError>(
+        PrototypeBindableFields.routeFirst<PrototypeSpecError>(
           node,
           path,
-          includeRoutePointers = true,
         ) { raw, at, kind ->
-          val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return@first null
-          val owner =
-            owners
-              .filter { owner -> owner.first.any { at.startsWith("$it.") } }
-              .maxByOrNull { it.first.first().length }
+          if (!usesRoutes && aliases.any { at.startsWith(it) }) return@routeFirst null
+          val text =
+            (raw as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return@routeFirst null
+          var parent = at
+          var owner: Pair<List<String>, JsonObject?>? = null
+          while (owner == null && '.' in parent) {
+            parent = parent.substringBeforeLast('.')
+            owner = ownerByPath[parent]
+          }
           for (name in fields(text)) {
             if (owner == null)
-              return@first PrototypeSpecError(at, "Route placeholder outside a screen")
+              return@routeFirst PrototypeSpecError(at, "Route placeholder outside a screen")
             if (name !in owner.second.orEmpty())
-              return@first PrototypeSpecError(at, "Undeclared route param ${JsonPrimitive(name)}")
+              return@routeFirst PrototypeSpecError(
+                at,
+                "Undeclared route param ${JsonPrimitive(name)}",
+              )
           }
           if (
             (kind.isDataPath() || kind == PrototypeBindableKind.ROUTE_POINTER) &&
@@ -117,8 +136,12 @@ internal object PrototypeRouteRules {
     return null
   }
 
-  fun uses(spec: JsonObject, context: Context): Boolean =
-    context.nodes.any { it.value.text("type") == "stack" && "routes" in it.value } ||
+  fun uses(spec: JsonObject, context: Context): Boolean {
+    val aliases =
+      context.nodes
+        .filter { (it.value["repeat"] as? JsonObject)?.text("as") == "route" }
+        .map { "${it.path}.children[" }
+    return context.nodes.any { it.value.text("type") == "stack" && "routes" in it.value } ||
       context.actions.any {
         (it.value.text("type") in listOf("push", "replace") && "params" in it.value) ||
           it.value.text("type") == "setStack" ||
@@ -127,15 +150,14 @@ internal object PrototypeRouteRules {
       ((spec["storage"] as? JsonObject)?.get("keys") as? JsonArray).orEmpty().any {
         it.jsonPrimitive.content.startsWith("stack:")
       } ||
-      context.nodes.any {
-        PrototypeBindableFields.first<Boolean>(it.value, it.path, includeRoutePointers = true) {
-          raw,
-          _,
-          _ ->
+      (context.nodes + context.actions.filter { it.path.startsWith("platform.on[") }).any {
+        PrototypeBindableFields.routeFirst<Boolean>(it.value, it.path) { raw, at, _ ->
+          if (aliases.any { at.startsWith(it) }) return@routeFirst null
           (raw as? JsonPrimitive)
             ?.takeIf { it.isString }
             ?.content
             ?.let { text -> true.takeIf { fields(text).isNotEmpty() } }
         } == true
       }
+  }
 }

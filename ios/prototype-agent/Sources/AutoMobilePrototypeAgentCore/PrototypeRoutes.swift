@@ -7,7 +7,7 @@ enum PrototypeRoutes {
             .compactMap { if case let .field(name) = $0 { name } else { nil } }
     }
 
-    static func validate(_: [String: JSONValue], context: PrototypeContractValidator) throws {
+    static func validate(_ spec: [String: JSONValue], context: PrototypeContractValidator) throws {
         let stacks = context.locatedNodes.filter { $0.value["type"] == .string("stack") }
         for stack in stacks {
             let screens = stack.value["screens"]?.objectFields ?? [:]
@@ -23,21 +23,22 @@ enum PrototypeRoutes {
                         )
                     }
                 }
-                for list in ["onEnter", "onBack"] {
-                    if let actions = route[list] { try placeholders(
-                        actions,
-                        path: "\(at).\(list)",
-                        params: route["params"]?.objectFields ?? [:]
-                    ) }
+                if stack.value["start"] == .string(name), !(route["params"]?.objectFields ?? [:]).isEmpty {
+                    throw PrototypeContractValidator.invalid("\(at).params", "Start screen cannot declare route params")
                 }
-                for (index, raw) in PrototypeStrictBindings.array(route["onBack"]).enumerated() {
-                    let action = raw.objectFields ?? [:]
-                    if action["type"] == .string("pop"), action["stack"] == stack.value["id"],
-                       action["force"] != .bool(true)
+                for action in context.actions {
+                    if action.path.hasPrefix("\(at).onBack["), action.value["type"] == .string("pop"),
+                       action.value["stack"] == stack.value["id"], action.value["force"] != .bool(true)
+                    {
+                        throw PrototypeContractValidator.invalid(action.path, "Direct onBack pop requires force: true")
+                    }
+                    if action.path.hasPrefix("\(at).onEnter["),
+                       ["push", "replace"].contains(action.value["type"]?.stringValue ?? ""),
+                       action.value["stack"] == stack.value["id"], action.value["screen"] == .string(name)
                     {
                         throw PrototypeContractValidator.invalid(
-                            "\(at).onBack[\(index)]",
-                            "Direct onBack pop requires force: true"
+                            action.path,
+                            "onEnter cannot navigate to its own screen"
                         )
                     }
                 }
@@ -92,126 +93,76 @@ enum PrototypeRoutes {
                 }
             }
         }
-        for node in context.locatedNodes {
-            if node.value["repeat"]?
-                .objectFields?["as"] ==
-                .string("route")
-            {
-                throw PrototypeContractValidator
-                    .invalid("\(node.path).repeat.as", "route is reserved for route params")
-            }
-            let owners = stacks.flatMap { stack in
-                (stack.value["screens"]?.objectFields ?? [:]).keys.map { name in
-                    (
-                        PrototypeStacks.screenPath(stack.path, name: name),
-                        stack.value["routes"]?.objectFields?[name]?.objectFields?["params"]?.objectFields ?? [:]
-                    )
-                }
-            }.filter { node.path == $0.0 || node.path.hasPrefix("\($0.0).") }.sorted { $0.0.count > $1.0.count }
-            try placeholders(
-                .object(node.value.filter { !["child", "children", "screens", "routes"].contains($0.key) }),
-                path: node.path,
-                params: owners.first?.1
-            )
-        }
-    }
-
-    /// Uses the repeat tokenizer; only bindable strings are inspected, never opaque payload values.
-    private static func placeholders(
-        _ value: JSONValue,
-        path: String,
-        params: [String: JSONValue]?,
-        field: String = ""
-    )
-        throws
-    {
-        if let text = value.stringValue {
-            let names = fields(text)
-            for name in names {
-                guard let params else { throw PrototypeContractValidator.invalid(
-                    path,
-                    "Route placeholder outside a screen"
-                ) }
-                if params[name] == nil { throw PrototypeContractValidator.invalid(
-                    path,
-                    "Undeclared route param \(PrototypeContractValidator.quoted(name))"
-                ) }
-            }
-            if ["path", "into", "data"].contains(field), !names.isEmpty,
-               text.split(separator: "/").contains(where: { part in
-                   let segment = String(part)
-                   let names = fields(segment)
-                   return !names.isEmpty && (names.count != 1 || segment != "{route.\(names[0])}")
-               })
-            { throw PrototypeContractValidator.invalid(
-                path,
-                "Route placeholder must occupy a whole data pointer segment"
-            ) }
-            return
-        }
-        if case let .array(items) = value {
-            for (index, child) in items.enumerated() {
-                try placeholders(
-                    child,
-                    path: "\(path)[\(index)]",
-                    params: params,
-                    field: field
+        let owners = stacks.flatMap { stack in
+            (stack.value["screens"]?.objectFields ?? [:]).keys.map { name in
+                (
+                    prefix: PrototypeStacks.screenPath(stack.path, name: name),
+                    lifecycle: PrototypeContractValidator.keyPath("\(stack.path).routes", name),
+                    params: stack.value["routes"]?.objectFields?[name]?.objectFields?["params"]?.objectFields ?? [:]
                 )
             }
         }
-        guard let object = value.objectFields else { return }
-        if object.count == 1, object["value"] != nil { return }
-        // Share the repeat binder's text-slot selection; an unbound label remains literal.
-        var textProjection = object
-        PrototypeRepeat.bindTextFields(&textProjection) { $0 + "\u{0}" }
-        let textKeys: Set<String> = [
-            "text",
-            "label",
-            "headline",
-            "supporting",
-            "title",
-            "placeholder",
-            "supportingText",
-            "trailingText",
-            "message",
-        ]
-        let strings: Set<String> = [
-            "text",
-            "label",
-            "headline",
-            "supporting",
-            "title",
-            "placeholder",
-            "supportingText",
-            "trailingText",
-            "message",
-            "name",
-            "equals",
-            "notEquals",
-            "key",
-            "valid",
-            "requireValid",
-            "stateKey",
-            "activeKey",
-            "hourKey",
-            "minuteKey",
-            "atEndKey",
-            "statusKey",
-            "state",
-            "path",
-            "into",
-            "data",
-            "value",
-            "url",
-        ]
-        for key in PrototypeContractValidator.sorted(object.keys) {
-            guard !["payload", "style", "repeat"].contains(key), let child = object[key] else { continue }
-            if key == "params", object["screen"] == nil { continue }
-            if child.stringValue != nil, object["type"] != nil, textKeys.contains(key),
-               textProjection[key] == child { continue }
-            if child.stringValue != nil, !strings.contains(key),
-               !["params", "headers", "query"].contains(field) { continue }
-            try placeholders(child, path: PrototypeContractValidator.keyPath(path, key), params: params, field: key)
+        let ownerByPath = Dictionary(uniqueKeysWithValues: owners.flatMap { owner in
+            [(owner.prefix, owner.params), (owner.lifecycle, owner.params)]
+        })
+        let usesRoutes = uses(spec, context: context)
+        let aliases = context.locatedNodes.filter { $0.value["repeat"]?.objectFields?["as"] == .string("route") }
+            .map { "\($0.path).children[" }
+        func validate(_ field: PrototypeRouteFields.Field) throws {
+            if !usesRoutes, aliases.contains(where: { field.path.hasPrefix($0) }) { return }
+            var parent = field.path
+            var params: [String: JSONValue]?
+            while params == nil, let dot = parent.lastIndex(of: ".") {
+                parent = String(parent[..<dot])
+                params = ownerByPath[parent]
+            }
+            for name in fields(field.text) {
+                guard let params else { throw PrototypeContractValidator.invalid(
+                    field.path,
+                    "Route placeholder outside a screen"
+                ) }
+                if params[name] == nil { throw PrototypeContractValidator.invalid(
+                    field.path, "Undeclared route param \(PrototypeContractValidator.quoted(name))"
+                ) }
+            }
+            if field.pointer, field.text.split(separator: "/").contains(where: { part in
+                let names = fields(String(part))
+                return !names.isEmpty && (names.count != 1 || part != "{route.\(names[0])}")
+            }) { throw PrototypeContractValidator.invalid(
+                field.path,
+                "Route placeholder must occupy a whole data pointer segment"
+            ) }
         }
+        for node in context.locatedNodes {
+            if usesRoutes, node.value["repeat"]?.objectFields?["as"] == .string("route") {
+                throw PrototypeContractValidator.invalid("\(node.path).repeat.as", "route is reserved for route params")
+            }
+            for field in PrototypeRouteFields.own(node.value, path: node.path) {
+                try validate(field)
+            }
+        }
+        for action in context.actions where action.path.hasPrefix("platform.on[") {
+            for field in PrototypeRouteFields.action(action.value, path: action.path) {
+                try validate(field)
+            }
+        }
+    }
+
+    static func uses(_ spec: [String: JSONValue], context: PrototypeContractValidator) -> Bool {
+        let aliases = context.locatedNodes.filter { $0.value["repeat"]?.objectFields?["as"] == .string("route") }
+            .map { "\($0.path).children[" }
+        func unshadowed(_ field: PrototypeRouteFields.Field) -> Bool { !aliases
+            .contains { field.path.hasPrefix($0) } && !fields(field.text).isEmpty
+        }
+        return context.locatedNodes.contains { $0.value["type"] == .string("stack") && $0.value["routes"] != nil } ||
+            context.actions.contains { action in
+                let type = action.value["type"]?.stringValue ?? ""
+                return type == "setStack" || (["push", "replace"].contains(type) && action.value["params"] != nil) ||
+                    (type == "pop" && action.value["force"] != nil) ||
+                    PrototypeRouteFields.action(action.value, path: action.path).contains(where: unshadowed)
+            } || PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
+            .contains { $0.hasPrefix("stack:") } ||
+            context.locatedNodes
+            .contains { node in PrototypeRouteFields.own(node.value, path: node.path).contains(where: unshadowed) }
     }
 }

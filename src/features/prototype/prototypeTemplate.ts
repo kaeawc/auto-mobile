@@ -516,21 +516,6 @@ export function mapBindableFields(
     return entry;
   });
   mapActions(copy, path, visit);
-  if (copy.type === "stack") {
-    const routes = record(copy.routes);
-    if (routes)
-      copy.routes = Object.fromEntries(
-        Object.entries(routes).map(([name, raw]) => {
-          const route = { ...record(raw) };
-          const routePath = memberPath(`${path}.routes`, name);
-          for (const field of ["onEnter", "onBack"])
-            mapList(route, field, routePath, (action, actionPath) =>
-              mapAction(action, actionPath, visit),
-            );
-          return [name, route];
-        }),
-      );
-  }
   mapObject(copy, "swipeActions", path, (entry, entryPath) => {
     for (const side of ["start", "end"]) {
       mapList(entry, side, entryPath, (action, actionPath) => mapPart(action, actionPath, visit));
@@ -544,6 +529,25 @@ export function mapBindableFields(
     return entry;
   });
   mapNodeKeys(copy, path, visit);
+  if (copy.type === "scroll")
+    mapList(copy, "onStartReached", path, (entry, at) => mapAction(entry, at, visit));
+  if (copy.type === "stack") {
+    const routes = record(copy.routes);
+    if (routes)
+      copy.routes = Object.fromEntries(
+        Object.entries(routes)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([name, raw]) => {
+            const route = { ...record(raw) };
+            const routePath = memberPath(`${path}.routes`, name);
+            for (const field of ["onEnter", "onBack"])
+              mapList(route, field, routePath, (action, actionPath) =>
+                mapAction(action, actionPath, visit),
+              );
+            return [name, route];
+          }),
+      );
+  }
   return copy;
 }
 
@@ -640,7 +644,7 @@ export function visitPrototypeHandlerFields(spec: unknown, visit: FieldVisitor):
     actions.forEach((action, index) => {
       const value = record(action);
       if (value) {
-        mapAction(value, `platform.on[${JSON.stringify(name)}][${index}]`, visit);
+        mapAction({ ...value }, `platform.on[${JSON.stringify(name)}][${index}]`, visit);
       }
     });
   }

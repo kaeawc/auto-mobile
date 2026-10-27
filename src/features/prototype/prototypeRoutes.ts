@@ -1,5 +1,11 @@
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { mapBindableFields, record, templateFieldReferences, type Raw } from "./prototypeTemplate";
+import {
+  mapBindableFields,
+  record,
+  templateFieldReferences,
+  visitPrototypeHandlerFields,
+  type Raw,
+} from "./prototypeTemplate";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import type { Located, PrototypeValidationError } from "./prototypeBindingValidation";
 
@@ -29,10 +35,23 @@ export function prototypeRoutesError(
         if (!prototypeContractPatterns.pathKey.test(key))
           return fail(at(`${routePath}.params`, key), "Invalid route param name");
       }
-      for (const [index, action] of (Array.isArray(route.onBack) ? route.onBack : []).entries()) {
-        const entry = record(action);
-        if (entry?.type === "pop" && entry.stack === value.id && entry.force !== true)
-          return fail(`${routePath}.onBack[${index}]`, "Direct onBack pop requires force: true");
+      if (name === value.start && Object.keys(record(route.params) ?? {}).length)
+        return fail(`${routePath}.params`, "Start screen cannot declare route params");
+      for (const action of actions) {
+        if (
+          action.path.startsWith(`${routePath}.onBack[`) &&
+          action.value.type === "pop" &&
+          action.value.stack === value.id &&
+          action.value.force !== true
+        )
+          return fail(action.path, "Direct onBack pop requires force: true");
+        if (
+          action.path.startsWith(`${routePath}.onEnter[`) &&
+          ["push", "replace"].includes(String(action.value.type)) &&
+          action.value.stack === value.id &&
+          action.value.screen === name
+        )
+          return fail(action.path, "onEnter cannot navigate to its own screen");
       }
     }
   }
@@ -63,68 +82,82 @@ export function prototypeRoutesError(
       }
     }
   }
+  const owners = stacks.flatMap((stack) =>
+    Object.keys(record(stack.value.screens) ?? {}).map((screen) => ({
+      prefix: `${stack.path}.screens[${JSON.stringify(screen)}]`,
+      lifecycle: at(`${stack.path}.routes`, screen),
+      params: record(record(record(stack.value.routes)?.[screen])?.params) ?? {},
+    })),
+  );
+  const ownerByPath = new Map(
+    owners.flatMap((owner) => [
+      [owner.prefix, owner],
+      [owner.lifecycle, owner],
+    ]),
+  );
+  const usesRoutes = prototypeRouteFields(spec).length > 0;
+  const aliases = nodes
+    .filter(({ value }) => record(value.repeat)?.as === "route")
+    .map(({ path }) => `${path}.children[`);
   let error: PrototypeValidationError | undefined;
+  const visit: import("./prototypeTemplate").FieldVisitor = (value, fieldPath, kind) => {
+    if (
+      typeof value !== "string" ||
+      (!usesRoutes && aliases.some((prefix) => fieldPath.startsWith(prefix)))
+    )
+      return value;
+    let parent = fieldPath;
+    let scope: (typeof owners)[number] | undefined;
+    while (!scope && parent.includes(".")) {
+      parent = parent.slice(0, parent.lastIndexOf("."));
+      scope = ownerByPath.get(parent);
+    }
+    for (const name of routeFields(value)) {
+      if (!scope) error ??= fail(fieldPath, "Route placeholder outside a screen");
+      else if (!Object.hasOwn(scope.params, name))
+        error ??= fail(fieldPath, `Undeclared route param ${JSON.stringify(name)}`);
+    }
+    if (
+      ["dataPath", "requestInto", "routePointer"].includes(kind) &&
+      value.split("/").some((part) => {
+        const names = routeFields(part);
+        return names.length > 0 && (names.length !== 1 || part !== `{route.${names[0]}}`);
+      })
+    )
+      error ??= fail(fieldPath, "Route placeholder must occupy a whole data pointer segment");
+    return value;
+  };
   walkPrototypeNodes(spec, (node, path) => {
-    if (record(node.repeat)?.as === "route")
+    if (usesRoutes && record(node.repeat)?.as === "route")
       error ??= fail(`${path}.repeat.as`, "route is reserved for route params");
-    // The closest screen owns the route scope, including nested stacks' own fields.
-    const owners = stacks.flatMap((stack) =>
-      Object.keys(record(stack.value.screens) ?? {}).map((screen) => ({
-        prefix: `${stack.path}.screens[${JSON.stringify(screen)}]`,
-        lifecycle: at(`${stack.path}.routes`, screen),
-        params: record(record(record(stack.value.routes)?.[screen])?.params) ?? {},
-      })),
-    );
-    mapBindableFields(
-      node,
-      path,
-      (value, fieldPath, kind) => {
-        if (typeof value !== "string") return value;
-        const scopes = owners
-          .filter(
-            ({ prefix, lifecycle }) =>
-              fieldPath.startsWith(`${prefix}.`) || fieldPath.startsWith(`${lifecycle}.`),
-          )
-          .sort((a, b) => b.prefix.length - a.prefix.length);
-        for (const name of routeFields(value)) {
-          if (!scopes.length) error ??= fail(fieldPath, "Route placeholder outside a screen");
-          else if (!Object.hasOwn(scopes[0].params, name))
-            error ??= fail(fieldPath, `Undeclared route param ${JSON.stringify(name)}`);
-        }
-        if (
-          ["dataPath", "requestInto", "routePointer"].includes(kind) &&
-          value.split("/").some((part) => {
-            const names = routeFields(part);
-            return names.length > 0 && (names.length !== 1 || part !== `{route.${names[0]}}`);
-          })
-        )
-          error ??= fail(fieldPath, "Route placeholder must occupy a whole data pointer segment");
-        return value;
-      },
-      true,
-    );
+    mapBindableFields(node, path, visit, true);
   });
+  visitPrototypeHandlerFields(spec, visit);
   return error;
 }
 
 /** Use the same field visitor as validation; opaque payloads never introduce capabilities. */
 export function prototypeRouteFields(spec: unknown): string[] {
   const fields: string[] = [];
+  const aliases: string[] = [];
+  walkPrototypeNodes(spec, (node, path) => {
+    if (record(node.repeat)?.as === "route") aliases.push(`${path}.children[`);
+  });
+  const visit: import("./prototypeTemplate").FieldVisitor = (value, fieldPath, kind) => {
+    if (
+      kind === "routeFeature" ||
+      (typeof value === "string" &&
+        routeFields(value).length &&
+        !aliases.some((prefix) => fieldPath.startsWith(prefix)))
+    )
+      fields.push(fieldPath);
+    return value;
+  };
   walkPrototypeNodes(spec, (node, path) => {
     if (node.type === "stack" && node.routes !== undefined) fields.push(`${path}.routes`);
-    mapBindableFields(
-      node,
-      path,
-      (value, fieldPath, kind) => {
-        const action = record(value);
-        if (kind === "routeFeature" || (typeof value === "string" && routeFields(value).length))
-          fields.push(fieldPath);
-        if (action?.type === "setStack") fields.push(fieldPath);
-        return value;
-      },
-      true,
-    );
+    mapBindableFields(node, path, visit, true);
   });
+  visitPrototypeHandlerFields(spec, visit);
   const keys = record(record(spec)?.storage)?.keys;
   if (Array.isArray(keys))
     keys.forEach((key, index) => {

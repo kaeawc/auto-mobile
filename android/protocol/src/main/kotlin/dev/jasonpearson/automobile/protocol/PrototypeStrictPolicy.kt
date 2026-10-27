@@ -16,9 +16,7 @@ internal object PrototypeStrictPolicy {
       if (missing.isNotEmpty())
         return PrototypeSpecError(
           "$",
-          if (missing == setOf("prototype_routes_v1"))
-            "Unsupported capabilities: prototype_routes_v1"
-          else "Unsupported capabilities",
+          "Unsupported capabilities: ${missing.sorted().joinToString(", ")}",
         )
     }
     val window = spec["window"] as? JsonObject
@@ -260,18 +258,19 @@ internal object PrototypeStrictPolicy {
       if (spec["platform"] != null) need("platform")
     }
 
-    fun scan(value: JsonElement, field: String = "") {
+    fun scan(value: JsonElement, field: String = "", routeAlias: Boolean = false) {
       if (value is JsonArray) {
-        value.forEach { scan(it) }
+        value.forEach { scan(it, routeAlias = routeAlias) }
         return
       }
       val fields = value as? JsonObject ?: return
       if (fields.size == 1 && fields.containsKey("value")) return
-      nodeFeatures(fields)
-      scanFields(fields, field)
+      val alias = routeAlias || (fields["repeat"] as? JsonObject)?.text("as") == "route"
+      nodeFeatures(fields, alias)
+      scanFields(fields, field, alias)
     }
 
-    private fun scanFields(fields: JsonObject, field: String) {
+    private fun scanFields(fields: JsonObject, field: String, routeAlias: Boolean) {
       val type = fields.text("type") ?: ""
       for ((key, child) in fields) {
         if (skipsScan(key, type)) continue
@@ -284,7 +283,7 @@ internal object PrototypeStrictPolicy {
         } else {
           fieldFeatures(key, child, field)
         }
-        descend(key, child)
+        descend(key, child, routeAlias)
       }
     }
 
@@ -292,27 +291,31 @@ internal object PrototypeStrictPolicy {
       key == "payload" || (key == "value" && type !in listOf("setData", "appendData"))
 
     // An effect's own `animate`, colours and params are not spec features of their own.
-    private fun descend(key: String, child: JsonElement) {
+    private fun descend(key: String, child: JsonElement, routeAlias: Boolean) {
       when {
-        key == "linkify" -> (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap") }
-        key != "series" && key != "effects" -> scan(child, key)
+        key == "linkify" ->
+          (child as? JsonObject)?.get("onTap")?.let { scan(it, "onTap", routeAlias) }
+        key != "series" && key != "effects" -> scan(child, key, routeAlias)
       }
     }
 
-    private fun nodeFeatures(fields: JsonObject) {
+    private fun nodeFeatures(fields: JsonObject, routeAlias: Boolean) {
       val binding =
         PrototypeBindableFields.first<Boolean>(fields, "") { raw, _, kind ->
           if (usesData(raw, kind)) true else null
         }
       if (binding == true) need("data_model")
       if (
-        PrototypeBindableFields.first<Boolean>(fields, "", includeRoutePointers = true) { raw, _, _
-          ->
-          (raw as? JsonPrimitive)
-            ?.takeIf { it.isString }
-            ?.content
-            ?.let { text -> true.takeIf { PrototypeRouteRules.fields(text).isNotEmpty() } }
-        } == true
+        !routeAlias &&
+          PrototypeBindableFields.first<Boolean>(fields, "", includeRoutePointers = true) {
+            raw,
+            _,
+            _ ->
+            (raw as? JsonPrimitive)
+              ?.takeIf { it.isString }
+              ?.content
+              ?.let { text -> true.takeIf { PrototypeRouteRules.fields(text).isNotEmpty() } }
+          } == true
       )
         need("routes")
       if (PrototypeStylePolishV2Rules.themedBorder(fields)) need("theme_modes")

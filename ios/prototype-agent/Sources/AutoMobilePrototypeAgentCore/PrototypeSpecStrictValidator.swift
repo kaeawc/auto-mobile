@@ -19,7 +19,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardRepeatPathCells(root, data: modelData)
             try PrototypeLimits.guardSubstitutedText(root, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
-            try PrototypeStrictSemantics.storage(fields)
+            try PrototypeStrictSemantics.storage(fields, context: context)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
             try PrototypeRequestValidator.validate(root, state: state)
             try PrototypePlatformValidator.validate(
@@ -54,8 +54,7 @@ public enum PrototypeSpecStrictValidator {
                 let missing = PrototypeStrictCapabilities.required(fields).subtracting(supportedCapabilities)
                 throw PrototypeContractValidator.invalid(
                     "$",
-                    missing == ["prototype_routes_v1"] ? "Unsupported capabilities: prototype_routes_v1" :
-                        "Unsupported capabilities"
+                    "Unsupported capabilities: \(PrototypeContractValidator.sorted(missing).joined(separator: ", "))"
                 )
             }
             if library, let window = fields["window"]?.objectFields {

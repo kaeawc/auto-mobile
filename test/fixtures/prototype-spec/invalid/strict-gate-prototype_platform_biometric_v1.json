@@ -1,0 +1,78 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "authStatus": "",
+      "unlocked": false,
+      "failures": 0
+    },
+    "requires": {
+      "platform": ["biometric"]
+    },
+    "platform": {
+      "on": {
+        "biometric.attemptFailed": [
+          {
+            "type": "increment",
+            "key": "failures"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Failed attempts {failures}"
+        },
+        {
+          "type": "button",
+          "label": "Unlock",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "biometric.authenticate",
+              "args": {
+                "title": {
+                  "value": "Unlock vault"
+                },
+                "subtitle": {
+                  "value": "Confirm it's you"
+                },
+                "allowDeviceCredential": {
+                  "value": false
+                }
+              },
+              "statusKey": "authStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "unlocked",
+                  "value": true
+                }
+              ],
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "unlocked",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_biometric_v1"
+}

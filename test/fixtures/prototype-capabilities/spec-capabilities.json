@@ -35,6 +35,7 @@
   "prototype_pager_state_key_v1",
   "prototype_platform_audio_v1",
   "prototype_platform_battery_v1",
+  "prototype_platform_biometric_v1",
   "prototype_platform_clipboard_v1",
   "prototype_platform_connectivity_v1",
   "prototype_platform_device_v1",

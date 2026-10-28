@@ -9,7 +9,7 @@ enum PrototypePlatformValidator {
     /// A literal `{value}` argument's rule, from the contract's `platformModules` table.
     enum Rule: Equatable {
         case json(maxBytes: Int)
-        case string(empty: Bool, maxBytes: Int)
+        case string([String: JSONValue])
         case boolean
         case integer(min: Double, max: Double)
         case enumeration(Set<String>)
@@ -65,8 +65,7 @@ enum PrototypePlatformValidator {
     private static func argumentRule(_ rule: [String: JSONValue]) -> Rule {
         switch rule["kind"]?.stringValue {
         case "json": .json(maxBytes: Int(rule["maxBytes"]?.numberValue ?? 0))
-        case "string": .string(empty: rule["empty"] == .bool(true),
-                               maxBytes: Int(rule["maxBytes"]?.numberValue ?? Double(Int.max / 2)))
+        case "string": .string(rule)
         case "boolean": .boolean
         case "enum":
             if case let .array(values)? = rule["values"] {
@@ -447,8 +446,9 @@ enum PrototypePlatformValidator {
             guard let bytes = try? encoder.encode(literal), bytes.count <= maxBytes else {
                 throw fail(path, "Invalid json value")
             }
-        case let .string(empty, maxBytes):
-            guard let text = literal.stringValue, empty || !text.isEmpty, text.utf8.count <= maxBytes else {
+        case let .string(rule):
+            // The shared contract rule honours empty, nonblank, min, max, maxBytes and pattern.
+            guard literal.stringValue != nil, PrototypeContractValidator.primitive(literal, rule: rule) else {
                 throw fail(path, "Invalid string value")
             }
         case .boolean:

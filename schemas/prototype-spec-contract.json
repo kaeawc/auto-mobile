@@ -21720,6 +21720,46 @@
           }
         }
       }
+    },
+    "biometric": {
+      "capability": "prototype_platform_biometric_v1",
+      "calls": {
+        "authenticate": {
+          "args": {
+            "title": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 64
+              }
+            },
+            "subtitle": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 128
+              }
+            },
+            "allowDeviceCredential": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "attemptFailed": {
+          "sensitive": false
+        }
+      },
+      "state": {}
     }
   },
   "platformNamespaces": {

@@ -20,8 +20,10 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 /**
- * Pins the exact serialized CallTool result for the navigation tools (navigateTo,
- * getNavigationGraph, explore) as it leaves the server transport (#11830). The real
+ * Pins the exact serialized CallTool result for the navigation tools as it leaves the
+ * server transport (#11830): for the schema'd navigateTo and getNavigationGraph, the text
+ * part, the retained `structuredContent`, the hoisted `success`/`error`, and `isError` only
+ * on a failed navigateTo; for explore, its unchanged schemaless text-only wire. The real
  * registered handlers run against fakes; the MCP boundary, the client's outputSchema
  * validation and the finalizer are production code. An envelope change that alters a
  * single wire byte, or a payload the declared outputSchema rejects, fails here.
@@ -135,6 +137,7 @@ describe("navigationTools structured wire envelopes", () => {
     args: Record<string, unknown>,
   ): Promise<{ wire: string; failure: boolean }> {
     const tool = ToolRegistry.getRegisteredTool(name)!;
+    expect(tool.outputSchema !== undefined).toBe(name !== "explore");
     let failure: boolean | undefined;
     const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
       const response = await tool.deviceAwareHandler!(device, args);
@@ -155,9 +158,21 @@ describe("navigationTools structured wire envelopes", () => {
     }
   }
 
-  /** The main-branch schemaless wire: the payload serialized once as the only text part. */
-  const textWire = (payload: Record<string, unknown>, tail: Record<string, unknown> = {}) =>
-    JSON.stringify({ content: [{ type: "text", text: JSON.stringify(payload) }], ...tail });
+  /**
+   * The structured wire: the payload serialized once as the text part, the same payload
+   * retained as `structuredContent`, then the envelope tail (`isError` and the hoisted
+   * `success`/`error`, in the order the transport emits them).
+   */
+  const structuredWire = (payload: Record<string, unknown>, tail: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload,
+      ...tail,
+    });
+
+  /** The schemaless wire: the payload serialized once as the only text part. */
+  const textWire = (payload: Record<string, unknown>) =>
+    JSON.stringify({ content: [{ type: "text", text: JSON.stringify(payload) }] });
 
   test("navigateTo success", async () => {
     navigateResult = {
@@ -171,15 +186,18 @@ describe("navigationTools structured wire envelopes", () => {
     };
     expect(await callOnWire("navigateTo", { targetScreen: "Settings" })).toEqual({
       failure: false,
-      wire: textWire({
-        message: 'Successfully navigated to "Settings"',
-        success: true,
-        currentScreen: "Settings",
-        targetScreen: "Settings",
-        stepsExecuted: 1,
-        path: ["tapOn"],
-        durationMs: 5,
-      }),
+      wire: structuredWire(
+        {
+          message: 'Successfully navigated to "Settings"',
+          success: true,
+          currentScreen: "Settings",
+          targetScreen: "Settings",
+          stepsExecuted: 1,
+          path: ["tapOn"],
+          durationMs: 5,
+        },
+        { success: true },
+      ),
     });
   });
 
@@ -195,7 +213,7 @@ describe("navigationTools structured wire envelopes", () => {
     };
     expect(await callOnWire("navigateTo", { targetScreen: "Settings" })).toEqual({
       failure: true,
-      wire: textWire(
+      wire: structuredWire(
         {
           error: "Navigation timeout (30 seconds)",
           success: false,
@@ -205,7 +223,7 @@ describe("navigationTools structured wire envelopes", () => {
           partialPath: [],
           durationMs: 5,
         },
-        { isError: true },
+        { isError: true, success: false, error: "Navigation timeout (30 seconds)" },
       ),
     });
   });
@@ -223,7 +241,7 @@ describe("navigationTools structured wire envelopes", () => {
     try {
       expect(await callOnWire("getNavigationGraph", { appId: "com.example" })).toEqual({
         failure: false,
-        wire: textWire({
+        wire: structuredWire({
           message: "Navigation graph for app: com.example",
           requestedAppId: "com.example",
           observedAppId: null,
@@ -251,6 +269,8 @@ describe("navigationTools structured wire envelopes", () => {
     }
   });
 
+  // explore stays schemaless (#11830): its completed/dry-run union has no object root, so a
+  // spilled response keeps only `success`/`error` and would fail an advertised outputSchema.
   const completedMessage =
     "Exploration completed: 1 interactions, 1 new screens discovered, 100% coverage";
   test.each([

@@ -85,6 +85,13 @@ class AutoMobilePrototypeCapabilitiesTest {
   }
 
   @Test
+  fun `embedded renderer supports fullscreen window chrome on every sdk`() {
+    assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(32))
+    assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
+    assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilities)
+  }
+
+  @Test
   fun `capabilities are sorted`() {
     val capabilities = AutoMobilePrototype.capabilities.toList()
     assertEquals(capabilities.sorted(), capabilities)

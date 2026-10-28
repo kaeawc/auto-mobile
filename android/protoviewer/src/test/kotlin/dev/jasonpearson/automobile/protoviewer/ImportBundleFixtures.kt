@@ -2,8 +2,20 @@ package dev.jasonpearson.automobile.protoviewer
 
 import java.util.Base64
 
-/** Captured from test/fixtures/prototype-bundle/corpus.json; no file I/O in tests. */
+/** Base64 fixtures keep tests independent of file I/O. */
 internal object ImportBundleFixtures {
+  val chromelessWindowChrome: ByteArray =
+    Base64.getDecoder()
+      .decode(
+        "UEsDBBQAAAAAAAAAIQAVN9k7qgAAAKoAAAALAAAAYnVuZGxlLmpzb257ImJ1bmRsZUZvcm1hdFZlcnNpb24iOjEsInNwZWNTaGEy" +
+          "NTYiOiI5ZTMyMzczYjcwOTdhYTZiMGYxZDU5MzliYzI0MTZlNDI4YmRmM2JiYjZlMjNiYTkyMDNlZGVjYThjYmMzMzcxIiwiYXNz" +
+          "ZXRzIjpbXSwiZm9udHMiOltdLCJyZXF1aXJlcyI6WyJwcm90b3R5cGVfd2luZG93X2Nocm9tZV92MSJdfVBLAwQUAAAAAAAAACEA" +
+          "wu7Yon4AAAB+AAAACQAAAHNwZWMuanNvbnsiaWQiOiJjaHJvbWUiLCJ3aW5kb3ciOnsicGxhY2VtZW50Ijp7InR5cGUiOiJmdWxs" +
+          "c2NyZWVuIn0sImNocm9tZSI6Im5vbmUifSwicm9vdCI6eyJ0eXBlIjoidGV4dCIsInRleHQiOiJQcm90b3R5cGUgY29udGVudCJ9" +
+          "fVBLAQIUABQAAAAAAAAAIQAVN9k7qgAAAKoAAAALAAAAAAAAAAAAAAAAAAAAAABidW5kbGUuanNvblBLAQIUABQAAAAAAAAAIQDC" +
+          "7tiifgAAAH4AAAAJAAAAAAAAAAAAAAAAANMAAABzcGVjLmpzb25QSwUGAAAAAAIAAgBwAAAAeAEAAAAA",
+      )
+
   val minimal: ByteArray =
     Base64.getDecoder()
       .decode(

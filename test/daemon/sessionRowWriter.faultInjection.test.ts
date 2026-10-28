@@ -92,10 +92,13 @@ class Run {
     };
     const upsert = this.persistence.upsertActiveSession.bind(this.persistence);
     this.persistence.upsertActiveSession = async (...args) => {
+      // Taken before the write, so a faulted repair cannot leave the hook armed for a later one.
+      const hook = args[2]?.unlessTerminal ? this.afterActivityRepair : undefined;
+      if (hook) {
+        this.afterActivityRepair = undefined;
+      }
       const generation = await upsert(...args);
       this.lastGeneration = generation;
-      const hook = args[2]?.unlessTerminal ? this.afterActivityRepair : undefined;
-      this.afterActivityRepair = undefined;
       await hook?.();
       return generation;
     };
@@ -243,7 +246,8 @@ class Run {
    * A peer's sweep expires the live row, so the next activity write misses and re-persists the
    * whole row; a rebind lands while that re-persist is in flight, so the re-persist owes the live
    * row's rewrite (#11557). The peer sweeps again before that rewrite's backoff retry, so only the
-   * rewrite leaves the live session's row active.
+   * rewrite leaves the live session's row active. Its first fault point, the initial
+   * `recordActivity`, comes from the shared `getOrCreateSession` preamble in `simulate`.
    */
   async overlapActivityWithRebind(): Promise<void> {
     await this.peerSweep();

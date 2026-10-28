@@ -13,6 +13,16 @@ export const includeExtrasSchema = z
       "Only meaningful with project:'full' or raw:true; text content always omits extras.",
   );
 
+/** A fresh instance per field: a shared zod instance emits a dangling `$ref` in the tool schema. */
+export const resourceLinkField = () =>
+  z
+    .boolean()
+    .optional()
+    .describe(
+      "Return the complete result as an automobile:tool-output resource and a resource_link block " +
+        "instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
+    );
+
 /**
  * Response-shape control for tools that embed a post-action observation (issue
  * #5872). Spread into an action tool's `z.object` shape to give it the same

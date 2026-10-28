@@ -25,6 +25,7 @@ import {
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { assertDeviceGestureRecordingStartHeldDevice } from "../daemon/deviceGestureRecordingStartAdmission";
+import { resourceLinkField } from "../utils/schemaHelpers";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 
 // Start device gesture recording tool schema (empty - uses active device)
@@ -77,6 +78,7 @@ const exportPlanSchema = addSessionUuidToSchema(
     .object({
       recordingId: z.string().optional().describe("Recording ID"),
       planName: z.string().optional().describe("Plan name"),
+      resourceLink: resourceLinkField(),
     })
     .strict(),
 );

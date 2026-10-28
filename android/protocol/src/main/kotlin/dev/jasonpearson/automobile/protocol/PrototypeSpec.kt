@@ -227,7 +227,9 @@ data class PrototypeWindow(
   /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
   val backdrop: PrototypeBackdrop? = null,
   val transition: String? = null,
-  /** Window controls (`prototype_platform_window_controls_v1`, #14320); no runtime applies them yet. */
+  /**
+   * Window controls (`prototype_platform_window_controls_v1`, #14320); no runtime applies them yet.
+   */
   val keepScreenOn: Boolean? = null,
   /** `"system"` or a whole 0-100 brightness. */
   val brightness: JsonElement? = null,

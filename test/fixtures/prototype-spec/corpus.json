@@ -164,6 +164,7 @@
     "platform-camera-capture.json",
     "platform-commerce.json",
     "platform-connectivity.json",
+    "platform-contacts-fields.json",
     "platform-contacts.json",
     "platform-feedback-bound-effect.json",
     "platform-feedback-handler.json",
@@ -1078,6 +1079,11 @@
     "platform-commerce-unknown-event.json",
     "platform-condition-unknown-module.json",
     "platform-connectivity-unknown-key.json",
+    "platform-contacts-fields-duplicate.json",
+    "platform-contacts-fields-empty.json",
+    "platform-contacts-fields-not-array.json",
+    "platform-contacts-fields-too-many.json",
+    "platform-contacts-fields-unknown.json",
     "platform-contacts-multiple-not-boolean.json",
     "platform-contacts-undeclared-module.json",
     "platform-contacts-unknown-arg.json",
@@ -2438,6 +2444,11 @@
       "prototype_platform_v1"
     ],
     "platform-contacts.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_contacts_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-contacts-fields.json": [
       "prototype_data_model_v1",
       "prototype_platform_contacts_v1",
       "prototype_platform_v1"

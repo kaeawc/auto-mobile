@@ -66,6 +66,8 @@ final class PrototypePlatformTests: XCTestCase {
                     case let .enumeration(values):
                         XCTAssertEqual(rule["kind"] as? String, "enum", arg)
                         XCTAssertEqual(Set(rule["values"] as? [String] ?? []), values, arg)
+                    case .contract:
+                        XCTAssertEqual(rule["kind"] as? String, "array", arg)
                     }
                 }
             }

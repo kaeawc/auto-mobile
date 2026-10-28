@@ -2079,11 +2079,11 @@ runtime. No production runtime advertises the module yet.
 
 **Contact and calendar pickers (#14318).** Two modules reach the system pickers, which return only what the
 user picks and need no declared permission. `contacts` (`prototype_platform_contacts_v1`) has
-`contacts.pick` with an optional `multiple` boolean; it is `sensitive` because the result is personal data.
+`contacts.pick` with an optional `fields` list (one to three unique values of `name`, `phone`, `email`) and an optional `multiple` boolean; it is `sensitive` because the result is personal data.
 `calendar` (`prototype_platform_calendar_v1`) has `calendar.insert` with `title` (required, 1-256
 characters), `start` and `end` (required, whole milliseconds since the epoch), `allDay`, `location` (1-256) and
 `notes` (1-2048). Neither module has events or `/platform` state, and a back-out is the typed error
-`cancelled`. The contract cannot yet check an enum list, so the contact `fields` selector is not an argument.
+`cancelled`.
 No production runtime advertises either module yet.
 
 **Outbound links (#14238).** The `links` module (`prototype_platform_links_v1`) has one call, `links.open`

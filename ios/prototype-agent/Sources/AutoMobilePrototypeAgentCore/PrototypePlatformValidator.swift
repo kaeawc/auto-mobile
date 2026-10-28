@@ -13,6 +13,8 @@ enum PrototypePlatformValidator {
         case boolean
         case integer(min: Double, max: Double)
         case enumeration(Set<String>)
+        /// Any other contract rule (arrays, objects), checked by the shared contract walk.
+        case contract(JSONValue)
     }
 
     struct Argument: Equatable {
@@ -73,7 +75,8 @@ enum PrototypePlatformValidator {
             } else {
                 preconditionFailure("platform enum argument without values")
             }
-        default: .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        case "number": .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        default: .contract(.object(rule))
         }
     }
 
@@ -474,6 +477,13 @@ enum PrototypePlatformValidator {
         case let .enumeration(values):
             guard case let .string(value) = literal, values.contains(value) else {
                 throw fail(path, "Invalid enum value")
+            }
+        case let .contract(rule):
+            do {
+                try PrototypeContractValidator.validateValue(literal, rule: rule, path: path)
+            } catch let error as PrototypeLoadError {
+                guard case let .invalidSpec(at, message) = error else { throw error }
+                throw fail(at, message)
             }
         }
     }

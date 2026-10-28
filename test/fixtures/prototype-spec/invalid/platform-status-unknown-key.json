@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "platform-status-unknown-key",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["battery"]
+    },
+    "root": {
+      "type": "text",
+      "text": "{platform:/battery/charge}"
+    }
+  },
+  "expectedPath": "root.text"
+}

@@ -21589,6 +21589,100 @@
       },
       "events": {},
       "state": {}
+    },
+    "battery": {
+      "capability": "prototype_platform_battery_v1",
+      "calls": {},
+      "events": {
+        "changed": {
+          "sensitive": false,
+          "debounceMs": 500
+        }
+      },
+      "state": {
+        "level": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
+          }
+        },
+        "state": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["charging", "full", "unplugged", "unknown"]
+          }
+        }
+      }
+    },
+    "power": {
+      "capability": "prototype_platform_power_v1",
+      "calls": {},
+      "events": {
+        "changed": {
+          "sensitive": false,
+          "debounceMs": 500
+        }
+      },
+      "state": {
+        "saver": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "thermal": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["nominal", "fair", "serious", "critical"]
+          }
+        }
+      }
+    },
+    "audio": {
+      "capability": "prototype_platform_audio_v1",
+      "calls": {},
+      "events": {
+        "changed": {
+          "sensitive": false,
+          "debounceMs": 500
+        }
+      },
+      "state": {
+        "volume": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 100
+          }
+        },
+        "muted": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "route": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["speaker", "wired", "bluetooth", "usb", "airplay", "cast", "other"]
+          }
+        },
+        "ringer": {
+          "platforms": ["android"],
+          "value": {
+            "kind": "enum",
+            "values": ["normal", "vibrate", "silent"]
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

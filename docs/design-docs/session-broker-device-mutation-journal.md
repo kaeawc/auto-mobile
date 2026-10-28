@@ -57,7 +57,25 @@ unless a single post-loop re-read of its namespace confirms the baseline value; 
 differing key forces fallback. Critical settings restore failures force fallback immediately.
 Preferences are skipped by replay and require fallback unless their JSON key
 identifies an app absent from the readable baseline inventory, which cleaning
-uninstalls with its data. The app-owned interaction breadcrumbs
+uninstalls with its data.
+
+Android volume rows hold live audio levels, which raw settings cleaning cannot
+reach (AudioService persists `volume_*` rows but never reloads them), so they
+require their journal revert. `mediaSession` volume journals `volume:<stream>`
+(music, ring or alarm); a `pressButton` volume key journals `volume:key-press`,
+the levels of every stream a key can adjust (voice call, system, ring, music,
+alarm, notification, Bluetooth SCO, accessibility, assistant), because the
+adjusted stream follows audio focus and call state. Priors come from
+`cmd media_session volume --get` before the tool acts; any unreadable stream
+makes the row unobservable. The revert sets each stream back, aliasable streams
+before the stream they alias, in one device shell and succeeds only when every
+stream reads its level back. The accessibility stream is verified only: the
+shell cannot set it, so an independently changed accessibility level escalates.
+A prior level of 0 is not restorable, because a muted stream reads 0 and a ring
+level of 0 also changes the ringer mode; a positive ring level implies the normal
+ringer mode, which setting it restores. Settings cleaning afterwards writes the
+same `volume_*` values when the first journaled prior matches the baseline.
+iOS volume presses keep a fallback intent. The app-owned interaction breadcrumbs
 `preference:tool:setUIState` and `preference:focused-field` make no store claims.
 Permission rows require a journal revert or fallback, including for apps absent
 from the baseline: notification-policy access can persist for a never-installed
@@ -110,7 +128,7 @@ cleaning and require a revert. Power controls also require their verified journa
 revert; baseline cleaning never covers `power:*`.
 
 SMS, phone calls, SQL writes or unclassified queries, app-log deletion,
-secondary-display rotation, volume presses on both platforms, `mediaSession` volume, Android manufacturer
+secondary-display rotation, iOS volume presses, Android manufacturer
 profiles with kill/display facets (or unknown ids), and `deviceSnapshot` restore record
 fallback opaque intents. Read-only SQL records nothing. iOS keep-booted also escalates to erase on the `fallback:` intents
 recorded by volume presses, `sqlQuery` writes, `resetAppLogs`, `sendSms`, `phoneCall` and

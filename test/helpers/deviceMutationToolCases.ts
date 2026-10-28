@@ -52,7 +52,7 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
   {
     name: "mediaSession",
     args: { action: { volume: { stream: "music", level: 3 } } },
-    kind: "opaque",
+    kind: "device-setting",
   },
   { name: "setAppLinks", args: {}, kind: "opaque" },
   { name: "setSensor", args: {}, kind: "opaque" },

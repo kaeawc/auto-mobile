@@ -116,7 +116,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["pressButton"],
-    "Power/lock journal the screen state with a readable prior; volume presses record a fallback intent because live audio levels have no revert on either platform. iOS power/action retain diagnostic breadcrumbs; other buttons are transient input.",
+    "Power/lock journal the screen state with a readable prior; Android volume presses journal the level of every stream a volume key can change, which the reset sets back and reads back. iOS volume presses record a fallback intent because simctl has no volume revert; iOS power/action retain diagnostic breadcrumbs; other buttons are transient input.",
     "journaled",
     { fallback: true },
   ),

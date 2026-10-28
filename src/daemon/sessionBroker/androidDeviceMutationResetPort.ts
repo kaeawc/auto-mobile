@@ -36,6 +36,7 @@ import {
   SCREEN_STATE_MUTATION_KEY,
   isRestorableScreenState,
 } from "./mutations/screenStateMutation";
+import { VOLUME_RESTORED_MARKER, volumeRevertScript } from "./mutations/volumeMutation";
 
 interface AndroidRevertCommand {
   command: string;
@@ -45,6 +46,8 @@ interface AndroidRevertCommand {
   wakeSleptScreen?: boolean;
 }
 
+/** A key-press volume revert runs one `cmd media_session` per stream set and per read-back. */
+const VOLUME_REVERT_TIMEOUT_MS = 10_000;
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
 type AndroidRevertAdapter = (mutation: DeviceMutationInput) => AndroidRevertCommand[] | null;
 
@@ -59,6 +62,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       this.displayOverrideCommands(mutation) ??
       this.nightModeCommands(mutation) ??
       this.screenStateCommands(mutation) ??
+      this.volumeCommands(mutation) ??
       this.settingsBackedCommands(mutation) ??
       this.appLocaleCommands(mutation) ??
       deviceStateSettingCommands(mutation),
@@ -527,6 +531,24 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           { command: "shell wm dismiss-keyguard" },
         ]
       : null;
+  }
+
+  /**
+   * Sets each stream a volume row covers back to its journaled level in one device shell, which
+   * prints the marker only when every stream reads its level back; any other output fails the
+   * revert. Unrestorable priors (unreadable, or a level of 0) have no command.
+   */
+  private volumeCommands({ key, priorValue }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const script = volumeRevertScript(key, priorValue);
+    return script === null
+      ? null
+      : [
+          {
+            command: `shell sh -c ${shellQuote(script)}`,
+            success: VOLUME_RESTORED_MARKER,
+            timeoutMs: VOLUME_REVERT_TIMEOUT_MS,
+          },
+        ];
   }
 
   private nightModeCommands({

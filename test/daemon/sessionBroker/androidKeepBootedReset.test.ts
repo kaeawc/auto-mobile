@@ -1322,6 +1322,24 @@ test("failed uncovered fontScale journal revert requires fallback", async () => 
   });
 });
 
+test("failed volume journal revert requires fallback, not the volume_* settings clean", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, {
+    ...SETTING,
+    key: "volume:music",
+    priorValue: { state: "present", value: 5 },
+  });
+  port.beforeWrite = async () => {
+    throw new Error("music volume did not read back");
+  };
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("music volume did not read back"),
+  });
+});
+
 test.each([false, true])(
   "Android recording gap forces fallback and clears only after success: %s",
   async (fail) => {

@@ -13,10 +13,6 @@
       "type": "column",
       "children": [
         {
-          "type": "text",
-          "text": "{platform:/cast/state} {platform:/cast/deviceName} {platform:/cast/protocol} {platform:/cast/volume}"
-        },
-        {
           "type": "button",
           "label": "Louder",
           "onTap": [
@@ -50,6 +46,6 @@
       ]
     }
   },
-  "expectedPath": "root.children[1].onTap[0].call",
+  "expectedPath": "root.children[0].onTap[0].call",
   "expectedMessage": "Platform module cast is not declared in requires.platform"
 }

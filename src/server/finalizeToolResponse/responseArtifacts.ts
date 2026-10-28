@@ -95,11 +95,14 @@ export function boundRenderedPayload(
   // mid-string into unparseable JSON. With a writer available, spill whatever
   // residue is still oversized and keep only the headline fields inline, so the
   // client always gets complete, parseable JSON plus a pointer to the rest.
+  // A caller that passes `resourceLink: true` asks for that spill (and its
+  // resource_link block) at any size (#13942).
   const boundedCandidate = sanitizedPayload ?? payload;
   if (
     ctx.artifactWriter &&
     !ctx.internal &&
-    exceedsInlineLimit(boundedCandidate, hasStructured, serialization)
+    (ctx.args?.resourceLink === true ||
+      exceedsInlineLimit(boundedCandidate, hasStructured, serialization))
   ) {
     try {
       sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate, hasStructured, serialization);

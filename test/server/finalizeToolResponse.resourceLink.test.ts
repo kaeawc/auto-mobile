@@ -71,4 +71,38 @@ describe("artifact resource_link blocks (#13942)", () => {
     expect(artifactResourceLinks({ observation: pointer("ToolResponse") })).toEqual([]);
     expect(artifactResourceLinks({ artifact: { path: "/x" } })).toEqual([]);
   });
+
+  describe("resourceLink opt-in", () => {
+    const run = (
+      response: ReturnType<typeof createStructuredToolResponse>,
+      ctx: { args?: Record<string, unknown>; internal?: boolean },
+    ) =>
+      finalizeToolResponse(response, {
+        name: "getLogs",
+        artifactWriter: new FakeWriter(),
+        ...ctx,
+      }) as { content: Array<Record<string, unknown>> };
+    const links = (response: { content: Array<Record<string, unknown>> }) =>
+      response.content.filter((part) => part.type === "resource_link");
+    const mid = () => createStructuredToolResponse({ success: true, logs: "x".repeat(8 * 1024) });
+
+    test("a mid-sized response is spilled and linked only when the caller opts in", () => {
+      expect(links(run(mid(), { args: { resourceLink: true } }))).toHaveLength(1);
+      expect(links(run(mid(), {}))).toHaveLength(0);
+      expect(links(run(mid(), { args: { resourceLink: false } }))).toHaveLength(0);
+    });
+
+    test("the opted-in response keeps success inline and drops the bulk", () => {
+      const response = run(mid(), { args: { resourceLink: true } });
+      const text = String((response.content[0] as { text: string }).text);
+      expect(text).toContain('"success":true');
+      expect(text).not.toContain("xxxxxxxx");
+    });
+
+    test("an internal caller is neither linked nor spilled", () => {
+      const response = run(mid(), { args: { resourceLink: true }, internal: true });
+      expect(links(response)).toHaveLength(0);
+      expect(String((response.content[0] as { text: string }).text)).toContain("xxxxxxxx");
+    });
+  });
 });

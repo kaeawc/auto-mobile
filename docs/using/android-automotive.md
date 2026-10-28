@@ -57,10 +57,12 @@ The gate uses the AVD's form factor, so a physical head unit is not covered.
 
 ## Simulating driving and night mode
 
-`deviceCondition` has a `vehicle` family for emulators:
+Call `setDeviceState` with a `deviceCondition` object as its only field; do not combine it with
+other `setDeviceState` fields. It is behind the `device-condition` feature flag, which is disabled
+by default. The `vehicle` family supports emulators:
 
 ```json
-{ "vehicle": { "motion": "driving", "nightMode": "on" } }
+{ "deviceCondition": { "vehicle": { "motion": "driving", "nightMode": "on" } } }
 ```
 
 - `vehicle.motion`: `parked` or `driving` (gear, speed and parking brake are set together), or `unset`.

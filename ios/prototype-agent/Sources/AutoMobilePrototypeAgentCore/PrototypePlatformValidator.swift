@@ -411,6 +411,9 @@ enum PrototypePlatformValidator {
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)
         }
+        if call == "links.open", let error = PrototypeLinks.argumentsError(args, path: "\(path).args") {
+            throw fail(error.path, error.message)
+        }
         if let into = action["into"] { try self.into(into, path: "\(path).into") }
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
     }

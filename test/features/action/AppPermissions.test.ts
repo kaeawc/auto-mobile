@@ -4,6 +4,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { SetAndroidScheduleExactAlarmAppOp } from "../../../src/features/action/SetAndroidScheduleExactAlarmAppOp";
 import { SetAndroidNotificationPolicyAccess } from "../../../src/features/action/SetAndroidNotificationPolicyAccess";
 import { AppPermissions } from "../../../src/features/action/AppPermissions";
+import { createSetAppPermissionsHandler } from "../../../src/server/appTools";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -1032,5 +1033,95 @@ describe("AppPermissions", () => {
         "Provide at least one permission or Android-specific permission option",
       );
     });
+  });
+});
+
+describe("AppPermissions audio_input_unavailable (#13627)", () => {
+  const diagnostic = {
+    code: "audio_input_unavailable" as const,
+    message: "No host audio input device; recordings on this device will contain no audio.",
+    retryable: false as const,
+  };
+  const noInput = () => diagnostic;
+  const hasInput = () => undefined;
+
+  test("a simulator microphone grant succeeds and carries the diagnostic", async () => {
+    const simctl = new FakeSimctl();
+    const permissions = new AppPermissions(iosSimulator, { simctl, audioInputDiagnostic: noInput });
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["microphone"],
+    });
+    expect(result.success).toBe(true);
+    expect(result.diagnostics).toEqual([diagnostic]);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+  });
+
+  test("the tool response states the diagnostic without failing the grant", async () => {
+    const handler = createSetAppPermissionsHandler(
+      (device) =>
+        new AppPermissions(device, { simctl: new FakeSimctl(), audioInputDiagnostic: noInput }),
+    );
+    const response = await handler(iosSimulator, {
+      appId: "com.example.app",
+      action: "grant",
+      permissions: ["microphone"],
+    });
+    expect("isError" in response ? response.isError : false).toBe(false);
+    const data = JSON.parse(response.content[0].text);
+    expect(data.diagnostics).toEqual([diagnostic]);
+    expect(data.message).toBe(
+      `Applied 1 app permission change(s) for com.example.app. Warning: ${diagnostic.message}`,
+    );
+  });
+
+  test("no diagnostic for a non-microphone grant, a revoke, or a host with input", async () => {
+    const cases = [
+      { resolver: noInput, action: "grant", permissions: ["camera"] },
+      { resolver: noInput, action: "revoke", permissions: ["microphone"] },
+      { resolver: hasInput, action: "grant", permissions: ["microphone"] },
+    ] as const;
+    for (const { resolver, action, permissions: requested } of cases) {
+      const permissions = new AppPermissions(iosSimulator, {
+        simctl: new FakeSimctl(),
+        audioInputDiagnostic: resolver,
+      });
+      const result = await permissions.setPermissions("com.example.app", {
+        action,
+        permissions: [...requested],
+      });
+      expect(result.success).toBe(true);
+      expect(result.diagnostics).toBeUndefined();
+    }
+  });
+
+  test("an Android RECORD_AUDIO grant by short name carries the diagnostic", async () => {
+    const recordAudio = egg.replaceAll(
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.RECORD_AUDIO",
+    );
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    const grant = "shell pm grant --user 0 'com.example.app' 'android.permission.RECORD_AUDIO'";
+    client.setCommandResult(grant, "");
+    client.setCommandResult(currentUser, "0\n");
+    client.setCommandResultSequence("shell dumpsys package 'com.example.app'", [
+      recordAudio,
+      recordAudio.replace(
+        "android.permission.RECORD_AUDIO: granted=false",
+        "android.permission.RECORD_AUDIO: granted=true",
+      ),
+    ]);
+    const permissions = new AppPermissions(androidDevice, {
+      adbFactory,
+      audioInputDiagnostic: noInput,
+    });
+    const result = await permissions.setPermissions("com.example.app", {
+      permissions: ["RECORD_AUDIO"],
+      userId: 0,
+    });
+    expect(client.wasCommandExecuted(grant)).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.diagnostics).toEqual([diagnostic]);
   });
 });

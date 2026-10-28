@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderPrototypeGuide } from "../../../src/features/prototype/prototypeGuide";
 import { PROTOTYPE_NODE_TYPES } from "../../../src/features/prototype/prototypeSpec";
+import { prototypeAccessibilityOutput } from "../../../src/features/prototype/prototypeAccessibilityLint";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const root = join(import.meta.dir, "../../..");
@@ -111,6 +112,10 @@ describe("prototype template gallery", () => {
             typeof node.testTag !== "string",
         );
         expect(untagged.map((node) => JSON.stringify(node).slice(0, 80))).toEqual([]);
+      });
+
+      test("passes the accessibility lint with zero findings (#14126)", () => {
+        expect(prototypeAccessibilityOutput(decoded.get(name))).toEqual({});
       });
 
       test("is listed in the authoring guide and the hackathon guide", () => {

@@ -2178,6 +2178,15 @@ No argument carries an amount, merchant, key or card: prices come only from the 
 catalog block, the check that `productId` names a catalog product and `commerce.checkout` are not in the
 contract yet, and no production runtime advertises the module.
 
+**Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
+Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
+and it may not also appear in `storage.keys`. The list needs the `secureStorage` module
+(`prototype_platform_secureStorage_v1`) in `requires.platform`; its one read-only key,
+`/platform/secureStorage/locked`, is true while a biometric-bound key is still locked.
+`secureAuth: {"state:<key>": "biometric"}` binds a secure key to a `biometric.authenticate` and needs `biometric`
+in `requires.platform`. A secure key never leaves the device through an emit `context`. The validators refuse
+`{state: <secure key>}` there. No production runtime advertises the module yet.
+
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
 exactly one `/<module>/<key>`: `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),

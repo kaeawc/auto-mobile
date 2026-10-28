@@ -223,6 +223,7 @@
     "search-bar-docked.json",
     "search-bar-minimal.json",
     "search-bar.json",
+    "secure-storage.json",
     "select-dropdown.json",
     "selection-controls.json",
     "set-state-matching-values.json",
@@ -1444,6 +1445,18 @@
     "search-bar-trailing-action-unknown-icon.json",
     "search-bar-unknown-extra-field.json",
     "search-bar-unknown-leading-icon.json",
+    "secure-storage-also-in-keys.json",
+    "secure-storage-auth-not-secure.json",
+    "secure-storage-auth-unknown-method.json",
+    "secure-storage-auth-without-biometric.json",
+    "secure-storage-auth-without-secure.json",
+    "secure-storage-data-key.json",
+    "secure-storage-emit-context-template.json",
+    "secure-storage-emit-context.json",
+    "secure-storage-non-string.json",
+    "secure-storage-too-many.json",
+    "secure-storage-undeclared-module.json",
+    "secure-storage-undeclared-state.json",
     "segmented-button-duplicate-value.json",
     "segmented-button-state-type.json",
     "segmented-button-too-many-options.json",
@@ -1724,6 +1737,7 @@
     "strict-gate-prototype_platform_power_v1.json",
     "strict-gate-prototype_platform_realtime_device_v1.json",
     "strict-gate-prototype_platform_realtime_v1.json",
+    "strict-gate-prototype_platform_secureStorage_v1.json",
     "strict-gate-prototype_platform_sensors_v1.json",
     "strict-gate-prototype_platform_settings_v1.json",
     "strict-gate-prototype_platform_share_v1.json",
@@ -2935,6 +2949,13 @@
       "prototype_data_model_v1",
       "prototype_platform_commerce_v1",
       "prototype_platform_v1"
+    ],
+    "secure-storage.json": [
+      "prototype_emit_context_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
     ],
     "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"]
   }

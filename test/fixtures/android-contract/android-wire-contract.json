@@ -9493,6 +9493,18 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "secure",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "secureAuth",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStorageKeyBytes": [

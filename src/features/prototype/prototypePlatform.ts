@@ -7,6 +7,10 @@ import {
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import {
+  prototypeSecureStorageEmitError,
+  prototypeSecureStorageError,
+} from "./prototypeSecureStorage";
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -561,7 +565,7 @@ export function prototypePlatformError(
     }
   }
   for (const { value, path } of actions) {
-    const found = emitNameError(value, path);
+    const found = emitNameError(value, path) ?? prototypeSecureStorageEmitError(value, path, root);
     if (found) {
       return found;
     }
@@ -570,13 +574,14 @@ export function prototypePlatformError(
 }
 
 /**
- * The first error in the root-level blocks: realtime channels, the auth block, the location block,
- * then `requires`.
+ * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
+ * the location block, then `requires`.
  */
 function rootBlockError(root: Raw): PrototypePlatformError | undefined {
   return (
     prototypeChannelsError(root) ??
     prototypeAuthBlockError(root) ??
+    prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
     requiresError(root)
   );

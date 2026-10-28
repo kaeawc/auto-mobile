@@ -153,6 +153,7 @@ struct PrototypeSpec: Decodable {
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
             channels: channels,
             auth: container.decodeIfPresent(JSONValue.self, forKey: .auth),
+            storage: container.decodeIfPresent(JSONValue.self, forKey: .storage),
             location: container.decodeIfPresent(JSONValue.self, forKey: .location),
             root: raw,
             state: menuState ?? [:]

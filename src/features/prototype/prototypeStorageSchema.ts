@@ -13,5 +13,13 @@ export const prototypeStorageSchema = z
       .min(1)
       .max(contract.limits.MAX_PROTOTYPE_STORAGE_KEYS)
       .refine((keys) => new Set(keys).size === keys.length),
+    /** `state:` keys kept in the Keystore or Keychain, never plaintext (#14321). */
+    secure: z
+      .array(z.string().min(1).max(261))
+      .min(1)
+      .max(8)
+      .refine((keys) => new Set(keys).size === keys.length)
+      .optional(),
+    secureAuth: z.record(z.string(), z.literal("biometric")).optional(),
   })
   .strict();

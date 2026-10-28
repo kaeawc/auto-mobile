@@ -1,0 +1,1128 @@
+{
+  "id": "pulse-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "derive": {
+    "stepsText": {
+      "of": {
+        "data": "/today/0/steps"
+      },
+      "format": {
+        "number": {
+          "grouping": true
+        }
+      },
+      "locale": "en-US"
+    }
+  },
+  "state": {
+    "scanning": false,
+    "found": false,
+    "bandName": "",
+    "bandBattery": 0,
+    "running": false,
+    "seconds": 0,
+    "bpm": 72,
+    "range": "week",
+    "zoneBuzz": true
+  },
+  "data": {
+    "bands": [
+      {
+        "id": "b1",
+        "name": "Pulse Band 2",
+        "battery": 82,
+        "signal": "strong"
+      },
+      {
+        "id": "b2",
+        "name": "Pulse Band Mini",
+        "battery": 37,
+        "signal": "weak"
+      }
+    ],
+    "today": [
+      {
+        "steps": 6420
+      }
+    ],
+    "resting": [
+      {
+        "day": "Mon",
+        "bpm": 61
+      },
+      {
+        "day": "Tue",
+        "bpm": 60
+      },
+      {
+        "day": "Wed",
+        "bpm": 63
+      },
+      {
+        "day": "Thu",
+        "bpm": 59
+      },
+      {
+        "day": "Fri",
+        "bpm": 58
+      },
+      {
+        "day": "Sat",
+        "bpm": 62
+      },
+      {
+        "day": "Sun",
+        "bpm": 60
+      }
+    ],
+    "lastRun": [
+      {
+        "t": "0:00",
+        "bpm": 72
+      },
+      {
+        "t": "1:00",
+        "bpm": 88
+      },
+      {
+        "t": "2:00",
+        "bpm": 104
+      },
+      {
+        "t": "3:00",
+        "bpm": 118
+      },
+      {
+        "t": "4:00",
+        "bpm": 126
+      },
+      {
+        "t": "5:00",
+        "bpm": 131
+      },
+      {
+        "t": "6:00",
+        "bpm": 138
+      },
+      {
+        "t": "7:00",
+        "bpm": 142
+      },
+      {
+        "t": "8:00",
+        "bpm": 147
+      },
+      {
+        "t": "9:00",
+        "bpm": 151
+      },
+      {
+        "t": "10:00",
+        "bpm": 149
+      },
+      {
+        "t": "11:00",
+        "bpm": 144
+      },
+      {
+        "t": "12:00",
+        "bpm": 139
+      },
+      {
+        "t": "13:00",
+        "bpm": 128
+      },
+      {
+        "t": "14:00",
+        "bpm": 112
+      },
+      {
+        "t": "15:00",
+        "bpm": 96
+      }
+    ],
+    "splits": [
+      {
+        "km": 1,
+        "pace": "5:12 /km"
+      },
+      {
+        "km": 2,
+        "pace": "5:04 /km"
+      },
+      {
+        "km": 3,
+        "pace": "4:58 /km"
+      }
+    ],
+    "week": [
+      {
+        "day": "Mon",
+        "steps": 8210
+      },
+      {
+        "day": "Tue",
+        "steps": 10450
+      },
+      {
+        "day": "Wed",
+        "steps": 6120
+      },
+      {
+        "day": "Thu",
+        "steps": 9930
+      },
+      {
+        "day": "Fri",
+        "steps": 7400
+      },
+      {
+        "day": "Sat",
+        "steps": 12880
+      },
+      {
+        "day": "Sun",
+        "steps": 6420
+      }
+    ],
+    "month": [
+      {
+        "week": "W1",
+        "steps": 58200
+      },
+      {
+        "week": "W2",
+        "steps": 61400
+      },
+      {
+        "week": "W3",
+        "steps": 54900
+      },
+      {
+        "week": "W4",
+        "steps": 61410
+      }
+    ],
+    "sleep": [
+      {
+        "day": "Mon",
+        "hours": 7.2
+      },
+      {
+        "day": "Tue",
+        "hours": 6.5
+      },
+      {
+        "day": "Wed",
+        "hours": 8.1
+      },
+      {
+        "day": "Thu",
+        "hours": 7
+      },
+      {
+        "day": "Fri",
+        "hours": 5.9
+      },
+      {
+        "day": "Sat",
+        "hours": 8.6
+      },
+      {
+        "day": "Sun",
+        "hours": 7.7
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "pair",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "pair": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "pair_bar",
+            "title": "Pair your band"
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 16
+            },
+            "children": [
+              {
+                "type": "icon",
+                "name": "bluetooth_searching",
+                "contentDescription": "Bluetooth"
+              },
+              {
+                "type": "text",
+                "text": "Wake your band and keep it close to the phone.",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "button",
+                "testTag": "scan_button",
+                "label": "Scan for bands",
+                "icon": "bluetooth",
+                "enabledWhen": {
+                  "key": "scanning",
+                  "equals": false
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "scanning",
+                    "value": true
+                  },
+                  {
+                    "type": "setState",
+                    "key": "found",
+                    "value": false
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "scan",
+                    "afterMs": 1500,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "scanning",
+                        "value": false
+                      },
+                      {
+                        "type": "setState",
+                        "key": "found",
+                        "value": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "testTag": "scan_progress",
+                "visibleWhen": {
+                  "key": "scanning",
+                  "equals": true
+                },
+                "style": {
+                  "spacing": 12,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "progress",
+                    "variant": "circular"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Looking for bands nearby",
+                    "semantics": {
+                      "liveRegion": "polite"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "testTag": "band_results",
+                "visibleWhen": {
+                  "key": "found",
+                  "equals": true
+                },
+                "repeat": {
+                  "items": {
+                    "path": "/bands"
+                  },
+                  "as": "band",
+                  "key": "id"
+                },
+                "children": [
+                  {
+                    "type": "listItem",
+                    "testTag": "band_result",
+                    "headline": "{band.name}",
+                    "supporting": "Battery {band.battery}% · Signal {band.signal}",
+                    "leadingIcon": "watch",
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "bandName",
+                        "value": "{band.name}"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "bandBattery",
+                        "value": "{band.battery}"
+                      },
+                      {
+                        "type": "emit",
+                        "name": "band_paired",
+                        "context": {
+                          "band": {
+                            "item": "id"
+                          }
+                        }
+                      },
+                      {
+                        "type": "replace",
+                        "stack": "nav",
+                        "screen": "home"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "tabs",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "today_bar",
+                    "title": "Today",
+                    "actions": [
+                      {
+                        "icon": "watch",
+                        "label": "Band settings",
+                        "onTap": [
+                          {
+                            "type": "push",
+                            "stack": "nav",
+                            "screen": "band"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "today_bar_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 16
+                      },
+                      "children": [
+                        {
+                          "type": "row",
+                          "style": {
+                            "spacing": 8,
+                            "alignment": "center"
+                          },
+                          "children": [
+                            {
+                              "type": "icon",
+                              "name": "bluetooth_connected",
+                              "contentDescription": "Connected"
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "band_status",
+                              "text": "{bandName} · {bandBattery}% battery",
+                              "style": {
+                                "textStyle": "bodyMedium"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "chart",
+                          "testTag": "steps_ring",
+                          "variant": "ring",
+                          "goal": 10000,
+                          "series": [
+                            {
+                              "path": "/today",
+                              "y": "steps",
+                              "label": "Steps today"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "testTag": "steps_label",
+                          "text": "{derived:stepsText} steps",
+                          "style": {
+                            "textStyle": "headlineSmall"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "Resting heart rate",
+                          "semantics": {
+                            "heading": true
+                          },
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "chart",
+                          "testTag": "resting_chart",
+                          "variant": "line",
+                          "xLabels": "ends",
+                          "series": [
+                            {
+                              "path": "/resting",
+                              "x": "day",
+                              "y": "bpm",
+                              "label": "Resting heart rate",
+                              "color": "error"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "workout_bar",
+                    "title": "Workout",
+                    "actions": [
+                      {
+                        "icon": "watch",
+                        "label": "Band settings",
+                        "onTap": [
+                          {
+                            "type": "push",
+                            "stack": "nav",
+                            "screen": "band"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "workout_bar_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 16
+                      },
+                      "children": [
+                        {
+                          "type": "card",
+                          "variant": "filled",
+                          "testTag": "live_card",
+                          "children": [
+                            {
+                              "type": "column",
+                              "style": {
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 16,
+                                  "bottom": 16
+                                },
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "row",
+                                  "style": {
+                                    "spacing": 8,
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "monitor_heart",
+                                      "contentDescription": "Heart rate",
+                                      "style": {
+                                        "color": "error"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "testTag": "hr_value",
+                                      "text": "{bpm} bpm",
+                                      "contentTransition": "numeric",
+                                      "style": {
+                                        "textStyle": "displaySmall"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "hr_zone",
+                                  "text": "Easy",
+                                  "visibleWhen": {
+                                    "key": "bpm",
+                                    "lt": 120
+                                  },
+                                  "semantics": {
+                                    "liveRegion": "polite"
+                                  },
+                                  "style": {
+                                    "textStyle": "labelLarge",
+                                    "color": "tertiary"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "hr_zone",
+                                  "text": "Aerobic",
+                                  "visibleWhen": {
+                                    "all": [
+                                      {
+                                        "key": "bpm",
+                                        "gt": 119
+                                      },
+                                      {
+                                        "key": "bpm",
+                                        "lt": 150
+                                      }
+                                    ]
+                                  },
+                                  "semantics": {
+                                    "liveRegion": "polite"
+                                  },
+                                  "style": {
+                                    "textStyle": "labelLarge",
+                                    "color": "primary"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "hr_zone",
+                                  "text": "Peak",
+                                  "visibleWhen": {
+                                    "key": "bpm",
+                                    "gt": 149
+                                  },
+                                  "semantics": {
+                                    "liveRegion": "polite"
+                                  },
+                                  "style": {
+                                    "textStyle": "labelLarge",
+                                    "color": "error"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "elapsed",
+                                  "text": "{seconds} s elapsed",
+                                  "style": {
+                                    "textStyle": "titleMedium"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "background_note",
+                                  "visibleWhen": {
+                                    "key": "running",
+                                    "equals": true
+                                  },
+                                  "text": "Recording. Keep the app open: background tracking is not available yet.",
+                                  "style": {
+                                    "textStyle": "bodySmall"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "row",
+                          "style": {
+                            "spacing": 8
+                          },
+                          "children": [
+                            {
+                              "type": "button",
+                              "testTag": "workout_start",
+                              "label": "Start",
+                              "icon": "play_arrow",
+                              "enabledWhen": {
+                                "key": "running",
+                                "equals": false
+                              },
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "running",
+                                  "value": true
+                                },
+                                {
+                                  "type": "startTimer",
+                                  "id": "clock",
+                                  "afterMs": 1000,
+                                  "everyMs": 1000,
+                                  "maxRuns": 3600,
+                                  "actions": [
+                                    {
+                                      "type": "increment",
+                                      "key": "seconds"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "startTimer",
+                                  "id": "heart",
+                                  "afterMs": 1000,
+                                  "everyMs": 1000,
+                                  "maxRuns": 90,
+                                  "actions": [
+                                    {
+                                      "type": "increment",
+                                      "key": "bpm"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "button",
+                              "testTag": "workout_pause",
+                              "label": "Pause",
+                              "icon": "pause",
+                              "variant": "tonal",
+                              "enabledWhen": {
+                                "key": "running",
+                                "equals": true
+                              },
+                              "onTap": [
+                                {
+                                  "type": "cancelTimer",
+                                  "id": "clock"
+                                },
+                                {
+                                  "type": "cancelTimer",
+                                  "id": "heart"
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "running",
+                                  "value": false
+                                }
+                              ]
+                            },
+                            {
+                              "type": "button",
+                              "testTag": "workout_finish",
+                              "label": "Finish",
+                              "icon": "stop",
+                              "variant": "outlined",
+                              "onTap": [
+                                {
+                                  "type": "cancelTimer",
+                                  "id": "clock"
+                                },
+                                {
+                                  "type": "cancelTimer",
+                                  "id": "heart"
+                                },
+                                {
+                                  "type": "emit",
+                                  "name": "workout_saved",
+                                  "context": {
+                                    "seconds": {
+                                      "state": "seconds"
+                                    },
+                                    "bpm": {
+                                      "state": "bpm"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "running",
+                                  "value": false
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "seconds",
+                                  "value": 0
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "bpm",
+                                  "value": 72
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "text": "Heart rate, last run",
+                          "semantics": {
+                            "heading": true
+                          },
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "chart",
+                          "testTag": "hr_chart",
+                          "variant": "area",
+                          "xLabels": "ends",
+                          "series": [
+                            {
+                              "path": "/lastRun",
+                              "x": "t",
+                              "y": "bpm",
+                              "label": "Heart rate",
+                              "color": "error"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "text": "Splits",
+                          "semantics": {
+                            "heading": true
+                          },
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "column",
+                          "repeat": {
+                            "items": {
+                              "path": "/splits"
+                            },
+                            "as": "split",
+                            "key": "km"
+                          },
+                          "children": [
+                            {
+                              "type": "listItem",
+                              "testTag": "split_row",
+                              "headline": "Km {split.km}",
+                              "supporting": "{split.pace}",
+                              "leadingIcon": "directions_run"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "history_bar",
+                    "title": "History",
+                    "actions": [
+                      {
+                        "icon": "watch",
+                        "label": "Band settings",
+                        "onTap": [
+                          {
+                            "type": "push",
+                            "stack": "nav",
+                            "screen": "band"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "history_bar_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 16
+                      },
+                      "children": [
+                        {
+                          "type": "segmentedButton",
+                          "testTag": "range_picker",
+                          "stateKey": "range",
+                          "options": [
+                            {
+                              "value": "week",
+                              "label": "Week"
+                            },
+                            {
+                              "value": "month",
+                              "label": "Month"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "text": "Steps",
+                          "semantics": {
+                            "heading": true
+                          },
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "chart",
+                          "testTag": "steps_week",
+                          "variant": "bar",
+                          "xLabels": "all",
+                          "goal": 10000,
+                          "visibleWhen": {
+                            "key": "range",
+                            "equals": "week"
+                          },
+                          "series": [
+                            {
+                              "path": "/week",
+                              "x": "day",
+                              "y": "steps",
+                              "label": "Steps",
+                              "color": "primary"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "chart",
+                          "testTag": "steps_month",
+                          "variant": "bar",
+                          "xLabels": "all",
+                          "visibleWhen": {
+                            "key": "range",
+                            "equals": "month"
+                          },
+                          "series": [
+                            {
+                              "path": "/month",
+                              "x": "week",
+                              "y": "steps",
+                              "label": "Steps",
+                              "color": "primary"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "text": "Sleep",
+                          "semantics": {
+                            "heading": true
+                          },
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "chart",
+                          "testTag": "sleep_week",
+                          "variant": "bar",
+                          "xLabels": "all",
+                          "goal": 8,
+                          "series": [
+                            {
+                              "path": "/sleep",
+                              "x": "day",
+                              "y": "hours",
+                              "label": "Sleep hours",
+                              "color": "tertiary"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "tabs",
+            "items": [
+              {
+                "label": "Today",
+                "icon": "today"
+              },
+              {
+                "label": "Workout",
+                "icon": "directions_run"
+              },
+              {
+                "label": "History",
+                "icon": "history"
+              }
+            ]
+          }
+        ]
+      },
+      "band": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "band_bar",
+            "title": "{bandName}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "listItem",
+                "testTag": "band_battery",
+                "headline": "Battery",
+                "supporting": "{bandBattery}%",
+                "leadingIcon": "battery_5_bar"
+              },
+              {
+                "type": "listItem",
+                "testTag": "band_vibrate",
+                "headline": "Vibrate on zone change",
+                "leadingIcon": "fitness_center",
+                "trailing": {
+                  "type": "switch",
+                  "stateKey": "zoneBuzz"
+                }
+              },
+              {
+                "type": "button",
+                "testTag": "unpair_button",
+                "label": "Unpair band",
+                "icon": "link_off",
+                "variant": "outlined",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "band_unpaired"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "clock"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "heart"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "running",
+                    "value": false
+                  },
+                  {
+                    "type": "setState",
+                    "key": "seconds",
+                    "value": 0
+                  },
+                  {
+                    "type": "setState",
+                    "key": "bpm",
+                    "value": 72
+                  },
+                  {
+                    "type": "setState",
+                    "key": "found",
+                    "value": false
+                  },
+                  {
+                    "type": "popToRoot",
+                    "stack": "nav"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

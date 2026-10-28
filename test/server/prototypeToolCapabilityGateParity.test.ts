@@ -591,6 +591,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_secureStorage_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["secureStorage"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, visibleWhen: { platform: "/secureStorage/locked", equals: true } }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_auth_v1: {
     minimalSpec: {
       ...base,

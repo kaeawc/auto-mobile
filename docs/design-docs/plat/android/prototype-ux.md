@@ -2177,7 +2177,7 @@ only; iOS has no public ambient-light API). A sensor the device lacks leaves its
 missing. `prototypeSensorReference.ts` is the reference the runtimes copy: whole-unit rounding, per-key
 throttling at `1000 / rateHz` ms (`rateHz` 1 to 30), and a shake at 2.7 g or more with a 1000 ms cooldown,
 replayed from `test/fixtures/prototype-sensors/`. The root `sensors` subscription block (which sensors to listen
-to and their `rateHz`) and the `motion` permission for `steps` are not in the contract yet, and no production
+to and their `rateHz`) and the `motion` permission for `steps` are outside this contract. No production
 runtime advertises the module.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,

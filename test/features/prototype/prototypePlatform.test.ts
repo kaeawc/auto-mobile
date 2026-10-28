@@ -799,6 +799,7 @@ describe("sensors module contract", () => {
     for (const name of ["pitchDeg", "rollDeg", "headingDeg", "steps", "lightLux"]) {
       expect(state[name].value.integer).toBe(true);
     }
+    expect(state.headingDeg.value.min).toBe(0);
     expect(state.headingDeg.value.max).toBe(359);
     expect(state.pitchDeg.value.min).toBe(-180);
     expect(state.pitchDeg.value.max).toBe(180);

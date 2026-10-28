@@ -9,6 +9,7 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
   getStaticToolDefinitions,
   getConnectedStaticToolDefinitions,
+  staticToolDeclaresInput,
 } from "../../src/daemon/staticToolDefinitions";
 import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
 import committedDefinitions from "../../schemas/tool-definitions.json";
@@ -228,5 +229,17 @@ describe("getStaticToolDefinitions", () => {
       expect(tool.name.length).toBeGreaterThan(0);
       expect(typeof tool.inputSchema).toBe("object");
     }
+  });
+});
+
+describe("staticToolDeclaresInput", () => {
+  test.each(["killDevice", "deleteDevice"])("%s declares a force input", (tool) => {
+    expect(staticToolDeclaresInput(tool, "force")).toBe(true);
+  });
+
+  test("a tool without the property, an unknown property and an unknown tool all read false", () => {
+    expect(staticToolDeclaresInput("tapOn", "force")).toBe(false);
+    expect(staticToolDeclaresInput("killDevice", "noSuchInput")).toBe(false);
+    expect(staticToolDeclaresInput("noSuchTool", "force")).toBe(false);
   });
 });

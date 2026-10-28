@@ -104,12 +104,14 @@ struct PrototypeSpec: Decodable {
     let authoredRoot: JSONValue
     /// Declarations retained for contract validation; no realtime transport is installed.
     let channels: JSONValue?
+    /// Declared media players (#14253), retained for contract validation; no player is created.
+    let media: JSONValue?
     let platformHandlers: [String: JSONValue]
     private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels, auth
-        case location
+        case location, media
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -134,6 +136,7 @@ struct PrototypeSpec: Decodable {
         if let data { try PrototypeLimits.guardData(data) }
         derive = try container.decodeIfPresent([String: PrototypeDerivedEntry].self, forKey: .derive)
         channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
+        media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -155,6 +158,7 @@ struct PrototypeSpec: Decodable {
             auth: container.decodeIfPresent(JSONValue.self, forKey: .auth),
             storage: container.decodeIfPresent(JSONValue.self, forKey: .storage),
             location: container.decodeIfPresent(JSONValue.self, forKey: .location),
+            media: media,
             root: raw,
             state: menuState ?? [:]
         )
@@ -240,6 +244,7 @@ struct PrototypeSpec: Decodable {
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
     ) {
         channels = spec.channels
+        media = spec.media
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         id = spec.id

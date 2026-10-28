@@ -5,6 +5,12 @@ import {
   prototypeRealtimeFields,
 } from "./prototypeChannels";
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
+import {
+  prototypeMediaCallError,
+  prototypeMediaError,
+  prototypeMediaPlayers,
+  prototypeMediaReadValid,
+} from "./prototypeMedia";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
 import {
@@ -345,15 +351,19 @@ function argumentsError(
   return undefined;
 }
 
+/** What a spec declares that platform uses are checked against. */
+interface PlatformContext {
+  declared: Set<string>;
+  permissions: Set<string>;
+  background: Set<string>;
+  channels: Raw;
+  players: ReadonlySet<string>;
+}
+
 function callError(
   action: Raw,
   path: string,
-  context: {
-    declared: Set<string>;
-    permissions: Set<string>;
-    background: Set<string>;
-    channels: Raw;
-  },
+  context: PlatformContext,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   const call = prototypePlatformCall(action.call);
@@ -418,8 +428,7 @@ function strings(value: unknown): Set<string> {
 
 function readError(
   use: { path: string; pointer: string },
-  declared: Set<string>,
-  channels: Raw,
+  { declared, channels, players }: Pick<PlatformContext, "declared" | "channels" | "players">,
 ): PrototypePlatformError | undefined {
   const name = prototypePlatformPointerModule(use.pointer);
   if (!module(name)) {
@@ -433,16 +442,18 @@ function readError(
     .slice(1)
     .split("/")
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+  const unknown = { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  if (name === "media") {
+    return prototypeMediaReadValid(tokens, players, state ?? {}) ? undefined : unknown;
+  }
   if (name === "realtime" && (tokens.length !== 3 || !Object.hasOwn(channels, tokens[1]))) {
-    return { path: use.path, message: `Unknown platform state ${use.pointer}` };
+    return unknown;
   }
   const key =
     name === "realtime" && tokens.length === 3
       ? tokens[2]
       : prototypePlatformPointerKey(use.pointer);
-  return state && (key === undefined || !Object.hasOwn(state, key))
-    ? { path: use.path, message: `Unknown platform state ${use.pointer}` }
-    : undefined;
+  return state && (key === undefined || !Object.hasOwn(state, key)) ? unknown : undefined;
 }
 
 /** Check portable comparisons against the union of platform-native state rules. */
@@ -474,12 +485,7 @@ function comparisonError(
 
 function useError(
   use: PrototypePlatformUse,
-  context: {
-    declared: Set<string>;
-    permissions: Set<string>;
-    background: Set<string>;
-    channels: Raw;
-  },
+  context: PlatformContext,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   switch (use.kind) {
@@ -493,7 +499,7 @@ function useError(
     case "call":
       return callError(use.action, use.path, context, check);
     case "read":
-      return readError(use, context.declared, context.channels) ?? comparisonError(use, check);
+      return readError(use, context) ?? comparisonError(use, check);
     case "event":
       return use.inHandler
         ? undefined
@@ -546,6 +552,7 @@ export function prototypePlatformError(
   const requires = record(root.requires) ?? {};
   const context = {
     channels: record(root.channels) ?? {},
+    players: prototypeMediaPlayers(root),
     declared: strings(requires.platform),
     permissions: new Set(
       (Array.isArray(requires.permissions) ? requires.permissions : []).map(
@@ -559,7 +566,7 @@ export function prototypePlatformError(
     return error;
   }
   for (const use of prototypePlatformUses(root)) {
-    const found = useError(use, context, check) ?? channelUseError(use, root);
+    const found = useError(use, context, check) ?? channelUseError(use, root, context.players);
     if (found) {
       return found;
     }
@@ -583,6 +590,7 @@ function rootBlockError(root: Raw): PrototypePlatformError | undefined {
     prototypeAuthBlockError(root) ??
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
+    prototypeMediaError(root) ??
     requiresError(root)
   );
 }
@@ -728,9 +736,14 @@ function argumentValueError(
   return undefined;
 }
 
-function channelUseError(use: PrototypePlatformUse, root: Raw): PrototypePlatformError | undefined {
+function channelUseError(
+  use: PrototypePlatformUse,
+  root: Raw,
+  players: ReadonlySet<string>,
+): PrototypePlatformError | undefined {
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
-        prototypeAuthCallError(use.action, use.path, root))
+        prototypeAuthCallError(use.action, use.path, root) ??
+        prototypeMediaCallError(use.action, use.path, players))
     : undefined;
 }

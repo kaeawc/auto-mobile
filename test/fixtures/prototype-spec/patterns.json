@@ -290,5 +290,27 @@
       "ada@example.testx",
       ""
     ]
+  },
+  "mediaUrl": {
+    "accepted": [
+      "https://example.com/clip.mp4",
+      "http://10.0.2.2:8080/live/master.m3u8",
+      "https://cdn.example.com/a/b.webm?token=x%20y"
+    ],
+    "rejected": [
+      "ftp://example.com/a.mp4",
+      "file:///sdcard/a.mp4",
+      "content://media/external/video/1",
+      "data:video/mp4;base64,AAAA",
+      "HTTPS://example.com/a.mp4",
+      "https://",
+      "https:",
+      "example.com/a.mp4",
+      "https://example.com/a b.mp4",
+      "https://example.com/\u0000",
+      "https://example.com/\u0085",
+      "https://example.com/\n",
+      ""
+    ]
   }
 }

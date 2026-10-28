@@ -264,7 +264,9 @@ export function renderPlatformModules(
         return `\`${name}.${op}\`(${args.join(", ")})${needs.length > 0 ? ` needs ${needs.join(", ")}` : ""}`;
       });
       const events = Object.keys(module.events).map((event) => `\`${name}.${event}\``);
-      const state = Object.keys(module.state ?? {}).map((key) => `\`/${name}/${key}\``);
+      // Media state is per declared player (#14253).
+      const scope = name === "media" ? "players/<id>/" : "";
+      const state = Object.keys(module.state ?? {}).map((key) => `\`/${name}/${scope}${key}\``);
       const capabilities = [module.capability, module.deviceCapability].filter(Boolean);
       return `| \`${name}\` | ${code(capabilities as string[])} | ${calls.join("<br>") || "-"} | ${events.join(", ") || "-"} | ${state.join(", ") || "-"} |`;
     });

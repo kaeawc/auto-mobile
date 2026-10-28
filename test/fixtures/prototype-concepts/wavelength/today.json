@@ -673,6 +673,36 @@
                     ]
                   }
                 ]
+              },
+              {
+                "type": "text",
+                "text": "End of episode",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": true
+                    },
+                    {
+                      "key": "positionSec",
+                      "gt": 3599
+                    }
+                  ]
+                },
+                "onAppear": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ],
+                "style": {
+                  "textStyle": "labelSmall"
+                }
               }
             ]
           },
@@ -1299,6 +1329,36 @@
                     ]
                   }
                 ]
+              },
+              {
+                "type": "text",
+                "text": "End of episode",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": true
+                    },
+                    {
+                      "key": "positionSec",
+                      "gt": 3599
+                    }
+                  ]
+                },
+                "onAppear": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ],
+                "style": {
+                  "textStyle": "labelSmall"
+                }
               }
             ]
           }
@@ -1386,6 +1446,36 @@
                 "min": 0,
                 "max": 3600,
                 "step": 1
+              },
+              {
+                "type": "text",
+                "text": "End of episode",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": true
+                    },
+                    {
+                      "key": "positionSec",
+                      "gt": 3599
+                    }
+                  ]
+                },
+                "onAppear": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ],
+                "style": {
+                  "textStyle": "labelSmall"
+                }
               },
               {
                 "type": "text",

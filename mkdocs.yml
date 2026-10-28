@@ -108,7 +108,6 @@ not_in_nav: |
   /design-docs/plat/android/android-17-target-sdk-audit.md
   /design-docs/plat/android/android17-playground-audit.md
   /design-docs/plat/android/dependency-injection.md
-  /design-docs/plat/android/emulator-grpc-audio.md
   /release/ios-simulator-continuity.md
   /release/device-claims-registry-migration.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
@@ -201,6 +200,7 @@ nav:
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
       - "Android windowing": design-docs/plat/android/windowing.md
       - "Android form factors": design-docs/plat/android/form-factors.md
+      - "Emulator gRPC audio": design-docs/plat/android/emulator-grpc-audio.md
       - "Device-condition capability probe": design-docs/plat/android/device-condition-capability-probe.md
       - "Device-condition attestation ceiling": design-docs/plat/android/device-condition-attestation-ceiling.md
       - "Desktop App": design-docs/plat/android/desktop-app.md

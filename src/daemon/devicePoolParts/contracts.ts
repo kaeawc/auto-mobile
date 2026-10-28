@@ -508,6 +508,8 @@ export interface StopAndroidEmulatorRecoveryOptions {
   handoffOwner: symbol;
   preservedSessionId: string | undefined;
   preservedSession: Session | undefined;
+  /** The recovery's own cancellation signal, passed explicitly rather than read ambiently (#15671). */
+  signal: AbortSignal | undefined;
 }
 
 export interface RebindSameAvdReplacementSessionOptions {
@@ -540,4 +542,9 @@ export interface StopDiscoveredEmulatorOptions {
   handoffOwner: symbol;
   preservedSessionId: string | undefined;
   preservedSession: Session | undefined;
+  /**
+   * The caller's cancellation signal, combined with the shutdown deadline. Explicit (#15671): an
+   * abort reaches this shutdown only through this field, never through the ambient abort context.
+   */
+  signal: AbortSignal | undefined;
 }

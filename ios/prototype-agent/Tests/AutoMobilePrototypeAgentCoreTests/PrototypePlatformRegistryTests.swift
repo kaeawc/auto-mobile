@@ -302,6 +302,29 @@ final class PrototypePlatformRegistryTests: XCTestCase {
     }
 
     @MainActor
+    func testStateRefreshPublishesTheSnapshotAndRunsNoHandler() async {
+        let module = FakePlatformModule()
+        let driver = PrototypePlatformDriver(
+            registry: PrototypePlatformRegistry(modules: [module]),
+            clock: PlatformClock()
+        )
+        var snapshots: [[String: JSONValue]] = []
+        driver.onState = { snapshots.append($0) }
+        // A real event after the refresh ends the wait, so a dropped refresh fails instead of hanging.
+        let delivered = await withCheckedContinuation { continuation in
+            driver.onEvent = { continuation.resume(returning: $0.event) }
+            driver.subscribe()
+            module.state = ["n": .number(7)]
+            module.continuation.yield(.stateRefresh("test"))
+            module.continuation.yield(PlatformEvent(event: "test.tick", data: .null))
+        }
+        XCTAssertEqual(delivered, "test.tick", "the refresh reached no handler")
+        XCTAssertEqual(snapshots.count, 2, "one refresh for the signal and one for the event")
+        XCTAssertEqual(snapshots.first?["test"], .object(["n": .number(7)]))
+        driver.stopEvents()
+    }
+
+    @MainActor
     func testInfoPlistFilteringAndCapabilities() {
         let module = FakePlatformModule()
         module.requiredInfoPlistKeys = ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"]

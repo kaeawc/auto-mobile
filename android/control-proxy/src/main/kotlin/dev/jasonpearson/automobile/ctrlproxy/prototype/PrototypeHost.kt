@@ -40,6 +40,8 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.dismiss
@@ -470,6 +472,7 @@ class DefaultPrototypeHost(
           surfaceId = request.surfaceId,
           blurBehindRadiusPx = backdropBlurPx(request, target.density()),
         )
+      target.constrainDismissWindow(params, request)
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
       }
@@ -655,6 +658,7 @@ class DefaultPrototypeHost(
       if (window !== current || current.anchoredOrigin != origin) return@post
       val params = copyParams(current.params)
       applyAnchoredOrigin(params, origin)
+      current.target.constrainDismissWindow(params, current.request)
       update(current, params)
     }
   }
@@ -680,6 +684,7 @@ class DefaultPrototypeHost(
         blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
+    current.target.constrainDismissWindow(params, current.request)
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
@@ -1260,6 +1265,22 @@ internal fun PrototypeWindowContent(
   }
 }
 
+/** Only host dismiss chrome is inset; fullscreen authored content keeps its viewport. */
+@Composable
+private fun prototypeRoundDismissPadding(): PaddingValues {
+  val configuration = LocalConfiguration.current
+  if (!configuration.isScreenRound) return PaddingValues(0.dp)
+  val size = LocalWindowInfo.current.containerSize
+  val safe = prototypeRoundSafeArea(size.width, size.height, true)
+  return with(LocalDensity.current) {
+    PaddingValues(
+      start = safe.horizontal.toDp(),
+      top = safe.vertical.toDp(),
+      end = safe.horizontal.toDp(),
+    )
+  }
+}
+
 @Composable
 private fun PrototypeChrome(
   request: PrototypeRequest,
@@ -1282,7 +1303,8 @@ private fun PrototypeChrome(
             WindowInsets.systemBars
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-          ),
+          )
+          .padding(prototypeRoundDismissPadding()),
       ) {
         PrototypeCloseChip(
           onClick = { scope.launch { request.onHostDismiss() } },
@@ -1391,7 +1413,8 @@ private fun PrototypeChromelessContent(
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           )
-          .padding(top = ESCAPE_PILL_TOP_PADDING_DP.dp),
+          .padding(top = ESCAPE_PILL_TOP_PADDING_DP.dp)
+          .padding(prototypeRoundDismissPadding()),
       ) {
         val colors = prototypeCloseColors(MaterialTheme.colorScheme)
         TextButton(

@@ -1,5 +1,6 @@
 import type { ProtoViewerResult } from "./protoViewerContract";
 export { ProtoViewerEntryPointMissingError } from "./ProtoViewerEntryPointMissingError";
+export { ProtoViewerForegroundError } from "./ProtoViewerForegroundError";
 export { ProtoViewerStorageError } from "./ProtoViewerStorageError";
 export interface ProtoViewerTempFile {
   readonly path: string;

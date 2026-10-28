@@ -3749,6 +3749,12 @@
           "hasDefault": true
         },
         {
+          "name": "screenRound",
+          "type": "boolean",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
           "name": "saved",
           "type": "object:dev.jasonpearson.automobile.protocol.SavedPrototypeInfo",
           "nullable": true,

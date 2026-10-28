@@ -49,6 +49,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPinnedShortcutPlat
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeScreenShapeSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
@@ -1166,6 +1167,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
       },
       resultBroadcaster,
+      AndroidPrototypeScreenShapeSource(this),
     )
   // Asset bytes live in the cache directory, never in the heap; cleared with the prototype session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a

@@ -504,7 +504,7 @@ export class ProxyDiscovery {
    */
   async readResource(
     uri: string,
-    { signal: callerSignal }: { signal?: AbortSignal } = {},
+    { signal: callerSignal, _meta }: { signal?: AbortSignal; _meta?: Record<string, unknown> } = {},
   ): Promise<any> {
     const signal = this.port.untilClosed(callerSignal);
     signal.throwIfAborted();
@@ -535,7 +535,14 @@ export class ProxyDiscovery {
           }
         : (ownerForwardedParams ?? this.port.withBoundSessionUuid({}));
     const forwarding = this.runtime.connectionRecovery.withRecoverableReconnect(
-      () => this.port.requireClient().readResource(uri, forwardedParams, { signal }),
+      () =>
+        this.port
+          .requireClient()
+          .readResource(
+            uri,
+            { ...forwardedParams, ...(_meta !== undefined && { _meta }) },
+            { signal },
+          ),
       this.port.sessionUuidFromArgs(forwardedParams),
       allowReleasedSession,
       true,

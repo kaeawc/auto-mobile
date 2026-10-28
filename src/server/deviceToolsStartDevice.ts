@@ -1,10 +1,16 @@
+import {
+  internalMcpSessionId,
+  internalOneShotCli,
+  internalRestartResumeSessionUuid,
+  internalRestartResumeTargets,
+} from "./internalToolParams";
 import { disabledDeviceResourceReport } from "../utils/iosDeviceResourceImpact";
 import type { DeviceBootResult } from "../devices/deviceBootSelection";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceShuttingDownError } from "../models/deviceAcquisitionRefusals";
-import { ActionableError, BootedDevice, DeviceInfo } from "../models";
+import { ActionableError, BootedDevice, DeviceInfo, type Platform } from "../models";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DaemonStateLike } from "../daemon/daemonState";
@@ -95,6 +101,17 @@ type StartDeviceHooks = {
   stripInternalAcquisitionParams: (rawArgs: object) => Record<string, unknown>;
 };
 
+function explicitDeviceOwnershipCheck(daemonState: DaemonStateLike) {
+  return async (deviceId: string, platform: Platform): Promise<void> => {
+    await getStartDevicePool(daemonState)?.assertNotClaimedByForeignDaemon(
+      deviceId,
+      platform,
+      undefined,
+      0,
+    );
+  };
+}
+
 const bootAndPrepareDevice = async (
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
@@ -133,6 +150,7 @@ const bootAndPrepareDevice = async (
     cleanupMayOutliveRequest: true,
     rollbackCreatedDevice: createdDeviceRollbackFor(options),
     checkBootCapacity: deps.checkBootCapacity,
+    assertExplicitDeviceNotForeignOwned: explicitDeviceOwnershipCheck(deps.daemonState),
     onAndroidColdBootTrackingChanged: () => {
       void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
         logger.warn(
@@ -348,8 +366,8 @@ async function reserveBootReadiness(
             daemonState,
             state.boot!,
             initialReservations,
-            args.__mcpSessionId,
-            args.__oneShotCli === true,
+            internalMcpSessionId(args),
+            internalOneShotCli(args),
           );
         }
         // A grant can win the mutex just as the caller loses its deadline race.
@@ -630,14 +648,14 @@ export async function bindBootedDeviceSession(
   // A one-shot `--cli` call is anonymous: autolock keys its session on the per-connection MCP id,
   // which the next CLI call never shares, so it would refuse that call. Bind it as an anonymous
   // acquisition below, which later one-shot calls reuse (#11096, #11148).
-  const useAutolock = autolockEnabled && args.__oneShotCli !== true;
+  const useAutolock = autolockEnabled && !internalOneShotCli(args);
   if (useAutolock && !resumeSessionId) {
     const autolockSessionId = await daemonState
       .getDevicePool()
       .autolockDevice(
         device.deviceId,
         device.platform,
-        args.__mcpSessionId,
+        internalMcpSessionId(args),
         sourceImage,
         childProcess,
         device,
@@ -669,8 +687,8 @@ export async function bindBootedDeviceSession(
       allowSessionRebind: false,
       readinessReservationOwners,
       verifiedAndroidAvdIdentity,
-      mcpSessionId: args.__mcpSessionId,
-      oneShotCli: args.__oneShotCli === true,
+      mcpSessionId: internalMcpSessionId(args),
+      oneShotCli: internalOneShotCli(args),
       receipt,
       refusePreparedForOtherRequest: false,
       recoveryTarget,
@@ -710,12 +728,12 @@ async function resumePreparedDeviceSession(
 ): Promise<string> {
   const pool = daemonState.getDevicePool();
   // The resume bind and adoption share a close fence, including provisionDevice callers.
-  const endResumeBind = pool.beginMcpBind(args.__mcpSessionId);
+  const endResumeBind = pool.beginMcpBind(internalMcpSessionId(args));
   try {
     let boundByStart = false;
-    let recoveryTarget: SessionRecoveryTarget | undefined = args.__restartResumeTargets?.find(
-      (reservation) => reservation.sessionId === resumeSessionId,
-    )?.target;
+    let recoveryTarget: SessionRecoveryTarget | undefined = internalRestartResumeTargets(
+      args,
+    )?.find((reservation) => reservation.sessionId === resumeSessionId)?.target;
     const session = await daemonState.getSessionManager().getOrCreateSession(
       resumeSessionId,
       {
@@ -749,7 +767,7 @@ async function resumePreparedDeviceSession(
       await pool.adoptResumedAutolockSession(
         resumeSessionId,
         device,
-        args.__mcpSessionId,
+        internalMcpSessionId(args),
         achievedReadiness,
       );
     }
@@ -767,17 +785,18 @@ export function restartResumeSessionForDevice(
   if (!pool) {
     return undefined;
   }
-  const admitted = args.__restartResumeTargets?.find(
+  const resumeSessionUuid = internalRestartResumeSessionUuid(args);
+  const admitted = internalRestartResumeTargets(args)?.find(
     ({ sessionId, target }) =>
-      (!args.__restartResumeSessionUuid || sessionId === args.__restartResumeSessionUuid) &&
+      (!resumeSessionUuid || sessionId === resumeSessionUuid) &&
       pool.matchesRestartRecoveryTarget(device, target),
   );
   if (admitted) {
     return admitted.sessionId;
   }
-  if (args.__restartResumeSessionUuid) {
+  if (resumeSessionUuid) {
     throw new ActionableError(
-      `Cannot safely recover session ${args.__restartResumeSessionUuid}: prepared device does not match its recovery target.`,
+      `Cannot safely recover session ${resumeSessionUuid}: prepared device does not match its recovery target.`,
     );
   }
   const reservation = pool.restartReservationForStart?.(
@@ -896,7 +915,7 @@ export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceR
     const bootOptions = { ...options, rollbackCreatedDevice };
     // Keep a close during boot visible through a resumed session's bind and autolock adoption.
     const pool = options.autolockEnabled ? initializedDevicePool() : undefined;
-    const endAutolockBind = pool?.beginMcpBind(args.__mcpSessionId);
+    const endAutolockBind = pool?.beginMcpBind(internalMcpSessionId(args));
     try {
       return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
     } catch (error) {
@@ -915,12 +934,12 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    const internalSessionId = rawArgs.__mcpSessionId;
+    const internalSessionId = internalMcpSessionId(rawArgs);
     const args = {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
       __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-      ...(rawArgs.__oneShotCli === true ? { __oneShotCli: true } : {}),
+      ...(internalOneShotCli(rawArgs) ? { __oneShotCli: true } : {}),
     };
     validateCameraPosterPlatform(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;

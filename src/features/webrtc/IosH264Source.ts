@@ -4,16 +4,10 @@ import type { BackoffPolicy } from "../../utils/Backoff";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import {
-  DefaultFfmpegClient,
-  resolveFfmpegBinary,
-  type FfmpegClient,
-} from "../../utils/media/FfmpegClient";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type {
   CaptureTarget,
   DecodedEncodedVideo,
-  EncodeSettings,
   IosScreenCaptureHelperOptions,
   IosScreenCaptureReadinessPhase,
 } from "../screen-stream";
@@ -24,14 +18,12 @@ import {
 } from "../screen-stream/IosScreenCaptureHelper";
 import {
   iosSimulatorCaptureHelperPool,
-  type IosSimulatorCaptureHelperLease,
   type IosSimulatorCaptureHelperPool,
 } from "../screen-stream/IosSimulatorCaptureHelperPool";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import { EncodedUnsupportedError } from "./EncodedUnsupportedError";
 import type { H264CaptureSource } from "./H264CaptureSource";
 import { IosCaptureStartup } from "./IosCaptureStartup";
-import { IosFramePipeline } from "./IosFramePipeline";
 import { NoFirstFrameError } from "./NoFirstFrameError";
 import { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError";
 import {
@@ -40,20 +32,15 @@ import {
   defaultCommandRunner,
   defaultResolveSimulatorWindowId,
   describeCaptureTarget,
-  validateFfmpegAvailability,
   hasScreenRecordingPermissionDenial,
   defaultScreenRecordingApprovalTarget,
 } from "./IosCaptureResolver";
 import {
   DEFAULT_IOS_WEBRTC_FPS,
-  IOS_WEBRTC_FFMPEG_ENV,
-  IOS_WEBRTC_FFMPEG_ENV_ALIAS,
   IOS_FIRST_FRAME_TIMEOUT_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   IOS_HELPER_STOP_TIMEOUT_MS,
-  IOS_FFMPEG_PROBE_TIMEOUT_MS,
-  readForceRawPipeline,
   resolveRunningReconnect,
   type CommandRunner,
   type IosH264SourceOptions,
@@ -64,13 +51,6 @@ import {
   type IosSimulatorWindowResolver,
   type ScreenCaptureHelperEnsurer,
 } from "./IosH264SourceConfig";
-export {
-  defaultIosBitrateBps,
-  IOS_ENCODER_RESTART_GRACE_MS,
-  IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
-  IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
-  resolveIosEncoderScale,
-} from "./IosFramePipeline";
 export { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError";
 
 export {
@@ -84,17 +64,17 @@ export * from "./IosCaptureResolver";
 
 export class IosH264Source implements H264CaptureSource {
   private readonly resolver: IosCaptureResolver;
-  private readonly pipeline: IosFramePipeline;
+  private nativeFrameMetrics: IosH264FrameMetrics["native"] = null;
+  private captureKind: CaptureTarget["kind"] | null = null;
+  private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
   private readonly startup: IosCaptureStartup;
   getFrameMetrics(): IosH264FrameMetrics {
-    return this.pipeline.getFrameMetrics();
+    return { native: this.nativeFrameMetrics };
   }
 
   private readonly helperPath?: string;
-  private readonly ffmpegPath: string;
   private readonly fps: number;
   private readonly createHelper: IosFrameCaptureHelperFactory;
-  private readonly ffmpegClient: FfmpegClient;
   private readonly simulatorWindowResolver: IosSimulatorWindowResolver;
   private readonly commandRunner: CommandRunner;
   private readonly helperPathExists?: (candidate: string) => boolean;
@@ -109,25 +89,10 @@ export class IosH264Source implements H264CaptureSource {
   /** Invalidates async work and helper callbacks from a stopped capture lifecycle. */
   private helperGeneration = 0;
   private cancelPreCaptureDeadline: (() => void) | null = null;
-  /**
-   * Output pipeline for the active capture. `"encoded"` consumes in-helper H.264
-   * Annex-B records (no ffmpeg); `"raw"` is the legacy BGRA + ffmpeg path. Decided
-   * per {@link establishCapture} from the handshake and the escape hatch (#4789).
-   */
-  private mode: "raw" | "encoded" = "raw";
-  /** Encoder policy passed DOWN to the helper as flags on the encoded path. */
-  private encodeSettings: EncodeSettings | null = null;
   /** Set once the helper advertises the encoded-video capability this attempt. */
   private encodedCapabilityConfirmed = false;
   private nativeIdleCapabilityConfirmed = false;
   private idleSupportReported = false;
-  /**
-   * True once an encoded attempt fell back to raw for a version-skewed helper, so
-   * a later running-phase reconnect does not re-probe encoding against the same
-   * incapable binary on every blip.
-   */
-  private encodedFellBack = false;
-  private readonly forceRaw: boolean;
   private teardownPromise: Promise<void> | null = null;
   /** Bounded tail of the helper's non-metrics stderr lines, newest last. */
   private helperStderrTail: string[] = [];
@@ -152,40 +117,15 @@ export class IosH264Source implements H264CaptureSource {
 
   constructor(private readonly options: IosH264SourceOptions) {
     this.helperPath = options.helperPath;
-    this.ffmpegPath = resolveFfmpegBinary({
-      explicitPath: options.ffmpegPath,
-      environmentKeys: [IOS_WEBRTC_FFMPEG_ENV, IOS_WEBRTC_FFMPEG_ENV_ALIAS],
-    });
     this.fps = options.fps ?? DEFAULT_IOS_WEBRTC_FPS;
     this.createHelper =
       options.createHelper ?? ((helperOptions) => new IosScreenCaptureHelper(helperOptions));
-    this.ffmpegClient =
-      options.ffmpegClient ??
-      new DefaultFfmpegClient({
-        binaryPath: this.ffmpegPath,
-        spawn: options.spawner
-          ? (binaryPath, args) => options.spawner!(binaryPath, args)
-          : undefined,
-      });
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     this.helperPathExists = options.helperPathExists;
     this.screenCaptureHelperProvider =
       options.screenCaptureHelperProvider ?? ScreenCaptureHelperProvider.getInstance();
     this.timer = options.timer ?? defaultTimer;
     this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? IOS_FIRST_FRAME_TIMEOUT_MS;
-    this.pipeline = new IosFramePipeline(
-      options,
-      this.ffmpegClient,
-      this.ffmpegPath,
-      this.fps,
-      this.timer,
-      {
-        isActive: () => this.isActive(),
-        isRunning: () => this.phase === "running",
-        failIfRunning: (error) => this.failIfRunning(error),
-        reportLegacyIdleSupport: () => this.reportLegacyIdleSupport(),
-      },
-    );
     this.simulatorHelperPool = options.simulatorHelperPool ?? iosSimulatorCaptureHelperPool;
     const reconnect = resolveRunningReconnect(options);
     this.runningReconnectMaxAttempts = reconnect.maxAttempts;
@@ -206,7 +146,6 @@ export class IosH264Source implements H264CaptureSource {
             pollBudgetMs: Math.max(0, IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS),
           },
         ));
-    this.forceRaw = options.forceRawPipeline ?? readForceRawPipeline(process.env);
     this.startup = new IosCaptureStartup(this.timer, this.firstFrameTimeoutMs, {
       generation: () => this.helperGeneration,
       lastReadinessPhase: () => this.lastReadinessPhase,
@@ -245,12 +184,14 @@ export class IosH264Source implements H264CaptureSource {
     this.deferredHelperFailure = null;
     this.helperStderrTail = [];
     this.lastReadinessPhase = null;
-    this.pipeline.helperFrameMetrics = null;
-    this.pipeline.nativeFrameMetrics = null;
-    this.mode = "raw";
-    this.encodeSettings = null;
-    this.encodedFellBack = false;
+    this.nativeFrameMetrics = null;
+    this.lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
     this.encodedCapabilityConfirmed = false;
+    if (this.options.size !== undefined) {
+      logger.warn(
+        "[IosH264Source] iOS ignores explicit encoder size; capture encodes at native size capped by the quality preset.",
+      );
+    }
 
     try {
       await this.establishCapture(generation);
@@ -280,98 +221,14 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     const target = await this.resolver.resolveCaptureTarget(helperPath);
-    this.pipeline.captureKind = target.kind;
+    this.captureKind = target.kind;
     if (!this.isActive() || generation !== this.helperGeneration) {
       return;
     }
-    if (await this.tryEstablishEncoded(helperPath, target)) {
-      return;
-    }
-    await this.establishRaw(helperPath, target);
-  }
-
-  /**
-   * Attempt the in-helper encoded H.264 path when the target and configuration
-   * allow it (issue #4789). Returns true when encoded capture is up; returns false
-   * — having stopped the incapable helper — when the helper turns out to predate
-   * the encode handshake, so the caller falls back to raw. Any other failure
-   * propagates so a genuine misconfiguration is not masked. No ffmpeg is probed or
-   * spawned on this path.
-   */
-  private async tryEstablishEncoded(helperPath: string, target: CaptureTarget): Promise<boolean> {
-    if (!this.shouldAttemptEncoded(target)) {
-      return false;
-    }
-    this.mode = "encoded";
-    this.encodeSettings = resolveEncodeSettings(this.options);
-    const generation = this.helperGeneration;
-    try {
-      await this.startCaptureWithSimulatorRetry(helperPath, this.encodedTarget(target));
-      return true;
-    } catch (error) {
-      if (!(error instanceof EncodedUnsupportedError)) {
-        throw error;
-      }
-      if (generation !== this.helperGeneration) {
-        return true; // The stopped attempt cannot replace the current helper.
-      }
-      this.encodedFellBack = true;
-      await this.stopCurrentHelper();
-      logger.warn(
-        `[IosH264Source] helper cannot encode in-process; falling back to the raw ffmpeg pipeline: ${error.message}`,
-      );
-      return false;
-    }
-  }
-
-  /**
-   * The legacy raw-BGRA + ffmpeg pipeline, byte-for-byte as before the encoded
-   * cutover. ffmpeg availability is validated here — and ONLY here — so the
-   * encoded path never probes an ffmpeg it will not use (issue #4789).
-   */
-  private async establishRaw(helperPath: string, target: CaptureTarget): Promise<void> {
-    this.mode = "raw";
-    this.encodeSettings = null;
-    const generation = this.helperGeneration;
-    await this.withPreCaptureDeadline(
-      validateFfmpegAvailability(
-        this.ffmpegClient,
-        this.ffmpegPath,
-        IOS_FFMPEG_PROBE_TIMEOUT_MS,
-        this.options.commandRunner,
-      ),
-      IOS_FFMPEG_PROBE_TIMEOUT_MS,
-      "Probing iOS WebRTC ffmpeg",
-    );
-    if (!this.isActive() || generation !== this.helperGeneration) {
-      return;
-    }
-    await this.startCaptureWithSimulatorRetry(helperPath, target);
-  }
-
-  /**
-   * Whether to attempt encoded capture. Encoded is a Simulator-only path in v1
-   * (the helper rejects `--encode` without `--simulator-window`), is disabled by
-   * the {@link IOS_WEBRTC_FORCE_RAW_ENV} escape hatch, is not re-probed after a
-   * skew fallback, and yields to an explicit encoder-size override — the helper's
-   * `--encode` mode has a preset long-side cap but no explicit-size flag,
-   * so an explicit size is honored by the raw ffmpeg `-vf scale` path.
-   */
-  private shouldAttemptEncoded(target: CaptureTarget): boolean {
-    return (
-      target.kind === "simulator" &&
-      !this.forceRaw &&
-      !this.encodedFellBack &&
-      this.options.size === undefined
-    );
-  }
-
-  /** The simulator target annotated with the resolved encode settings. */
-  private encodedTarget(target: CaptureTarget): CaptureTarget {
-    if (target.kind !== "simulator" || this.encodeSettings === null) {
-      return target;
-    }
-    return { ...target, encode: this.encodeSettings };
+    await this.startCaptureWithSimulatorRetry(helperPath, {
+      ...target,
+      encode: resolveEncodeSettings(this.options, target.kind),
+    });
   }
 
   async stop(): Promise<void> {
@@ -408,30 +265,6 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   /**
-   * Serve a downstream keyframe request (a WHEP viewer's PLI relayed through the
-   * publisher). ffmpeg cannot be signalled to emit an IDR mid-stream over a
-   * pipe, so restart the encoder: a fresh h264_videotoolbox encoder begins its
-   * output with SPS/PPS + an IDR on the next delivered frame, which is exactly
-   * what a late or recovering viewer needs to decode. This is the on-demand
-   * recovery path the periodic GOP could not provide under a delivery shortfall,
-   * where `-g` (counted in encoded frames) stretches the wall-clock IDR interval
-   * past its ~2s target.
-   *
-   * Restarting on demand — rather than shortening `-g` for every stream — keeps
-   * the steady-state bitrate cost at zero: no extra keyframes are emitted unless
-   * a viewer actually asks. A burst of PLIs is throttled to one restart per
-   * {@link IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}; later requests are also held
-   * until that replacement emits its IDR. Safe to call before the initial
-   * encoder emits its first IDR (that encoder will already satisfy the request)
-   * or after the source has stopped.
-   */
-  requestKeyFrame(purpose: "viewer" | "probe" = "viewer"): boolean {
-    return this.mode === "encoded"
-      ? this.requestEncodedKeyFrame()
-      : this.pipeline.requestRawKeyFrame(purpose);
-  }
-
-  /**
    * Encoded-path keyframe request (issue #4789): write `{"cmd":"forceKeyFrame"}`
    * on the helper's STDIN control channel so the running VTCompressionSession
    * forces an IDR on its next frame — no encoder restart. The PLI throttle is kept
@@ -440,17 +273,17 @@ export class IosH264Source implements H264CaptureSource {
    * allows. The throttle clock only advances on a successful signal, so a helper
    * that momentarily has no control channel is retried on the next request.
    */
-  private requestEncodedKeyFrame(): boolean {
+  requestKeyFrame(): boolean {
     if (this.phase !== "running" || !this.helper) {
       return false;
     }
     const now = this.timer.now();
-    if (now - this.pipeline.lastForcedKeyFrameMs < IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS) {
+    if (now - this.lastForcedKeyFrameMs < IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS) {
       return false;
     }
     const sent = this.helper.requestKeyFrame?.() ?? false;
     if (sent) {
-      this.pipeline.lastForcedKeyFrameMs = now;
+      this.lastForcedKeyFrameMs = now;
       logger.debug("[IosH264Source] forced keyframe requested on helper control channel");
     }
     return sent;
@@ -486,7 +319,7 @@ export class IosH264Source implements H264CaptureSource {
 
   private createCaptureHelper(options: IosScreenCaptureHelperOptions): IosFrameCaptureHelper {
     if (options.target.kind === "simulator" && !this.options.createHelper) {
-      return this.simulatorHelperPool.acquire(options) as IosSimulatorCaptureHelperLease;
+      return this.simulatorHelperPool.acquire(options);
     }
     return this.createHelper(options);
   }
@@ -502,8 +335,7 @@ export class IosH264Source implements H264CaptureSource {
         await this.startCaptureAttempt(helperPath, currentTarget);
         return;
       } catch (error) {
-        // A version-skewed encoded attempt must reach establishCapture with its
-        // type intact so it can fall back to raw — never wrapped or retried here.
+        // Preserve the actionable version-skew failure without retrying an old binary.
         if (error instanceof EncodedUnsupportedError) {
           throw error;
         }
@@ -553,79 +385,46 @@ export class IosH264Source implements H264CaptureSource {
     this.requiredPermissionTarget = defaultScreenRecordingApprovalTarget(helperPath);
     this.nativeIdleCapabilityConfirmed = false;
     this.idleSupportReported = false;
-    this.pipeline.latestLegacyFrame = null;
     const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
     this.helper = helper;
-    if (this.mode === "encoded") {
-      await this.startEncodedCaptureAttempt(helper, target);
-      return;
-    }
-    const firstAudio = this.options.audioEnabled ? this.startup.waitForFirstAudio(helper) : null;
-    const firstFrame = this.startup.waitForFirstFrame(helper, target);
-    // Enter the running phase before processing the first frame so invalid
-    // geometry follows the same source-failure contract as later frames.
-    this.wireHelperFrames(helper);
-    await helper.start();
-    await Promise.all([firstFrame, firstAudio]);
-  }
-
-  /**
-   * Bring up the encoded path to its first Annex-B record. No ffmpeg encoder is
-   * spawned; the helper's own VTCompressionSession output is forwarded to
-   * `onData`. A helper that fails before the first record without ever advertising
-   * the encode capability surfaces {@link EncodedUnsupportedError} to trigger the
-   * raw fallback (issue #4789).
-   */
-  private async startEncodedCaptureAttempt(
-    helper: IosFrameCaptureHelper,
-    target: CaptureTarget,
-  ): Promise<void> {
     this.encodedCapabilityConfirmed = false;
     this.wireEncodedHelper(helper);
     const firstAudio = this.options.audioEnabled ? this.startup.waitForFirstAudio(helper) : null;
     const firstRecord = this.startup.waitForFirstEncodedRecord(helper, target);
-    await helper.start();
-    await Promise.all([firstRecord, firstAudio]);
+    try {
+      await Promise.all([firstRecord, firstAudio, Promise.resolve().then(() => helper.start())]);
+    } catch (error) {
+      throw this.encodedStartupError(
+        error instanceof Error ? error : new Error(errorMessage(error)),
+      );
+    }
   }
 
   /**
    * Classify an encoded-startup failure. A helper that exited/errored WITHOUT ever
    * advertising the encoded-video capability predates `--encode h264` (an old
    * binary rejects the flag and exits), so return {@link EncodedUnsupportedError}
-   * to drive the raw fallback. A capable helper's failure is returned as-is.
+   * with upgrade guidance. A capable helper's failure is returned as-is.
    */
   private encodedStartupError(error: Error): Error {
-    if (this.encodedCapabilityConfirmed) {
+    if (
+      this.encodedCapabilityConfirmed ||
+      error instanceof ScreenRecordingPermissionError ||
+      error instanceof EncodedUnsupportedError
+    ) {
       return error;
     }
     return new EncodedUnsupportedError(
       `The screen-capture-helper did not advertise the '${ENCODED_VIDEO_CAPABILITY}' capability ` +
-        `before failing to start encoded capture (${error.message}).`,
+        `before failing to start encoded capture (${error.message}). Update to the screen-capture-helper from the matching AutoMobile release, or rebuild the local helper and update AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER.`,
     );
-  }
-
-  private wireHelperFrames(helper: IosFrameCaptureHelper): void {
-    const generation = this.helperGeneration;
-    helper.on("frame", (frame) => {
-      if (this.isCurrentHelper(helper, generation)) {
-        this.pipeline.handleFrame(frame);
-      }
-    });
-    helper.on("malformed", (error) => {
-      if (this.isCurrentHelper(helper, generation)) {
-        logger.warn(`[IosH264Source] malformed frame from helper: ${error.reason}`);
-      }
-    });
-    this.wireHelperDiagnostics(helper);
   }
 
   /**
    * Wire the encoded-path helper (issue #4789): Annex-B records go straight to
    * `onData`, the capability handshake is tracked so a startup failure can be
    * classified as a version skew, and a decoder resync requests a keyframe —
-   * discarded bytes may have included reference frames, so recovery needs an IDR
-   * (a raw resync only ever costs one frame). Shares the stderr/readiness/metrics
-   * wiring with the raw path.
+   * discarded bytes may have included reference frames, so recovery needs an IDR.
    */
   private wireEncodedHelper(helper: IosFrameCaptureHelper): void {
     const generation = this.helperGeneration;
@@ -673,7 +472,10 @@ export class IosH264Source implements H264CaptureSource {
       helperStderrTail: () => this.helperStderrTail,
       failForHelperLine: (line) =>
         this.failIfCurrentHelper(helper, generation, this.helperFailureFor(line)),
-      pipeline: this.pipeline,
+      setNativeFrameMetrics: (metrics) => {
+        this.nativeFrameMetrics = metrics;
+        this.options.onFrameMetrics?.(this.getFrameMetrics());
+      },
       options: this.options,
     });
   }
@@ -690,13 +492,15 @@ export class IosH264Source implements H264CaptureSource {
    * The helper already produced a self-contained H.264 record (SPS/PPS prepended
    * on keyframes), so there is no ffmpeg encoder in this path — the record is the
    * output. The PTS-carrying header is consumed by the wire timing upstream; this
-   * source only relays the elementary-stream bytes, exactly as the ffmpeg path
-   * relays its stdout chunks.
+   * source only relays the elementary-stream bytes.
    */
   private handleEncodedVideo(video: DecodedEncodedVideo): void {
     if (!this.isActive()) {
       return;
     }
+    // stdout (video) and stderr (capability) arrive on independent handlers, so a
+    // record may beat its capability line; a record is itself proof of capability.
+    this.encodedCapabilityConfirmed = true;
     this.reportLegacyIdleSupport();
     this.options.onSourceFrame?.();
     this.options.onData(video.payload);
@@ -704,7 +508,7 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private reportLegacyIdleSupport(): void {
-    if (this.pipeline.captureKind === "simulator" && !this.idleSupportReported) {
+    if (this.captureKind === "simulator" && !this.idleSupportReported) {
       this.idleSupportReported = true;
       this.options.onIdleAttestationSupport?.(false);
     }
@@ -798,6 +602,10 @@ export class IosH264Source implements H264CaptureSource {
         const phase = this.phaseNow();
         if (phase === "stopping" || phase === "idle") {
           return; // stop() won during the attempt.
+        }
+        if (error instanceof EncodedUnsupportedError) {
+          this.failNow(error);
+          return;
         }
         this.phase = "reconnecting";
       }
@@ -912,8 +720,6 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private async teardown(): Promise<void> {
-    this.pipeline.stop();
-
     await this.stopCurrentHelper();
   }
 

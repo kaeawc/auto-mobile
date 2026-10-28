@@ -124,11 +124,6 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     kind: "input",
     reason: "Read-only executable path or command name.",
   },
-  {
-    name: "AUTOMOBILE_IOS_WEBRTC_FFMPEG",
-    kind: "input",
-    reason: "Read-only executable path or command name.",
-  },
   { name: "AUTOMOBILE_VIDEO_SERVER_JAR", kind: "input", reason: "Read-only encoder JAR." },
   {
     name: "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER",
@@ -237,7 +232,6 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_IOS_TEAM_IDS",
   "AUTOMOBILE_IOS_TEMPLATE_CLONE",
   "AUTOMOBILE_IOS_WARMUP_DEVICES",
-  "AUTOMOBILE_IOS_WEBRTC_FORCE_RAW",
   "AUTOMOBILE_IPROXY_START_TIMEOUT_MS",
   "AUTOMOBILE_LOG_FORMAT",
   "AUTOMOBILE_LOG_LEVEL",

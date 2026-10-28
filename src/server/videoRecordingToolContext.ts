@@ -1,6 +1,10 @@
 import { z } from "zod/v4";
 import type { BootedDevice } from "../models";
-import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  platformSchema,
+  resourceLinkField,
+} from "../utils/schemaHelpers";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { IOS_MAX_DURATION_SECONDS } from "../daemon/videoRecordingManager";
 import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
@@ -84,6 +88,7 @@ export const videoRecordingSchema = addDeviceTargetingToSchema(
       outputName: z.string().optional().describe("Recording label"),
       display: z.string().optional().describe('Android panel key, role, or "active" (start only)'),
       highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
+      resourceLink: resourceLinkField(),
     })
     .strict(),
 );

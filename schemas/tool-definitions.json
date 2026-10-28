@@ -4419,6 +4419,10 @@
           "description": "Plan name",
           "type": "string"
         },
+        "resourceLink": {
+          "description": "Return the complete result as an automobile:tool-output resource and a resource_link block instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
+          "type": "boolean"
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -6500,6 +6504,243 @@
       },
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "requestedAppId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedAppId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currentScreen": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nodeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "edgeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "knownEdges": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknownEdges": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "screens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "visitCount": {
+                "type": "number"
+              },
+              "lastVisited": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "visitCount", "lastVisited"],
+            "additionalProperties": {}
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["tool", "back", "unknown"]
+              },
+              "tool": {
+                "type": "string"
+              },
+              "args": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "uiState": {
+                "type": "object",
+                "properties": {
+                  "selectedElements": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "resourceId": {
+                          "type": "string"
+                        },
+                        "contentDesc": {
+                          "type": "string"
+                        },
+                        "selectedState": {
+                          "type": "object",
+                          "properties": {
+                            "method": {
+                              "type": "string",
+                              "enum": ["accessibility", "visual"]
+                            },
+                            "confidence": {
+                              "type": "number"
+                            },
+                            "reason": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["method", "confidence"],
+                          "additionalProperties": {}
+                        }
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "destinationId": {
+                    "type": "string"
+                  },
+                  "modalStack": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["bottomsheet", "dialog", "popup", "menu", "overlay"]
+                        },
+                        "identifier": {
+                          "type": "string"
+                        },
+                        "layer": {
+                          "type": "number"
+                        },
+                        "windowId": {
+                          "type": "number"
+                        },
+                        "windowType": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "layer"],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "scrollPosition": {
+                    "type": "object",
+                    "properties": {
+                      "container": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "resourceId": {
+                            "type": "string"
+                          },
+                          "contentDesc": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": {}
+                      },
+                      "targetElement": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "resourceId": {
+                            "type": "string"
+                          },
+                          "contentDesc": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": {}
+                      },
+                      "direction": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"]
+                      },
+                      "speed": {
+                        "type": "string",
+                        "enum": ["slow", "normal", "fast"]
+                      }
+                    },
+                    "required": ["targetElement", "direction"],
+                    "additionalProperties": {}
+                  }
+                },
+                "required": ["selectedElements"],
+                "additionalProperties": {}
+              }
+            },
+            "required": ["from", "to", "type"],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "message",
+        "requestedAppId",
+        "observedAppId",
+        "currentScreen",
+        "nodeCount",
+        "edgeCount",
+        "knownEdges",
+        "unknownEdges",
+        "screens",
+        "transitions"
+      ],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true
@@ -7819,6 +8060,74 @@
       },
       "required": ["artifactPath"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "artifactPath": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "packageName": {
+          "type": "string"
+        },
+        "upgrade": {
+          "type": "boolean"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "signingGuard": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "matched"
+                },
+                "matchedSha256": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": ["status", "matchedSha256"],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "no-existing-package"
+                }
+              },
+              "required": ["status"],
+              "additionalProperties": {}
+            }
+          ]
+        },
+        "installRoute": {
+          "type": "string",
+          "enum": ["split-apks", "apk-set", "bundle"]
+        }
+      },
+      "required": ["message", "success"],
+      "additionalProperties": {}
     }
   },
   {
@@ -13163,6 +13472,56 @@
       },
       "required": ["targetScreen"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "currentScreen": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetScreen": {
+          "type": "string"
+        },
+        "stepsExecuted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "partialPath": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "durationMs": {
+          "type": "number"
+        }
+      },
+      "required": ["success", "currentScreen", "targetScreen", "stepsExecuted"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -27969,6 +28328,56 @@
                 }
               ]
             },
+            "auth": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "const": "fake"
+                },
+                "accounts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "\\S"
+                      },
+                      "email": {
+                        "type": "string",
+                        "maxLength": 254,
+                        "pattern": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])",
+                        "description": "Reserved domain only: example.test, example.com or *.invalid"
+                      },
+                      "avatar": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      }
+                    },
+                    "required": ["id", "name", "email"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 8
+                },
+                "sessionTtlSeconds": {
+                  "type": "integer",
+                  "minimum": 60,
+                  "maximum": 2592000
+                }
+              },
+              "required": ["provider", "accounts"],
+              "additionalProperties": false,
+              "description": "Fake sign-in accounts for auth.signIn (prototype_platform_auth_v1); unique ids, no passwords or tokens"
+            },
             "derive": {
               "type": "object",
               "additionalProperties": {
@@ -32426,6 +32835,46 @@
       },
       "required": ["appId", "confirm"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["ios", "android"]
+        },
+        "requestedAppId": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["app", "all-apps"]
+        },
+        "exceededRequestedScope": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "deviceId",
+        "platform",
+        "requestedAppId",
+        "scope",
+        "exceededRequestedScope",
+        "message"
+      ],
+      "additionalProperties": {}
     }
   },
   {
@@ -35734,6 +36183,123 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["grant", "revoke", "reset"]
+        },
+        "changedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepId": {
+                "type": "string"
+              },
+              "success": {
+                "type": "boolean"
+              },
+              "changedCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "failedCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "skipped": {
+                "type": "boolean"
+              },
+              "result": {},
+              "error": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "warning": {
+                "type": "string"
+              }
+            },
+            "required": ["stepId", "success", "changedCount", "failedCount"],
+            "additionalProperties": {}
+          }
+        },
+        "error": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "audio_input_unavailable"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "appId",
+        "deviceId",
+        "platform",
+        "action",
+        "changedCount",
+        "failedCount",
+        "operations"
+      ],
+      "additionalProperties": {}
     }
   },
   {
@@ -47312,6 +47878,52 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "packageName": {
+          "type": "string"
+        },
+        "keepData": {
+          "type": "boolean"
+        },
+        "wasInstalled": {
+          "type": "boolean"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "signingGuard": {
+          "type": "object",
+          "properties": {
+            "matchedSha256": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["matchedSha256"],
+          "additionalProperties": {}
+        },
+        "removalVerification": {
+          "type": "string",
+          "enum": ["absent", "installed", "unknown"]
+        }
+      },
+      "required": ["message", "success", "packageName", "keepData"],
+      "additionalProperties": {}
     }
   },
   {
@@ -47320,7 +47932,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Start or stop device video recording.",
+    "description": "Start or stop device video recording. resourceLink on stop links its full result; required fields stay inline, bounded.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -47487,6 +48099,10 @@
             "required": ["shape"],
             "additionalProperties": false
           }
+        },
+        "resourceLink": {
+          "description": "Return the complete result as an automobile:tool-output resource and a resource_link block instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
+          "type": "boolean"
         },
         "sessionUuid": {
           "description": "Session",

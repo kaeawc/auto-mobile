@@ -232,20 +232,6 @@ export const MEDIA_ENV = {
     default: "ffmpeg",
     doc: "ffmpeg binary used for video processing.",
   },
-  IOS_WEBRTC_FFMPEG: {
-    name: "AUTOMOBILE_IOS_WEBRTC_FFMPEG",
-    legacyName: "AUTO_MOBILE_IOS_WEBRTC_FFMPEG",
-    kind: "path",
-    default: "ffmpeg",
-    doc: "ffmpeg binary used for iOS WebRTC streaming.",
-  },
-  IOS_WEBRTC_FORCE_RAW: {
-    name: "AUTOMOBILE_IOS_WEBRTC_FORCE_RAW",
-    legacyName: "AUTO_MOBILE_IOS_WEBRTC_FORCE_RAW",
-    kind: "bool",
-    default: "off",
-    doc: "Force the raw iOS WebRTC capture path (1/true).",
-  },
   LOG_FORMAT: {
     name: "AUTOMOBILE_LOG_FORMAT",
     legacyName: "AUTO_MOBILE_LOG_FORMAT",

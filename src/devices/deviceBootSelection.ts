@@ -304,6 +304,8 @@ export interface DeviceBootResult {
 
 export interface DeviceBootServiceDependencies {
   invalidateAndroidDeviceList?: () => void;
+  /** Fresh claim check for a literal explicit ID missing from eligible running devices. */
+  assertExplicitDeviceNotForeignOwned?: (deviceId: string, platform: Platform) => Promise<void>;
   deviceManager: PlatformDeviceManager;
   deviceMatcher: DeviceMatcher;
   displayInventory?: DisplayInventoryProvider;

@@ -128,6 +128,21 @@ describe("iOS observed rotation verification (#8778)", () => {
     expect(result.error).toBeUndefined();
   });
 
+  test("surfaces cancellation that arrives during the orientation restore", async () => {
+    const controller = new AbortController();
+    const spy = spyOn(runner, "requestRotate")
+      .mockResolvedValueOnce(
+        runnerResult({ success: false, error: "no", rotationPerformed: false }),
+      )
+      .mockImplementationOnce(async () => {
+        controller.abort();
+        return runnerResult({ value: 0, currentOrientation: "portrait" });
+      });
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(0)]);
+    await expect(rotate.execute("landscape", { signal: controller.signal })).rejects.toThrow();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
   test("warns when the orientation restore itself fails", async () => {
     spyOn(runner, "requestRotate")
       .mockResolvedValueOnce(

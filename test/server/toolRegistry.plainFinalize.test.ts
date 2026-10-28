@@ -4,6 +4,11 @@ import { DefaultAfterToolCallHandler, ToolRegistryClass } from "../../src/server
 import { markInternalToolCall } from "../../src/daemon/internalToolCall";
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { resourceLinkField } from "../../src/utils/schemaHelpers";
+import {
+  DEVICE_SESSION_ACQUISITION_TOOLS,
+  getActiveDeviceSelectionFromResult,
+  getDeviceSessionIdFromResult,
+} from "../../src/daemon/deviceSessionResult";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { logger } from "../../src/utils/logger";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
@@ -112,6 +117,31 @@ describe("plain-registered tools are finalized (#13942)", () => {
     expect(response.content[0]!.text.length).toBeLessThan(8 * 1024);
     expect(links(response)).toHaveLength(1);
   });
+
+  test.each([...DEVICE_SESSION_ACQUISITION_TOOLS, "setActiveDevice"])(
+    "%s is never spilled: ingress binds the session its result names",
+    async (name) => {
+      // An oversized acquisition result (a cold boot's --debug-perf timing tree) still carries the
+      // session the ingress stages bind and heartbeat; a spill would drop the nested identity.
+      const bound = {
+        success: true,
+        sessionUuid: "selected-session",
+        deviceId: "emulator-5554",
+        runtime: { session: { sessionUuid: "minted-session" } },
+        timings: "t".repeat(70 * 1024),
+      };
+      registry.register(name, "binding tool", z.object({}).passthrough(), async () =>
+        envelope(bound),
+      );
+      const response = await registry
+        .getTool(name)!
+        .handler({ resourceLink: true }, undefined, undefined);
+      expect(JSON.stringify(response)).toBe(JSON.stringify(envelope(bound)));
+      expect(writer.writes).toHaveLength(0);
+      expect(getDeviceSessionIdFromResult(response)).toBe("minted-session");
+      expect(getActiveDeviceSelectionFromResult(response)?.sessionUuid).toBe("selected-session");
+    },
+  );
 
   test("a failed spill serves the payload un-spilled and warns", async () => {
     payload = oversized();

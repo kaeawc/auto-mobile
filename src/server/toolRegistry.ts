@@ -1,3 +1,4 @@
+import { isDeviceBindingTool } from "../daemon/deviceSessionResult";
 import type { z, ZodType } from "zod/v4";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import {
@@ -294,6 +295,11 @@ export class ToolRegistryClass {
       handler: async (args, progress, signal) => {
         await assertSessionBrokerToolCall(name, false, args);
         const response = await handler(args, progress, signal);
+        if (isDeviceBindingTool(name)) {
+          // Ingress binds and heartbeats the session these results name after the handler
+          // returns (`runtime.session.sessionUuid`, `sessionUuid`), so they are never spilled.
+          return response;
+        }
         return this.plainToolFinalizer.finalizePlain({
           name,
           outputSchema: options.outputSchema,

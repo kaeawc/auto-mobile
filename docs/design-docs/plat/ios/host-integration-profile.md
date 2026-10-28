@@ -14,13 +14,13 @@ The SDK reports each family as an `SdkCapabilityDescriptor` (`ios/sdk-wire`). It
 know decodes as `UNKNOWN` on both platforms. Transport descriptors add `faultEnforcement`, which
 Android-shaped parsers drop.
 
-| Profile term | `state` | `reason` | Meaning |
-|---|---|---|---|
-| active | `SUPPORTED` | — | registered and capturing |
-| host opt-in | `DISABLED` | `HOST_OPT_IN` | supported, but the host has not registered it |
-| capture off | `DISABLED` | `NETWORK_CAPTURE_DISABLED` | registered, network capture switched off at runtime |
-| not started | `NOT_INITIALIZED` | `NETWORK_CAPTURE_NOT_INITIALIZED` | SDK disabled, or started with `enableNetworkCapture = false` |
-| unsupported | `UNSUPPORTED` | `NO_ADAPTER` | no adapter exists; manual `recordRequest` only |
+| Profile term | `state`           | `reason`                          | Meaning                                                      |
+| ------------ | ----------------- | --------------------------------- | ------------------------------------------------------------ |
+| active       | `SUPPORTED`       | —                                 | registered and capturing                                     |
+| host opt-in  | `DISABLED`        | `HOST_OPT_IN`                     | supported, but the host has not registered it                |
+| capture off  | `DISABLED`        | `NETWORK_CAPTURE_DISABLED`        | registered, network capture switched off at runtime          |
+| not started  | `NOT_INITIALIZED` | `NETWORK_CAPTURE_NOT_INITIALIZED` | SDK disabled, or started with `enableNetworkCapture = false` |
+| unsupported  | `UNSUPPORTED`     | `NO_ADAPTER`                      | no adapter exists; manual `recordRequest` only               |
 
 `faultEnforcement` is `ENFORCED` when the SDK applies a matched fault rule itself, `EVALUATE_ONLY`
 when it returns a decision the host must apply, and `NONE` when no rule can take effect. Only a
@@ -37,13 +37,13 @@ one descriptor per `HostTransport`, in declaration order.
 
 ## Network transports
 
-| Family | Registration | Capture path | `faultEnforcement` when active |
-|---|---|---|---|
-| Default and custom `URLSession` (`network.transport.urlsession`) | `registerURLSession(configuration)` before `URLSession(configuration:)` | SDK `URLProtocol` | `ENFORCED` |
-| Background `URLSession` (`network.transport.urlsession.background`) | `registerURLSession(backgroundConfiguration)`, then forward delegate callbacks to `registration.adapter` | `URLSessionNetworkCaptureAdapter` | `EVALUATE_ONLY` |
-| `URLSessionWebSocketTask` (`network.transport.websocket`) | `registerWebSocket()`, then forward sent and received frames | `WebSocketNetworkCaptureAdapter` | `EVALUATE_ONLY` |
-| `NWConnection` (`network.transport.nwconnection`) | `registerNWConnection()`, then forward state, send and receive callbacks | `NWConnectionNetworkCaptureAdapter` | `EVALUATE_ONLY` |
-| Anything else (`network.transport.other`) | none | `recordRequest` | `NONE` |
+| Family                                                              | Registration                                                                                             | Capture path                        | `faultEnforcement` when active |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------ |
+| Default and custom `URLSession` (`network.transport.urlsession`)    | `registerURLSession(configuration)` before `URLSession(configuration:)`                                  | SDK `URLProtocol`                   | `ENFORCED`                     |
+| Background `URLSession` (`network.transport.urlsession.background`) | `registerURLSession(backgroundConfiguration)`, then forward delegate callbacks to `registration.adapter` | `URLSessionNetworkCaptureAdapter`   | `EVALUATE_ONLY`                |
+| `URLSessionWebSocketTask` (`network.transport.websocket`)           | `registerWebSocket()`, then forward sent and received frames                                             | `WebSocketNetworkCaptureAdapter`    | `EVALUATE_ONLY`                |
+| `NWConnection` (`network.transport.nwconnection`)                   | `registerNWConnection()`, then forward state, send and receive callbacks                                 | `NWConnectionNetworkCaptureAdapter` | `EVALUATE_ONLY`                |
+| Anything else (`network.transport.other`)                           | none                                                                                                     | `recordRequest`                     | `NONE`                         |
 
 Fault enforcement on the three adapter transports is #5163. It changes their `faultEnforcement`,
 not their registration.
@@ -82,13 +82,13 @@ not their registration.
 These families follow the same rules: one registration call, no delegate replacement, and a
 descriptor that is `DISABLED` / `HOST_OPT_IN` until registered.
 
-| Family | Planned registration | Ownership notes |
-|---|---|---|
-| WKWebView | register a web view with the bridge, which adds only a script message handler and user script | `AutoMobileWebViewBridge.attach(to:)` currently sets `navigationDelegate`; the registration path must instead take navigation callbacks forwarded from the host's delegate |
-| UIKit | register once, then call the push, pop, presentation, tab and split hooks from the host's delegates | no swizzling; hooks resolve the scene on the main thread |
-| SwiftUI | register once, then use `.trackNavigation()` or the `track*` calls | one active flag per adapter |
-| Deep links | register once, then call `record` from the host's URL handler | the host owns URL dispatch |
-| Custom routers | register once, then call `record` per completed transition | events are dropped until the transition completes |
+| Family         | Planned registration                                                                                | Ownership notes                                                                                                                                                            |
+| -------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WKWebView      | register a web view with the bridge, which adds only a script message handler and user script       | `AutoMobileWebViewBridge.attach(to:)` currently sets `navigationDelegate`; the registration path must instead take navigation callbacks forwarded from the host's delegate |
+| UIKit          | register once, then call the push, pop, presentation, tab and split hooks from the host's delegates | no swizzling; hooks resolve the scene on the main thread                                                                                                                   |
+| SwiftUI        | register once, then use `.trackNavigation()` or the `track*` calls                                  | one active flag per adapter                                                                                                                                                |
+| Deep links     | register once, then call `record` from the host's URL handler                                       | the host owns URL dispatch                                                                                                                                                 |
+| Custom routers | register once, then call `record` per completed transition                                          | events are dropped until the transition completes                                                                                                                          |
 
 The navigation adapters share one hub. Registration must not reset a redactor another adapter
 installed.

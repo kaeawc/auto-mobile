@@ -60,13 +60,14 @@
     }
 
     extension PrototypePlatformRegistry {
-        /// The haptics, sound and connectivity modules the injected agent and ProtoViewer register;
-        /// none needs a permission, an entitlement or an Info.plist key.
+        /// The haptics, sound, connectivity and links modules the injected agent and ProtoViewer
+        /// register; none needs a permission, an entitlement or an Info.plist key.
         static func feedbackModules() -> PrototypePlatformRegistry {
             PrototypePlatformRegistry(modules: [
                 PrototypeHapticsModule(player: UIKitHapticsPlayer()),
                 PrototypeSoundModule(player: SystemSoundPlayer()),
                 PrototypeConnectivityModule(source: NWPathConnectivitySource()),
+                PrototypeLinksModule(opener: UIKitLinkOpener()),
             ])
         }
     }

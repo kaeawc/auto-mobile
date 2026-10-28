@@ -32,6 +32,7 @@
             PrototypePlatformRegistry(modules: [
                 PrototypeClipboardModule(clipboard: UIPasteboardPrototypeClipboard()),
                 PrototypeConnectivityModule(source: NWPathConnectivitySource()),
+                PrototypeLinksModule(opener: UIKitLinkOpener()),
             ])
     }
 #endif

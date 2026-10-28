@@ -1,3 +1,4 @@
+import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
@@ -18,6 +19,7 @@ const spec = {
 
 describe("refused show event ownership", () => {
   let client: FakeCtrlProxy;
+  let store: InMemoryPrototypeStatusStore;
   let restore: () => void;
   let unsubscribe: () => void;
   beforeAll(async () => {
@@ -46,8 +48,10 @@ describe("refused show event ownership", () => {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
+    store = new InMemoryPrototypeStatusStore(timer);
     client.setSupportedCommands([]);
     unsubscribe = registerPrototypeTools({
+      store,
       clientFactory: () => client,
       clock: timer,
       timer,
@@ -93,6 +97,39 @@ describe("refused show event ownership", () => {
     expect((await call({ action: "awaitEvent", id: "panel" })).event?.kind).toBe(
       "appearance_changed",
     );
+  });
+  test("a render failure is actionable and never records a shown prototype", async () => {
+    client.setPrototypeResult({
+      success: false,
+      errorCode: "render_failed",
+      error: "First composition timed out",
+    });
+    const result = await call({ action: "show", spec });
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe("render_failed");
+    expect(result.error).toContain("Check the prototype content");
+    expect(result.error).toContain("First composition timed out");
+    expect(store.shownSpecs.read(device.deviceId, "panel").kind).toBe("unknown");
+    expect((await call({ action: "status" })).prototypes).toEqual([]);
+  });
+  test("render failure preserves the previous shown spec on replacement", async () => {
+    expect((await call({ action: "show", spec })).success).toBe(true);
+    const before = store.shownSpecs.read(device.deviceId, "panel");
+    expect(before.kind).toBe("known");
+    client.setPrototypeResult({ success: false, errorCode: "render_failed" });
+    expect(
+      (
+        await call({
+          action: "show",
+          spec: { ...spec, root: { type: "text", text: "Replacement" } },
+        })
+      ).success,
+    ).toBe(false);
+    const after = store.shownSpecs.read(device.deviceId, "panel");
+    expect(after.kind).toBe("known");
+    if (before.kind === "known" && after.kind === "known") {
+      expect(after.spec).toEqual(before.spec);
+    }
   });
   test("a dispatched failed fresh show clears its event epoch", async () => {
     client.setPrototypeResult({ success: false, error: "Device refused" });

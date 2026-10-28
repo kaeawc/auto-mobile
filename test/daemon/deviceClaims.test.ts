@@ -111,8 +111,12 @@ describe("the device_claims table", () => {
     await claims.upsert(CLAIM);
     await claims.upsert({ ...CLAIM, deviceId: "emulator-5556" });
     await claims.upsert({ ...CLAIM, deviceId: "emulator-5558", pid: 200, ownerToken: "token-b" });
-    await claims.releaseOwnedBy(OWNER.pid);
-    expect((await claims.list()).map((claim) => claim.deviceId)).toEqual(["emulator-5558"]);
+    await claims.upsert({ ...CLAIM, deviceId: "emulator-5560", ownerToken: "new-generation" });
+    await claims.releaseOwnedBy(OWNER);
+    expect((await claims.list()).map((claim) => claim.deviceId)).toEqual([
+      "emulator-5558",
+      "emulator-5560",
+    ]);
   });
 
   test("a platform keeps its own row for the same id", async () => {
@@ -166,6 +170,40 @@ describe("the claims mirror", () => {
     mirror.released("emulator-5554", OWNER);
     await mirror.idle();
     expect(store.rows.size).toBe(0);
+  });
+
+  test("shutdown withdraws only recorded owner tokens, including across platforms", async () => {
+    const store = new FakeDeviceClaims();
+    const hub = new DeviceClaimMirrorHub();
+    const timer = new FakeTimer();
+    for (const platform of ["android", "ios"] as const) {
+      const mirror = hub.register(
+        new StoreDeviceClaimMirror({
+          platform,
+          store: () => store,
+          timer,
+          generationOf: () => undefined,
+        }),
+      );
+      mirror.claimed("owned", OWNER);
+      mirror.claimed("replaced", OWNER);
+    }
+    await hub.idle();
+    const replacements = (["android", "ios"] as const).map((platform) => ({
+      ...CLAIM,
+      platform,
+      deviceId: "replaced",
+      ownerToken: "foreign-generation",
+    }));
+    for (const row of replacements) {
+      await store.upsert(row);
+    }
+
+    hub.dispose();
+    await hub.idle();
+    await hub.releaseOwnedClaims(store);
+
+    expect(await store.list()).toEqual(replacements);
   });
 
   test("the owner's control-socket record reaches the table, and a reused PID reads as no row", async () => {

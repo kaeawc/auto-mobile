@@ -105,6 +105,8 @@ export interface PrototypeSavedDependencies {
   signal?: AbortSignal;
 }
 export const savedPrototypeErrorMessages: Record<SavedPrototypeErrorCode, string> = {
+  render_failed:
+    "The prototype did not complete its first render. Check the prototype content and CtrlProxy logs, then retry.",
   pin_unsupported: "This launcher does not support pinned shortcuts; save without pin.",
   device_locked: "Unlock the device and retry saving with pin.",
   pin_failed:

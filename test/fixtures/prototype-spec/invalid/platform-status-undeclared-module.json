@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "platform-status-undeclared-module",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{platform:/audio/volume}"
+    }
+  },
+  "expectedPath": "root.text"
+}

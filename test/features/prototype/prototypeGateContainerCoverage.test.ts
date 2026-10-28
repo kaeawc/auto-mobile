@@ -39,6 +39,10 @@ const soundCall = {
 };
 const mediaImage = { type: "image", asset: { data: "/photo" }, contentDescription: "Photo" };
 const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
+const statusRead = (module: string, key: string, equals: string | boolean | number) => ({
+  ...label,
+  visibleWhen: { platform: `/${module}/${key}`, equals },
+});
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
@@ -222,6 +226,9 @@ const fixtures: Record<string, Node> = {
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
+  prototype_platform_battery_v1: statusRead("battery", "state", "charging"),
+  prototype_platform_power_v1: statusRead("power", "thermal", "serious"),
+  prototype_platform_audio_v1: statusRead("audio", "muted", true),
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

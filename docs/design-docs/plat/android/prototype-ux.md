@@ -2465,8 +2465,9 @@ numeric value, exact strings and member names, and structural array/object equal
 is an integer 1..2000; oldest rows are dropped after replacement/append and before final data
 limits. Missing/non-array targets and invalid writes leave input unchanged.
 
-Runtime work remains owed: WebSocket/SSE transport, host/device dispatch, routing and atomic
-frame writes, reconnect/backoff, send queues, counters/events, inspection, simulation and
+The daemon holds the upstream connection for `via: "host"` channels (see
+[Host channel transport](#host-channel-transport)). Runtime work remains owed: the device-side
+transports, device client frame routing, routing and atomic frame writes, reconnect/backoff, send queues, counters/events, inspection, simulation and
 foreground/background/patch/reset/dismiss lifecycle. Pure TS, Kotlin and Swift rules replay shared
 backoff and coalescing vectors under `test/fixtures/prototype-spec/realtime/`. Reconnect uses
 full jitter: `floor(random * min(maxDelayMs, initialDelayMs * 2^(attempt-1)))`, with defaults of
@@ -2474,6 +2475,39 @@ full jitter: `floor(random * min(maxDelayMs, initialDelayMs * 2^(attempt-1)))`, 
 random value. Within one 50 ms flush window, consecutive frames made only of `setData` and
 `setState` to the same set of targets collapse to the last frame. Appends and all other actions
 remain ordered and are never coalesced. These are contract rules without runtime integration.
+
+### Host channel transport
+
+A `via: "host"` channel is a relay: the device sends `prototype_channel_open {connectionId,
+prototypeId, channel, kind, url, protocols?, headers?, lastEventId?}` and the host answers with
+`prototype_channel_opened`, one `prototype_channel_frame {data, event?, id?}` per upstream frame
+and a final `prototype_channel_closed {code?, reason?, error?}`. The device sends
+`prototype_channel_send {connectionId, data}` and `prototype_channel_close`. These are transport
+messages outside the Kotlin-mirrored wire manifest; what a spec sees stays on
+`prototype_platform_event`. The host never reconnects: the device state machine owns backoff, so
+`via` does not change behaviour.
+
+- **Egress.** The destination goes through the same pinning as requests: localhost names, every DNS
+  answer and the daemon's own ports are checked, and the socket connects only to the validated
+  address while keeping the URL's `Host` and TLS server name. A refusal is `blocked_destination`.
+  Authored headers follow the request rules, and `Sec-WebSocket-*` and `Last-Event-ID` are refused.
+- **WebSocket.** A handshake redirect or any non-101 answer is `handshake_failed` with the HTTP
+  status. Binary frames are not delivered. A ping goes out every 25 s and a missed pong closes the
+  connection with `network`.
+- **SSE.** A `GET` with `Accept: text/event-stream` and `Last-Event-ID` when the device supplies
+  one. Redirects are re-validated at each hop (at most five; an origin change drops authored
+  headers; an HTTPS-to-HTTP hop is refused). Anything but a `200 text/event-stream` answer is
+  `handshake_failed`. Events follow the WHATWG EventSource processing model; `retry` is ignored,
+  since the device owns the delay. The stream has no total size cap, only the per-event cap.
+- **Limits.** The handshake times out after the request default. A frame or event larger than
+  `MAX_PROTOTYPE_CHANNEL_FRAME_BYTES` closes the connection with `too_large` (the host cannot
+  drop one frame and keep the stream aligned). A device send larger than
+  `MAX_PROTOTYPE_CHANNEL_SEND_BYTES` is refused, and a device may hold at most
+  `MAX_PROTOTYPE_CHANNELS_OPEN` connections; one over the cap is answered with `closed` and
+  `too_many_in_flight`.
+- **Lifecycle.** Dismissing the prototype, closing the owning socket or removing the device aborts
+  its connections without a `closed` frame, as a cancelled request sends no reply. A socket close
+  ends only the connections it opened.
 
 ## Data, storage and network (#12531)
 

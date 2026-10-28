@@ -1,3 +1,4 @@
+import { refreshAllocationBindingExclusion } from "../sessionBroker/provisioning/exclusion";
 import { holderOf } from "../deviceBinding";
 import { type ForeignDeviceOwnership } from "../foreignDeviceOwnership";
 import { type Session, type SessionRecoveryTarget } from "../sessionManager";
@@ -436,7 +437,11 @@ export class DevicePoolAssignment {
     await Promise.all([
       this.state.foreignDeviceOwnership?.refresh(idle("android")),
       this.state.iosForeignDeviceOwnership?.refresh(idle("ios")),
-      this.state.bindingExclusion?.refresh({ requireCurrent }),
+      this.state.bindingExclusion
+        ? requireCurrent
+          ? refreshAllocationBindingExclusion(this.state.bindingExclusion)
+          : this.state.bindingExclusion.refresh()
+        : undefined,
     ]);
   }
 

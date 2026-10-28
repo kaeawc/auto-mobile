@@ -64,6 +64,13 @@ Other refusals you may meet, and what to do:
 | `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                              |
 | `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                  |
 
+A daemon warning about unknown registry migrations means a newer release has updated
+shared ownership data. Allocation claim files alone decide ownership, and this daemon
+skips the shared claims table until restart. Managed bindings are not enforced while
+the warning is shown: this daemon can allocate a device held only by a managed binding.
+Upgrade the daemons sharing managed devices to a release that includes these migrations.
+Restart all of them after upgrading.
+
 ### Choosing a device when a call is ambiguous
 
 If your MCP client declares the elicitation capability (form mode) and connects

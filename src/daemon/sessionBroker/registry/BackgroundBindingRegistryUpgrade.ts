@@ -1,3 +1,4 @@
+import { BindingRegistrySchemaUnsupportedError } from "../provisioning/BindingRegistrySchemaUnsupportedError";
 import { exponentialBackoff, type BackoffPolicy } from "../../../utils/Backoff";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -27,6 +28,11 @@ export class BackgroundBindingRegistryUpgrade {
       return;
     }
     this.task ??= this.run().catch((error: unknown) => {
+      if (error instanceof BindingRegistrySchemaUnsupportedError) {
+        // Retrying cannot teach this daemon new migrations; exclusion owns the one-time warning.
+        logger.debug(`[Daemon] Registry upgrade skipped until restart: ${errorMessage(error)}`);
+        return false;
+      }
       logger.warn(`[Daemon] Binding registry upgrade stopped: ${errorMessage(error)}`, error);
       return false;
     });
@@ -56,6 +62,9 @@ export class BackgroundBindingRegistryUpgrade {
       await this.open(this.controller.signal);
       return true;
     } catch (error) {
+      if (error instanceof BindingRegistrySchemaUnsupportedError) {
+        throw error;
+      }
       if (!this.controller.signal.aborted) {
         logger.warn(
           `[Daemon] Binding registry upgrade deferred: ${errorMessage(error)} (attempt ${attempt}; retry delay ${delayMs}ms)`,

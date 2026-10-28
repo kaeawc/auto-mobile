@@ -1,7 +1,11 @@
 import { holderOf } from "../deviceBinding";
 import { Platform } from "../../models";
 import { DeviceAllocationCriteria } from "../DeviceCriteriaMatcher";
-import { currentBindingReconciler, bindingRefusal } from "../sessionBroker/provisioning/exclusion";
+import {
+  currentBindingReconciler,
+  bindingRefusal,
+  refreshAllocationBindingExclusion,
+} from "../sessionBroker/provisioning/exclusion";
 import {
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,
@@ -155,7 +159,9 @@ export class DevicePoolBinding {
       return;
     }
     try {
-      await this.state.bindingExclusion.refresh({ maxAgeMs: input.maxAgeMs, requireCurrent: true });
+      await refreshAllocationBindingExclusion(this.state.bindingExclusion, {
+        maxAgeMs: input.maxAgeMs,
+      });
       let refusal = this.callbacks.bindingRefusalFor(input);
       if (
         refusal &&
@@ -166,7 +172,7 @@ export class DevicePoolBinding {
         // A cached snapshot can predate the requester's own claim of this slot (#11457). Re-read
         // with a load that starts after this call before refusing a session, so a fresh execution
         // is never refused its own device.
-        await this.state.bindingExclusion.refresh({ fresh: true, requireCurrent: true });
+        await refreshAllocationBindingExclusion(this.state.bindingExclusion, { fresh: true });
         refusal = this.callbacks.bindingRefusalFor(input);
       }
       if (refusal) {
@@ -215,7 +221,7 @@ export class DevicePoolBinding {
     if (!this.state.bindingExclusion) {
       return new Set();
     }
-    await this.state.bindingExclusion.refresh({ requireCurrent: true });
+    await refreshAllocationBindingExclusion(this.state.bindingExclusion);
     return this.state.bindingExclusion.stableIdsFor(platform);
   }
 

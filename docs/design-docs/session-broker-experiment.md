@@ -489,6 +489,14 @@ receipts and admission reservations to the same SQLite database, using immediate
 transactions for cross-process admission; assignment generations and native journal
 operations stay private, and allocation indices are never public session
 identities. Provider-local SQLite only (no Talos PostgreSQL change).
+An executed migration unknown to this daemon disables registry exclusion for generic
+acquisition: the `files_only` diagnostic names the path, migrations and remedy, and a
+warning is logged once per process per registry path. Managed bindings are not enforced
+in files-only mode: this daemon can allocate a device held only by a managed binding,
+because allocation claim files alone decide ownership. The device-claims mirror skips
+reads, writes, opens and retries until daemon restart. Writers and ownership readers
+requiring current registry evidence still fail with non-retryable
+`registry_schema_unsupported`; the schema guard runs before any migration or write.
 
 Broker mode holds a process-generation-aware host lock and refuses startup over
 unaccounted managed inventory or live generic sessions (drain the prior provider
@@ -524,5 +532,8 @@ inventory or an unconfirmed stop leave retirement pending for a later startup (a
 broker provider fails startup; an ordinary daemon warns and continues). The
 verification pass is bounded to 30 s. Broker records and their private scope
 survive; registry locations, SQL storage names and migration keys stay compatible.
+Unknown executed migrations are never upgraded or modified by an older daemon.
+Managed bindings are not enforced in files-only mode.
+Upgrade the daemons sharing managed devices to a release that includes these migrations.
 The retained native-resource budget variable is documented under
 [environment variables](../using/environment-variables.md).

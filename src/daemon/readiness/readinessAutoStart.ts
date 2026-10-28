@@ -1,13 +1,16 @@
 import { ActionableError, type DeviceInfo } from "../../models";
 import { isExcludedFromAutoStart } from "../deviceAutoStartExclusion";
-import type { BindingExclusion } from "../sessionBroker/provisioning/exclusion";
+import {
+  refreshAllocationBindingExclusion,
+  type BindingExclusion,
+} from "../sessionBroker/provisioning/exclusion";
 
 /** Called only for implicit cold boots, after preserving existing-device selection. */
 export async function selectReadinessAutoStartImage(
   images: readonly DeviceInfo[],
   bindingExclusion: Pick<BindingExclusion, "refresh" | "holderOf">,
 ): Promise<DeviceInfo> {
-  await bindingExclusion.refresh({ requireCurrent: true });
+  await refreshAllocationBindingExclusion(bindingExclusion);
   const candidates = images.filter((image) => !isExcludedFromAutoStart(image, bindingExclusion));
   if (candidates.length === 0) {
     throw new ActionableError(

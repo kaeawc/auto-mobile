@@ -4,6 +4,7 @@ import {
   prototypeAuthBlockError,
   prototypeAuthCallError,
 } from "../../../src/features/prototype/prototypeAuth";
+import { prototypeAuthSchema } from "../../../src/features/prototype/prototypeAuthSchema";
 
 const account = (id: string) => ({ id, name: `User ${id}`, email: `${id}@example.test` });
 const spec = (overrides: Record<string, unknown> = {}) => ({
@@ -59,4 +60,21 @@ test("the advertised prototype schema inlines the auth block with no dangling $r
   const advertised = JSON.stringify(spec?.properties?.auth);
   expect(advertised).toContain('"const":"fake"');
   expect(advertised).not.toContain("$ref");
+  expect(spec?.properties?.auth).toMatchObject({
+    additionalProperties: false,
+    properties: { accounts: { maxItems: 8, items: { additionalProperties: false } } },
+  });
+});
+
+test("the schema refuses a whitespace-only account name, matching the nonblank contract", () => {
+  const block = (name: string) => ({
+    provider: "fake",
+    accounts: [{ id: "u1", name, email: "u1@example.test" }],
+  });
+  expect(prototypeAuthSchema().safeParse(block("Ada")).success).toBe(true);
+  expect(prototypeAuthSchema().safeParse(block(" \t\u00A0\uFEFF")).success).toBe(false);
+  expect(prototypeAuthSchema().safeParse(block("")).success).toBe(false);
+  const prototype = toolDefinitions.find((tool) => tool.name === "prototype");
+  const advertised = JSON.stringify(prototype?.inputSchema);
+  expect(advertised).toContain('"maxLength":64,"pattern":"\\\\S"');
 });

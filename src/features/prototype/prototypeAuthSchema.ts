@@ -6,7 +6,8 @@ function authAccountSchema() {
   return z
     .object({
       id: z.string().max(64).regex(prototypeContractPatterns.stateKey),
-      name: z.string().min(1).max(64),
+      // \S excludes exactly the contract blankText set, and advertises as a pattern.
+      name: z.string().max(64).regex(/\S/),
       email: z
         .string()
         .max(254)

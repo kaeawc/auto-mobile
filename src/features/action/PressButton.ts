@@ -440,7 +440,7 @@ export class PressButton extends BaseVisualChange {
 
   private async executeAndroidButtonPress(
     button: string,
-    dispatch: PressDispatchOptions = {},
+    dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
     const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
     const normalized = button.toLowerCase();
@@ -773,7 +773,7 @@ export class PressButton extends BaseVisualChange {
    */
   private async executeiOSButtonPress(
     button: string,
-    dispatch: PressDispatchOptions = {},
+    dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
     const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
     throwIfAborted(signal);

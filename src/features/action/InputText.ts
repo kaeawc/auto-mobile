@@ -137,8 +137,10 @@ export class InputText extends BaseVisualChange {
   /** Typed view of the internals unit tests drive directly; not a production API. */
   get testHooks(): InputTextTestHooks {
     return {
-      executeAndroidTextInput: (...args) => this.executeAndroidTextInput(...args),
-      executeKeyEventPlan: (...args) => this.executeKeyEventPlan(...args),
+      executeAndroidTextInput: (text, imeAction, dismissKeyboard, mode, signal) =>
+        this.executeAndroidTextInput(text, { imeAction, dismissKeyboard, mode, signal }),
+      executeKeyEventPlan: (plan, timeoutMs, noRetry, beforeDispatch, signal) =>
+        this.executeKeyEventPlan(plan, { timeoutMs, noRetry, beforeDispatch, signal }),
       executeiOSTextInput: (text, imeAction, signal) =>
         executeIosTextInput(this.iosTextDeps(), text, imeAction, signal),
     };
@@ -218,13 +220,12 @@ export class InputText extends BaseVisualChange {
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidTextInput", () =>
-                this.executeAndroidTextInput(
-                  text,
+                this.executeAndroidTextInput(text, {
                   imeAction,
                   dismissKeyboard,
-                  resolvedMode,
+                  mode: resolvedMode,
                   signal,
-                ),
+                }),
               );
             case "ios":
               // dismissKeyboard is Android-only — it works around an emulator
@@ -272,11 +273,14 @@ export class InputText extends BaseVisualChange {
    */
   private async executeAndroidTextInput(
     text: string,
-    imeAction?: ImeAction,
-    dismissKeyboard: boolean = false,
-    mode: InputTextMode = "a11y",
-    signal?: AbortSignal,
+    options: {
+      imeAction?: ImeAction;
+      dismissKeyboard?: boolean;
+      mode?: InputTextMode;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const { imeAction, dismissKeyboard = false, mode = "a11y", signal } = options;
     assertInputNotAborted(signal);
     if (mode === "eventLast") {
       return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard, signal);
@@ -359,13 +363,12 @@ export class InputText extends BaseVisualChange {
       logger.info(
         "[InputText] eventLast requested but no printable non-whitespace ASCII character was found; using a11y",
       );
-      const result = await this.executeAndroidTextInput(
-        text,
+      const result = await this.executeAndroidTextInput(text, {
         imeAction,
         dismissKeyboard,
-        "a11y",
+        mode: "a11y",
         signal,
-      );
+      });
       return { ...result, method: "a11y" };
     }
 
@@ -378,13 +381,12 @@ export class InputText extends BaseVisualChange {
       logger.info(
         `[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`,
       );
-      const result = await this.executeAndroidTextInput(
-        text,
+      const result = await this.executeAndroidTextInput(text, {
         imeAction,
         dismissKeyboard,
-        "a11y",
+        mode: "a11y",
         signal,
-      );
+      });
       return { ...result, method: "a11y" };
     }
 
@@ -393,28 +395,26 @@ export class InputText extends BaseVisualChange {
     const prefixResult = await this.withTextDispatch(() => a11yClient.requestSetText(prefix));
     assertInputNotAborted(signal);
     if (!prefixResult.success) {
-      return this.setTextFailure(
-        text,
-        "eventLast prefix",
-        "before real key event",
-        prefixResult.error,
-        "eventLast",
-      );
+      return this.setTextFailure(text, {
+        stage: "eventLast prefix",
+        phase: "before real key event",
+        cause: prefixResult.error,
+        method: "eventLast",
+      });
     }
 
-    await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
+    await this.executeKeyEventPlan(keyEventPlan, { signal });
 
     if (suffix.length > 0) {
       const finalResult = await this.withTextDispatch(() => a11yClient.requestSetText(text));
       assertInputNotAborted(signal);
       if (!finalResult.success) {
-        return this.setTextFailure(
-          text,
-          "eventLast final",
-          "after real key event",
-          finalResult.error,
-          "eventLast",
-        );
+        return this.setTextFailure(text, {
+          stage: "eventLast final",
+          phase: "after real key event",
+          cause: finalResult.error,
+          method: "eventLast",
+        });
       }
     }
 
@@ -447,13 +447,12 @@ export class InputText extends BaseVisualChange {
     assertInputNotAborted(signal);
     const chars = Array.from(text);
     if (!(await this.hasAsciiKeyEventPlan(chars, signal))) {
-      const result = await this.executeAndroidTextInput(
-        text,
+      const result = await this.executeAndroidTextInput(text, {
         imeAction,
         dismissKeyboard,
-        "a11y",
+        mode: "a11y",
         signal,
-      );
+      });
       return { ...result, method: "a11y" };
     }
 
@@ -461,13 +460,12 @@ export class InputText extends BaseVisualChange {
     const clearResult = await this.withTextDispatch(() => a11yClient.requestSetText(""));
     assertInputNotAborted(signal);
     if (!clearResult.success) {
-      return this.setTextFailure(
-        text,
-        "eventAll initial clear",
-        "before eventAll input",
-        clearResult.error,
-        "eventAll",
-      );
+      return this.setTextFailure(text, {
+        stage: "eventAll initial clear",
+        phase: "before eventAll input",
+        cause: clearResult.error,
+        method: "eventAll",
+      });
     }
 
     const inputFailure = await this.sendAndroidEventAllCharacters(text, chars, a11yClient, signal);
@@ -479,13 +477,12 @@ export class InputText extends BaseVisualChange {
       const finalResult = await this.withTextDispatch(() => a11yClient.requestSetText(text));
       assertInputNotAborted(signal);
       if (!finalResult.success) {
-        return this.setTextFailure(
-          text,
-          "eventAll final",
-          "after eventAll input",
-          finalResult.error,
-          "eventAll",
-        );
+        return this.setTextFailure(text, {
+          stage: "eventAll final",
+          phase: "after eventAll input",
+          cause: finalResult.error,
+          method: "eventAll",
+        });
       }
     }
 
@@ -522,7 +519,7 @@ export class InputText extends BaseVisualChange {
       const keyEventPlan = await this.getAsciiKeyEventPlan(char, undefined, signal);
 
       if (keyEventPlan) {
-        await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
+        await this.executeKeyEventPlan(keyEventPlan, { signal });
         targetText += char;
         continue;
       }
@@ -543,13 +540,12 @@ export class InputText extends BaseVisualChange {
       );
       assertInputNotAborted(signal);
       if (!setTextResult.success) {
-        return this.setTextFailure(
-          text,
-          "eventAll unsupported text run",
-          "during eventAll input",
-          setTextResult.error,
-          "eventAll",
-        );
+        return this.setTextFailure(text, {
+          stage: "eventAll unsupported text run",
+          phase: "during eventAll input",
+          cause: setTextResult.error,
+          method: "eventAll",
+        });
       }
     }
 
@@ -632,11 +628,8 @@ export class InputText extends BaseVisualChange {
 
     const typed = await this.typeAppendKeyEvents(
       planned.plans,
-      remaining,
-      timeoutMs,
-      beforeKeyEvents,
-      signal,
-      onDispatch,
+      { remaining, timeoutMs },
+      { beforeKeyEvents, signal, onDispatch },
     );
     if (typed.error) {
       // A non-timeout failure leaves an exact confirmed prefix, while a timed-out
@@ -727,12 +720,15 @@ export class InputText extends BaseVisualChange {
    */
   private async typeAppendKeyEvents(
     plans: KeyEventPlan[],
-    remaining: () => number | undefined,
-    timeoutMs: number | undefined,
-    beforeKeyEvents?: AppendKeyEventValidator,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    timing: { remaining: () => number | undefined; timeoutMs: number | undefined },
+    hooks: {
+      beforeKeyEvents?: AppendKeyEventValidator;
+      signal?: AbortSignal;
+      onDispatch?: () => void;
+    },
   ): Promise<{ charsSent?: number; error?: string; failureSource?: AppendTextFailureSource }> {
+    const { remaining, timeoutMs } = timing;
+    const { beforeKeyEvents, signal, onDispatch } = hooks;
     let charsSent = 0;
     for (const plan of plans) {
       assertInputNotAborted(signal);
@@ -780,7 +776,12 @@ export class InputText extends BaseVisualChange {
         // stalled key event would otherwise hold the queue for ~4x the request
         // deadline. A single attempt keeps this append's device operations within
         // one budget, including shared ADB-path discovery.
-        await this.executeKeyEventPlan(plan, budget, true, beforeDispatch, signal);
+        await this.executeKeyEventPlan(plan, {
+          timeoutMs: budget,
+          noRetry: true,
+          beforeDispatch,
+          signal,
+        });
       } catch (error) {
         assertInputNotAborted(signal);
         if (validationError) {
@@ -908,11 +909,9 @@ export class InputText extends BaseVisualChange {
    */
   private setTextFailure(
     text: string,
-    stage: string,
-    phase: string,
-    cause: string | undefined,
-    method: InputTextMode,
+    failure: { stage: string; phase: string; cause: string | undefined; method: InputTextMode },
   ): SendTextResult & { method?: InputTextMode } {
+    const { stage, phase, cause, method } = failure;
     logger.warn(`[InputText] ${stage} setText failed: ${cause}`);
     return {
       success: false,
@@ -1004,11 +1003,14 @@ export class InputText extends BaseVisualChange {
 
   private async executeKeyEventPlan(
     plan: KeyEventPlan,
-    timeoutMs?: number,
-    noRetry: boolean = false,
-    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
-    signal?: AbortSignal,
+    options: {
+      timeoutMs?: number;
+      noRetry?: boolean;
+      beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<void> {
+    const { timeoutMs, noRetry = false, beforeDispatch, signal } = options;
     for (const [index, command] of plan.commands.entries()) {
       assertInputNotAborted(signal);
       const apiLevel = command.startsWith("shell input text ")

@@ -274,6 +274,8 @@ export class DevicePoolAllocationWiring {
       foreignOwnershipFor: (platform) => this.callbacks.foreignOwnershipFor(platform),
       isDrivenByForeignDaemon: (device) => this.callbacks.isDrivenByForeignDaemon(device),
       publishDeviceClaim: (deviceId) => this.callbacks.publishDeviceClaim(deviceId),
+      assertNotClaimedByForeignDaemon: (deviceId, platform) =>
+        this.callbacks.assertNotClaimedByForeignDaemon(deviceId, platform),
       rollbackAssignments: (assignments, releaseReason) =>
         this.callbacks.rollbackAssignments(assignments, releaseReason),
       refreshForeignOwnership: (requireCurrent) =>

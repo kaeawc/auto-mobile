@@ -2083,6 +2083,13 @@ writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, 
 actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
 fails with `unavailable`.
 
+On iOS the agent and Viewer registries run `links.open` with `UIApplication.open` for external opens
+(its completion decides `opened` or `unavailable`; `canOpenURL` is not used, since it would need
+`LSApplicationQueriesSchemes`) and `SFSafariViewController`, presented over the foreground key window's top
+view controller, for `inApp` and `auto` web URLs. When nothing can present, `inApp` opens externally and
+reports `fallback`. The result has no `handler`. The Simulator has no Phone or Mail app, so `tel:` and
+`mailto:` report `unavailable` there.
+
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.
 `mediaLibrary` (`prototype_platform_mediaLibrary_v1`) has `mediaLibrary.pick` with `media` (required:
@@ -2126,6 +2133,17 @@ optional fields the platform reported. `<into>__meta` then gets `{durationMs, ap
 only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the fix is rolled
 back. The root subscription block is not in the contract yet, and no production runtime advertises the
 module.
+
+**BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
+of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
+padded), `uint8`, `uint16le`, `int16le`, `uint32le`, `float32le`, and the decode-only SIG decoders
+`gatt.battery_level` (0x2A19, 0-100) and `gatt.heart_rate_measurement` (0x2A37:
+`{heartRate, sensorContact: "unsupported" | "notDetected" | "detected", energyExpended?, rrIntervalsMs?}`,
+RR intervals rounded to whole milliseconds). Values are at most 512 bytes, the ATT attribute limit. Failures
+are typed: `length` (wrong byte count or over the limit), `range` (a number out of range, a non-whole
+integer, a non-finite float, a battery level over 100), `format` (invalid UTF-8, hex or base64, or a value
+of the wrong JSON type), `decodeOnly` and `unknown`. The TypeScript reference and its Kotlin and Swift twins
+replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and runtimes are not built.
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
@@ -3216,6 +3234,14 @@ the exact byte boundary (whitespace included) and the emit payload boundary. Fix
 pinned to LF for Windows; no binary assets are included. The worked examples above are committed as
 `doc-example-N.json` fixtures and `test/parity/prototypeSpec.test.ts` asserts they match this page. The page
 is registered under How it Works in `mkdocs.yml` and linked from the design index.
+
+Reference concept slices live in `test/fixtures/prototype-concepts/<concept>/`: `today.json` (a
+whole concept app written only with capabilities Android and iOS both advertise, with literal `data`
+in place of a mock backend), `concept.json` (`{issue, name, capabilities}`, the gate capabilities the
+three strict policies must derive) and a `README.md` listing every required capability and each
+workaround or dead end with its spec path. The TypeScript, Kotlin and Swift suites load every concept
+directory; TypeScript also requires a `testTag` on every interactive node, a spec `id` of
+`<concept>-today` and zero static accessibility lint findings.
 
 ## Flow and grid contract (not device-verified)
 

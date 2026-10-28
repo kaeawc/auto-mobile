@@ -17,11 +17,7 @@ import {
 } from "../../models";
 import { toActionableError } from "../../models/ActionableError";
 import { defaultTimer } from "../../utils/SystemTimer";
-import {
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  throwIfAborted,
-} from "../../utils/toolUtils";
+import { createStructuredToolResponse, throwIfAborted } from "../../utils/toolUtils";
 import { resolveTransportDeadlineMs } from "../formTools";
 import type { PressButtonArgs, RotateArgs, SelectAllTextArgs } from "../interactionToolTypes";
 import { runSessionRotationMutation } from "../sessionRotation";
@@ -48,7 +44,7 @@ export async function selectAllTextHandler(
     const message = result.success
       ? "Selected all text in focused input field"
       : `Failed to select all text: ${result.error || "unknown error"}`;
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message,
       observation: result.observation,
       ...result,

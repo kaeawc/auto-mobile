@@ -12,6 +12,7 @@ import {
 import type { Kysely } from "kysely";
 import {
   DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS,
+  DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS,
   lazyDeviceClaims,
   StoreDeviceClaimMirror,
   type DeviceClaim,
@@ -111,8 +112,12 @@ describe("the device_claims table", () => {
     await claims.upsert(CLAIM);
     await claims.upsert({ ...CLAIM, deviceId: "emulator-5556" });
     await claims.upsert({ ...CLAIM, deviceId: "emulator-5558", pid: 200, ownerToken: "token-b" });
-    await claims.releaseOwnedBy(OWNER.pid);
-    expect((await claims.list()).map((claim) => claim.deviceId)).toEqual(["emulator-5558"]);
+    await claims.upsert({ ...CLAIM, deviceId: "emulator-5560", ownerToken: "new-generation" });
+    await claims.releaseOwnedBy(OWNER);
+    expect((await claims.list()).map((claim) => claim.deviceId)).toEqual([
+      "emulator-5558",
+      "emulator-5560",
+    ]);
   });
 
   test("a platform keeps its own row for the same id", async () => {
@@ -168,6 +173,40 @@ describe("the claims mirror", () => {
     expect(store.rows.size).toBe(0);
   });
 
+  test("shutdown withdraws only recorded owner tokens, including across platforms", async () => {
+    const store = new FakeDeviceClaims();
+    const hub = new DeviceClaimMirrorHub();
+    const timer = new FakeTimer();
+    for (const platform of ["android", "ios"] as const) {
+      const mirror = hub.register(
+        new StoreDeviceClaimMirror({
+          platform,
+          store: () => store,
+          timer,
+          generationOf: () => undefined,
+        }),
+      );
+      mirror.claimed("owned", OWNER);
+      mirror.claimed("replaced", OWNER);
+    }
+    await hub.idle();
+    const replacements = (["android", "ios"] as const).map((platform) => ({
+      ...CLAIM,
+      platform,
+      deviceId: "replaced",
+      ownerToken: "foreign-generation",
+    }));
+    for (const row of replacements) {
+      await store.upsert(row);
+    }
+
+    hub.dispose();
+    await hub.idle();
+    await hub.releaseOwnedClaims(store);
+
+    expect(await store.list()).toEqual(replacements);
+  });
+
   test("the owner's control-socket record reaches the table, and a reused PID reads as no row", async () => {
     const store = new FakeDeviceClaims();
     const mirror = mirrorOver(() => store);
@@ -190,6 +229,83 @@ describe("the claims mirror", () => {
     mirror.claimed("emulator-5554", OWNER);
     mirror.released("emulator-5554", OWNER);
     await mirror.idle();
+  });
+
+  test("a read joins an existing open without starting one, including its first settled read", async () => {
+    const store = new FakeDeviceClaims();
+    await store.upsert(CLAIM);
+    const opening = Promise.withResolvers<{ deviceClaims(): DeviceClaims }>();
+    const lazy = lazyDeviceClaims(() => opening.promise);
+    const startOpen = mock(() => true);
+    const mirror = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: lazy,
+      whenOpen: async () => (await opening.promise).deviceClaims(),
+      openRegistry: startOpen,
+      timer: new FakeTimer(),
+      generationVerdict: () => "same",
+    });
+    const read = mirror.read(CLAIM.deviceId);
+    opening.resolve({ deviceClaims: () => store });
+    expect(await read).toEqual(CLAIM);
+
+    const settledMirror = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: lazyDeviceClaims(() => opening.promise),
+      whenOpen: async () => (await opening.promise).deviceClaims(),
+      timer: new FakeTimer(),
+      generationVerdict: () => "same",
+    });
+    expect(await settledMirror.read(CLAIM.deviceId)).toEqual(CLAIM);
+    expect(startOpen).not.toHaveBeenCalled();
+  });
+
+  test("a read bounds a stalled open with its injected timer and does not open a registry", async () => {
+    const timer = new FakeTimer();
+    const startOpen = mock(() => true);
+    const mirror = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: () => undefined,
+      whenOpen: () => new Promise<DeviceClaims | undefined>(() => {}),
+      openRegistry: startOpen,
+      timer,
+    });
+    const result = mirror.read(CLAIM.deviceId).catch((error: unknown) => error);
+    timer.advanceTime(DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS);
+    expect(await result).toBeInstanceOf(Error);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(startOpen).not.toHaveBeenCalled();
+  });
+
+  test("a failed open rejects the read, while no existing open returns no row", async () => {
+    const mirror = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: () => undefined,
+      whenOpen: async () => {
+        throw new Error("upgrade pending");
+      },
+      timer: new FakeTimer(),
+    });
+    await expect(mirror.read(CLAIM.deviceId)).rejects.toThrow("upgrade pending");
+    const unopened = new StoreDeviceClaimMirror({
+      platform: "android",
+      store: () => undefined,
+      whenOpen: async () => undefined,
+      timer: new FakeTimer(),
+    });
+    expect(await unopened.read(CLAIM.deviceId)).toBeUndefined();
+  });
+
+  test("releasing a refused claim preserves the other owner's row", async () => {
+    const store = new FakeDeviceClaims();
+    await store.upsert(CLAIM);
+    const mirror = mirrorOver(() => store);
+    mirror.released(CLAIM.deviceId, { pid: 999, ownerToken: "never-acquired" });
+    await mirror.idle();
+    expect(await store.get(CLAIM.platform, CLAIM.deviceId)).toEqual(CLAIM);
+    mirror.released(CLAIM.deviceId, OWNER);
+    await mirror.idle();
+    expect(await store.get(CLAIM.platform, CLAIM.deviceId)).toBeUndefined();
   });
 
   test("a failed write is traced and does not escape", async () => {

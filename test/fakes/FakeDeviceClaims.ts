@@ -22,10 +22,10 @@ export class FakeDeviceClaims implements DeviceClaims {
     this.rows.set(key, { ...claim, claimedAtMs: sameOwner ? held.claimedAtMs : claim.claimedAtMs });
   }
 
-  async releaseOwnedBy(pid: number): Promise<void> {
+  async releaseOwnedBy(owner: { pid: number; ownerToken: string }): Promise<void> {
     this.failIfBusy();
     for (const [key, row] of this.rows) {
-      if (row.pid === pid) {
+      if (row.pid === owner.pid && row.ownerToken === owner.ownerToken) {
         this.rows.delete(key);
       }
     }

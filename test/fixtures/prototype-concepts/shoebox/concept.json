@@ -1,0 +1,14 @@
+{
+  "issue": 14226,
+  "name": "Shoebox",
+  "capabilities": [
+    "prototype_data_model_v1",
+    "prototype_emit_context_v1",
+    "prototype_flow_grid_v1",
+    "prototype_format_v1",
+    "prototype_refresh_v1",
+    "prototype_semantics_v1",
+    "prototype_stack_v1",
+    "prototype_timers_v1"
+  ]
+}

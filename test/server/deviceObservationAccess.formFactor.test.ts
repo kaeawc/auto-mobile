@@ -1,7 +1,11 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import type { PooledDevice } from "../../src/daemon/devicePoolTypes";
 import type { BootedDevice } from "../../src/models";
-import { sessionlessDeviceReadFor } from "../../src/server/deviceObservationAccess";
+import {
+  HeldDeviceFormFactorResolver,
+  sessionlessDeviceReadFor,
+} from "../../src/server/deviceObservationAccess";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import type { AvdConfigReader } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 import { createExecResult } from "../../src/utils/execResult";
@@ -16,6 +20,56 @@ const emulator: BootedDevice = {
   name: "mtwear-api37",
   platform: "android",
 };
+
+function heldEmulator(): PooledDevice {
+  return {
+    id: emulator.deviceId,
+    name: emulator.name,
+    platform: "android",
+    sessionId: "held-session",
+    status: "busy",
+    lastUsedAt: 0,
+    assignmentCount: 1,
+    errorCount: 0,
+    incarnation: 1,
+  };
+}
+
+test("held-session hung config read returns without form factor at the default deadline", async () => {
+  const timer = new FakeTimer();
+  const reader: AvdConfigReader = { readConfig: () => new Promise(() => {}) };
+  const resolver = new HeldDeviceFormFactorResolver(reader, timer);
+  const result = resolver.enrich(emulator, heldEmulator());
+
+  expect(timer.getPendingTimeouts()).toEqual([2000]);
+  timer.advanceTime(2000);
+  expect(await result).toBe(emulator);
+  expect(await result).not.toHaveProperty("formFactor");
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("held-session retries timed-out config once and caches the successful watch result", async () => {
+  const timer = new FakeTimer();
+  const watch = new FakeAvdConfigReader({ deviceName: "wearos_small_round" });
+  const readConfig = mock<AvdConfigReader["readConfig"]>(() => new Promise(() => {}));
+  const resolver = new HeldDeviceFormFactorResolver({ readConfig }, timer, 25);
+  const pooled = heldEmulator();
+  const first = resolver.enrich(emulator, pooled);
+  const concurrent = resolver.enrich(emulator, pooled);
+
+  expect(readConfig).toHaveBeenCalledTimes(1);
+  expect(timer.getPendingTimeouts()).toEqual([25]);
+  timer.advanceTime(25);
+  expect(await first).not.toHaveProperty("formFactor");
+  expect(await concurrent).not.toHaveProperty("formFactor");
+
+  readConfig.mockImplementation((name) => watch.readConfig(name));
+  expect((await resolver.enrich(emulator, pooled)).formFactor).toBe("watch");
+  expect((await resolver.enrich(emulator, pooled)).formFactor).toBe("watch");
+  expect(readConfig).toHaveBeenCalledTimes(2);
+  expect(watch.readConfigCalls).toEqual([emulator.name]);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
 
 function readAccess(device: BootedDevice, avdConfigReader: AvdConfigReader, withStatus = false) {
   return sessionlessDeviceReadFor({

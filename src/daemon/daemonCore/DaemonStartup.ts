@@ -451,6 +451,14 @@ export class DaemonStartup {
           registryExists: bindingRegistryFileExists(),
           open: () => this.host.openBindingRegistry(),
         });
+      } else if (bindingRegistryFileExists()) {
+        void this.host.openBindingRegistry(undefined, { quiet: true }).catch((error: unknown) => {
+          // Pending schemas retry after bind; claim files decide until the registry can be read.
+          logger.warn(
+            `[Daemon] Recovery registry open deferred; will retry after socket bind: ${errorMessage(error)}`,
+            error,
+          );
+        });
       }
 
       this.host.services.sessionManager().assertDaemonCollaboratorsAttached();

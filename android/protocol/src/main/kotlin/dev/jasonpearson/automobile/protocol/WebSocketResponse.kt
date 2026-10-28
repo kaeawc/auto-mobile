@@ -985,6 +985,7 @@ enum class SavedPrototypeErrorCode {
   @SerialName("not_found") NOT_FOUND,
   @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
   @SerialName("internal_error") INTERNAL_ERROR,
+  @SerialName("render_failed") RENDER_FAILED,
 }
 
 @Serializable

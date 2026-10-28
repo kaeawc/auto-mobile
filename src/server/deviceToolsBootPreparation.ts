@@ -1,3 +1,8 @@
+import {
+  adoptRestartResumeTargets,
+  internalMcpSessionId,
+  internalOneShotCli,
+} from "./internalToolParams";
 import { holderOf } from "../daemon/deviceBinding";
 import { currentTaskContext } from "./tasks/runAsTask";
 import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
@@ -278,7 +283,7 @@ function withRestartMatchExclusions(
   if (!restart) {
     return exclusions;
   }
-  args.__restartResumeTargets ??= restart.resumeTargets;
+  adoptRestartResumeTargets(args, restart.resumeTargets);
   return {
     excludeDeviceNames: unionSets(exclusions.excludeDeviceNames, restart.names),
     excludeDeviceIds: unionSets(exclusions.excludeDeviceIds, restart.ids),
@@ -301,7 +306,7 @@ export function devicesHeldByOtherSessions(
   if (!pool) {
     return undefined;
   }
-  const mcpSessionId = args.__oneShotCli === true ? undefined : args.__mcpSessionId;
+  const mcpSessionId = internalOneShotCli(args) ? undefined : internalMcpSessionId(args);
   const sessionManager = daemonState.getSessionManager();
   const callerMayReuse = (deviceId: string, holderSessionId: string): boolean => {
     if (mcpSessionId === undefined) {

@@ -1,41 +1,17 @@
-import fs from "fs/promises";
-import path from "path";
 import * as yaml from "js-yaml";
 import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
-import { errorMessage } from "../describeUnknownError";
 import { PlanNormalizer } from "./PlanNormalizer";
 import { redactPlanObjectTypedText } from "../redactTypedTextArguments";
 import { migratePlan, type PlanMigrationOptions } from "./PlanMigrator";
-import { getMcpServerVersion, releaseVersion } from "../mcpVersion";
 import { PlanValidator } from "./PlanValidator";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
-import { sortedReaddir } from "../io";
 
 /**
  * Interface for plan serialization/deserialization
- * Handles YAML export and import of plans
+ * Handles YAML import of plans
  */
 export interface PlanSerializer {
-  /**
-   * Export a plan from logged tool calls in a directory
-   * @param logDir Directory containing log files
-   * @param planName Name for the exported plan
-   * @param outputPath Path where the plan YAML will be written
-   * @returns Promise with export result including success status, plan path, content, and step count
-   */
-  exportPlanFromLogs(
-    logDir: string,
-    planName: string,
-    outputPath: string,
-  ): Promise<{
-    success: boolean;
-    planPath?: string;
-    planContent?: string;
-    stepCount?: number;
-    error?: string;
-  }>;
-
   /**
    * Import a plan from YAML content
    * @param yamlContent YAML string containing plan definition
@@ -45,195 +21,14 @@ export interface PlanSerializer {
   importPlanFromYaml(yamlContent: string, options?: PlanMigrationOptions): Plan;
 }
 
-interface LoggedToolCall {
-  timestamp: string;
-  tool: string;
-  params: Record<string, any>;
-  optional?: boolean;
-  result: { success: boolean; data?: any; error?: string };
-}
-
 const migrateYamlPlan = (rawPlan: unknown, options?: PlanMigrationOptions) =>
   migratePlan(rawPlan, options);
 
-// Tools that should be omitted from plans
-const OMITTED_TOOLS = new Set([
-  "startDevice",
-  "killDevice",
-  "deleteDevice",
-  "listDeviceImages",
-  "checkRunningDevices",
-  "listDevices",
-  "setActiveDevice",
-]);
-
 /**
  * YAML-based plan serialization implementation
- * Provides YAML export and import capabilities for Plan objects
+ * Provides YAML import for Plan objects
  */
 export class YamlPlanSerializer implements PlanSerializer {
-  /**
-   * Check if a tool call should be included in the plan
-   */
-  private static shouldIncludeInPlan(toolName: string, isLastObserve: boolean): boolean {
-    if (OMITTED_TOOLS.has(toolName)) {
-      return false;
-    }
-
-    // Include all non-observe tools
-    if (toolName !== "observe") {
-      return true;
-    }
-
-    // For observe calls, only include the last one
-    return isLastObserve;
-  }
-
-  /**
-   * Export a plan from logged tool calls in a directory
-   * @param logDir Directory containing log files
-   * @param planName Name for the exported plan
-   * @param outputPath Path where the plan YAML will be written
-   * @returns Promise with export result including success status, plan path, content, and step count
-   */
-  async exportPlanFromLogs(
-    logDir: string,
-    planName: string,
-    outputPath: string,
-  ): Promise<{
-    success: boolean;
-    planPath?: string;
-    planContent?: string;
-    stepCount?: number;
-    error?: string;
-  }> {
-    try {
-      // Read all log files in the directory
-      const files = await sortedReaddir(logDir);
-      const logFiles = files.filter((f) => f.endsWith(".json")).sort();
-
-      if (logFiles.length === 0) {
-        return { success: false, error: "No log files found" };
-      }
-
-      // Collect all successful tool calls
-      const allToolCalls: LoggedToolCall[] = [];
-
-      for (const logFile of logFiles) {
-        await this.readSuccessfulToolCalls(logDir, logFile, allToolCalls);
-      }
-
-      if (allToolCalls.length === 0) {
-        return { success: false, error: "No successful tool calls found in logs" };
-      }
-
-      // Sort by timestamp
-      allToolCalls.sort(
-        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
-
-      // Find the last observe call
-      let lastObserveIndex = -1;
-      for (let i = allToolCalls.length - 1; i >= 0; i--) {
-        if (allToolCalls[i].tool === "observe") {
-          lastObserveIndex = i;
-          break;
-        }
-      }
-
-      // Filter tools and create plan steps
-      const planSteps: PlanStep[] = [];
-
-      for (let i = 0; i < allToolCalls.length; i++) {
-        const toolCall = allToolCalls[i];
-        const isLastObserve = i === lastObserveIndex;
-
-        if (YamlPlanSerializer.shouldIncludeInPlan(toolCall.tool, isLastObserve)) {
-          planSteps.push({
-            tool: toolCall.tool,
-            params: toolCall.params,
-            ...(toolCall.optional === true ? { optional: true } : {}),
-          });
-        }
-      }
-
-      // Create the plan. Persist the release portion only: the test-plan schema
-      // requires `^\d+\.\d+\.\d+$`, and plan files are schema-validated before
-      // migration runs, so a dev build's `+g<sha>` stamp would be rejected. The
-      // stamp's purpose (daemon skew detection, diagnostics) is unrelated to plans.
-      const mcpVersion = releaseVersion(getMcpServerVersion());
-      const plan: Plan = {
-        name: planName,
-        description: `Exported plan with ${planSteps.length} steps`,
-        steps: planSteps,
-        mcpVersion,
-        metadata: {
-          createdAt: new Date().toISOString(),
-          version: "1.0.0",
-        },
-      };
-
-      // Convert to YAML
-      const yamlContent = yaml.dump(plan, {
-        indent: 2,
-        lineWidth: -1,
-        noRefs: true,
-      });
-
-      // Write to file
-      await fs.writeFile(outputPath, yamlContent, "utf-8");
-      logger.info(`Plan exported to ${outputPath}`);
-
-      return {
-        success: true,
-        planPath: outputPath,
-        planContent: yamlContent,
-        stepCount: planSteps.length,
-      };
-    } catch (error) {
-      logger.warn(`Failed to export plan: ${errorMessage(error)}`, error);
-      return { success: false, error: `${error}` };
-    }
-  }
-
-  private async readSuccessfulToolCalls(
-    logDir: string,
-    logFile: string,
-    allToolCalls: LoggedToolCall[],
-  ): Promise<void> {
-    try {
-      const logPath = path.join(logDir, logFile);
-      const content = await fs.readFile(logPath, "utf-8");
-
-      // Handle both single JSON objects and newline-delimited JSON
-      const lines = content
-        .trim()
-        .split("\n")
-        .filter((line) => line.trim());
-
-      this.appendSuccessfulLogEntries(lines, logFile, allToolCalls);
-    } catch (error) {
-      logger.warn(`Failed to read log file ${logFile}: ${error}`);
-    }
-  }
-
-  private appendSuccessfulLogEntries(
-    lines: string[],
-    logFile: string,
-    allToolCalls: LoggedToolCall[],
-  ): void {
-    for (const line of lines) {
-      try {
-        const logEntry = JSON.parse(line.trim());
-        if (logEntry.result?.success) {
-          allToolCalls.push(logEntry);
-        }
-      } catch (parseError) {
-        logger.warn(`Failed to parse line in ${logFile}: ${parseError}`);
-      }
-    }
-  }
-
   /**
    * Import a plan from YAML content
    * @param yamlContent YAML string containing plan definition

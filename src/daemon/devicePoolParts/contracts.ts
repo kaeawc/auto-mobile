@@ -238,7 +238,7 @@ export interface DeviceReadyListener {
 }
 
 export interface DeviceRemovedListener {
-  (deviceId: string, platform: "android" | "ios"): void;
+  (deviceId: string, platform: Platform): void;
 }
 
 /** Fired after a pooled device's status or holding session changed and the change committed. */

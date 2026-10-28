@@ -3,13 +3,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
+import type { Platform } from "../../../models/Platform";
 import { DeviceAssignedToBindingError, BindingDiscoveryIncompleteError } from "./refusal";
-import type {
-  ManagedDeviceEntry,
-  BindingKey,
-  BindingPlatform,
-  BindingRegistry,
-} from "../registry/bindingRegistry";
+import type { ManagedDeviceEntry, BindingKey, BindingRegistry } from "../registry/bindingRegistry";
 import {
   openSqliteBindingRegistry,
   bindingRegistryFileExists,
@@ -20,7 +16,8 @@ import {
  * (AVD name, simulator UDID, or a physical serial). Unknown identities are left out.
  */
 export interface ManagedDeviceRef {
-  platform: BindingPlatform;
+  /** Bindings hold only Android and iOS devices, so a watch device is never held. */
+  platform: Platform;
   stableIds: ReadonlyArray<string | undefined>;
 }
 
@@ -60,7 +57,7 @@ export interface BindingExclusion {
   /** The managed entry holding the device, from the last snapshot. */
   holderOf(device: ManagedDeviceRef): ManagedDeviceEntry | undefined;
   /** Every stable id the last snapshot holds for `platform`, for selector-based boots. */
-  stableIdsFor(platform: BindingPlatform): ReadonlySet<string>;
+  stableIdsFor(platform: Platform): ReadonlySet<string>;
 }
 
 /**
@@ -130,14 +127,14 @@ export function bindingRefusal(
   return new DeviceAssignedToBindingError(input.action, input.deviceId, entry);
 }
 
-function entryKey(platform: BindingPlatform, stableId: string): string {
+function entryKey(platform: Platform, stableId: string): string {
   return JSON.stringify([platform, stableId]);
 }
 
 interface LoadedSnapshot {
   kind: "loaded";
   byDevice: Map<string, ManagedDeviceEntry>;
-  byPlatform: Map<BindingPlatform, Set<string>>;
+  byPlatform: Map<Platform, Set<string>>;
   loadedAtMs: number;
 }
 
@@ -257,7 +254,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
     return undefined;
   }
 
-  stableIdsFor(platform: BindingPlatform): ReadonlySet<string> {
+  stableIdsFor(platform: Platform): ReadonlySet<string> {
     return this.snapshot?.kind === "loaded"
       ? (this.snapshot.byPlatform.get(platform) ?? new Set())
       : new Set();
@@ -300,7 +297,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
       throw new BindingDiscoveryIncompleteError(errorMessage(error));
     }
     const byDevice = new Map<string, ManagedDeviceEntry>();
-    const byPlatform = new Map<BindingPlatform, Set<string>>();
+    const byPlatform = new Map<Platform, Set<string>>();
     for (const entry of entries) {
       byDevice.set(entryKey(entry.platform, entry.stableDeviceId), entry);
       const ids = byPlatform.get(entry.platform) ?? new Set<string>();

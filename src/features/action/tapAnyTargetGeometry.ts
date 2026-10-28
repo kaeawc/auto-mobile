@@ -2,7 +2,7 @@ import { type CapturedTapTarget } from "./TapAnyAndroidTapper";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   ActionableError,
-  BootedDevice,
+  type AndroidOrIosPlatform,
   Element,
   TapAnyElementOptions,
   ViewHierarchyResult,
@@ -25,7 +25,7 @@ export function findTapAnyClickableElement(
       hierarchy: ViewHierarchyResult,
       container?: ElementContainerSelector,
     ) => boolean;
-    platform: BootedDevice["platform"];
+    platform: AndroidOrIosPlatform;
     iosMultiPanel: boolean;
   },
   options: TapAnyElementOptions,
@@ -60,7 +60,7 @@ export function findTapAnyClickableElement(
 export function resolveTapAnyPoint(
   context: {
     geometry: ElementGeometry;
-    platform: BootedDevice["platform"];
+    platform: AndroidOrIosPlatform;
     iosMultiPanel: boolean;
   },
   target: CapturedTapTarget,

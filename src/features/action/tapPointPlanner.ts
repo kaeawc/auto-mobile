@@ -21,6 +21,7 @@ import {
   ElementSelectionResult,
   ObserveResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../models";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -359,7 +360,7 @@ export class TapPointPlanner {
   ): ObserveResult["screenSize"] | undefined {
     return screenSizeForOffscreenCheck(viewHierarchy, {
       ...options,
-      platform: this.deps.device.platform,
+      platform: requireAndroidOrIosPlatform(this.deps.device.platform, "tapOn"),
       iosMultiPanel:
         this.deps.device.platform === "ios" && (this.deps.device.displays?.panels.length ?? 0) > 1,
     });

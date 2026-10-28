@@ -6,7 +6,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../src/models";
+import { type BootedDevice, requireAndroidOrIosPlatform } from "../../src/models";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
@@ -60,7 +60,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
       holderOf: ({ stableIds }) =>
         brokerHeld && stableIds.includes(booted.deviceId)
           ? {
-              platform: booted.platform,
+              platform: requireAndroidOrIosPlatform(booted.platform, "Binding hold"),
               stableDeviceId: booted.deviceId,
               holder: "session_broker",
               scopeKey: "scope",

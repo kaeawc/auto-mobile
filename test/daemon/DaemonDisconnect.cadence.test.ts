@@ -7,7 +7,7 @@ import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/models/VideoRecordingC
 import type { Session } from "../../src/daemon/sessionManager";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import type { DisconnectMonitorCadence } from "../../src/daemon/daemonCore/DaemonDisconnect";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {
   BootedDeviceDiscoveryOptions,
   BootedDeviceDiscovery,
@@ -51,10 +51,10 @@ function monitor(
   let androidListedReads = 0;
   let recovered = 0;
   const requests: BootedDeviceDiscoveryOptions[] = [];
-  const scopes: ("ios" | "android" | "either" | undefined)[] = [];
+  const scopes: (SomePlatform | undefined)[] = [];
   const manager = {
     getBootedDevicesDetailed: async (
-      scope?: "ios" | "android" | "either",
+      scope?: SomePlatform,
       options: BootedDeviceDiscoveryOptions = {},
     ): Promise<BootedDeviceDiscovery> => {
       scopes.push(scope);

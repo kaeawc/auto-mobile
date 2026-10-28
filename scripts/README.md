@@ -355,6 +355,26 @@ that name the session are saved under `scratch/live-idle-release-check/<time>/`.
 On failure the private directory is kept. `test/bats/live-idle-release-check.bats`
 covers the script with a fake server, adb and clock.
 
+## Research: Persona Robustness Harness
+
+`persona-robustness/run.ts` (#14061) replays one plan under the stock baseline,
+each manufacturer profile and a set of display stressors on a real emulator, and
+writes `report.json` and `report.md`. It is manual only and never runs in CI.
+
+```bash
+bun run build
+bun scripts/persona-robustness/run.ts \
+  --plan test/resources/test-plans/playground/ux-exploration/navigate-demo-index.yaml \
+  --personas samsung-oneui,xiaomi-hyperos,motorola,display:font-scale-1.3 \
+  --repeats 2 --ablate
+```
+
+Options: `--app-id` (default: the plan's first `launchApp`), `--personas`,
+`--repeats`, `--ablate`, `--session`, `--avd`, `--server` and `--out` (default
+`scratch/persona-robustness/<time>/`). It exits 1 when a reset failed and the
+run stopped early. Scoring and attribution rules are in
+`docs/design-docs/plat/android/persona-robustness-harness.md`.
+
 ## Other Scripts
 
 ### Build Scripts

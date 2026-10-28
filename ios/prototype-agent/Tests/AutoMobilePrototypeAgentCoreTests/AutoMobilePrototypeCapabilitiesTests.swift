@@ -47,6 +47,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_location_v1",
             // Contract only; the system media picker and camera runtimes are owed (#14197).
             "prototype_platform_mediaLibrary_v1", "prototype_platform_camera_v1",
+            // Contract only; the fake store runtime is owed (#14314).
+            "prototype_platform_commerce_v1",
             // Contract only; the window controls runtime is owed (#14320).
             "prototype_platform_window_controls_v1",
             // Contract only; the keyboard dismiss runtime is owed (#14320).

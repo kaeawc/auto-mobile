@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type PassiveWorkKind,
   PassiveWorkPolicy,
   isAppearanceSyncEnabled,
   parsePassiveWorkSettings,
@@ -34,6 +35,21 @@ describe("PassiveWorkPolicy", () => {
       expect(scoped.allows("ios", "observation-stream", "sim-a")).toBe(false);
       expect(scoped.allows("android", "appearance-sync", "android-a")).toBe(false);
       expect(scoped.allows("android", "observation-stream", "android-a")).toBe(false);
+    }
+  });
+
+  test("watchOS devices get no passive work, even when owned or allowlisted", () => {
+    const scoped = policy(
+      {
+        AUTOMOBILE_IOS_WARMUP_DEVICES: "watch-a",
+        AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES: "watch-a",
+        AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES: "watch-a",
+      },
+      ["watch-a"],
+    );
+    const kinds: PassiveWorkKind[] = ["appearance-sync", "startup-warmup", "observation-stream"];
+    for (const kind of kinds) {
+      expect(scoped.allows("watchos", kind, "watch-a")).toBe(false);
     }
   });
 

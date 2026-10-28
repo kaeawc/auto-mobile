@@ -5,7 +5,7 @@ import {
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError, BootedDevice, requireAndroidOrIosPlatform } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import {
   NavigationGraphManager,
@@ -156,7 +156,7 @@ export function createNavigateToHandler({
           ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
           : {}),
         targetScreen: args.targetScreen,
-        platform: args.platform || device.platform,
+        platform: requireAndroidOrIosPlatform(args.platform || device.platform, "navigateTo"),
         sessionUuid: args.sessionUuid,
       };
       const result = await navigateTo.execute(options, progress, signal);

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import type { BootedDevice } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
@@ -88,6 +89,7 @@ export async function captureDeviceVisualScreen(
   device: BootedDevice,
   deps: DeviceVisualScreenDependencies = {},
 ): Promise<VisualScreen & { hierarchy: ViewHierarchyResult }> {
+  const platform = requireAndroidOrIosPlatform(device.platform, "Visual screenshot comparison");
   const capture = deps.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
   const snapshot = await capture.capture({
     freshness: "fresh",
@@ -105,7 +107,7 @@ export async function captureDeviceVisualScreen(
     png,
     hierarchy: snapshot.hierarchy,
     geometry: {
-      platform: device.platform,
+      platform,
       screenSize,
       rotation: snapshot.hierarchy.rotation,
       nativeScale: snapshot.hierarchy.nativeScale,
@@ -135,7 +137,7 @@ export async function readVisualDeviceProfile(
   const fontScale = settings.current?.fontScale;
   const theme = settings.current?.theme;
   return {
-    platform: device.platform,
+    platform: requireAndroidOrIosPlatform(device.platform, "Visual screenshot comparison"),
     width,
     height,
     density: screen.hierarchy.density ?? screen.hierarchy.nativeScale ?? null,

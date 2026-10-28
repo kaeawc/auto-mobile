@@ -3,7 +3,13 @@ import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
+import {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
+} from "../../models";
 import { FieldSpec, SetUIStateElementSelector } from "../../models/SetUIStateOptions";
 import { FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector, type FieldTypeDetection } from "./FieldTypeDetector";
@@ -96,7 +102,7 @@ export class SetUIStateFields {
     },
   ) {
     this.selector = new ResolverElementSelector(undefined, this.hierarchy, {
-      platform: options.device.platform,
+      platform: requireAndroidOrIosPlatform(options.device.platform, "setUIState"),
       iosMultiPanel:
         options.device.platform === "ios" && (options.device.displays?.panels.length ?? 0) > 1,
     });

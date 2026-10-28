@@ -7,7 +7,7 @@ import {
   withAppIdAliases,
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
-import type { Platform } from "../models";
+import type { AndroidOrIosPlatform, Platform } from "../models";
 import { getRequestedResourceUri } from "./resourceRegistry";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import { encodeUriSegment } from "../utils/encodeUriSegment";
@@ -137,7 +137,8 @@ export interface LegacyPutAppFileInput {
   sourcePath?: string;
   contentText?: string;
   contentBase64?: string;
-  platform?: Platform;
+  /** Mirrors the tool's platform selector, which only offers Android and iOS. */
+  platform?: AndroidOrIosPlatform;
   deviceId?: string;
   device?: string;
   sessionUuid?: string;

@@ -1,73 +1,13 @@
-import { logger } from "../../../src/utils/logger";
-import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
-import { describe, expect, spyOn, test } from "bun:test";
-import fs from "fs/promises";
+import { describe, expect, test } from "bun:test";
 import * as yaml from "js-yaml";
-import os from "os";
-import path from "path";
 import { YamlPlanSerializer } from "../../../src/utils/plan/PlanSerializer";
 import type { Plan } from "../../../src/models/Plan";
 
 /**
  * Tests for PlanSerializer focusing on the pure importPlanFromYaml logic.
- *
- * exportPlanFromLogs is not tested here because it requires filesystem access
- * (reading log directories and writing output files) without injectable dependencies.
  */
 describe("YamlPlanSerializer", () => {
   const serializer = new YamlPlanSerializer();
-
-  describe("exportPlanFromLogs", () => {
-    test("warns and preserves export failure when log enumeration rejects", async () => {
-      const error = new Error("logs unavailable");
-      const read = spyOn(fs, "readdir").mockRejectedValue(error);
-      const warning = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        expect(
-          await serializer.exportPlanFromLogs("/fake/logs", "Failure", "/fake/out.yaml"),
-        ).toEqual({
-          success: false,
-          error: String(error),
-        });
-        expect(loggerCallsWithPrefix(warning.mock.calls, "Failed to export plan:")).toEqual([
-          ["Failed to export plan: logs unavailable", error],
-        ]);
-      } finally {
-        read.mockRestore();
-        warning.mockRestore();
-      }
-    });
-    test("preserves step-level optional flag when present in logged tool calls", async () => {
-      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "plan-serializer-"));
-      const outputPath = path.join(tempDir, "exported.yaml");
-      try {
-        await fs.writeFile(
-          path.join(tempDir, "tool-calls.json"),
-          JSON.stringify({
-            timestamp: "2026-07-09T00:00:00.000Z",
-            tool: "tapOn",
-            params: { text: "Not Now" },
-            optional: true,
-            result: { success: true },
-          }) + "\n",
-          "utf-8",
-        );
-
-        const result = await serializer.exportPlanFromLogs(tempDir, "Optional Export", outputPath);
-
-        expect(result.success).toBe(true);
-        const exported = yaml.load(result.planContent ?? "") as Plan;
-        expect(exported.steps[0]).toMatchObject({
-          tool: "tapOn",
-          params: { text: "Not Now" },
-          optional: true,
-        });
-        expect(exported.steps[0].params.optional).toBeUndefined();
-      } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
-      }
-    });
-  });
 
   describe("importPlanFromYaml", () => {
     test.each([

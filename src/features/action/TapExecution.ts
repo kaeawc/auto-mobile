@@ -1,5 +1,6 @@
 import { deadlineRequest, type TapOnCall } from "./ActionCall";
-import type { ElementSelectionResult } from "../../models";
+import type { AndroidOrIosPlatform, ElementSelectionResult } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import type { DisplayFence, ObservedActionResult } from "./BaseVisualChange";
 import { describeFocusTarget } from "./tapFocusIdentity";
 import {
@@ -171,6 +172,11 @@ interface TapTargetState extends TapHierarchyState {
 /** Executes one selector action while keeping its observation and verification state local. */
 export class TapExecution {
   constructor(private readonly host: TapExecutionHost) {}
+
+  /** The bound device's platform; tapOn rejects a watch before any platform-specific step. */
+  private platform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.host.device().platform, "tapOn");
+  }
   async executeWithReadScope(
     options: TapOnElementOptions,
     call: TapOnCall = {},
@@ -472,7 +478,7 @@ export class TapExecution {
               : request.requestDeadlineMs - this.host.timer().now(),
           ),
           context: "while revalidating a cached observation",
-          platform: this.host.device().platform,
+          platform: this.platform(),
         },
       );
       this.host.replaceObservationHierarchy(observeResult, freshHierarchy, true);
@@ -617,7 +623,7 @@ export class TapExecution {
             x: initialTapPoint.x,
             y: initialTapPoint.y,
           },
-          resolvedElementLayer(target.viewHierarchy, target.element, this.host.device().platform),
+          resolvedElementLayer(target.viewHierarchy, target.element, this.platform()),
         );
       }
 
@@ -801,7 +807,7 @@ export class TapExecution {
       resolvedElementLayer(
         target.viewHierarchy,
         state.focusTarget ?? target.tapElement,
-        this.host.device().platform,
+        this.platform(),
       ),
     );
   }

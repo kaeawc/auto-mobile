@@ -78,7 +78,7 @@ function readAccess(device: BootedDevice, avdConfigReader: AvdConfigReader, with
       ? {
           listBootedWithStatus: async () => ({
             devices: [device],
-            scanned: { android: true, ios: true },
+            scanned: { android: true, ios: true, watchos: false },
           }),
         }
       : {}),

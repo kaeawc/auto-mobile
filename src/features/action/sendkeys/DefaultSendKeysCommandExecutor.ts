@@ -41,6 +41,7 @@ import { clearIosFieldWithVerification } from "../iosClearVerification";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import type { InsertTextState } from "../../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ObserveResult } from "../../../models";
+import { requireAndroidOrIosPlatform } from "../../../models/Platform";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -143,7 +144,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           return observation;
         }
         return observation.viewHierarchy
-          ? scopeObserveResultToLayer(observation, "prototype", device.platform)
+          ? scopeObserveResultToLayer(
+              observation,
+              "prototype",
+              requireAndroidOrIosPlatform(device.platform, "sendKeys"),
+            )
           : { ...observation, focusedElement: undefined, accessibilityFocusedElement: undefined };
       },
       captureScreenshot: observer.captureScreenshot?.bind(observer),

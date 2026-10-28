@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fs } from "fs";
 import * as path from "path";
-import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
+import {
+  type BootedDevice,
+  type DeviceSnapshotManifest,
+  requireAndroidOrIosPlatform,
+} from "../../src/models";
 import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
 import { DeviceSnapshotStore, type SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
@@ -51,7 +55,7 @@ function record(snapshotName: string, device = DEVICE): DeviceSnapshotRecord {
     timestamp,
     deviceId: device.deviceId,
     deviceName: device.name,
-    platform: device.platform,
+    platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
     snapshotType: "adb",
     includeAppData: true,
     includeSettings: true,

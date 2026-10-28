@@ -1,4 +1,5 @@
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
+import { requireAndroidOrIosPlatform, requireAndroidOrIosSelector } from "../models/Platform";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import type { DeviceDiscoveryError } from "../models/DeviceDiscoveryError";
@@ -245,12 +246,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return mergeIosDevices(simulators, (await this.listPhysicalIosDevices()).devices);
   }
 
-  /**
-   * List all available device images
-   * @returns Promise with array of device image names
-   */
+  /** List the device images available for a platform, or both for `"either"`. */
   async listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
-    switch (platform) {
+    switch (requireAndroidOrIosSelector(platform, "Listing device images")) {
       case "android":
         return this.listAndroidDeviceImages({ signal });
       case "ios":
@@ -337,7 +335,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @returns Promise with boolean indicating if the device image is running
    */
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
-    switch (device.platform) {
+    switch (requireAndroidOrIosPlatform(device.platform, "Checking a device image")) {
       case "android": {
         const booted = await this.emulator.getBootedDevicesChecked(false, {
           bypassDeviceListCache: true,
@@ -365,7 +363,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @returns Promise with array of running device info
    */
   async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
-    switch (platform) {
+    switch (requireAndroidOrIosSelector(platform, "Listing booted devices")) {
       case "android":
         return this.emulator.getBootedDevices();
       case "ios":

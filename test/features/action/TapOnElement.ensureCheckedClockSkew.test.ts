@@ -2,6 +2,7 @@ import { isolatedTapStrategy } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import type {
+  AndroidOrIosPlatform,
   BootedDevice,
   Element,
   ObserveResult,
@@ -79,7 +80,7 @@ class DeviceClockObserveScreen extends FakeObserveScreen {
 
 async function runEnsureChecked(
   deviceSkewMs: number,
-  options: { platform?: BootedDevice["platform"]; deviceClockUnavailable?: boolean } = {},
+  options: { platform?: AndroidOrIosPlatform; deviceClockUnavailable?: boolean } = {},
 ) {
   const platform = options.platform ?? "android";
   const timer = new FakeTimer();

@@ -1,4 +1,10 @@
-import type { BootedDevice, ObserveResult, ViewHierarchyWindowInfo } from "../../models";
+import type {
+  AndroidOrIosPlatform,
+  BootedDevice,
+  ObserveResult,
+  ViewHierarchyWindowInfo,
+} from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { appendObserveError } from "./ObserveError";
@@ -250,6 +256,10 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
   }
   private get platformValidator() {
     return this.dependencies.platformValidator();
+  }
+  /** Recaptures validate against the device's own platform; a watch has no hierarchy path. */
+  private get hierarchyPlatform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.device.platform, "Observing the view hierarchy");
   }
   private get resolveObservationTimestampMs() {
     return this.dependencies.resolveObservationTimestampMs;
@@ -620,7 +630,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       !hierarchy ||
       !hasUsableHierarchy(hierarchy) ||
       hierarchy.fresh !== true ||
-      !this.platformValidator.validate(this.device.platform, hierarchy).valid
+      !this.platformValidator.validate(this.hierarchyPlatform, hierarchy).valid
     ) {
       return false;
     }
@@ -849,7 +859,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       hasUsableHierarchy(hierarchy) &&
       hierarchy.fresh === true &&
       hierarchy.packageName === expected.packageName &&
-      this.platformValidator.validate(this.device.platform, hierarchy).valid
+      this.platformValidator.validate(this.hierarchyPlatform, hierarchy).valid
     );
   }
 

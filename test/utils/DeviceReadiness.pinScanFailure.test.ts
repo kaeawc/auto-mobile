@@ -101,6 +101,6 @@ describe("DeviceReadiness platform scan status", () => {
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
     );
     const scan = await manager.detectConnectedPlatformsWithStatus();
-    expect(scan.scanned).toEqual({ android: true, ios: false });
+    expect(scan.scanned).toEqual({ android: true, ios: false, watchos: false });
   });
 });

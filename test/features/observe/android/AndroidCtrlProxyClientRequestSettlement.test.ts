@@ -646,6 +646,7 @@ const EXCLUDED: Record<string, string> = {
     "sends only when the device advertises the optional command, which this harness does not",
   addStorageChangeListener: "registers an in-process listener; it sends nothing",
   attachPrototypeRequestHost: "wires an in-process host; it sends nothing",
+  attachPrototypeChannelHost: "wires an in-process host; it sends nothing",
   onPrototypeEvent: "registers an in-process listener; it sends nothing",
   requestIdFromWireData: "decodes an inbound frame's id; it sends nothing",
 };

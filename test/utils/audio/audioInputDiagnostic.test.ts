@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { BootedDevice } from "../../../src/models";
 import { AUDIO_INPUT_UNAVAILABLE } from "../../../src/models/AudioInputDiagnostic";
 import {
@@ -12,6 +14,8 @@ import {
   type RawAudioDevice,
 } from "../../../src/utils/audio/hostAudio";
 import { buildAndroidAvdCapabilityInventory } from "../../../src/utils/virtualDeviceCapabilities";
+import { parseAvdConfig } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
+import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 
 const MIC: RawAudioDevice = {
   name: "MacBook Pro Microphone",
@@ -78,48 +82,54 @@ function emulator(config: Record<string, string>, launchWithoutAudio = false): B
 }
 
 describe("audio_input_unavailable diagnostic", () => {
-  test("a simulator on a host with no input device gets the typed, non-retryable diagnostic", () => {
-    const diagnostic = resolverFor(new FakeHal({ output: 2 }, DEVICES))(simulator);
+  test("a simulator on a host with no input device gets the typed, non-retryable diagnostic", async () => {
+    const diagnostic = await resolverFor(new FakeHal({ output: 2 }, DEVICES))(simulator);
     expect(diagnostic?.code).toBe(AUDIO_INPUT_UNAVAILABLE);
     expect(diagnostic?.retryable).toBe(false);
     expect(diagnostic?.message).toStartWith("No host audio input device;");
     expect(diagnostic?.message).toContain("do not retry");
   });
 
-  test("a host with a real or loopback default input emits nothing", () => {
-    expect(resolverFor(new FakeHal({ input: 1, output: 2 }, DEVICES))(simulator)).toBeUndefined();
-    expect(resolverFor(new FakeHal({ input: 3, output: 3 }, DEVICES))(simulator)).toBeUndefined();
+  test("a host with a real or loopback default input emits nothing", async () => {
+    expect(
+      await resolverFor(new FakeHal({ input: 1, output: 2 }, DEVICES))(simulator),
+    ).toBeUndefined();
+    expect(
+      await resolverFor(new FakeHal({ input: 3, output: 3 }, DEVICES))(simulator),
+    ).toBeUndefined();
   });
 
-  test("the diagnostic follows the live default input as it is removed and restored", () => {
+  test("the diagnostic follows the live default input as it is removed and restored", async () => {
     const hal = new FakeHal({ input: 1, output: 2 }, DEVICES);
     const resolve = resolverFor(hal);
-    expect(resolve(simulator)).toBeUndefined();
+    expect(await resolve(simulator)).toBeUndefined();
     hal.defaults.input = undefined;
-    expect(resolve(simulator)?.code).toBe(AUDIO_INPUT_UNAVAILABLE);
+    expect((await resolve(simulator))?.code).toBe(AUDIO_INPUT_UNAVAILABLE);
     hal.defaults.input = 3;
-    expect(resolve(simulator)).toBeUndefined();
+    expect(await resolve(simulator)).toBeUndefined();
   });
 
-  test("an unprobed host and a physical iPhone never get the diagnostic", () => {
+  test("an unprobed host and a physical iPhone never get the diagnostic", async () => {
     const unprobed = createAudioInputDiagnosticResolver(() => unprobedHostAudio("linux", "n/a"));
-    expect(unprobed(simulator)).toBeUndefined();
-    expect(resolverFor(new FakeHal({ output: 2 }, DEVICES))(physicalIphone)).toBeUndefined();
+    expect(await unprobed(simulator)).toBeUndefined();
+    expect(await resolverFor(new FakeHal({ output: 2 }, DEVICES))(physicalIphone)).toBeUndefined();
   });
 
-  test("an emulator launched with -no-audio or with hw.audioInput=no gets the same code", () => {
+  test("an emulator launched with -no-audio or with hw.audioInput=no gets the same code", async () => {
     const resolve = createAudioInputDiagnosticResolver(() => unprobedHostAudio("linux", "n/a"));
-    const noAudio = resolve(emulator({ "hw.audioInput": "yes" }, true));
+    const noAudio = await resolve(emulator({ "hw.audioInput": "yes" }, true));
     expect(noAudio?.code).toBe(AUDIO_INPUT_UNAVAILABLE);
     expect(noAudio?.message).toContain("-no-audio");
-    expect(resolve(emulator({ "hw.audioInput": "no" }))?.message).toContain("hw.audioInput=no");
+    expect((await resolve(emulator({ "hw.audioInput": "no" })))?.message).toContain(
+      "hw.audioInput=no",
+    );
   });
 
-  test("an emulator with audio input enabled, or with no inventory, emits nothing", () => {
+  test("an emulator with audio input enabled, or with no inventory, emits nothing", async () => {
     const resolve = createAudioInputDiagnosticResolver(() => unprobedHostAudio("linux", "n/a"));
-    expect(resolve(emulator({ "hw.audioInput": "yes" }))).toBeUndefined();
+    expect(await resolve(emulator({ "hw.audioInput": "yes" }))).toBeUndefined();
     expect(
-      resolve({ name: "Pixel", platform: "android", deviceId: "emulator-5554" }),
+      await resolve({ name: "Pixel", platform: "android", deviceId: "emulator-5554" }),
     ).toBeUndefined();
   });
 
@@ -130,5 +140,47 @@ describe("audio_input_unavailable diagnostic", () => {
         { id: "android.emulator.audioInput", state: "available", source: "avd_config" },
       ]),
     ).toBeUndefined();
+  });
+
+  describe("an emulator that arrives without an inventory (the daemon session path)", () => {
+    const configIni = readFileSync(
+      path.resolve(import.meta.dir, "../../fixtures/android-avd-audio/config.ini"),
+      "utf8",
+    );
+    const bare: BootedDevice = { name: "Pixel_9", platform: "android", deviceId: "emulator-5554" };
+    const unprobed = () => unprobedHostAudio("linux", "n/a");
+
+    test("reads hw.audioInput=no from its AVD config", async () => {
+      const reader = FakeAvdConfigReader.forAvds({
+        Pixel_9: parseAvdConfig(configIni.replace("hw.audioInput=yes", "hw.audioInput=no")),
+      });
+      const diagnostic = await createAudioInputDiagnosticResolver(unprobed, reader)(bare);
+      expect(diagnostic?.message).toContain("hw.audioInput=no");
+      expect(reader.readConfigCalls).toEqual(["Pixel_9"]);
+    });
+
+    test("an AVD with audio input, or an unknown AVD, emits nothing", async () => {
+      const reader = FakeAvdConfigReader.forAvds({ Pixel_9: parseAvdConfig(configIni) });
+      const resolve = createAudioInputDiagnosticResolver(unprobed, reader);
+      expect(await resolve(bare)).toBeUndefined();
+      expect(await resolve({ ...bare, name: "Missing" })).toBeUndefined();
+    });
+
+    test("a device that already has an inventory, or is not an emulator, reads no config", async () => {
+      const reader = FakeAvdConfigReader.forAvds({ Pixel_9: parseAvdConfig(configIni) });
+      const resolve = createAudioInputDiagnosticResolver(unprobed, reader);
+      await resolve(emulator({ "hw.audioInput": "yes" }));
+      await resolve({ ...bare, deviceId: "R5CT1234ABC" });
+      expect(reader.readConfigCalls).toEqual([]);
+    });
+
+    test("an unreadable AVD config leaves input unknown rather than unavailable", async () => {
+      const throwing = {
+        readConfig: async (): Promise<null> => {
+          throw new Error("EACCES");
+        },
+      };
+      expect(await createAudioInputDiagnosticResolver(unprobed, throwing)(bare)).toBeUndefined();
+    });
   });
 });

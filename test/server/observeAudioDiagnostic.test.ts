@@ -30,9 +30,9 @@ async function observe(resolver: AudioInputDiagnosticResolver, result: ObserveRe
     registerObserveTools({
       hidesPrototypeForScreenshot: async () => false,
       createScreen: () => observeToolScreen(screen),
-      audioInputDiagnostic: (target) => {
+      audioInputDiagnostic: async (target) => {
         seen.push(target);
-        return resolver(target);
+        return await resolver(target);
       },
     });
     const tool = ToolRegistry.getTool("observe")!;
@@ -49,7 +49,7 @@ async function observe(resolver: AudioInputDiagnosticResolver, result: ObserveRe
 describe("observe audio_input_unavailable (#13627)", () => {
   test("a device with no audio input carries the typed diagnostic", async () => {
     const result = observationOf(capturedTwoWindowHierarchy());
-    const { payload, seen } = await observe(() => diagnostic, result);
+    const { payload, seen } = await observe(async () => diagnostic, result);
     expect(payload.diagnostics).toEqual([diagnostic]);
     expect(seen).toEqual([device]);
     // The served copy carries it; the (cacheable) observation itself is untouched.
@@ -57,7 +57,10 @@ describe("observe audio_input_unavailable (#13627)", () => {
   });
 
   test("a device with audio input carries no diagnostics field", async () => {
-    const { payload } = await observe(() => undefined, observationOf(capturedTwoWindowHierarchy()));
+    const { payload } = await observe(
+      async () => undefined,
+      observationOf(capturedTwoWindowHierarchy()),
+    );
     expect(payload.diagnostics).toBeUndefined();
   });
 

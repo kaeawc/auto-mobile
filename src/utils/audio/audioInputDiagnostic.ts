@@ -3,7 +3,18 @@ import {
   AUDIO_INPUT_UNAVAILABLE,
   type AudioInputDiagnostic,
 } from "../../models/AudioInputDiagnostic";
-import type { VirtualDeviceCapability } from "../../models/virtualDeviceCapabilities";
+import type {
+  VirtualDeviceCapability,
+  VirtualDeviceCapabilityInventory,
+} from "../../models/virtualDeviceCapabilities";
+import { errorMessage } from "../../models/describeUnknownError";
+import { isAndroidEmulatorSerial } from "../androidSerial";
+import {
+  FileAvdConfigReader,
+  type AvdConfigReader,
+} from "../android-cmdline-tools/AvdConfigReader";
+import { logger } from "../logger";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 import { resolveIosDeviceKind } from "../ios-cmdline-tools/IosDeviceKind";
 import { iosSimulatorAudioCapabilities } from "./audioCapabilities";
 import { hostAudioSnapshot } from "./defaultHostAudioProbe";
@@ -41,25 +52,51 @@ export function audioInputDiagnosticFromCapabilities(
 
 export type AudioInputDiagnosticResolver = (
   device: BootedDevice,
-) => AudioInputDiagnostic | undefined;
+) => Promise<AudioInputDiagnostic | undefined>;
 
 /**
  * Resolves the diagnostic for a booted device. An iOS simulator records from the host's default
  * input, so it reads the live (cached) host probe rather than an inventory captured at discovery.
- * An Android emulator uses the inventory its AVD config produced. Physical devices have their own
- * microphones and never get the diagnostic.
+ * An Android emulator uses its inventory, read from its AVD config when the device arrives without
+ * one (the daemon session path builds a bare device). Physical devices have their own microphones
+ * and never get the diagnostic.
  */
 export function createAudioInputDiagnosticResolver(
   hostAudio: () => HostAudioSnapshot = hostAudioSnapshot,
+  avdConfigs: AvdConfigReader = defaultAvdConfigs(),
 ): AudioInputDiagnosticResolver {
-  return (device) => {
+  return async (device) => {
     if (device.platform === "ios") {
       return resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator"
         ? audioInputDiagnosticFromCapabilities(iosSimulatorAudioCapabilities(hostAudio()))
         : undefined;
     }
-    return audioInputDiagnosticFromCapabilities(device.capabilityInventory?.capabilities ?? []);
+    const inventory = device.capabilityInventory ?? (await emulatorInventory(device, avdConfigs));
+    return audioInputDiagnosticFromCapabilities(inventory?.capabilities ?? []);
   };
+}
+
+const NO_AVD_CONFIGS: AvdConfigReader = { readConfig: async () => null };
+
+/** Under `bun test` (NODE_ENV=test) the default never reads the machine's AVDs; tests inject one. */
+function defaultAvdConfigs(): AvdConfigReader {
+  return readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test" ? NO_AVD_CONFIGS : new FileAvdConfigReader();
+}
+
+async function emulatorInventory(
+  device: BootedDevice,
+  avdConfigs: AvdConfigReader,
+): Promise<VirtualDeviceCapabilityInventory | undefined> {
+  if (!isAndroidEmulatorSerial(device.deviceId)) {
+    return undefined;
+  }
+  try {
+    return (await avdConfigs.readConfig(device.name))?.capabilityInventory;
+  } catch (error) {
+    // Best effort: an unreadable AVD config leaves the audio input state unknown, not unavailable.
+    logger.debug(`AVD config for ${device.name} unreadable: ${errorMessage(error)}`);
+    return undefined;
+  }
 }
 
 export const defaultAudioInputDiagnostic: AudioInputDiagnosticResolver =

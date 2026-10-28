@@ -12,6 +12,7 @@ import type { BootedDevice } from "../models";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer } from "../utils/SystemTimer";
+import { resourceLinkField } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { nodeAppFileFileSystem } from "./appFileSupport";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -58,6 +59,7 @@ const getLogsInput = z.object({
     .max(GET_LOGS_MAX_LINES)
     .optional()
     .describe("Newest lines kept (default 1000)"),
+  resourceLink: resourceLinkField(),
 });
 
 export type GetLogsArgs = z.output<DeviceToolSchema<typeof getLogsInput>>;

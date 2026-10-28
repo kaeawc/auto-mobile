@@ -6353,6 +6353,10 @@
           "minimum": 1,
           "maximum": 5000
         },
+        "resourceLink": {
+          "description": "Return the complete result as an automobile:tool-output resource and a resource_link block instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]

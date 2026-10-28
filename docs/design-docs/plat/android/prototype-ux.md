@@ -2007,8 +2007,19 @@ path. No production runtime advertises them yet: the Android and iOS readers are
 **Connectivity (#14273).** The `connectivity` module (`prototype_platform_connectivity_v1`) follows the
 same shape: `/platform/connectivity/online` and `metered` and `constrained` are booleans, and
 `transport` is `wifi`, `cellular`, `ethernet`, `vpn`, `other` or `none`. `constrained` is iOS Low Data
-Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery per 500 ms. No
-production runtime advertises it yet.
+Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery per 500 ms.
+
+CtrlProxy registers the Android runtime and advertises the capability; the embedded renderer leaves the
+module to its host app. It reads the default network with `registerDefaultNetworkCallback`, registered on
+the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
+`online: false` with `transport: "wifi"`. With no default network the state is offline on `none` with
+`metered` and `constrained` false. `transport` takes the first of `vpn`, `wifi`, `cellular`, `ethernet`
+that the network carries, so a VPN reports `vpn` over its underlying transport, and anything else is
+`other`. `metered` is the absence of `NET_CAPABILITY_NOT_METERED`. `constrained` is Data Saver on
+(`getRestrictBackgroundStatus` not `DISABLED`) on a metered network, because Data Saver restricts only
+metered networks. State updates at once; the event fires once the state has been quiet for the
+debounce, and a flap that settles back on the last delivered state is not an event. The iOS runtime and
+the offline simulation override are not built.
 
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.

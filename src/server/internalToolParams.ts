@@ -7,6 +7,8 @@ import {
   INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_PARAM_NAMES,
 } from "../daemon/wire/constants";
+import type { SwipeAtRecordingContext } from "../models/SwipeAtOptions";
+import type { TapAtPlanContext } from "../models/TapAtGeometry";
 
 export function stripInternalToolParams(params: unknown): unknown {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
@@ -89,4 +91,23 @@ export function adoptRestartResumeSessionUuid(
   sessionUuid: string | undefined,
 ): void {
   args.__restartResumeSessionUuid ??= sessionUuid;
+}
+
+/**
+ * The geometry context a `tapAt` resolves against: a plan step's (`__tapAtPlanContext`), else
+ * the recording one dispatch attaches (`__tapAtRecordingContext`). Returned by reference so
+ * the handler fills the same object the recorder later reads.
+ */
+export function internalTapAtContext(args: {
+  readonly __tapAtPlanContext?: TapAtPlanContext;
+  readonly __tapAtRecordingContext?: TapAtPlanContext;
+}): TapAtPlanContext | undefined {
+  return args.__tapAtPlanContext ?? args.__tapAtRecordingContext;
+}
+
+/** The recording context a `swipeAt` fills with its resolved screen (`__swipeAtRecordingContext`), by reference. */
+export function internalSwipeAtRecordingContext(args: {
+  readonly __swipeAtRecordingContext?: SwipeAtRecordingContext;
+}): SwipeAtRecordingContext | undefined {
+  return args.__swipeAtRecordingContext;
 }

@@ -578,14 +578,30 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The advisory XCTestRunner simulator lane is label opt-in on PRs (#10895);
-      # it runs every night on CircleCI (nightly-macos) regardless.
+      # The advisory XCTestRunner simulator lane runs on PRs with the `run-ios-sim`
+      # label (#10895) and on PRs that touch a layer the iOS SDK contract suite
+      # crosses (#5164); it runs every night on CircleCI (nightly-macos) regardless.
+      - name: "Check for iOS SDK contract inputs"
+        id: filter-ios-sdk-contract
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ios_sdk_contract:
+              - 'ios/auto-mobile-sdk/Sources/**'
+              - 'ios/control-proxy/Sources/**'
+              - 'ios/sdk-wire/Sources/**'
+              - 'ios/Playground/Sources/SdkContract/**'
+              - 'src/features/observe/ios/**'
+              - 'scripts/ios/sdk-contract/**'
+              - 'scripts/ios/sdk-contract-integration.sh'
+
       - name: "Decide if XCTestRunner simulator tests should run"
         id: ios_sim_tests_should_run
         env:
           OPT_IN: ${{ contains(github.event.pull_request.labels.*.name, 'run-ios-sim') }}
+          CONTRACT_INPUTS: ${{ steps.filter-ios-sdk-contract.outputs.ios_sdk_contract }}
         run: |
-          if [[ "$OPT_IN" == "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
+          if [[ ( "$OPT_IN" == "true" || "$CONTRACT_INPUTS" == "true" ) && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"

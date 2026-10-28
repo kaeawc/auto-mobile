@@ -158,6 +158,7 @@ nav:
       - "Session broker device reuse": design-docs/session-broker-device-reuse.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
+      - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS WKWebView bridge actions": design-docs/plat/ios/webview-bridge-actions.md

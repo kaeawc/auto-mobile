@@ -32,6 +32,8 @@ struct PlaygroundApp: App {
             } catch {
                 AutoMobileLog.shared.e("PlaygroundApp", "database_fixture_failed error=\(error.localizedDescription)")
             }
+            // No-op unless the SDK contract harness launched this run (#5164).
+            SdkContractRunner.startIfRequested()
         #endif
 
         AutoMobileLog.shared.i("PlaygroundApp", "app_launched")

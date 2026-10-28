@@ -126,15 +126,23 @@ describe("bindMockValue", () => {
     expect(bindMockValue(uses.slice(0, 5), big, 100_000)).toHaveLength(5);
   });
 
-  test("keys and scalars are charged too", () => {
+  test("keys are charged", () => {
     const wide = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`key${i}`, ""]));
     expect(() => bindMockValue(wide, context, 5000)).toThrow(MockResponseTooLargeError);
-    expect(() =>
-      bindMockValue(
-        Array.from({ length: 1000 }, () => 1),
-        context,
-        5000,
-      ),
-    ).toThrow(MockResponseTooLargeError);
+  });
+
+  test("scalars are charged by their serialized size, separators included", () => {
+    // `[1,2,3]` is 7 characters.
+    expect(bindMockValue([1, 2, 3], context, 7)).toEqual([1, 2, 3]);
+    expect(() => bindMockValue([1, 2, 3], context, 6)).toThrow(MockResponseTooLargeError);
+    // `[true,null,-12.5]` is 17 characters.
+    expect(bindMockValue([true, null, -12.5], context, 17)).toEqual([true, null, -12.5]);
+    expect(() => bindMockValue([true, null, -12.5], context, 16)).toThrow(
+      MockResponseTooLargeError,
+    );
+    // 40,000 zeros serialize to 80,001 characters, far below the response cap.
+    const zeros = Array.from({ length: 40_000 }, () => 0);
+    expect(bindMockValue(zeros, context)).toHaveLength(40_000);
+    expect(() => bindMockValue(zeros, context, 80_000)).toThrow(MockResponseTooLargeError);
   });
 });

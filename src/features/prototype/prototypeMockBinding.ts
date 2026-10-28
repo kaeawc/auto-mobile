@@ -90,11 +90,13 @@ export function bindMockValue(
       });
     }
     if (Array.isArray(entry)) {
-      charge(2);
+      // Brackets and the commas between elements.
+      charge(2 + Math.max(0, entry.length - 1));
       return entry.map(bind);
     }
     if (typeof entry === "object" && entry !== null) {
-      charge(2);
+      // Braces and the commas between members.
+      charge(2 + Math.max(0, Object.keys(entry).length - 1));
       return Object.fromEntries(
         Object.entries(entry).map(([key, member]) => {
           charge(key.length + 3);
@@ -102,7 +104,7 @@ export function bindMockValue(
         }),
       );
     }
-    charge(8);
+    charge(JSON.stringify(entry).length);
     return entry;
   };
   return bind(value);

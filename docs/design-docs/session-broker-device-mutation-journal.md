@@ -52,7 +52,16 @@ uninstalls with its data. The app-owned interaction breadcrumbs
 `preference:tool:setUIState` and `preference:focused-field` make no store claims.
 Permission rows require a journal revert or fallback, including for apps absent
 from the baseline: notification-policy access can persist for a never-installed
-package.
+package. Android `setAppPermissions` runtime grants and revokes are the exception:
+before the call, the host resolves the user the tool will act on (an explicit
+`userId`, or the sole running primary user) and journals
+`runtime:<user>:<package>:<permission>` with the grant read from `dumpsys package`,
+which the port reverts with `pm grant`/`pm revoke --user`. `notificationsEnabled`
+joins them as `POST_NOTIFICATIONS` only on a read API level of 33 or higher. An
+ambiguous user, an unreadable API level or grant, the app-op path below API 33,
+notification-policy access, the exact-alarm app-op and device-wide `reset` keep
+escalating rows. Runtime rows for an app absent from the readable baseline
+inventory are not journaled: cleaning uninstalls that app and its permission state.
 
 On iOS, sanitize covers session-installed apps and app groups through inventory
 cleaning, absolute keychain/permission/location/status-bar/clipboard resets,

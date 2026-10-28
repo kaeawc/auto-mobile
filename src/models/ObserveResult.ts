@@ -17,6 +17,7 @@ import { SelectedElement } from "./SelectedElement";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
 import type { MediaView } from "./MediaView";
 import type { ObserveError } from "./ObserveError";
+import type { AudioInputDiagnostic } from "./AudioInputDiagnostic";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
@@ -282,6 +283,12 @@ export type ObserveResult = {
    * with a `total`), or `scoped` (narrowed to the returned hierarchy).
    */
   layoutWarnings?: LayoutWarnings;
+  /**
+   * Device-level environment conditions, present only on the `observe` tool's own result, so an
+   * agent sees them before it acts: `audio_input_unavailable` when recordings on this device will
+   * contain no audio (#13627).
+   */
+  diagnostics?: AudioInputDiagnostic[];
 
   /**
    * Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise,

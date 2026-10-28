@@ -75,22 +75,30 @@ export class MockRoutingPrototypeHttpExecutor implements PrototypeHttpExecutor {
       request.timeoutMs ?? DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
       MAX_PROTOTYPE_REQUEST_TIMEOUT_MS,
     );
+    // The engine stops at the deadline too, so a request that timed out or was cancelled while it
+    // waited on latency never writes to the shared backend afterwards.
+    const stop = new AbortController();
+    const engineSignal = AbortSignal.any([signal, stop.signal]);
     let response: MockResponse;
     try {
       response = await raceWithDeadline(
         () =>
-          backend.answer({
-            method: request.method,
-            path: target.path,
-            query: target.query,
-            body: requestBody(request.body),
-          }),
+          backend.answer(
+            {
+              method: request.method,
+              path: target.path,
+              query: target.query,
+              body: requestBody(request.body),
+            },
+            engineSignal,
+          ),
         {
           timer: this.timer,
           timeoutMs,
           signal,
           label: "Mock request",
           timeoutError: () => TIMED_OUT,
+          onTimeout: () => stop.abort(),
         },
       );
     } catch (error) {

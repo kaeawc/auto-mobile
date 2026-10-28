@@ -71,11 +71,16 @@ export class PrototypeMockBackend {
     );
   }
 
-  async answer(request: MockRequest): Promise<MockResponse> {
+  /**
+   * Aborting `signal` while the answer waits on latency or a route delay ends it with the abort
+   * reason before anything is written, so a cancelled or timed-out request never changes state.
+   */
+  async answer(request: MockRequest, signal?: AbortSignal): Promise<MockResponse> {
     const method = request.method.toUpperCase();
     await this.waitLatency();
+    signal?.throwIfAborted();
     const response = this.faultFor(method, request.path) ??
-      (await this.cannedRoute(method, request)) ??
+      (await this.cannedRoute(method, request, signal)) ??
       this.collectionResponse(method, request) ?? {
         status: 404,
         headers: {},
@@ -121,11 +126,16 @@ export class PrototypeMockBackend {
   private async cannedRoute(
     method: string,
     request: MockRequest,
+    signal: AbortSignal | undefined,
   ): Promise<MockResponse | undefined> {
     for (const route of this.definition.routes ?? []) {
       const params = route.method === method ? matchMockPath(route.path, request.path) : undefined;
       if (params !== undefined) {
-        return this.routeResponse(route, { params, query: request.query, body: request.body });
+        return this.routeResponse(
+          route,
+          { params, query: request.query, body: request.body },
+          signal,
+        );
       }
     }
     return undefined;
@@ -134,9 +144,11 @@ export class PrototypeMockBackend {
   private async routeResponse(
     route: MockRoute,
     context: Parameters<typeof bindMockValue>[1],
+    signal: AbortSignal | undefined,
   ): Promise<MockResponse> {
     if (route.delayMs !== undefined && route.delayMs > 0) {
       await this.deps.timer.sleep(route.delayMs);
+      signal?.throwIfAborted();
     }
     return {
       status: route.status ?? 200,

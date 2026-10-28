@@ -30,6 +30,11 @@ function setup() {
   };
 }
 
+const flush = async (): Promise<void> => {
+  for (let i = 0; i < 50; i++) {
+    await Promise.resolve();
+  }
+};
 const signal = () => new AbortController().signal;
 
 describe("MockRoutingPrototypeHttpExecutor", () => {
@@ -182,8 +187,9 @@ describe("MockRoutingPrototypeHttpExecutor", () => {
     timer.advanceTime(10);
     expect(await slow).toMatchObject({ ok: false, error: { code: "timeout" } });
     expect(await delayed).toMatchObject({ ok: false, error: { code: "timeout" } });
-    // The write never happened: the deadline passed while the request still waited on latency.
+    // The write never happens: the deadline passed while the request still waited on latency.
     timer.advanceTime(5000);
+    await flush();
     expect(registry.get("slow")!.snapshot().items).toEqual([]);
   });
 
@@ -218,5 +224,44 @@ describe("MockRoutingPrototypeHttpExecutor", () => {
     );
     timer.advanceTime(MAX_PROTOTYPE_REQUEST_TIMEOUT_MS);
     expect(await pending).toMatchObject({ ok: false, error: { code: "timeout" } });
+  });
+
+  test("a request cancelled during latency never writes, and one that finishes still does", async () => {
+    const timer = new FakeTimer();
+    const registry = new PrototypeMockBackendRegistry({ ids: new FakeIdGenerator(), timer });
+    registry.define("shop", { latencyMs: { min: 1000, max: 1000 }, collections: { items: [] } });
+    const executor = new MockRoutingPrototypeHttpExecutor(new RecordingExecutor(), registry, timer);
+    const url = "https://shop.mock.automobile.invalid/items";
+    const cancelled = new AbortController();
+    const first = executor.execute(
+      { method: "POST", url, body: { name: "gone" } },
+      cancelled.signal,
+    );
+    const second = executor.execute({ method: "POST", url, body: { name: "kept" } }, signal());
+    cancelled.abort();
+    timer.advanceTime(1000);
+    expect(await first).toMatchObject({ ok: false, error: { code: "cancelled" } });
+    expect(await second).toMatchObject({ ok: true, status: 201 });
+    await flush();
+    expect(registry.get("shop")!.snapshot().items).toEqual([{ name: "kept", id: "fake-1" }]);
+  });
+
+  test("a route delay also stops before the response when cancelled", async () => {
+    const timer = new FakeTimer();
+    const registry = new PrototypeMockBackendRegistry({ ids: new FakeIdGenerator(), timer });
+    registry.define("shop", { routes: [{ method: "GET", path: "/x", delayMs: 500, body: "y" }] });
+    const executor = new MockRoutingPrototypeHttpExecutor(new RecordingExecutor(), registry, timer);
+    const cancelled = new AbortController();
+    const pending = executor.execute(
+      { method: "GET", url: "https://shop.mock.automobile.invalid/x" },
+      cancelled.signal,
+    );
+    // Let the engine reach the route delay before the cancel, so only the check after it can stop it.
+    await flush();
+    cancelled.abort();
+    timer.advanceTime(500);
+    expect(await pending).toMatchObject({ ok: false, error: { code: "cancelled" } });
+    await flush();
+    expect(registry.get("shop")!.requestLog()).toEqual([]);
   });
 });

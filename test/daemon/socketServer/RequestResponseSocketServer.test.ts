@@ -1,7 +1,10 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../../../src/models/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
-import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
+import {
+  RequestResponseSocketServer,
+  type RequestResponseContext,
+} from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import { SocketRequest, SocketResponse } from "../../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
@@ -297,4 +300,75 @@ it.each([
     expect(response).not.toHaveProperty("code");
     expect(response).not.toHaveProperty("retryable");
   }
+});
+
+/** Server whose handler parks on a gate and records the per-request signal it was given. */
+class SignalProbeServer extends RequestResponseSocketServer<TestRequest, TestResponse> {
+  public signals: Array<AbortSignal | undefined> = [];
+  private release: () => void = () => {};
+
+  constructor() {
+    super("/fake/path/signal.sock", new FakeTimer(), "Signal");
+  }
+
+  send(socket: FakeSocket, request: TestRequest): Promise<void> {
+    return this.processLine(socket, JSON.stringify(request));
+  }
+
+  finish(): void {
+    this.release();
+  }
+
+  settled(socket: FakeSocket): Promise<void> | undefined {
+    return this.pendingBySocket.get(socket);
+  }
+
+  protected async handleRequest(
+    request: TestRequest,
+    context?: RequestResponseContext,
+  ): Promise<TestResponse> {
+    this.signals.push(context?.signal);
+    await new Promise<void>((resolve) => {
+      this.release = resolve;
+    });
+    return { id: request.id, type: "test_response", success: true };
+  }
+
+  protected createErrorResponse(id: string | undefined, error: string): TestResponse {
+    return { id: id ?? "unknown", type: "test_response", success: false, error };
+  }
+}
+
+describe("per-request client-gone signal (#11817)", () => {
+  it("aborts the handler's signal when the client socket closes mid-request", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    const pending = server.send(socket, { id: "1", action: "echo" });
+    await Promise.resolve();
+    const signal = server.signals[0];
+    expect(signal?.aborted).toBe(false);
+
+    socket.emit("close");
+
+    expect(signal?.aborted).toBe(true);
+    server.finish();
+    await pending;
+  });
+
+  it("does not abort a finished request's signal or leak the close listener", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    const baseline = socket.listenerCount("close");
+    const pending = server.send(socket, { id: "1", action: "echo" });
+    await Promise.resolve();
+    expect(socket.listenerCount("close")).toBe(baseline + 1);
+
+    server.finish();
+    await pending;
+    await server.settled(socket);
+
+    expect(socket.listenerCount("close")).toBe(baseline);
+    socket.emit("close");
+    expect(server.signals[0]?.aborted).toBe(false);
+  });
 });

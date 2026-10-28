@@ -6,6 +6,12 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { BaseSocketServer } from "./BaseSocketServer";
 import { SocketRequest, SocketResponse } from "./SocketServerTypes";
 
+/** Per-request context an auxiliary server hands its handler. */
+export interface RequestResponseContext {
+  /** Aborts when the requesting client's socket closes before the reply is sent. */
+  signal: AbortSignal;
+}
+
 const FRAME_TOO_LARGE_ERROR = "Invalid request: frame too large";
 
 /**
@@ -85,8 +91,13 @@ export abstract class RequestResponseSocketServer<
       return;
     }
 
+    // Aborts when the client goes away before the reply, so a handler that honours the signal can
+    // stop work nobody will read (#11817).
+    const clientGone = new AbortController();
+    const abortOnClose = (): void => clientGone.abort(new Error("Client socket closed"));
+    socket.once("close", abortOnClose);
     try {
-      const response = await this.handleRequest(request);
+      const response = await this.handleRequest(request, { signal: clientGone.signal });
       this.sendJson(socket, response);
     } catch (error) {
       logger.error(`[${this.serverName}] Request handler error: ${error}`);
@@ -95,6 +106,8 @@ export abstract class RequestResponseSocketServer<
         ...streamAuthRefusalFields(error),
       };
       this.sendJson(socket, errorResponse);
+    } finally {
+      socket.off("close", abortOnClose);
     }
   }
 
@@ -105,7 +118,10 @@ export abstract class RequestResponseSocketServer<
    * Handle a request and return a response.
    * Subclasses must implement this.
    */
-  protected abstract handleRequest(request: TRequest): Promise<TResponse>;
+  protected abstract handleRequest(
+    request: TRequest,
+    context?: RequestResponseContext,
+  ): Promise<TResponse>;
 
   /**
    * Create an error response for a failed request.

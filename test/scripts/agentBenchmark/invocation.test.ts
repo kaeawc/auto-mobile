@@ -143,9 +143,9 @@ describe("agent benchmark claude invocation", () => {
 
   test("an inherited instructions switch is stripped; only the harness flag sets it", () => {
     const inherited = { AUTOMOBILE_SERVER_INSTRUCTIONS: "1" };
-    expect(mcpServerEnv(inherited, PATHS, "linux", "/work").AUTOMOBILE_SERVER_INSTRUCTIONS).toBe(
-      undefined,
-    );
+    expect(
+      mcpServerEnv(inherited, PATHS, "linux", "/work").AUTOMOBILE_SERVER_INSTRUCTIONS,
+    ).toBeUndefined();
     expect(
       mcpServerEnv({}, PATHS, "linux", "/work", { instructions: true })
         .AUTOMOBILE_SERVER_INSTRUCTIONS,

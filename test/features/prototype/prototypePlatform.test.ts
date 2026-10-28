@@ -694,6 +694,46 @@ describe("links module contract", () => {
   });
 });
 
+describe("system media picker and camera module contracts", () => {
+  const pick = PROTOTYPE_PLATFORM_MODULES.mediaLibrary.calls.pick;
+  const capture = PROTOTYPE_PLATFORM_MODULES.camera.calls.capture;
+
+  test("mediaLibrary.pick requires a media kind and bounds maxItems to 1-64", () => {
+    expect(Object.keys(pick.args)).toEqual(["media", "maxItems"]);
+    expect(pick.args.media.optional).toBe(false);
+    expect(pick.args.media.value.values).toEqual(["images", "videos", "imagesAndVideos"]);
+    expect(pick.args.maxItems.optional).toBe(true);
+    expect(pick.args.maxItems.value).toEqual({ kind: "number", integer: true, min: 1, max: 64 });
+  });
+
+  test("camera.capture requires a media kind and takes an optional video duration", () => {
+    expect(Object.keys(capture.args)).toEqual(["media", "maxDurationMs"]);
+    expect(capture.args.media.value.values).toEqual(["image", "video"]);
+    expect(capture.args.maxDurationMs.optional).toBe(true);
+    expect(capture.args.maxDurationMs.value.integer).toBe(true);
+    expect(capture.args.maxDurationMs.value.min).toBe(1);
+  });
+
+  test("both use system UI: sensitive, no declared permission, events or state", () => {
+    for (const call of [pick, capture]) {
+      expect(call.sensitive).toBe(true);
+      expect(call.permissions).toEqual([]);
+      expect(call.background).toEqual([]);
+    }
+    for (const name of ["mediaLibrary", "camera"]) {
+      expect(PROTOTYPE_PLATFORM_MODULES[name].events).toEqual({});
+      expect(PROTOTYPE_PLATFORM_MODULES[name].state).toEqual({});
+    }
+  });
+
+  test("picker and capture are gated separately, so a device can offer only the picker", () => {
+    expect(PROTOTYPE_PLATFORM_MODULES.mediaLibrary.capability).toBe(
+      "prototype_platform_mediaLibrary_v1",
+    );
+    expect(PROTOTYPE_PLATFORM_MODULES.camera.capability).toBe("prototype_platform_camera_v1");
+  });
+});
+
 describe("location module contract", () => {
   const location = PROTOTYPE_PLATFORM_MODULES.location;
 

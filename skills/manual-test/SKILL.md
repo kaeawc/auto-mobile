@@ -63,7 +63,9 @@ SessionConfig JSON/path; both are `up`/`serve` options and mutually exclusive.
 `--owner disposable` records an owned sleep PID/start identity; `owner-kill
 --client NAME` signals only that identity-confirmed owner. Use `info`, `release`,
 `abandon`, `close` and `status --client NAME` for lifecycle evidence;
-`status --all` lists the batch. Release polls cleanup; abandonment returns a
+`status --all` lists the batch. `up` refuses while a client driver is alive.
+Release does not end the driver; run `proxy1 close --client NAME` first, then retry `up`.
+Release polls cleanup; abandonment returns a
 bounded receipt that may still be cleanup-pending, so verify status/absence. `release`/`abandon --as-client OTHER` deliberately
 use another batch client's stored token for isolation tests.
 `call --allow-foreign-session OTHER` permits explicit selectors for that ready batch
@@ -93,6 +95,9 @@ scenarios; live execution also requires `AUTOMOBILE_ACCEPTANCE_LIVE=1`,
   and the batch's caffeinate by its recorded PID. Save device evidence first.
   No device process signals, `force`, `adb emu kill`, or manual AVD/simulator deletion.
   Zero-pooling release destroys the device through product cleanup; verify it.
+  `broker1 down` does not evict idle pooled devices (pooling requires reuse enabled).
+  They stay running, and `shutdown-devices` refuses them as broker-held; never signal
+  them. No harness drain exists yet (#15653).
 - Broker batches never make sessionless device calls or generic lifecycle calls
   (`startDevice`, `provisionDevice`, `getAndroid`, `getApple`, `killDevice`).
   Calls require a ready grant and live driver; inventory resources and

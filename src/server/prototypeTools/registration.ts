@@ -623,6 +623,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       adbFactory: dependencies.adbFactory,
       lastRenderedObservation: dependencies.lastRenderedObservation,
       anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
+      screenRoundFactory: dependencies.screenRoundFactory,
       shaderAssetCache: dependencies.shaderAssetCache,
       env: dependencies.env,
     };

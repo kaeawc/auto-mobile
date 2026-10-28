@@ -379,6 +379,7 @@ covers the script with a fake server, adb and clock.
   - `persistence-prepare` / `persistence-verify` - Check whether `-writable-system` changes survive an `avd snapshot save` + cold reload
   - See `docs/design-docs/plat/android/device-condition-capability-probe.md`
 - `capture-oem-evidence.sh <serial> [out-dir]` - Capture the non-interactive OEM evidence for #14048 from one connected device: `getprop` (device identifiers redacted), `pm list features`, system packages and default-app holders, under `test/fixtures/android-oem/<manufacturer>-<model>-<date>/` with a provenance manifest. The README it writes there lists the hierarchy captures still to take by hand. Tests: `test/bats/capture-oem-evidence.bats` (stub adb).
+- `media/generate-prototype-test-media.sh [out-dir]` - Generate the prototype test clips (#14257) with ffmpeg `lavfi` sources into `scratch/prototype-media/` (default): H.264/AAC MP4 and VP9/Opus WebM clips from 160x90 to 640x360 and 3-10 s, a two-rendition HLS ladder, five 5 s AAC episodes and a `manifest.txt` of sha256 sums. Output is byte-identical across runs with the same ffmpeg build, so no clip is committed. Needs ffmpeg with `libx264`, `aac`, `libvpx-vp9` and `libopus`; `FFMPEG` overrides the binary. Tests: `test/bats/generate-prototype-test-media.bats` (stub ffmpeg).
 
 ### Tool Definition Scripts
 

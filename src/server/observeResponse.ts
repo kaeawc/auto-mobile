@@ -47,6 +47,10 @@ import {
 } from "../features/observe/output/ObserveScopeExperiments";
 import { type WaitForObservationOutcome } from "../features/observe/wait/WaitEvaluation";
 import type { ObserveArgs } from "./observeTools";
+import {
+  defaultAudioInputDiagnostic,
+  type AudioInputDiagnosticResolver,
+} from "../utils/audio/audioInputDiagnostic";
 import { assertActiveWindowWaitForSupportedOnPlatform } from "../features/observe/wait/WaitForSchemas";
 
 export interface ObserveToolDependencies {
@@ -65,6 +69,21 @@ export interface ObserveToolDependencies {
   deviceReadAccess?: DeviceObservationAccess;
   /** Whether the device can hide its own prototype for a capture (#9305); defaults to CtrlProxy's. */
   hidesPrototypeForScreenshot?: (device: BootedDevice) => Promise<boolean>;
+  /** Device-level audio input condition (#13627); defaults to the host probe and AVD inventory. */
+  audioInputDiagnostic?: AudioInputDiagnosticResolver;
+}
+
+/**
+ * The served observe result with the device's environment conditions. A copy, so a cached
+ * observation reused by later action tools never carries them; unchanged when there are none.
+ */
+export function withDeviceDiagnostics(
+  result: ObserveResult,
+  device: BootedDevice,
+  resolve: AudioInputDiagnosticResolver = defaultAudioInputDiagnostic,
+): ObserveResult {
+  const diagnostic = resolve(device);
+  return diagnostic ? { ...result, diagnostics: [diagnostic] } : result;
 }
 
 /**

@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "open-url-geo-in-app",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["links"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "links.open",
+          "args": {
+            "url": {
+              "value": "geo:37.78,-122.41"
+            },
+            "mode": {
+              "value": "inApp"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.mode.value"
+}

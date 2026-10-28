@@ -27,6 +27,14 @@ const settingsCall = {
   ...label,
   onTap: [{ type: "platform", call: "settings.open", args: { page: { value: "app" } } }],
 };
+const mediaPickCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.pick", args: { media: { value: "images" } } }],
+};
+const cameraCaptureCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "camera.capture", args: { media: { value: "image" } } }],
+};
 const contactsCall = {
   ...label,
   onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
@@ -268,6 +276,8 @@ const fixtures: Record<string, Node> = {
   prototype_platform_settings_v1: settingsCall,
   prototype_platform_links_v1: openUrlCall,
   prototype_platform_contacts_v1: contactsCall,
+  prototype_platform_mediaLibrary_v1: mediaPickCall,
+  prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_calendar_v1: calendarCall,
   prototype_platform_location_v1: locationCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },

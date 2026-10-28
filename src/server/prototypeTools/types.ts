@@ -35,6 +35,7 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import type { PrototypeEventLifecycle } from "../prototypeLifecycle";
 import type { IosSavedPrototypeInstaller } from "../prototypeSavedActions";
 import type { prototypeOutputSchema } from "./schemas";
+import type { ScreenRoundReaderFactory } from "./screenShape";
 
 export type PrototypeClient = AndroidPrototypeClient;
 /**
@@ -81,6 +82,8 @@ export interface PrototypeToolDependencies {
   cacheInvalidator?: DeviceWindowCacheInvalidator;
   /** Captures the hierarchy element anchors resolve against; tests inject captured hierarchies. */
   anchorHierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
+  /** Reads whether a watch display is round for the show result; tests inject a fake. */
+  screenRoundFactory?: ScreenRoundReaderFactory;
 }
 
 export interface AnchorStage {
@@ -124,6 +127,7 @@ export type PrototypeHandlerDependencies = {
   | "adbFactory"
   | "lastRenderedObservation"
   | "anchorHierarchyCaptureFactory"
+  | "screenRoundFactory"
   | "shaderAssetCache"
   | "env"
 >;

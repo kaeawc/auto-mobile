@@ -21,7 +21,7 @@ import kotlin.math.sin
 // rectangle, kept in `Offset` space so it is host-testable (no android.graphics
 // Path) and never flakes. The Modifier turns it into a double-stroked border.
 // These outline primitives are minSdk-24 safe (Canvas/Path/Brush). The separate
-// crayonGrain modifier uses RuntimeShader only on API 33+, with a no-op below 33.
+// crayonGrain modifier uses RuntimeShader on API 33+ and a bitmap tile below 33.
 // ---------------------------------------------------------------------------
 
 /** Deterministic hash noise in [-1, 1) from a seed and index. */

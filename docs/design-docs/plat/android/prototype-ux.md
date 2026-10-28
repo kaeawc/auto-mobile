@@ -2779,6 +2779,19 @@ into bottom/systemBars, plus ime when the keyboard should move content. Cutout
 padding is normally useful at top/start/end. Anchors stay in screen coordinates;
 inset padding does not reinterpret their coordinate origin.
 
+## Wear OS (not device-verified)
+
+Prototypes render on a watch with the same overlay and Material 3 components as on a phone; the
+spec has no round-aware nodes, Wear components or rotary input.
+
+- On a device whose `formFactor` is `watch`, a successful `show` reports `screenRound`, read from
+  `dumpsys display` like `observe`'s `isScreenRound`. Content in the corners of a round display is
+  clipped. Other devices pay no read; an unreadable display leaves the field absent.
+- The dismiss affordance keeps its phone placement; it is not moved into the round display's
+  inscribed area.
+- Wear launchers are not expected to support pinned shortcuts, so `save` with `pin:true` takes the
+  unsupported-launcher path: the save is kept and the result reports `pinned:"unsupported"`.
+
 ## Lifecycle and safety
 
 #12064 reverses the #9307 "non-removable dismiss control" default: chromeless fullscreen is the default on

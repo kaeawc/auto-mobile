@@ -81,7 +81,8 @@ export function bindMockValue(
         charge(sizeOf(exact[1]!, bound));
         return bound;
       }
-      charge(entry.length);
+      // Literal text only: each placeholder is charged for what it emits, not for its own syntax.
+      charge(entry.replace(PLACEHOLDER, "").length);
       return entry.replace(PLACEHOLDER, (_match, token: string) => {
         const text = asText(lookup(token, context));
         charge(text.length);

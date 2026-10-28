@@ -107,6 +107,18 @@ describe("bindMockValue", () => {
     expect(bindMockValue("{query.q}", long, 4096)).toBe("x".repeat(1024));
   });
 
+  test("placeholder syntax is not charged, only the text it emits", () => {
+    const small = { ...context, query: { q: "x" } };
+    const template = "{query.q}".repeat(27_000);
+    // 243,000 characters of template, 27,000 emitted: well under a 100,000-character limit.
+    expect(bindMockValue(template, small, 100_000)).toBe("x".repeat(27_000));
+    expect(() => bindMockValue(template, small, 26_999)).toThrow(MockResponseTooLargeError);
+    expect(bindMockValue(`ab${template.slice(0, 18)}cd`, small, 6)).toBe("abxxcd");
+    expect(() => bindMockValue(`ab${template.slice(0, 18)}cd`, small, 5)).toThrow(
+      MockResponseTooLargeError,
+    );
+  });
+
   test("an exact placeholder bound to a large value is charged on every use", () => {
     const big = { ...context, body: { blob: "y".repeat(10_000) } };
     const uses = Array.from({ length: 20 }, () => "{body:/blob}");

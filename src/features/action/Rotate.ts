@@ -60,6 +60,16 @@ const DISPLAY_LIST_TIMEOUT_MS = 2_000;
 // Reads of a non-default display's rotation after `cmd window user-rotation -d` (150ms apart).
 const DISPLAY_ROTATION_CONFIRM_ATTEMPTS = 5;
 
+type RotationPerf = ReturnType<typeof createGlobalPerformanceTracker>;
+
+/** The per-call inputs every Android rotation step needs (#11835). */
+interface AndroidRotationRun {
+  orientation: "portrait" | "landscape";
+  perf: RotationPerf;
+  lockOrientation: boolean | undefined;
+  signal?: AbortSignal;
+}
+
 export class Rotate extends BaseVisualChange {
   // Serializes the read-auto-rotate -> disable -> rotate -> restore-auto-rotate
   // critical section per device, so two concurrent rotations against the SAME
@@ -207,11 +217,8 @@ export class Rotate extends BaseVisualChange {
             );
           }
           return await this.executeAndroidRotation(
-            orientation,
+            { orientation, perf, lockOrientation, signal },
             progress,
-            perf,
-            lockOrientation,
-            signal,
           );
         default:
           throw unsupportedPlatformError(this.device.platform, "rotate the device");
@@ -407,13 +414,10 @@ export class Rotate extends BaseVisualChange {
     const verified = verifyIosRotation(result, orientation, previousObservation);
     return verified.success
       ? verified
-      : await this.restoreIosOrientationAfterFailure(
-          verified,
-          runner,
-          previousObservation,
+      : await this.restoreIosOrientationAfterFailure(verified, runner, previousObservation, {
           perf,
           signal,
-        );
+        });
   }
 
   /**
@@ -424,9 +428,9 @@ export class Rotate extends BaseVisualChange {
     failed: RotateResult,
     client: Pick<IosCtrlProxy, "requestRotate"> | undefined,
     previousObservation: ObserveResult | undefined,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>,
-    signal?: AbortSignal,
+    call: { perf: RotationPerf; signal?: AbortSignal },
   ): Promise<RotateResult> {
+    const { perf, signal } = call;
     const prior = observedIosOrientation(previousObservation);
     if (!client || prior === "unknown" || prior === failed.orientation) {
       return failed;
@@ -451,28 +455,23 @@ export class Rotate extends BaseVisualChange {
   }
 
   private async executeAndroidRotation(
-    orientation: "portrait" | "landscape",
+    run: AndroidRotationRun,
     progress: ProgressCallback | undefined,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>,
-    lockOrientation: boolean | undefined,
-    signal?: AbortSignal,
   ): Promise<RotateResult> {
-    throwIfAborted(signal);
+    throwIfAborted(run.signal);
     this.reader.beginCall();
     try {
-      return await this.runAndroidRotation(orientation, progress, perf, lockOrientation, signal);
+      return await this.runAndroidRotation(run, progress);
     } finally {
       this.reader.endCall();
     }
   }
 
   private async runAndroidRotation(
-    orientation: "portrait" | "landscape",
+    run: AndroidRotationRun,
     progress: ProgressCallback | undefined,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>,
-    lockOrientation: boolean | undefined,
-    signal?: AbortSignal,
   ): Promise<RotateResult> {
+    const { orientation, perf, signal } = run;
     const observationOptions = {
       usesObservationForResolution: false,
       changeExpected: true,
@@ -504,7 +503,7 @@ export class Rotate extends BaseVisualChange {
         }
         try {
           const mutation = (slot?: RotationRestoreSlot) =>
-            this.performAndroidRotation(orientation, perf, lockOrientation, signal, slot, written);
+            this.performAndroidRotation(run, slot, written);
           const result = this.options.sessionRotation
             ? await this.options.sessionRotation(mutation)
             : await mutation();
@@ -620,10 +619,10 @@ export class Rotate extends BaseVisualChange {
   private async finishAndroidRotation(
     result: RotateResult,
     settings: RotationCallSettings,
-    lockOrientation: boolean | undefined,
+    run: Pick<AndroidRotationRun, "lockOrientation" | "signal">,
     slot?: RotationRestoreSlot,
-    signal?: AbortSignal,
   ): Promise<RotateResult> {
+    const { lockOrientation, signal } = run;
     if (
       settings.started &&
       !result.success &&
@@ -647,13 +646,11 @@ export class Rotate extends BaseVisualChange {
    * {@link getRotationLock} to serialize it per device (#6199 review).
    */
   private async performAndroidRotation(
-    orientation: "portrait" | "landscape",
-    perf: ReturnType<typeof createGlobalPerformanceTracker>,
-    lockOrientation: boolean | undefined,
-    signal?: AbortSignal,
+    run: AndroidRotationRun,
     slot?: RotationRestoreSlot,
     written?: AndroidRotationWrites,
   ): Promise<RotateResult> {
+    const { orientation, perf, lockOrientation, signal } = run;
     throwIfAborted(signal);
     // Read the natural axes first so the requested value and every orientation read agree.
     const value = rotationForOrientation(orientation, await this.reader.readNaturalAxes(signal));
@@ -719,9 +716,8 @@ export class Rotate extends BaseVisualChange {
       return this.finishAndroidRotation(
         alreadyApplied.result,
         settings,
-        lockOrientation,
+        { lockOrientation, signal },
         slot,
-        signal,
       );
     }
     logger.debug(
@@ -803,7 +799,7 @@ export class Rotate extends BaseVisualChange {
         cleanup,
         slot !== undefined,
       );
-      return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
+      return this.finishAndroidRotation(result, settings, { lockOrientation, signal }, slot);
     } catch (error) {
       return this.recoverAndroidRotation({
         error,
@@ -998,7 +994,7 @@ export class Rotate extends BaseVisualChange {
         cleanup,
         slot !== undefined,
       );
-      return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
+      return this.finishAndroidRotation(result, settings, { lockOrientation, signal }, slot);
     }
     if (achievedOrientation !== "unknown") {
       const rollbackWarning = await this.store.rollbackUserRotation({

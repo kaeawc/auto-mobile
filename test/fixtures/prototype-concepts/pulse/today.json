@@ -1086,6 +1086,29 @@
                     "name": "band_unpaired"
                   },
                   {
+                    "type": "cancelTimer",
+                    "id": "clock"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "heart"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "running",
+                    "value": false
+                  },
+                  {
+                    "type": "setState",
+                    "key": "seconds",
+                    "value": 0
+                  },
+                  {
+                    "type": "setState",
+                    "key": "bpm",
+                    "value": 72
+                  },
+                  {
                     "type": "setState",
                     "key": "found",
                     "value": false

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -51,7 +51,7 @@ let restore: () => void, dispose: () => void;
 let client: FakeCtrlProxy;
 let executor: FakeChannelExecutor;
 
-beforeEach(() => {
+function setup(): void {
   restore = preserveToolRegistry();
   const timer = new FakeTimer();
   client = new FakeCtrlProxy(timer);
@@ -72,6 +72,18 @@ beforeEach(() => {
     timer,
     channelExecutor: executor,
   });
+}
+beforeEach(setup);
+beforeAll(async () => {
+  // Warm the registered show/dismiss schema path outside the measured test.
+  setup();
+  try {
+    await call({ action: "show", spec: fixture });
+    await call({ action: "dismiss", id: fixture.id });
+  } finally {
+    dispose();
+    restore();
+  }
 });
 afterEach(() => {
   dispose();

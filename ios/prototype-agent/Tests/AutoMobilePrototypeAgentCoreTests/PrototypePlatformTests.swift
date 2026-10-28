@@ -69,8 +69,10 @@ final class PrototypePlatformTests: XCTestCase {
                     case let .contract(swiftRule):
                         // Every other kind (array, tagged, choice, true, ...) keeps the contract rule
                         // itself, so it must round-trip unchanged.
-                        let stored = try JSONSerialization.jsonObject(with: JSONEncoder().encode(swiftRule))
-                        XCTAssertEqual(stored as? NSDictionary, rule as NSDictionary, arg)
+                        let expected = try JSONDecoder().decode(
+                            JSONValue.self, from: JSONSerialization.data(withJSONObject: rule)
+                        )
+                        XCTAssertEqual(swiftRule, expected, arg)
                     }
                 }
             }

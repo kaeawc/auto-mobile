@@ -35,6 +35,10 @@ const cameraCaptureCall = {
   ...label,
   onTap: [{ type: "platform", call: "camera.capture", args: { media: { value: "image" } } }],
 };
+const recorderCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "audioRecorder.start", args: {} }],
+};
 const contactsCall = {
   ...label,
   onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
@@ -290,6 +294,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_mediaLibrary_v1: mediaPickCall,
   prototype_platform_location_v1: locationCall,
   prototype_platform_camera_v1: cameraCaptureCall,
+  prototype_platform_audioRecorder_v1: recorderCall,
   prototype_platform_calendar_v1: calendarCall,
   prototype_platform_commerce_v1: commerceCall,
   prototype_platform_auth_v1: authCall,

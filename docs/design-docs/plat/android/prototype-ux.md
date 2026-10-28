@@ -2204,6 +2204,16 @@ replayed from `test/fixtures/prototype-sensors/`. The root `sensors` subscriptio
 to and their `rateHz`) and the `motion` permission for `steps` are outside this contract. No production
 runtime advertises the module.
 
+**Voice notes (#14194, contract only).** The `audioRecorder` module
+(`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`
+in `requires.permissions`. `audioRecorder.start` takes an optional `maxDurationMs` (whole number
+1-300000); `audioRecorder.stop` writes an `audio/mp4` device media item with `durationMs` to `into`;
+`audioRecorder.cancel` discards the recording. `/platform/audioRecorder/status` is `recording`,
+`stopped`, `permission_denied`, `unavailable` or `error` (also delivered as
+`audioRecorder.statusChanged`), `level` is 0-1 and updates at most 10 times a second, and `elapsedMs`
+counts the current recording. A press-and-hold control uses the gesture action lists, and playback
+uses a `media` audio player. No production runtime advertises the module yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

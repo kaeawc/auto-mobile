@@ -22350,6 +22350,70 @@
           }
         }
       }
+    },
+    "audioRecorder": {
+      "capability": "prototype_platform_audioRecorder_v1",
+      "calls": {
+        "start": {
+          "args": {
+            "maxDurationMs": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 300000
+              }
+            }
+          },
+          "permissions": ["microphone"],
+          "background": [],
+          "sensitive": true
+        },
+        "stop": {
+          "args": {},
+          "permissions": ["microphone"],
+          "background": [],
+          "sensitive": true
+        },
+        "cancel": {
+          "args": {},
+          "permissions": ["microphone"],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "statusChanged": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "status": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["recording", "stopped", "permission_denied", "unavailable", "error"]
+          }
+        },
+        "level": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "min": 0,
+            "max": 1
+          }
+        },
+        "elapsedMs": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 300000
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

@@ -1,0 +1,81 @@
+{
+  "spec": {
+    "id": "r",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "voiceNote": {}
+      }
+    },
+    "state": {
+      "recStatus": ""
+    },
+    "requires": {
+      "platform": ["audioRecorder"]
+    },
+    "platform": {
+      "on": {
+        "audioRecorder.statusChanged": [
+          {
+            "type": "emit",
+            "name": "recorder_status"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{platform:/audioRecorder/status} {platform:/audioRecorder/elapsedMs} {platform:/audioRecorder/level}"
+        },
+        {
+          "type": "button",
+          "label": "Hold to record",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.start",
+              "args": {
+                "maxDurationMs": {
+                  "value": 60000
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.stop",
+              "args": {},
+              "into": "/data/draft/voiceNote",
+              "statusKey": "recStatus"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Discard",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.cancel",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].call",
+  "expectedMessage": "Platform call audioRecorder.start requires permission microphone in requires.permissions"
+}

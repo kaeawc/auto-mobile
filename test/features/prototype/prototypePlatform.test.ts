@@ -837,3 +837,52 @@ describe("sensors module contract", () => {
     expect(state.proximityNear.platforms).toEqual(["android", "ios"]);
   });
 });
+
+describe("audioRecorder module contract", () => {
+  const recorder = PROTOTYPE_PLATFORM_MODULES.audioRecorder;
+
+  test("start, stop and cancel need the microphone permission", () => {
+    expect(Object.keys(recorder.calls)).toEqual(["start", "stop", "cancel"]);
+    for (const call of Object.values(recorder.calls)) {
+      expect(call.permissions).toEqual(["microphone"]);
+      expect(call.background).toEqual([]);
+    }
+    expect(recorder.calls.start.sensitive).toBe(true);
+    expect(recorder.calls.stop.sensitive).toBe(true);
+  });
+
+  test("start caps a recording at five minutes; stop and cancel take no arguments", () => {
+    expect(recorder.calls.start.args.maxDurationMs).toEqual({
+      optional: true,
+      value: { kind: "number", integer: true, min: 1, max: 300000 },
+    });
+    expect(recorder.calls.stop.args).toEqual({});
+    expect(recorder.calls.cancel.args).toEqual({});
+  });
+
+  test("status, a 0-1 level and elapsed time are readable on both platforms", () => {
+    expect(Object.keys(recorder.state ?? {})).toEqual(["status", "level", "elapsedMs"]);
+    expect(recorder.state?.status.value.values).toEqual([
+      "recording",
+      "stopped",
+      "permission_denied",
+      "unavailable",
+      "error",
+    ]);
+    expect(recorder.state?.level.value).toEqual({ kind: "number", min: 0, max: 1 });
+    expect(Object.keys(recorder.events)).toEqual(["statusChanged"]);
+  });
+
+  test("a level reading binds into a progress value through {platform}", () => {
+    const result = validatePrototypeSpec({
+      id: "rec",
+      window: { placement: { type: "fullscreen" } },
+      requires: {
+        platform: ["audioRecorder"],
+        permissions: [{ name: "microphone", purpose: "Record a voice note" }],
+      },
+      root: { type: "text", text: "Level {platform:/audioRecorder/level}" },
+    });
+    expect(result.success).toBe(true);
+  });
+});

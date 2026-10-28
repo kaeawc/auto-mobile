@@ -157,6 +157,7 @@
     "pager-indicator-dots.json",
     "pager-options.json",
     "pager-state-key-indicator.json",
+    "platform-audio-recorder.json",
     "platform-auth.json",
     "platform-biometric.json",
     "platform-calendar.json",
@@ -1046,6 +1047,12 @@
     "placement-offset-x-over-max.json",
     "placement-offset-y-below-min.json",
     "platform-argument-value.json",
+    "platform-audio-recorder-duration-over-limit.json",
+    "platform-audio-recorder-duration-zero.json",
+    "platform-audio-recorder-stop-unknown-arg.json",
+    "platform-audio-recorder-undeclared-module.json",
+    "platform-audio-recorder-undeclared-permission.json",
+    "platform-audio-recorder-unknown-state.json",
     "platform-auth-password-arg.json",
     "platform-auth-sign-out-arg.json",
     "platform-auth-style-unknown.json",
@@ -1724,6 +1731,7 @@
     "strict-gate-prototype_network_v1.json",
     "strict-gate-prototype_pager_options_v1.json",
     "strict-gate-prototype_pager_state_key_v1.json",
+    "strict-gate-prototype_platform_audioRecorder_v1.json",
     "strict-gate-prototype_platform_audio_v1.json",
     "strict-gate-prototype_platform_auth_v1.json",
     "strict-gate-prototype_platform_battery_v1.json",
@@ -2972,6 +2980,11 @@
     ],
     "hide-keyboard-free-form-maps.json": ["prototype_routes_v1", "prototype_stack_v1"],
     "hide-keyboard-ignored-accessory.json": ["prototype_platform_namespace_v1"],
-    "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"]
+    "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
+    "platform-audio-recorder.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_audioRecorder_v1",
+      "prototype_platform_v1"
+    ]
   }
 }

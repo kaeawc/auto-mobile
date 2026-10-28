@@ -34,6 +34,7 @@
   "prototype_network_v1",
   "prototype_pager_options_v1",
   "prototype_pager_state_key_v1",
+  "prototype_platform_audioRecorder_v1",
   "prototype_platform_audio_v1",
   "prototype_platform_auth_v1",
   "prototype_platform_battery_v1",

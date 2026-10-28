@@ -575,6 +575,23 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_audioRecorder_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["audioRecorder"],
+        permissions: [{ name: "microphone", purpose: "Record a voice note" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          { ...label, onTap: [{ type: "platform", call: "audioRecorder.start", args: {} }] },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_contacts_v1: {
     minimalSpec: {
       ...base,

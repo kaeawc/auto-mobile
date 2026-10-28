@@ -14,7 +14,8 @@ import kotlinx.serialization.json.JsonPrimitive
  * and a literal `player` argument names a declared player. Contract only: no runtime plays media.
  */
 internal object PrototypeMedia {
-  fun players(root: JsonObject): Set<String> = root.member("media")?.member("players")?.keys.orEmpty()
+  fun players(root: JsonObject): Set<String> =
+    root.member("media")?.member("players")?.keys.orEmpty()
 
   fun error(root: JsonObject): PrototypeSpecError? {
     root.member("media") ?: return null

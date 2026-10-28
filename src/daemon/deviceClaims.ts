@@ -39,8 +39,8 @@ export interface DeviceClaims {
     deviceId: string,
     owner: { pid: number; ownerToken: string },
   ): Promise<void>;
-  /** Removes every row this process owns (a clean shutdown); other owners' rows are left alone. */
-  releaseOwnedBy(pid: number): Promise<void>;
+  /** Clean shutdown removes only rows naming both this PID and this owner's token. */
+  releaseOwnedBy(owner: { pid: number; ownerToken: string }): Promise<void>;
   get(platform: Platform, deviceId: string): Promise<DeviceClaim | undefined>;
   list(): Promise<DeviceClaim[]>;
 }
@@ -186,6 +186,17 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
   async idle(): Promise<void> {
     while (this.inFlight.size > 0) {
       await Promise.all([...this.inFlight.values()]);
+    }
+  }
+
+  /** After disposal and draining, withdraw only the owner generations this mirror recorded. */
+  async releaseOwnedClaims(store: DeviceClaims): Promise<void> {
+    const owners = new Map<string, MirrorOwner>();
+    for (const intent of this.intents.values()) {
+      owners.set(`${intent.owner.pid}:${intent.owner.ownerToken}`, intent.owner);
+    }
+    for (const owner of owners.values()) {
+      await store.releaseOwnedBy(owner);
     }
   }
 

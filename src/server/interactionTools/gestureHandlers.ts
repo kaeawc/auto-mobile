@@ -9,11 +9,7 @@ import {
   SwipeOnToolPayload,
   type DragAndDropResult,
 } from "../../models";
-import {
-  StructuredToolResponse,
-  createJSONToolResponse,
-  createStructuredToolResponse,
-} from "../../utils/toolUtils";
+import { StructuredToolResponse, createStructuredToolResponse } from "../../utils/toolUtils";
 import type { DragAndDropArgs, PinchOnArgs, SwipeOnArgs } from "../interactionToolTypes";
 import { ProgressCallback } from "../toolRegistry";
 import type { InteractionToolDependencies } from "./dependencies";
@@ -137,7 +133,7 @@ export async function pinchOnHandler(
     { progress, signal },
   );
 
-  const response = createJSONToolResponse({
+  const response = createStructuredToolResponse({
     message: formatPinchOnMessage(result, args.direction),
     observation: result.observation,
     ...result,
@@ -177,7 +173,7 @@ export async function dragAndDropHandler(
   const message = result.success
     ? "Dragged element to target"
     : `Failed to drag element to target: ${result.error || "unknown error"}`;
-  const response = createJSONToolResponse({
+  const response = createStructuredToolResponse({
     message,
     observation: result.observation,
     ...result,

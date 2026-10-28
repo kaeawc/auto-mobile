@@ -80,6 +80,16 @@ import type {
   WakeAndUnlockArgs,
 } from "./interactionToolTypes";
 import {
+  clipboardResultSchema,
+  dragAndDropResultSchema,
+  homeScreenResultSchema,
+  pinchOnResultSchema,
+  recentAppsResultSchema,
+  selectAllTextResultSchema,
+  shakeResultSchema,
+  systemTrayResultSchema,
+} from "./interactionToolOutputSchemas";
+import {
   keyboardResultSchema,
   openLinkResultSchema,
   pressButtonResultSchema,
@@ -155,7 +165,12 @@ export const recentAppsTool = defineDeviceTool({
   name: "recentApps",
   description: "Open recent apps",
   input: recentAppsInput,
-  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: true,
+    supportsProgress: true,
+    outputSchema: recentAppsResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const recentAppsSchema = recentAppsTool.schema;
@@ -164,7 +179,12 @@ const homeScreenTool = defineDeviceTool({
   name: "homeScreen",
   description: "Go to home screen",
   input: homeScreenInput,
-  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: true,
+    supportsProgress: true,
+    outputSchema: homeScreenResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const homeScreenSchema = homeScreenTool.schema;
@@ -173,7 +193,12 @@ export const selectAllTextTool = defineDeviceTool({
   name: "selectAllText",
   description: "Select all text in focused input",
   input: selectAllTextInput,
-  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: selectAllTextResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const selectAllTextSchema = selectAllTextTool.schema;
@@ -183,7 +208,12 @@ export const shakeTool = defineDeviceTool({
   description:
     "Shake device; iOS Simulator and Android emulator only (unsupported on physical iOS and Android devices).",
   input: shakeInput,
-  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: shakeResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const shakeSchema = shakeTool.schema;
@@ -262,7 +292,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
-    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: systemTrayResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -348,7 +383,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag and drop element",
     dragAndDropSchema,
     (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
-    { defaultEnabled: false, supportsProgress: true, ...NAV_PLAN_SKELETON },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: dragAndDropResultSchema,
+      ...NAV_PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -367,6 +407,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       defaultEnabled: false,
       supportsProgress: true,
+      outputSchema: pinchOnResultSchema,
       ...NAV_PLAN_SKELETON,
     },
   );
@@ -402,6 +443,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       ...PLAN_RELEVANT,
       defaultEnabled: false,
+      outputSchema: clipboardResultSchema,
       deviceReadOnly: (args: ClipboardArgs) => args.action === "get",
       deviceReadOnlyArgs: [{ argument: "action", values: ["get"] }],
     },

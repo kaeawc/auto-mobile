@@ -75,6 +75,7 @@ interface IosCaptureStartupContext {
     what: string,
   ): string;
   encodedStartupError(error: Error): Error;
+  encodedCapabilityConfirmed(): boolean;
 }
 export class IosCaptureStartup {
   cancelFirstFrameWait: (() => void) | null = null;
@@ -85,76 +86,6 @@ export class IosCaptureStartup {
     private readonly firstFrameTimeoutMs: number,
     private readonly context: IosCaptureStartupContext,
   ) {}
-
-  waitForFirstFrame(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
-    const generation = this.context.generation();
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      let firstFrameSeen = false;
-      const finish = (callback: () => void): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.timer.clearTimeout(timeout);
-        if (this.cancelFirstFrameWait === cancel) {
-          this.cancelFirstFrameWait = null;
-        }
-        callback();
-      };
-      const cancel = (): void => {
-        finish(resolve);
-      };
-      const timeout = this.timer.setTimeout(() => {
-        finish(() => reject(makeNoFramesError(target, this.context.lastReadinessPhase())));
-      }, this.firstFrameTimeoutMs);
-      this.cancelFirstFrameWait = cancel;
-
-      helper.on("frame", () => {
-        if (!this.context.isCurrentHelper(helper, generation) || !this.context.isActive()) {
-          return;
-        }
-        firstFrameSeen = true;
-        this.context.markRunning();
-        finish(resolve);
-      });
-      helper.on("stderr", (line) => {
-        if (!this.context.isCurrentHelper(helper, generation) || !this.context.isActive()) {
-          return;
-        }
-        if (isNoFramesPermissionWarning(line)) {
-          finish(() =>
-            reject(
-              makeScreenRecordingPermissionHintError(target, this.context.lastReadinessPhase()),
-            ),
-          );
-        } else if (isHelperError(line)) {
-          finish(() => reject(this.context.helperFailureFor(line)));
-        }
-      });
-      helper.on("error", (error) => {
-        if (!this.context.isCurrentHelper(helper, generation) || !this.context.isActive()) {
-          return;
-        }
-        if (firstFrameSeen) {
-          this.context.failIfCurrentHelper(helper, generation, error);
-          return;
-        }
-        finish(() => reject(error));
-      });
-      helper.on("exit", (info) => {
-        if (!this.context.isCurrentHelper(helper, generation) || !this.context.isActive()) {
-          return;
-        }
-        const error = new Error(this.context.describeHelperExit(info, "exited"));
-        if (firstFrameSeen) {
-          this.context.failIfCurrentHelper(helper, generation, error);
-          return;
-        }
-        finish(() => reject(error));
-      });
-    });
-  }
 
   waitForFirstAudio(helper: IosFrameCaptureHelper): Promise<void> {
     const generation = this.context.generation();
@@ -208,12 +139,8 @@ export class IosCaptureStartup {
   }
 
   /**
-   * Resolve when the encoded helper delivers its first Annex-B record, mirroring
-   * {@link waitForFirstFrame}. On a startup failure the outcome is classified: a
-   * helper that never advertised the encode capability is a version skew
-   * ({@link EncodedUnsupportedError}, → raw fallback); a capable helper that failed
-   * for any other reason surfaces its real error; a timeout is a retryable
-   * {@link NoFirstFrameError}, matching the raw path. Issue #4789.
+   * Wait for the first Annex-B record. Missing encoding capability is an
+   * actionable version-skew failure; a capable helper timeout may be retried.
    */
   waitForFirstEncodedRecord(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
     const generation = this.context.generation();
@@ -238,12 +165,18 @@ export class IosCaptureStartup {
         finish(() => reject(this.context.encodedStartupError(error)));
       };
       const timeout = this.timer.setTimeout(() => {
-        finish(() => reject(makeNoFramesError(target, this.context.lastReadinessPhase())));
+        rejectStartupFailure(makeNoFramesError(target, this.context.lastReadinessPhase()));
       }, this.firstFrameTimeoutMs);
       this.cancelFirstFrameWait = cancel;
 
       helper.on("encodedVideo", () => {
         if (!this.context.isCurrentHelper(helper, generation) || !this.context.isActive()) {
+          return;
+        }
+        if (!this.context.encodedCapabilityConfirmed()) {
+          rejectStartupFailure(
+            new Error("Received encoded video without the required capability handshake"),
+          );
           return;
         }
         firstRecordSeen = true;

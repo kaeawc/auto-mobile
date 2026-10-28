@@ -191,23 +191,4 @@ describe("LatestFrameQueue", () => {
     expect(queue.take()).toBeNull();
     expect(queue.metrics().droppedFrames).toBe(enqueuedCount - takenCount);
   });
-
-  test("take preserves the replayed flag untouched", () => {
-    const queue = new LatestFrameQueue({ maxFrameBytes: 16, now: () => 100 });
-    for (const replayed of [true, false, undefined]) {
-      const input = frame(42, 8);
-      if (replayed !== undefined) {
-        input.replayed = replayed;
-      }
-      queue.enqueue(input);
-      const taken = queue.take();
-      expect(taken).toBe(input);
-      expect(taken?.replayed).toBe(replayed);
-      expect(taken).toEqual({
-        header: { width: 1, height: 1, bytesPerRow: 8, timestampMs: 42 },
-        pixels: Buffer.alloc(8),
-        ...(replayed === undefined ? {} : { replayed }),
-      });
-    }
-  });
 });

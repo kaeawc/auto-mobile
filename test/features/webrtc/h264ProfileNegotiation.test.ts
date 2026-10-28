@@ -22,7 +22,7 @@ import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
  * PR #4877 GLOBALLY switched the advertised profile / acceptance gate to Main
  * and made the gate REJECT Baseline (`0x42`) for every source. But the sources
  * do not share one profile: after #4756 the Android MediaCodec encoder emits
- * **Main** (`0x4d`), while the iOS ffmpeg path (`-profile:v baseline`) and the
+ * **Main** (`0x4d`), while the iOS helper (VideoToolbox baseline) and the
  * synthetic MediaMTX test frames (`libx264 -profile:v baseline`) still emit
  * **Baseline** (`0x42`). #4877's global switch broke the two Baseline sources'
  * WHIP publish and was only caught by a merge-only integration job, so it merged
@@ -75,12 +75,12 @@ const REAL_H264_SOURCES: readonly RealH264Source[] = [
     sps: Buffer.from([0x67, 0x4d, 0x00, 0x2a]),
   },
   {
-    name: "iOS ffmpeg (-profile:v baseline -level:v 4.2)",
-    origin: "src/features/webrtc/IosH264Source.ts",
+    name: "iOS helper (VideoToolbox baseline, level 4.2)",
+    origin: "ios/screen-capture/Sources/ScreenCaptureHelper/H264VideoEncoder.swift",
     profile: "constrained-baseline",
     advertisedProfileLevelId: WEBRTC_H264_PROFILE_LEVEL_ID,
     profileIdc: BASELINE_PROFILE_IDC,
-    // VideoToolbox/ffmpeg baseline at the advertised Level 4.2 ceiling.
+    // VideoToolbox baseline at the advertised Level 4.2 ceiling.
     sps: Buffer.from([0x67, 0x42, 0xc0, 0x2a]),
   },
   {

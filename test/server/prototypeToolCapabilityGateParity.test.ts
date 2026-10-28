@@ -532,6 +532,46 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_contacts_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["contacts"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_calendar_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["calendar"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "calendar.insert",
+                args: { title: { value: "Dinner" }, start: { value: 1 }, end: { value: 2 } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_haptics_v1: {
     minimalSpec: {
       ...base,

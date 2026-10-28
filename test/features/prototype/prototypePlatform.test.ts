@@ -609,3 +609,41 @@ describe("settings module contract", () => {
     expect(settings.calls.open.permissions).toEqual([]);
   });
 });
+
+describe("picker module contracts", () => {
+  test("contacts.pick takes one optional boolean and is sensitive", () => {
+    const pick = PROTOTYPE_PLATFORM_MODULES.contacts.calls.pick;
+    expect(Object.keys(pick.args)).toEqual(["multiple"]);
+    expect(pick.args.multiple.optional).toBe(true);
+    expect(pick.sensitive).toBe(true);
+    expect(pick.permissions).toEqual([]);
+  });
+
+  test("calendar.insert bounds its text and requires title, start and end", () => {
+    const insert = PROTOTYPE_PLATFORM_MODULES.calendar.calls.insert;
+    expect(Object.keys(insert.args)).toEqual([
+      "title",
+      "start",
+      "end",
+      "allDay",
+      "location",
+      "notes",
+    ]);
+    const required = Object.entries(insert.args)
+      .filter(([, argument]) => !argument.optional)
+      .map(([name]) => name);
+    expect(required).toEqual(["title", "start", "end"]);
+    expect(insert.args.title.value.max).toBe(256);
+    expect(insert.args.location.value.max).toBe(256);
+    expect(insert.args.notes.value.max).toBe(2048);
+    expect(insert.args.start.value.integer).toBe(true);
+    expect(insert.sensitive).toBe(false);
+  });
+
+  test("neither picker module has events, state or a declared permission", () => {
+    for (const name of ["contacts", "calendar"]) {
+      expect(PROTOTYPE_PLATFORM_MODULES[name].events).toEqual({});
+      expect(PROTOTYPE_PLATFORM_MODULES[name].state).toEqual({});
+    }
+  });
+});

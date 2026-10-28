@@ -218,6 +218,7 @@ test("down closes in reverse launch order, joining each receipt before the next 
   expect(await settleByFakeEvents(f.timer, down, { description: "reverse close" })).toBe(0);
   expect(f.proxyCalls.map((argv) => argv.at(-1))).toEqual(["i-phone", "a-tablet", "a-phone"]);
   expect(f.logs.at(-1)).toContain("0 unverified grant(s) of 2");
+  expect(f.files.has(join(f.batchDir, "evidence/pool-retained.json"))).toBe(false);
   const ledger = new BrokerDeviceLedger({ batchDir: f.batchDir, fs: f.deps.fs, timer: f.timer });
   expect(ledger.devices().every((row) => ledger.hasEvent(row, "absent"))).toBe(true);
 });
@@ -448,6 +449,9 @@ test("up refuses live recorded drivers and unknown client names before preflight
   f.files.set(join(f.batchDir, "sessions/a-phone/driver.pid"), "1234");
   f.deps.isPidAlive = () => true;
   expect(await f.run(["up"])).toBe(2);
+  expect(f.logs.join("\n")).toContain(
+    `Batch client a-phone still has a live driver (pid 1234). Release does not end the driver; run "${f.batchDir}/bin/proxy1 close --client a-phone" first, then retry up.`,
+  );
   expect(f.preflights()).toBe(0);
   expect(f.commands).toHaveLength(0);
   expect(await f.run(["up", "--clients", "unknown"])).toBe(2);
@@ -588,8 +592,11 @@ test("down accepts pooled devices and report counts them", async () => {
     await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pooled release" }),
   ).toBe(0);
   expect(f.logs.join("\n")).toContain(
-    "Pooled a-phone on ambroker-a-phone: clean idle device retained by the broker pool.",
+    "Pooled a-phone on ambroker-a-phone (device ID native-a-phone): clean idle device retained by the broker pool. No harness command evicts idle pooled devices yet (product path pending, #15653); do not signal the device; shutdown-devices refuses it as broker-held until the product evicts it.",
   );
+  expect(JSON.parse(f.files.get(join(f.batchDir, "evidence/pool-retained.json"))!)).toEqual([
+    { client: "a-phone", deviceId: "native-a-phone", name: "ambroker-a-phone" },
+  ]);
   expect(await f.run(["report"])).toBe(0);
   expect(
     JSON.parse(f.files.get(join(f.batchDir, "evidence/broker-report.json"))!).ledger.summary.pooled,

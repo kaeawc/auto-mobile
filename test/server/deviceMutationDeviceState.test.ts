@@ -158,6 +158,20 @@ describe("setDeviceState journal intents", () => {
     ).toEqual([]);
   });
 
+  test("a deviceCondition clock skew journals the same clock intent as setDeviceState.clock", () => {
+    const skew = { deviceCondition: { faults: { clockSkew: { offsetSeconds: 86400 } } } };
+    expect(deviceToolMutations("setDeviceState", skew, "android")).toContainEqual({
+      kind: "clock",
+      key: "device",
+    });
+    const unset = { deviceCondition: { faults: { clockSkew: "unset" } } };
+    expect(
+      deviceToolMutations("setDeviceState", unset, "android").filter(
+        (entry) => entry.kind === "clock",
+      ),
+    ).toEqual([]);
+  });
+
   test("calls that apply no new Android state add no fallback", () => {
     const entries = deviceToolMutations(
       "setDeviceState",

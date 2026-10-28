@@ -71,12 +71,44 @@ export interface AudioInjection {
   stop(): Promise<InjectionResult>;
 }
 
+type EarlyEnd = Exclude<InjectionResult["reason"], "completed">;
+
+/** The one way an injection ends early: stop() or the max-duration deadline. */
+interface InjectionControl {
+  readonly endReason: EarlyEnd | undefined;
+  /** Resolves when the injection is ended early. */
+  readonly ended: Promise<void>;
+  /** Records the first reason and cancels the call, which also fails a write parked on back-pressure. */
+  end(reason: EarlyEnd): void;
+}
+
+function createInjectionControl(call: GrpcCall): InjectionControl {
+  let endReason: EarlyEnd | undefined;
+  let resolveEnded!: () => void;
+  const ended = new Promise<void>((resolve) => {
+    resolveEnded = resolve;
+  });
+  return {
+    get endReason() {
+      return endReason;
+    },
+    ended,
+    end(reason) {
+      if (endReason) {
+        return;
+      }
+      endReason = reason;
+      call.cancel();
+      resolveEnded();
+    },
+  };
+}
+
 interface InjectionRun {
   call: GrpcCall;
   pcm: PcmAudio;
   options: InjectAudioOptions;
-  control: { stopped: boolean };
-  startedAt: number;
+  control: InjectionControl;
   framesSent: number;
 }
 
@@ -99,16 +131,13 @@ export class EmulatorAudioClient {
   constructor(
     private readonly transport: GrpcTransport,
     private readonly authorizer: GrpcAuthorizer,
-    private readonly timer: Pick<
-      Timer,
-      "now" | "sleep" | "setTimeout" | "clearTimeout"
-    > = defaultTimer,
+    private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout"> = defaultTimer,
   ) {}
 
   async injectAudio(source: PcmAudio, options: InjectAudioOptions = {}): Promise<AudioInjection> {
     const pcm = prepareForInjection(source);
     const call = await this.open(INJECT_AUDIO_METHOD);
-    const control = { stopped: false };
+    const control = createInjectionControl(call);
     const done = this.streamInjection(call, pcm, options, control);
     // Keep an unobserved failure from becoming an unhandled rejection; callers read it via done/stop.
     done.catch((error: unknown) =>
@@ -119,9 +148,7 @@ export class EmulatorAudioClient {
       sampleRate: pcm.sampleRate,
       done,
       stop: () => {
-        control.stopped = true;
-        // Cancel rather than half-close: a write can be parked on the emulator's back-pressure.
-        call.cancel();
+        control.end("stopped");
         return done;
       },
     };
@@ -195,42 +222,58 @@ export class EmulatorAudioClient {
     call: GrpcCall,
     pcm: PcmAudio,
     options: InjectAudioOptions,
-    control: { stopped: boolean },
+    control: InjectionControl,
   ): Promise<InjectionResult> {
-    const run: InjectionRun = {
-      call,
-      pcm,
-      options,
-      control,
-      startedAt: this.timer.now(),
-      framesSent: 0,
-    };
-    if (options.startDelayMs) {
-      await this.timer.sleep(options.startDelayMs);
-    }
-    let reason: InjectionResult["reason"] | undefined;
+    const run: InjectionRun = { call, pcm, options, control, framesSent: 0 };
+    // A timer, not a check between writes, so it also ends a write parked on back-pressure.
+    const deadline =
+      options.maxDurationMs === undefined
+        ? undefined
+        : this.timer.setTimeout(() => control.end("max_duration"), options.maxDurationMs);
     try {
-      do {
-        reason = await this.sendPass(run);
-      } while (reason === undefined && options.loop && pcm.samples.length > 0);
-    } catch (error) {
-      // A write fails once the server has closed or the caller cancelled the stream; the
-      // status below says which.
-      logger.debug(`audio injection write ended: ${errorMessage(error)}`);
+      if (options.startDelayMs) {
+        await this.delayUnlessEnded(options.startDelayMs, control);
+      }
+      await this.sendAll(run);
+    } finally {
+      if (deadline) {
+        this.timer.clearTimeout(deadline);
+      }
     }
     call.end();
     const status = await call.status();
     if (status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
       throw injectionError(status);
     }
-    return {
-      framesSent: run.framesSent,
-      reason: reason ?? (control.stopped ? "stopped" : "completed"),
-    };
+    return { framesSent: run.framesSent, reason: control.endReason ?? "completed" };
   }
 
-  /** Sends the clip once; returns why it stopped early, or undefined when the clip finished. */
-  private async sendPass(run: InjectionRun): Promise<InjectionResult["reason"] | undefined> {
+  private async sendAll(run: InjectionRun): Promise<void> {
+    try {
+      let finished = false;
+      do {
+        finished = await this.sendPass(run);
+      } while (finished && run.options.loop && run.pcm.samples.length > 0);
+    } catch (error) {
+      // A write fails once the server has closed or the stream was cancelled; the call status
+      // and the end reason say which.
+      logger.debug(`audio injection write ended: ${errorMessage(error)}`);
+    }
+  }
+
+  /** Waits `ms`, or less when the injection ends first, so stop() never waits out a start delay. */
+  private delayUnlessEnded(ms: number, control: InjectionControl): Promise<void> {
+    return new Promise((resolve) => {
+      const handle = this.timer.setTimeout(resolve, ms);
+      void control.ended.then(() => {
+        this.timer.clearTimeout(handle);
+        resolve();
+      });
+    });
+  }
+
+  /** Sends the clip once; true when it finished, false when the injection ended first. */
+  private async sendPass(run: InjectionRun): Promise<boolean> {
     const { pcm } = run;
     const format: EmulatorAudioFormat = {
       samplingRate: pcm.sampleRate,
@@ -239,9 +282,8 @@ export class EmulatorAudioClient {
     };
     const packetSamples = Math.max(1, Math.round((INJECT_PACKET_MS / 1000) * pcm.sampleRate));
     for (let start = 0; start < pcm.samples.length; start += packetSamples) {
-      const early = this.earlyStop(run);
-      if (early) {
-        return early;
+      if (run.control.endReason) {
+        return false;
       }
       const audio = pcmBytes(pcm.samples.subarray(start, start + packetSamples));
       // Only the first packet's format is honored by the emulator.
@@ -254,17 +296,6 @@ export class EmulatorAudioClient {
       );
       run.framesSent += audio.byteLength / 2;
     }
-    return undefined;
-  }
-
-  private earlyStop(run: InjectionRun): InjectionResult["reason"] | undefined {
-    if (run.control.stopped) {
-      return "stopped";
-    }
-    const { maxDurationMs } = run.options;
-    if (maxDurationMs !== undefined && this.timer.now() - run.startedAt >= maxDurationMs) {
-      return "max_duration";
-    }
-    return undefined;
+    return true;
   }
 }

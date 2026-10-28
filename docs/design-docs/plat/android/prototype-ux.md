@@ -2102,7 +2102,12 @@ an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated si
 `auth.signOut` takes no arguments. The `auth.sessionExpired` event and the read-only keys
 `/platform/auth/signedIn` (boolean) and `/platform/auth/userId` complete the module. No argument or key carries
 a password, secret or session token: the runtime keeps the token in the Keystore or Keychain and never exposes
-it. The root `auth` accounts block is not in the contract yet, and no production runtime advertises the module.
+it. The accounts come from a root `auth` block, which needs `auth` in `requires.platform`:
+`{provider: "fake", accounts, sessionTtlSeconds?}`. `accounts` holds 1 to 8 entries of `{id, name, email,
+avatar?}` with unique ids. Each email must use a reserved domain (`example.test`, `example.com` or any
+`.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
+`sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
+validation. No production runtime advertises the module yet.
 
 **Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
 `location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole

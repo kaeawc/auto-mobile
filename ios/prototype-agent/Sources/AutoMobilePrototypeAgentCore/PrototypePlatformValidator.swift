@@ -108,18 +108,22 @@ enum PrototypePlatformValidator {
         var permissions: Set<String> = []
         var background: Set<String> = []
         var channels: [String: JSONValue] = [:]
+        /// Whether the spec has a root `auth` block for `auth.*` calls (#14303).
+        var hasAuth = false
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
-        requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, root: JSONValue,
-        state: [String: JSONValue]
+        requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
+        root: JSONValue, state: [String: JSONValue]
     )
         throws
     {
         try PrototypeChannels.validate(channels?.objectFields, requires: requires, state: state)
+        try PrototypeAuthRules.validateBlock(auth, requires: requires)
         var declared = try validateRequires(requires)
         declared.channels = channels?.objectFields ?? [:]
+        declared.hasAuth = auth?.objectFields != nil
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
@@ -408,6 +412,7 @@ enum PrototypePlatformValidator {
             }
         }
         try PrototypeChannels.call(action, path: path, channels: declared.channels)
+        try PrototypeAuthRules.validateCall(call, path: path, hasAuth: declared.hasAuth)
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)
         }

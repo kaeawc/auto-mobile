@@ -108,7 +108,7 @@ struct PrototypeSpec: Decodable {
     private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels
+        case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels, auth
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -151,6 +151,7 @@ struct PrototypeSpec: Decodable {
             requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
             channels: channels,
+            auth: container.decodeIfPresent(JSONValue.self, forKey: .auth),
             root: raw,
             state: menuState ?? [:]
         )

@@ -303,6 +303,7 @@ export class ToolRegistryClass {
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
+      selectsActiveDevice: options.selectsActiveDevice,
     });
   }
 

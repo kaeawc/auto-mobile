@@ -3,6 +3,7 @@ import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_PARAM_NAMES,
 } from "../daemon/wire/constants";
 
@@ -46,4 +47,31 @@ export function internalExecutionStartTime(args: object): number | undefined {
 export function internalMcpSessionId(args: object): string | undefined {
   const value = internalParam(args, INTERNAL_MCP_SESSION_PARAM);
   return typeof value === "string" ? value : undefined;
+}
+
+/** Whether the call is a one-shot `--cli` invocation, which is anonymous (`__oneShotCli`). */
+export function internalOneShotCli(args: object): boolean {
+  return internalParam(args, INTERNAL_ONE_SHOT_CLI_PARAM) === true;
+}
+
+/** The restart-resume reservations a start may bind (`__restartResumeTargets`). */
+export function internalRestartResumeTargets<T>(args: {
+  readonly __restartResumeTargets?: T;
+}): T | undefined {
+  return args.__restartResumeTargets;
+}
+
+/** The one session a restart-resume start must recover (`__restartResumeSessionUuid`). */
+export function internalRestartResumeSessionUuid(args: {
+  readonly __restartResumeSessionUuid?: string;
+}): string | undefined {
+  return args.__restartResumeSessionUuid;
+}
+
+/** Record the restart-resume reservations on the start's args unless it already carries some. */
+export function adoptRestartResumeTargets<T>(
+  args: { __restartResumeTargets?: T },
+  targets: T,
+): void {
+  args.__restartResumeTargets ??= targets;
 }

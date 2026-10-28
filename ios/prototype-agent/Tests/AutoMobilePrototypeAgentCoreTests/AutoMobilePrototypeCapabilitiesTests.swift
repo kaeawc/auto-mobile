@@ -45,6 +45,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
             // Contract only; the system media picker and camera runtimes are owed (#14197).
             "prototype_platform_mediaLibrary_v1", "prototype_platform_camera_v1",
+            // Contract only; the window controls runtime is owed (#14320).
+            "prototype_platform_window_controls_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.

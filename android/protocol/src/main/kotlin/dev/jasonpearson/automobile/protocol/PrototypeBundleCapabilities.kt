@@ -54,6 +54,8 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_window_motion_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
+    if (PrototypeEnvelopeFeatures.WINDOW_CONTROLS.any { (spec["window"] as? JsonObject)?.containsKey(it) == true })
+      caps.add("prototype_platform_window_controls_v1")
     if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {
       caps.add("prototype_design_platform_v1")
     }

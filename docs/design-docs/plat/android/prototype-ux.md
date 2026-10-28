@@ -2021,6 +2021,15 @@ call proves presence only and returns no biometric data. Failures use the typed 
 `unavailable` for a locked-out, unenrolled or hardware-less device. No production runtime advertises the
 module yet.
 
+**Window controls (#14320).** Four optional root `window` fields need
+`prototype_platform_window_controls_v1`; they are not a platform module, so no `requires.platform` entry.
+`keepScreenOn` (boolean) keeps the screen awake, `brightness` (whole 0-100, or `system`) sets the prototype
+window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) requests an orientation, and
+`statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
+prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
+and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
+best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name

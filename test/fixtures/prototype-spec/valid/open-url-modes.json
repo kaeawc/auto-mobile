@@ -1,0 +1,128 @@
+{
+  "id": "open-url-modes",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["links"]
+  },
+  "state": {
+    "mode": "inApp",
+    "url": "tel:+15551234567"
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "label": "tel external",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "tel:+15551234567"
+              },
+              "mode": {
+                "value": "external"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "tel auto",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "tel:+15551234567"
+              },
+              "mode": {
+                "value": "auto"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "geo auto",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "geo:37.78,-122.41"
+              },
+              "mode": {
+                "value": "auto"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "http in app",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "http://example.com/{data:/path}"
+              },
+              "mode": {
+                "value": "inApp"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "bound url in app",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "state": "url"
+              },
+              "mode": {
+                "value": "inApp"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "bound mode tel",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "tel:+15551234567"
+              },
+              "mode": {
+                "state": "mode"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

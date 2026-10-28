@@ -437,6 +437,18 @@ export const observeResultSchema = z
       ),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
+    diagnostics: z
+      .array(
+        z.object({
+          code: z.literal("audio_input_unavailable"),
+          message: z.string(),
+          retryable: z.literal(false),
+        }),
+      )
+      .optional()
+      .describe(
+        "Device-level environment conditions. audio_input_unavailable: recordings on this device will contain no audio because the host or emulator has no audio input; do not retry.",
+      ),
     layoutWarnings: z
       .object({
         scope: z.enum(["full", "truncated", "scoped"]),

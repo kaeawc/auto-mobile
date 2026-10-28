@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "k2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "picked": [],
+        "photo": {}
+      }
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["camera"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "camera.capture",
+          "args": {
+            "media": {
+              "value": "video"
+            },
+            "maxDurationMs": {
+              "value": 0
+            }
+          },
+          "into": "/data/draft/photo",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.maxDurationMs.value"
+}

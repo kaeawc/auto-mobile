@@ -4,6 +4,7 @@ import {
   prototypeChannelCallError,
   prototypeRealtimeFields,
 } from "./prototypeChannels";
+import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -374,14 +375,29 @@ function callError(
   if (args) {
     return args;
   }
-  if (action.call === "share.open") {
-    const error = prototypeShareArgumentsError(record(action.args) ?? {}, `${path}.args`);
-    if (error) {
-      return error;
-    }
+  const crossArgs = crossArgumentsError(action, path);
+  if (crossArgs) {
+    return crossArgs;
   }
   const into = typeof action.into === "string" ? intoError(action.into) : undefined;
   return into ? { path: `${path}.into`, message: into } : undefined;
+}
+
+/** Rules that relate one call's arguments to each other, beyond the per-argument contract table. */
+const crossArgumentRules: Record<
+  string,
+  (args: Raw, path: string) => PrototypePlatformError | undefined
+> = {
+  "share.open": (args, path) => prototypeShareArgumentsError(args, path),
+  "links.open": prototypeLinksArgumentsError,
+};
+
+function crossArgumentsError(action: Raw, path: string): PrototypePlatformError | undefined {
+  const rule =
+    typeof action.call === "string" && Object.hasOwn(crossArgumentRules, action.call)
+      ? crossArgumentRules[action.call]
+      : undefined;
+  return rule?.(record(action.args) ?? {}, `${path}.args`);
 }
 
 function intoError(into: string): string | undefined {

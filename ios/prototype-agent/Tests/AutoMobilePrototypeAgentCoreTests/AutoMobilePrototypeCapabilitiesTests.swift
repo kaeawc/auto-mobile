@@ -33,7 +33,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // Contract only; the device status readers are owed (#14323).
             "prototype_platform_battery_v1", "prototype_platform_power_v1",
             "prototype_platform_audio_v1",
-            // Contract only; the connectivity runtimes are owed (#14273).
+            // Registered by the agent and Viewer registries (#14273), not the static list.
             "prototype_platform_connectivity_v1",
             // Contract only; the biometric prompt runtime is owed (#14328).
             "prototype_platform_biometric_v1",

@@ -10,6 +10,13 @@ import {
 } from "./sharedStorageReadService";
 import type { Platform } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
+import {
+  parseIosStorageDiscovery,
+  unavailableIosStorageDiscovery,
+  type IosStorageDiscoverer,
+  type IosStorageDiscovery,
+} from "../features/storage/iosStorageDiscovery";
 import type {
   KeystoreDiscovery,
   KeystoreDiscoveryState,
@@ -76,6 +83,7 @@ export interface StorageCapabilityDependencies {
   adbFactory?: AdbClientFactory;
   probeDebuggableBuild?: (adb: AdbExecutor, appId: string) => Promise<boolean | undefined>;
   createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
+  createIosStorageDiscovery?: (device: BootedDevice) => IosStorageDiscoverer;
   createUserResolver?: (adb: AdbExecutor) => StorageCapabilityUserResolver;
 }
 
@@ -168,6 +176,31 @@ async function resolveKeystoreDiscovery(
   }
 }
 
+/** Reads the SDK's storage capability payload through the device's iOS runner. */
+function runnerIosStorageDiscovery(device: BootedDevice): IosStorageDiscoverer {
+  return {
+    discoverIosStorage: async (appId) =>
+      parseIosStorageDiscovery(
+        await IOSCtrlProxyClient.getInstance(device).storageCapabilities(appId),
+      ),
+  };
+}
+
+async function resolveIosStorageDiscovery(
+  device: BootedDevice,
+  appId: string,
+  dependencies: StorageCapabilityDependencies,
+): Promise<IosStorageDiscovery> {
+  try {
+    const discovery =
+      dependencies.createIosStorageDiscovery?.(device) ?? runnerIosStorageDiscovery(device);
+    return await discovery.discoverIosStorage(appId);
+  } catch (error) {
+    logger.warn("[StorageCapabilityResources] iOS storage discovery unavailable", error);
+    return unavailableIosStorageDiscovery();
+  }
+}
+
 function buildUri(deviceId: string, appId?: string): string {
   const base = `automobile:devices/${deviceId}/storage/capabilities`;
   return appId ? `${base}?appId=${encodeUriSegment(appId)}` : base;
@@ -241,6 +274,9 @@ export async function getStorageCapabilitiesResource(
     );
     if (device.platform === "android" && appId && context.embeddedSdk) {
       context.keystore = await resolveKeystoreDiscovery(device, appId, dependencies);
+    }
+    if (device.platform === "ios" && appId && context.embeddedSdk) {
+      context.iosStorage = await resolveIosStorageDiscovery(device, appId, dependencies);
     }
     const report = computeStorageCapabilities(context);
 

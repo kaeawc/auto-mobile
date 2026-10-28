@@ -794,7 +794,7 @@ public final class DatabaseInspector: Sendable
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
   public func configure(_ configuration: StorageInspectionConfiguration)
-  public func registerAppGroupSuite(_ suiteName: String)
+  public func registerAppGroupSuite(_ suiteName: String, coordination: StoreCoordination = .uncoordinated)
   public func registerCoreDataStore(_ store: CoreDataStoreRegistration)
   public func authorizeHostMutations(_ authorized: Bool)
   public func authorizeSessionMutations(sessionId: String?)
@@ -848,11 +848,16 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable
   public func closeAll()
 
 // Storage/StorageInspectionPolicy.swift
+public enum StoreCoordination: String, Codable, Sendable
+  case uncoordinated
+  case hostCoordinated = "host_coordinated"
 public struct CoreDataStoreRegistration: Sendable, Codable
   public let identifier: String
   public let modelVersion: String?
   public let entities: [String]
-  public init(identifier: String, modelVersion: String? = nil, entities: [String] = [])
+  public let appGroup: String?
+  public let coordination: StoreCoordination?
+  public init( identifier: String, modelVersion: String? = nil, entities: [String] = [], appGroup: String? = nil, coordination: StoreCoordination? = nil )
 public struct KeychainDeletionEntry: Hashable, Sendable
   public let service: String
   public let account: String
@@ -861,6 +866,7 @@ public struct KeychainDeletionEntry: Hashable, Sendable
 public struct StorageInspectionConfiguration: Sendable
   public var allowedDatabasePaths: Set<String>
   public var registeredAppGroupSuites: Set<String>
+  public var hostCoordinatedAppGroupSuites: Set<String>
   public var coreDataStores: [CoreDataStoreRegistration]
   public var sensitiveKeys: Set<String>
   public var maxRows: Int
@@ -868,7 +874,7 @@ public struct StorageInspectionConfiguration: Sendable
   public var allowKeychainDeletion: Bool
   public var allowedKeychainDeletionEntries: Set<KeychainDeletionEntry>
   public var allowMutations: Bool
-  public init( allowedDatabasePaths: Set<String> = [], registeredAppGroupSuites: Set<String> = [], coreDataStores: [CoreDataStoreRegistration] = [], sensitiveKeys: Set<String> = [], maxRows: Int = 500, maxBytes: Int = 512 * 1024, allowMutations: Bool = false, allowKeychainDeletion: Bool = false, allowedKeychainDeletionEntries: Set<KeychainDeletionEntry> = [] )
+  public init( allowedDatabasePaths: Set<String> = [], registeredAppGroupSuites: Set<String> = [], coreDataStores: [CoreDataStoreRegistration] = [], sensitiveKeys: Set<String> = [], maxRows: Int = 500, maxBytes: Int = 512 * 1024, allowMutations: Bool = false, allowKeychainDeletion: Bool = false, allowedKeychainDeletionEntries: Set<KeychainDeletionEntry> = [], hostCoordinatedAppGroupSuites: Set<String> = [] )
 
 // Storage/UserDefaultsInspector.swift
 public final class UserDefaultsInspector: @unchecked Sendable
@@ -1236,3 +1242,20 @@ public struct KeychainDeleteOutcome: Codable, Equatable, Sendable
   public let outcome: String
   public let deletedScope: KeychainItemSelector?
   public init(outcome: String, deletedScope: KeychainItemSelector? = nil)
+public struct StorageStoreState: Codable, Equatable, Sendable
+  public let kind: String
+  public let identifier: String
+  public let sharing: String
+  public let appGroup: String?
+  public let coordination: String
+  public let query: String
+  public let reason: String?
+  public init( kind: String, identifier: String, sharing: String, appGroup: String?, coordination: String, query: String, reason: String? )
+public struct KeychainCapability: Codable, Equatable, Sendable
+  public let schemaVersion: Int
+  public let capability: String
+  public let inspection: String
+  public let deletion: String
+  public let reason: String?
+  public let deletionScopes: [KeychainItemSelector]
+  public init( schemaVersion: Int, capability: String, inspection: String, deletion: String, reason: String?, deletionScopes: [KeychainItemSelector] )

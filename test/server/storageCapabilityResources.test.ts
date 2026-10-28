@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { computeStorageCapabilities } from "../../src/features/storage/storageCapabilities";
 import { FakeKeystoreDiscovery } from "../fakes/FakeKeystoreDiscovery";
+import { FakeIosStorageDiscovery } from "../fakes/FakeIosStorageDiscovery";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   registerStorageCapabilityResources,
@@ -47,6 +48,7 @@ describe("storageCapabilityResources", () => {
     dependencies: StorageCapabilityDependencies = {
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       createKeystoreDiscovery: () => new FakeKeystoreDiscovery(),
+      createIosStorageDiscovery: () => new FakeIosStorageDiscovery(),
       createUserResolver: () => ({
         resolve: async () => ({ userId: 0, source: "currentUser" }),
       }),
@@ -299,6 +301,75 @@ describe("storageCapabilityResources", () => {
       );
       serverConfig.setEmbeddedSdkEnabled(false);
       await readResource("automobile:devices/emulator-5554/storage/capabilities?appId=com.x");
+      expect(fake.calls).toEqual([]);
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
+
+  const iosSimulator: BootedDevice = {
+    name: "iPhone 17",
+    platform: "ios",
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+  };
+
+  test("iOS reports the SDK's Keychain capability and shared-store states (#5161)", async () => {
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    try {
+      const fake = new FakeIosStorageDiscovery();
+      setDevices([iosSimulator], { createIosStorageDiscovery: () => fake });
+      const content = await readResource(
+        `automobile:devices/${iosSimulator.deviceId}/storage/capabilities?appId=com.x`,
+      );
+      const body = JSON.parse(content.text ?? "{}");
+      const domain = (name: string) =>
+        body.domains.find((d: { domain: string }) => d.domain === name);
+      expect(domain("secure_state").capabilities).toEqual([fake.discovery.keychain]);
+      expect(domain("key_value").stores).toEqual(fake.discovery.stores);
+      expect(fake.calls).toEqual(["com.x"]);
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
+
+  test("failed iOS storage discovery becomes a typed unavailable Keychain state", async () => {
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    try {
+      const fake = new FakeIosStorageDiscovery();
+      fake.failure = new Error("runner down");
+      setDevices([iosSimulator], { createIosStorageDiscovery: () => fake });
+      const content = await readResource(
+        `automobile:devices/${iosSimulator.deviceId}/storage/capabilities?appId=com.x`,
+      );
+      const body = JSON.parse(content.text ?? "{}");
+      expect(body.domains).toHaveLength(6);
+      const keychain = body.domains.find((d: { domain: string }) => d.domain === "secure_state")
+        .capabilities[0];
+      expect(keychain).toMatchObject({ deletion: "unknown", reason: "BRIDGE_UNAVAILABLE" });
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
+
+  test("iOS storage discovery requires app scope and the embedded SDK", async () => {
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    const fake = new FakeIosStorageDiscovery();
+    try {
+      setDevices([iosSimulator, androidEmulator], {
+        adbFactory: new FakeAdbClientFactory(),
+        createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+        createKeystoreDiscovery: () => new FakeKeystoreDiscovery(),
+        createIosStorageDiscovery: () => fake,
+      });
+      serverConfig.setEmbeddedSdkEnabled(true);
+      await readResource(`automobile:devices/${iosSimulator.deviceId}/storage/capabilities`);
+      await readResource("automobile:devices/emulator-5554/storage/capabilities?appId=com.x");
+      serverConfig.setEmbeddedSdkEnabled(false);
+      await readResource(
+        `automobile:devices/${iosSimulator.deviceId}/storage/capabilities?appId=com.x`,
+      );
       expect(fake.calls).toEqual([]);
     } finally {
       serverConfig.setEmbeddedSdkEnabled(previous);

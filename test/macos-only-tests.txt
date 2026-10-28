@@ -33,6 +33,7 @@ portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo 
 portable test/features/observe/ios/observationBridgeState.test.ts        # pure parser plus the capability probe over fakes
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
+portable test/features/storage/iosStorageDiscovery.test.ts           # pure parsing of the SDK storage capability payload
 
 portable test/utils/iosDeviceResourceHazards.test.ts                    # pure hazard matching, no iOS host
 portable test/utils/iosDeviceResourceImpact.test.ts                     # pure catalog metadata and documentation parity, no iOS host

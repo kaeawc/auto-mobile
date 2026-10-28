@@ -27,6 +27,8 @@ export interface SmokeDriver {
   /** Installs over whatever is there; must never uninstall first. */
   install(artifact: string): Promise<void>;
   installedApp(): Promise<InstalledApp>;
+  /** Optional platform launch-state reset before each URL-driven import/open. */
+  prepareForUrlOpen?(): Promise<void>;
   readonly viewer: ProtoViewerDevice;
   readonly screens?: ScreenDriver;
 }
@@ -59,6 +61,7 @@ async function importBundle(
 ): Promise<{ check: SmokeCheck; libraryId?: string }> {
   const name = `import ${bundle.label}`;
   try {
+    await driver.prepareForUrlOpen?.();
     const result = await driver.viewer.importBundle(bundle.bytes, bundle.label, IMPORT_TIMEOUT_MS);
     if (result.status !== "imported") {
       return { check: fail(name, `expected imported, got ${JSON.stringify(result)}`) };
@@ -76,6 +79,7 @@ async function openEntry(
   label: string,
 ): Promise<SmokeCheck> {
   return guarded(name, async () => {
+    await driver.prepareForUrlOpen?.();
     const result = await driver.viewer.open(libraryId, IMPORT_TIMEOUT_MS);
     if (result.status !== "opened") {
       return fail(name, `expected opened, got ${JSON.stringify(result)}`);

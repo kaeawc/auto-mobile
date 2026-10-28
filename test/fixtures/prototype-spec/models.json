@@ -708,6 +708,9 @@
   "actionDismiss": {
     "type": "dismiss"
   },
+  "actionHideKeyboard": {
+    "type": "hideKeyboard"
+  },
   "actionDecrement": {
     "type": "decrement",
     "key": "count"

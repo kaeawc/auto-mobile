@@ -5,8 +5,78 @@ import Foundation
     import XCTest
 #endif
 
+/// Only the English system "Open in" confirmation for this exact display name is actionable.
+/// Cleanup uses the same match, but must cancel rather than launch the app.
+enum ProtoViewerAlertAction: Equatable, Sendable {
+    case openProtoViewer
+    case cancel
+    case none
+
+    static func decide(
+        titleOrLabel: String,
+        buttonTitles: [String],
+        appDisplayName: String,
+        cleaningUp: Bool = false
+    )
+        -> Self
+    {
+        guard !appDisplayName.isEmpty, buttonTitles.contains("Open") else { return .none }
+        let titles = [
+            "Open in \(appDisplayName)?",
+            "Open in “\(appDisplayName)”?",
+            "Open in \"\(appDisplayName)\"?",
+        ]
+        guard titles.contains(titleOrLabel.trimmingCharacters(in: .whitespacesAndNewlines)) else { return .none }
+        if cleaningUp {
+            return buttonTitles.contains("Cancel") ? .cancel : .none
+        }
+        return .openProtoViewer
+    }
+}
+
 extension ElementLocator {
     #if canImport(XCTest) && os(iOS)
+        /// Snapshot once and tap captured screen coordinates; never query live system dialogs.
+        func answerProtoViewerConfirmation(cleaningUp: Bool = false) throws {
+            try catchingObjCException {
+                let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                let snapshot = try springboard.snapshot()
+                for alert in self.collectAlertElements(from: snapshot) {
+                    let descendants = self.protoViewerDialogNodes(alert)
+                    let buttons = descendants.filter { $0.elementType == .button }
+                    // Some sheets have an empty label and expose the title as static text.
+                    let title = descendants.first { $0.elementType == .staticText }?.label ?? ""
+                    let titles = alert.label.isEmpty ? [title] : [alert.label]
+                    for title in titles {
+                        let action = ProtoViewerAlertAction.decide(
+                            titleOrLabel: title,
+                            buttonTitles: buttons.map(\.label),
+                            appDisplayName: "ProtoViewer",
+                            cleaningUp: cleaningUp
+                        )
+                        let buttonTitle: String
+                        switch action {
+                        case .openProtoViewer: buttonTitle = "Open"
+                        case .cancel: buttonTitle = "Cancel"
+                        case .none: continue
+                        }
+                        guard let button = buttons.first(where: { $0.label == buttonTitle }),
+                              button.isEnabled, !button.frame.isEmpty
+                        else { continue }
+                        springboard.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                            dx: button.frame.midX - snapshot.frame.minX,
+                            dy: button.frame.midY - snapshot.frame.minY
+                        )).tap()
+                        return
+                    }
+                }
+            }
+        }
+
+        private func protoViewerDialogNodes(_ snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            [snapshot] + snapshot.children.flatMap { protoViewerDialogNodes($0) }
+        }
+
         /// Collect text-input element snapshots by walking the already-captured
         /// application snapshot tree (issue #5474).
         ///

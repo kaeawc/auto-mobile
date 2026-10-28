@@ -123,6 +123,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
   private readonly retryDelays: readonly number[];
   private versions = 0;
   private disposed = false;
+  private skipped = false;
   private registryOpeningHandled = false;
 
   constructor(private readonly options: StoreDeviceClaimMirrorOptions) {
@@ -131,7 +132,19 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     this.retryDelays = options.retryDelaysMs ?? DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS;
   }
 
+  /** Unknown registry migrations disable the mirror for this daemon's lifetime; restart re-evaluates. */
+  skip(): void {
+    this.skipped = true;
+    for (const intent of this.intents.values()) {
+      this.clearRetry(intent);
+    }
+    this.intents.clear();
+  }
+
   claimed(deviceId: string, owner: MirrorOwner, stillHeld?: () => boolean): void {
+    if (this.skipped) {
+      return;
+    }
     const held = this.intents.get(deviceId);
     const sameOwner =
       held?.kind === "claim" &&
@@ -146,21 +159,22 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
   }
 
   released(deviceId: string, owner: MirrorOwner): void {
+    if (this.skipped) {
+      return;
+    }
     this.record(deviceId, { kind: "release", owner, claimedAtMs: this.options.timer.now() });
   }
 
   async read(deviceId: string): Promise<DeviceClaim | undefined> {
-    const store =
-      this.options.store() ??
-      (this.options.whenOpen
-        ? await raceWithDeadline(this.options.whenOpen, {
-            timer: this.options.timer,
-            timeoutMs: DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS,
-            label: "Device claim registry open",
-          })
-        : undefined);
+    if (this.skipped) {
+      return undefined;
+    }
+    const store = await this.readStore();
+    if (this.skipped) {
+      return undefined;
+    }
     const row = await store?.get(this.options.platform, deviceId);
-    if (!row) {
+    if (this.skipped || !row) {
       return undefined;
     }
     if (row.processGenerationToken !== undefined) {
@@ -174,11 +188,38 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     return row;
   }
 
+  /** Join a pending open without letting a terminal skip surface its already-reported failure. */
+  private async readStore(): Promise<DeviceClaims | undefined> {
+    let store: DeviceClaims | undefined;
+    try {
+      store =
+        this.options.store() ??
+        (this.options.whenOpen
+          ? await raceWithDeadline(this.options.whenOpen, {
+              timer: this.options.timer,
+              timeoutMs: DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS,
+              label: "Device claim registry open",
+            })
+          : undefined);
+    } catch (error) {
+      if (!this.skipped) {
+        throw error;
+      }
+      // The hub skipped while this read joined an open; claim files decide after its failure.
+      logger.debug(`[DeviceClaims] Ignoring skipped registry open: ${errorMessage(error)}`);
+      return undefined;
+    }
+    return store;
+  }
+
   /**
    * A registry opened (or reopened): write every claim this daemon holds and every release still
    * owed, whatever was written before. Restarts the retry budget of each.
    */
   reconcile(store?: DeviceClaims): void {
+    if (this.skipped) {
+      return;
+    }
     for (const [deviceId, intent] of this.intents) {
       intent.synced = false;
       intent.attempts = 0;
@@ -206,11 +247,17 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
 
   /** After disposal and draining, withdraw only the owner generations this mirror recorded. */
   async releaseOwnedClaims(store: DeviceClaims): Promise<void> {
+    if (this.skipped) {
+      return;
+    }
     const owners = new Map<string, MirrorOwner>();
     for (const intent of this.intents.values()) {
       owners.set(`${intent.owner.pid}:${intent.owner.ownerToken}`, intent.owner);
     }
     for (const owner of owners.values()) {
+      if (this.skipped) {
+        return;
+      }
       await store.releaseOwnedBy(owner);
     }
   }
@@ -219,7 +266,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     deviceId: string,
     intent: Pick<MirrorIntent, "kind" | "owner" | "claimedAtMs" | "stillHeld">,
   ) {
-    if (this.disposed) {
+    if (this.disposed || this.skipped) {
       return;
     }
     const previous = this.intents.get(deviceId);
@@ -237,7 +284,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
 
   private write(deviceId: string, given?: DeviceClaims): void {
     const intent = this.intents.get(deviceId);
-    if (!intent || this.disposed || this.inFlight.has(deviceId)) {
+    if (!intent || this.disposed || this.skipped || this.inFlight.has(deviceId)) {
       // An in-flight write looks again when it settles, so a newer intent is never dropped.
       return;
     }
@@ -340,7 +387,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
   }
 
   private scheduleRetry(deviceId: string, intent: MirrorIntent): void {
-    if (this.disposed || intent.retry !== undefined) {
+    if (this.disposed || this.skipped || intent.retry !== undefined) {
       return;
     }
     const delay = this.retryDelays[intent.attempts];

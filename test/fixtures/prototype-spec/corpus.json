@@ -94,6 +94,11 @@
     "glass-shared-repeat-template.json",
     "grid-adaptive-min-width.json",
     "grid-fixed-columns-span.json",
+    "hide-keyboard-channel-literals.json",
+    "hide-keyboard-free-form-maps.json",
+    "hide-keyboard-ignored-accessory.json",
+    "hide-keyboard-request-query.json",
+    "hide-keyboard.json",
     "icon-effects-integer-spellings.json",
     "icon-effects-repeat.json",
     "icon-effects.json",
@@ -828,6 +833,7 @@
     "grid-span-exceeds-columns.json",
     "grid-span-outside-grid.json",
     "height-dp-over-max.json",
+    "hide-keyboard-extra-field.json",
     "icon-button-unknown-icon.json",
     "icon-effect-expanded-loop-limit.json",
     "icon-effect-extra.json",
@@ -1703,6 +1709,7 @@
     "strict-gate-prototype_format_v1.json",
     "strict-gate-prototype_gestures_v1.json",
     "strict-gate-prototype_glass_v1.json",
+    "strict-gate-prototype_hide_keyboard_v1.json",
     "strict-gate-prototype_icon_effects_v1.json",
     "strict-gate-prototype_keyframes_v1.json",
     "strict-gate-prototype_lazy_list_v1.json",
@@ -2957,6 +2964,14 @@
       "prototype_platform_v1",
       "prototype_storage_v1"
     ],
+    "hide-keyboard.json": ["prototype_hide_keyboard_v1"],
+    "hide-keyboard-request-query.json": ["prototype_data_model_v1", "prototype_network_v1"],
+    "hide-keyboard-channel-literals.json": [
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "hide-keyboard-free-form-maps.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "hide-keyboard-ignored-accessory.json": ["prototype_platform_namespace_v1"],
     "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"]
   }
 }

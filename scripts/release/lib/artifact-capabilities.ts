@@ -72,6 +72,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
     prototype_motion_v3: "Expressive, press and layout animate are Android only until #14684",
     prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
+    prototype_hide_keyboard_v1:
+      "hideKeyboard has a validated contract only; the iOS agent does not run it yet (#14320)",
     prototype_platform_window_controls_v1:
       "Window controls have a validated contract only; the iOS agent does not apply them yet (#14320)",
     prototype_motion_v2:

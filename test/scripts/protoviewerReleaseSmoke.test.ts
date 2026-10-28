@@ -8,6 +8,9 @@ import {
   parseInstalledApp,
 } from "../../scripts/release/lib/protoviewer-smoke/androidDriver";
 import { smokeBundles } from "../../scripts/release/lib/protoviewer-smoke/bundles";
+import { createIosDriver } from "../../scripts/release/lib/protoviewer-smoke/iosDriver";
+import type { ToolRunner } from "../../scripts/release/lib/artifact-policy/toolRunner";
+import { PROTOVIEWER_PACKAGE } from "../../src/features/prototype/protoViewer/protoViewerContract";
 import {
   LICENSES_ERROR_TEXT,
   LICENSES_LINK_TEXT,
@@ -92,6 +95,102 @@ const bundle = { label: "kept", bytes: new Uint8Array([1]) };
 const artifacts = { previous: "n.apk", candidate: "n1.apk" };
 const statuses = (checks: { name: string; status: string }[]) =>
   Object.fromEntries(checks.map((check) => [check.name, check.status]));
+
+class FakeIosRunner implements ToolRunner {
+  readonly calls: { command: string; args: readonly string[] }[] = [];
+  terminationError?: Error;
+  private version = 0;
+  async run(command: string, args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+    this.calls.push({ command, args });
+    if (args[1] === "install") {
+      this.version++;
+    }
+    if (args[1] === "terminate" && this.terminationError) {
+      throw this.terminationError;
+    }
+    return { stdout: command === "plutil" ? String(this.version) : "/data", stderr: "" };
+  }
+}
+
+describe("iOS smoke launch state", () => {
+  test("terminates only ProtoViewer on the supplied udid", async () => {
+    const runner = new FakeIosRunner();
+    const driver = createIosDriver("fake-udid", runner);
+    await driver.prepareForUrlOpen?.();
+    expect(runner.calls).toEqual([
+      { command: "xcrun", args: ["simctl", "terminate", "fake-udid", PROTOVIEWER_PACKAGE] },
+    ]);
+  });
+
+  test("already not running is a successful start state", async () => {
+    const runner = new FakeIosRunner();
+    runner.terminationError = Object.assign(new Error("Application is not running"), { code: 3 });
+    await createIosDriver("fake-udid", runner).prepareForUrlOpen?.();
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  test("unexpected terminate errors propagate", async () => {
+    const runner = new FakeIosRunner();
+    runner.terminationError = Object.assign(new Error("Simulator unavailable"), { code: 149 });
+    const driver = createIosDriver("fake-udid", runner);
+    await expect(driver.prepareForUrlOpen?.()).rejects.toThrow("Simulator unavailable");
+  });
+
+  for (const mode of ["smoke", "upgrade"] as const) {
+    test(`${mode} terminates before every import and open, using only fakes`, async () => {
+      const runner = new FakeIosRunner();
+      const driver = createIosDriver("fake-udid", runner);
+      const viewer = new FakeViewer();
+      const events: string[] = [];
+      // Substitute the viewer as well: no real simctl, files, timers or simulator are used.
+      const fake: SmokeDriver = {
+        ...driver,
+        viewer: {
+          installed: () => viewer.installed(),
+          async importBundle(bytes, label) {
+            expect(runner.calls.at(-1)?.args[1]).toBe("terminate");
+            events.push("import");
+            runner.calls.length = 0;
+            return viewer.importBundle(bytes, label);
+          },
+          async open(libraryId) {
+            expect(runner.calls.at(-1)?.args[1]).toBe("terminate");
+            events.push("open");
+            runner.calls.length = 0;
+            return viewer.open(libraryId);
+          },
+        },
+      };
+      const checks =
+        mode === "smoke"
+          ? await runMinifiedSmoke(fake, "candidate.app", { bundled: bundle, imported: bundle })
+          : await runUpgradeInPlace(
+              fake,
+              { previous: "old.app", candidate: "candidate.app" },
+              bundle,
+            );
+      expect(events).toEqual(
+        mode === "smoke" ? ["import", "open", "import", "open"] : ["import", "open"],
+      );
+      expect(checks.find((check) => check.name.startsWith("import"))?.status).toBe("pass");
+      expect(summarize(checks).failed).toBe(false);
+    });
+  }
+
+  test("a failed launch-state step fails the check without importing", async () => {
+    const runner = new FakeIosRunner();
+    runner.terminationError = new Error("terminate failed");
+    const viewer = new FakeViewer();
+    const driver: SmokeDriver = { ...createIosDriver("fake-udid", runner), viewer };
+    const checks = await runMinifiedSmoke(driver, "candidate.app", {
+      bundled: bundle,
+      imported: bundle,
+    });
+    expect(viewer.library.size).toBe(0);
+    expect(statuses(checks)["import kept"]).toBe("fail");
+    expect(summarize(checks).text).toContain("terminate failed");
+  });
+});
 
 describe("ProtoViewer upgrade in place", () => {
   test("keeps the saved entry, installs over without uninstalling and skips settings", async () => {

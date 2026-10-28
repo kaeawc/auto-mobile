@@ -1,3 +1,4 @@
+import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonBroker } from "../../src/daemon/daemonCore/DaemonBroker";
 import { DeviceClaimMirrorHub } from "../../src/daemon/deviceClaimMirrorHub";
@@ -531,6 +532,24 @@ describe("Daemon.start() tool-call-end wiring", () => {
     } finally {
       open.mockRestore();
       internals.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("unsupported registry schema skips every mirror and keeps the typed refusal until restart", async () => {
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    const error = new BindingRegistrySchemaUnsupportedError("/fake/daemon.sqlite", ["future"]);
+    const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry").mockRejectedValue(error);
+    const skip = spyOn(daemon.testHooks.runtime.deviceClaimMirrors, "skip");
+    try {
+      await expect(daemon.testHooks.openBindingRegistry()).rejects.toBe(error);
+      await expect(daemon.testHooks.openBindingRegistry()).rejects.toBe(error);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(skip).toHaveBeenCalledTimes(1);
+    } finally {
+      open.mockRestore();
+      skip.mockRestore();
+      daemon.testHooks.stopSessionTimers();
       timer.reset();
     }
   });

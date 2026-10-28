@@ -5,6 +5,7 @@ import { PROTOVIEWER_PACKAGE } from "../../../../src/features/prototype/protoVie
 import { SimCtlClient } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { defaultIdGenerator } from "../../../../src/utils/IdGenerator";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
+import { logger } from "../../../../src/utils/logger";
 import type { ToolRunner } from "../artifact-policy/toolRunner";
 import type { SmokeDriver } from "./flows";
 
@@ -20,6 +21,18 @@ export function createIosDriver(udid: string, runner: ToolRunner): SmokeDriver {
     async install(artifact) {
       // simctl install over an existing app keeps its data container.
       await simctl(["install", udid, artifact]);
+    },
+    async prepareForUrlOpen() {
+      try {
+        await simctl(["terminate", udid, PROTOVIEWER_PACKAGE]);
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === 3) {
+          // ESRCH means ProtoViewer is already not running: the requested start state.
+          logger.debug("ProtoViewer was already not running before the smoke URL check", error);
+          return;
+        }
+        throw error;
+      }
     },
     async installedApp() {
       const app = await simctl(["get_app_container", udid, PROTOVIEWER_PACKAGE, "app"]);

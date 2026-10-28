@@ -141,6 +141,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
+  z.object({ type: z.enum(["hideKeyboard"]) }).strict(),
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
   appendDataActionSchema,
   upsertDataActionSchema,
@@ -954,6 +955,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "increment",
   "decrement",
   "dismiss",
+  "hideKeyboard",
   "setData",
   "appendData",
   "upsertData",

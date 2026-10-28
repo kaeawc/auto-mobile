@@ -157,6 +157,7 @@ export type FieldKind =
   | "uploadRequest"
   | "prependData"
   | "scrollTo"
+  | "hideKeyboard"
   | "timer"
   | "stackTransition"
   | "stackSource"
@@ -347,6 +348,10 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
     case "scrollTo":
       // Marks the whole action so the chat scroll gate can locate it (#14232).
       visit(action, path, "scrollTo");
+      break;
+    case "hideKeyboard":
+      // Marks the whole action so the hide keyboard gate can locate it (#14320).
+      visit(action, path, "hideKeyboard");
       break;
     default:
       mapTimerAction(action, path, visit);

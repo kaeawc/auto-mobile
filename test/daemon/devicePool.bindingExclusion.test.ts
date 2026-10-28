@@ -13,6 +13,7 @@ import {
   BINDING_DISCOVERY_INCOMPLETE_CODE,
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,
+  BindingRegistrySchemaUnsupportedError,
 } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
@@ -126,6 +127,31 @@ describe("DevicePool binding exclusion", () => {
     expect(await internals.getStartableDeviceImageCandidates("ios")).toEqual([]);
     expect(opens).toBeGreaterThan(before);
     expect([...(await pool.bindingStableIds("ios"))]).toEqual(["IMAGE"]);
+  });
+
+  test("unknown migrations allow generic allocation, explicit binds, and selector-based starts", async () => {
+    let opens = 0;
+    await setUp([ios("LOCAL"), ios("EXPLICIT")], async () => {
+      opens++;
+      throw new BindingRegistrySchemaUnsupportedError("/fake/pool.sqlite", ["future"]);
+    });
+    manager.deviceImages = [
+      { platform: "ios", name: "Local image", deviceId: "IMAGE", isRunning: false },
+    ];
+    expect(await assignOne("generic", "ios")).toBe("LOCAL");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "explicit",
+      deviceId: "EXPLICIT",
+      platform: "ios",
+    });
+    expect(pool.getDevice("EXPLICIT")?.sessionId).toBe("explicit");
+    expect(await pool.bindingStableIds("ios")).toEqual(new Set());
+    expect(
+      (await pool.testHooks.getStartableDeviceImageCandidates("ios")).map(
+        (image) => image.deviceId,
+      ),
+    ).toEqual(["IMAGE"]);
+    expect(opens).toBe(1);
   });
 
   test("generic single-device allocation skips an idle device a binding holds", async () => {

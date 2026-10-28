@@ -29,6 +29,17 @@ struct PrototypeStyleShadowLayer: Equatable {
 
 /// Radius resolution shared by every paint, clip, and shadow source.
 enum PrototypeStyleCorners {
+    /// Cards use an authored uniform radius, resolving tokens through the active theme.
+    static func cardRadius(_ radius: CornerRadius?, shapes: PrototypeShapes) -> Double {
+        if case let .uniform(value)? = radius.map(shapes.resolve) { return value }
+        return 12
+    }
+
+    /// A card draws its own outline and shadow; clipping its subtree would cut both off.
+    static func clipsContent(nodeType: String) -> Bool {
+        nodeType != "card"
+    }
+
     static func sourceBounds(width: Double, height: Double, spread: Double) -> CGRect? {
         guard width + 2 * spread > 0, height + 2 * spread > 0 else { return nil }
         return CGRect(x: -spread, y: -spread, width: width + 2 * spread, height: height + 2 * spread)

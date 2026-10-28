@@ -53,6 +53,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_commerce_v1",
             // Contract only; the window controls runtime is owed (#14320).
             "prototype_platform_window_controls_v1",
+            // Contract only; the keyboard dismiss runtime is owed (#14320).
+            "prototype_hide_keyboard_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
             // Contract only; the Keychain-backed secure storage runtime is owed (#14321).

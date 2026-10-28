@@ -166,7 +166,8 @@ internal object PrototypeSpecInput {
       ?: PrototypeContainerRules.pagerStateKeyErrors(context)
       ?: PrototypeLazyListRules.error(context)
 
-  private fun excludeAccessoryReferences(context: Context): PrototypeSpecError? {
+  /** Drops nodes and actions under `ios.bottomAccessory`, which neither renderer draws. */
+  fun excludeAccessoryReferences(context: Context): PrototypeSpecError? {
     val ignored =
       context.nodes
         .filter {

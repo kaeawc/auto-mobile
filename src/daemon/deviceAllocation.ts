@@ -26,7 +26,10 @@ import type { EmulatorLossIncident, EmulatorLossIncidentStore } from "./emulator
 import type { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import type { IdleDeviceReaper, IosLivenessSnapshot } from "./idleDeviceReaper";
-import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import {
+  refreshAllocationBindingExclusion,
+  type BindingExclusion,
+} from "./sessionBroker/provisioning/exclusion";
 import type { SessionReleaseReason } from "./releaseReasons";
 import {
   SessionRecoveryIdentityLossError,
@@ -437,7 +440,7 @@ export class DeviceAllocation {
   }> {
     if (!recoveryTarget && this.port.bindingExclusion) {
       // Guarded, not awaited unconditionally: an extra tick reorders allocation interleavings.
-      await this.port.bindingExclusion.refresh({ requireCurrent: true });
+      await refreshAllocationBindingExclusion(this.port.bindingExclusion);
     }
     if (!recoveryTarget && this.port.tracksForeignOwnership(platform)) {
       return this.tryAssignUnclaimedDevice(sessionId, platform, signal);

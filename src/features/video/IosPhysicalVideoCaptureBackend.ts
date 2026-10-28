@@ -41,6 +41,7 @@ import {
   buildEncodedCopyFfmpegArgs,
   HELPER_STDERR_TAIL,
   IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS,
+  IOS_PHYSICAL_MUXER_MAX_BUFFERED_BYTES,
   normalizeUdid,
 } from "./iosPhysicalVideoEncoding";
 export { parseCaptureDeviceList } from "./HelperCaptureDeviceLister";
@@ -386,6 +387,19 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       state.framesDropped += 1;
       return;
     }
+    // A stalled muxer (e.g. blocked output storage) must not let the daemon retain
+    // the whole stream. Shed records, and since P-frames after a gap are
+    // undecodable, resume only at a keyframe once the buffer has drained.
+    if (stdin.writableLength > IOS_PHYSICAL_MUXER_MAX_BUFFERED_BYTES) {
+      state.awaitingKeyframe = true;
+    }
+    if (state.awaitingKeyframe) {
+      if (!video.keyframe || stdin.writableNeedDrain) {
+        state.framesDropped += 1;
+        return;
+      }
+      state.awaitingKeyframe = false;
+    }
     stdin.write(video.payload);
     state.framesWritten += 1;
   }
@@ -416,7 +430,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     );
     if (state.framesDropped > 0) {
       logger.debug(
-        `[IosPhysicalVideo] dropped ${state.framesDropped} encoded record(s) that arrived before the first keyframe.`,
+        `[IosPhysicalVideo] dropped ${state.framesDropped} encoded record(s) that arrived before the first keyframe or while the muxer stalled.`,
       );
     }
   }

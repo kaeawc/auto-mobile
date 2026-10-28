@@ -7,6 +7,9 @@ export const IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS = 30000;
 /** Stderr lines retained from the helper for failure diagnostics. */
 export const HELPER_STDERR_TAIL = 20;
 
+/** Encoded bytes ffmpeg may leave unread on stdin before records are shed. */
+export const IOS_PHYSICAL_MUXER_MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
+
 /** Lowercased, separator-free UDID for cross-vocabulary comparison. */
 export function normalizeUdid(value: string): string {
   return value.replace(/-/g, "").toLowerCase();
@@ -23,7 +26,10 @@ export function buildDeviceEncodeSettings(config: VideoCaptureConfig): EncodeSet
   return {
     codec: "h264",
     bitrate: { kind: "explicitBps", bps: config.targetBitrateKbps * 1000 },
-    ...(resolution ? { maxLongSide: Math.max(resolution.width, resolution.height) } : {}),
+    // The helper rejects an odd or sub-2 cap, so round the longer edge down to even.
+    ...(resolution
+      ? { maxLongSide: Math.max(2, Math.max(resolution.width, resolution.height) & ~1) }
+      : {}),
   };
 }
 

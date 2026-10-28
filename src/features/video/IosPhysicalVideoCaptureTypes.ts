@@ -84,8 +84,10 @@ export interface CaptureState {
   encoder?: FfmpegProcess;
   encoderTracker?: ProcessTracker;
   framesWritten: number;
-  /** Records discarded because they preceded the first keyframe. */
+  /** Records discarded before the first keyframe or while the muxer stalled. */
   framesDropped: number;
+  /** True while shedding records from a stalled muxer until the next keyframe. */
+  awaitingKeyframe?: boolean;
   helperStderr: string[];
   helperExit?: { code: number | null; signal: NodeJS.Signals | null };
   /** First error emitted by the helper process (spawn ENOENT/EACCES, etc.). */

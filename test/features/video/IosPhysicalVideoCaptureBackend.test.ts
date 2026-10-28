@@ -357,6 +357,12 @@ describe("buildDeviceEncodeSettings", function () {
       buildDeviceEncodeSettings(makeConfig({ resolution: { width: 480, height: 640 } })),
     ).toMatchObject({ maxLongSide: 640 });
   });
+
+  test("rounds an odd longer edge down to the even value the helper requires", function () {
+    expect(
+      buildDeviceEncodeSettings(makeConfig({ resolution: { width: 1179, height: 2557 } })),
+    ).toMatchObject({ maxLongSide: 2556 });
+  });
 });
 
 describe("buildEncodedCopyFfmpegArgs", function () {
@@ -387,6 +393,31 @@ describe("IosPhysicalVideoCaptureBackend - lifecycle", function () {
     const result = await harness.backend.stop(handle);
 
     expect(result.endedAt).toBe(new Date(10_000).toISOString());
+  });
+
+  test("sheds records while the muxer stalls and resumes at the next keyframe", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitRecord();
+    const stdin = harness.ffmpeg.processes[0].stdin;
+    stdin.pause();
+    const big = Buffer.alloc(1024 * 1024, 1);
+    for (let i = 0; i < 64; i++) {
+      harness.helper.emitRecord(false, big);
+    }
+    // Bounded: a stalled muxer must not retain the whole stream in the daemon.
+    expect(stdin.writableLength).toBeLessThan(32 * 1024 * 1024);
+
+    stdin.resume();
+    await new Promise((resolve) => setImmediate(resolve));
+    const before = harness.ffmpeg.processes[0].written.length;
+    harness.helper.emitRecord(false, big);
+    expect(harness.ffmpeg.processes[0].written.length).toBe(before);
+    harness.helper.emitRecord(true, big);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(harness.ffmpeg.processes[0].written.length).toBeGreaterThan(before);
+
+    await harness.backend.stop(handle);
   });
 
   test("stop closes ffmpeg stdin so the moov atom is finalized instead of killing the encoder", async function () {

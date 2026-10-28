@@ -1,0 +1,42 @@
+{
+  "description": "Peaks at or above 2.7 g are shakes; a second peak inside the 1000 ms cooldown is ignored; 2.69 g is not a shake.",
+  "samples": [
+    {
+      "timestampMs": 0,
+      "x": 0,
+      "y": 0,
+      "z": 9.8
+    },
+    {
+      "timestampMs": 100,
+      "x": 20,
+      "y": 20,
+      "z": 9.8
+    },
+    {
+      "timestampMs": 500,
+      "x": 25,
+      "y": 0,
+      "z": 9.8
+    },
+    {
+      "timestampMs": 1100,
+      "x": 26.5,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "timestampMs": 1200,
+      "x": 30,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "timestampMs": 2200,
+      "x": 26.4,
+      "y": 0,
+      "z": 0
+    }
+  ],
+  "expectedShakes": [100, 1100]
+}

@@ -171,6 +171,13 @@ export interface ToolTraits {
    * successful result binds the connection to the selected session.
    */
   selectsActiveDevice?: boolean;
+  /**
+   * Budgets its MCP request deadline from the `timeoutMs` argument like a device-resource call
+   * (`setDeviceResources`, `reconcileDeviceResources`), so the daemon sizes the request timeout
+   * without keying on the tool name (#15672). Advertised as `_meta["automobile/deviceResourceBudget"]`
+   * so a process that cannot load the registry reads it from the committed tool definitions.
+   */
+  deviceResourceBudget?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
@@ -200,6 +207,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     stagesFiles,
     planRelevant,
     selectsActiveDevice,
+    deviceResourceBudget,
   } = options;
   return {
     stopsApp,
@@ -211,6 +219,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     stagesFiles,
     planRelevant,
     selectsActiveDevice,
+    deviceResourceBudget,
   };
 }
 

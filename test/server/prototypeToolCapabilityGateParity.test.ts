@@ -515,6 +515,23 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_settings_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["settings"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "settings.open", args: { page: { value: "app" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_haptics_v1: {
     minimalSpec: {
       ...base,

@@ -21760,6 +21760,27 @@
         }
       },
       "state": {}
+    },
+    "settings": {
+      "capability": "prototype_platform_settings_v1",
+      "calls": {
+        "open": {
+          "args": {
+            "page": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["app", "notifications", "location", "wifi", "bluetooth", "display"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {

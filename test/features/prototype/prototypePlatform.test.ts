@@ -585,3 +585,27 @@ describe("biometric module contract", () => {
     expect(biometric.calls.authenticate.sensitive).toBe(false);
   });
 });
+
+describe("settings module contract", () => {
+  const settings = PROTOTYPE_PLATFORM_MODULES.settings;
+
+  test("open takes one page from the closed list and nothing else", () => {
+    const args = settings.calls.open.args;
+    expect(Object.keys(args)).toEqual(["page"]);
+    expect(args.page.optional).toBe(false);
+    expect(args.page.value.values).toEqual([
+      "app",
+      "notifications",
+      "location",
+      "wifi",
+      "bluetooth",
+      "display",
+    ]);
+  });
+
+  test("the module has no events, state or permission", () => {
+    expect(settings.events).toEqual({});
+    expect(settings.state).toEqual({});
+    expect(settings.calls.open.permissions).toEqual([]);
+  });
+});

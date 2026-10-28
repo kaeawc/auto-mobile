@@ -102,6 +102,7 @@
                     {
                       "type": "slider",
                       "testTag": "volume_slider",
+                      "contentDescription": "Volume",
                       "stateKey": "volume",
                       "min": 0,
                       "max": 100,

@@ -611,6 +611,12 @@ install a virtual loopback device and make it the default input". A supported ho
 default device and its transport (`built-in`, `virtual`, `usb`, ...) in its `reason`, so "real mic"
 and "virtual loopback" can be told apart.
 
+- **`audio_input_unavailable` (#13627).** `src/utils/audio/audioInputDiagnostic.ts` derives the
+  diagnostic from a non-available `*.audioInput` entry, so there is no second detection path. An iOS
+  simulator reads the live cached host probe (not an inventory captured at discovery); an Android
+  emulator uses its booted inventory, and a device without one gets nothing. Physical devices never
+  get it. `observe` adds it to its own served copy only, so cached observations reused by action
+  tools never carry it; a microphone grant keeps `success` and adds it under `diagnostics`.
 - **Probe.** `src/utils/audio/coreAudioHal.ts` reads the CoreAudio HAL through `bun:ffi`
   (`AudioObjectGetPropertyData` on the system object, then the default device's streams, name and
   transport). HAL property queries need no GUI session, so the probe runs the same from a LaunchDaemon

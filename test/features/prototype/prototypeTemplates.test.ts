@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderPrototypeGuide } from "../../../src/features/prototype/prototypeGuide";
+import { prototypeAccessibilityOutput } from "../../../src/features/prototype/prototypeAccessibilityLint";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { untaggedInteractiveNodes } from "../../helpers/prototypeTestTags";
 
@@ -58,6 +59,10 @@ describe("prototype template gallery", () => {
 
       test("sets a testTag on every interactive node", () => {
         expect(untaggedInteractiveNodes(decoded.get(name))).toEqual([]);
+      });
+
+      test("passes the accessibility lint with zero findings (#14126)", () => {
+        expect(prototypeAccessibilityOutput(decoded.get(name))).toEqual({});
       });
 
       test("is listed in the authoring guide and the hackathon guide", () => {

@@ -190,6 +190,15 @@ separate `select` key exists. Android only; not yet verified on a TV image
 - 📸 Screenshot paths are kept for **at least 10 minutes after return** unless evicted early under capacity pressure; each path has a `screenshotExpiresAt`/`expiresAt` (host epoch ms, not a promise). Retention starts at **128 MiB** and scales by 64 MiB per active device up to 1 GiB, within a limit of **4096 files**. Each device’s newest 3 screenshots (counting its incoming frame) are evicted only as a last resort, and a capture is admitted even if nothing fits. The byte limits and per-device allowance are [configurable](using/environment-variables.md#screenshot-retention). After a restart, existing files get a process-start grace of ten minutes.
 - 🧹 `holdSessionOnFailure` keeps plan sessions instead of auto-releasing them.
 
+### No audio input (`audio_input_unavailable`)
+
+When a device cannot record audio, `observe` returns `diagnostics: [{ code: "audio_input_unavailable", message, retryable: false }]`,
+and a `setAppPermissions` grant of `microphone` (iOS) or `RECORD_AUDIO` (Android) still succeeds but carries the same
+`diagnostics` entry. This applies to an iOS simulator on a host with no audio input device, and to an Android emulator launched
+with `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`) or with `hw.audioInput=no`. Recordings on that device contain no audio.
+Treat this as an environment limitation: do not retry, and do not report it as an app failure. Fix the host (for example, make a
+virtual loopback device the default input) or the AVD audio settings. The `message` names the cause.
+
 ### Stylus pointer on `tapAt`, `swipeAt` and `dragPath`
 
 `pointer: { toolType: "stylus" }` injects a stylus instead of a finger (Android only; never falls back to a finger).

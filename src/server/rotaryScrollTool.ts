@@ -3,11 +3,22 @@ import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { defineDeviceTool } from "./defineTool";
 import { ActionableError, type BootedDevice } from "../models";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultTimer } from "../utils/SystemTimer";
 import { hierarchyFingerprint } from "../utils/hierarchyFingerprint";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { hasUsableHierarchy } from "../features/observe/ActiveWindowAttribution";
+import {
+  defaultDeviceTraits,
+  isWatch,
+  type DeviceTraits,
+} from "../utils/android-cmdline-tools/deviceTraits";
+import { DEVICE_TRAITS_TIMEOUT_MS } from "./bootedDeviceTraits";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import type { ObserveResult } from "../models";
 import {
   AdbRotaryScroller,
@@ -46,6 +57,10 @@ export const rotaryScrollResultSchema = z
       }),
     ),
     reason: z.string().optional(),
+    warning: z
+      .string()
+      .optional()
+      .describe("Set when the device is not confirmed to be a watch; the input is still sent"),
   })
   .passthrough();
 
@@ -86,7 +101,39 @@ const defaultRotaryScrollerFactory: RotaryScrollerFactory = (device) =>
     },
   });
 
-function payload(result: RotaryScrollResult) {
+/**
+ * Whether the device announces a watch build (`ro.build.characteristics`, #14897); undefined
+ * when the traits could not be read. Injectable so tests never touch adb.
+ */
+export type WatchCheck = (device: BootedDevice) => Promise<boolean | undefined>;
+
+export function traitsWatchCheck(traits: DeviceTraits, adbFactory: AdbClientFactory): WatchCheck {
+  return async (device) => {
+    try {
+      const read = await traits.read(adbFactory.create(device), device.deviceId, {
+        timeoutMs: DEVICE_TRAITS_TIMEOUT_MS,
+      });
+      return isWatch(read);
+    } catch (error) {
+      logger.warn(`rotaryScroll could not read device traits: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  };
+}
+
+const defaultWatchCheck = traitsWatchCheck(defaultDeviceTraits, defaultAdbClientFactory);
+
+/** Most phones ignore rotary events, so a scroll on one is worth flagging (#14902). */
+export function watchWarning(watch: boolean | undefined): string | undefined {
+  if (watch === true) {
+    return undefined;
+  }
+  return watch === false
+    ? "This device does not announce a watch build (ro.build.characteristics); most phones and tablets ignore rotary input."
+    : "Could not read the device traits to confirm this is a watch; rotary input may be ignored.";
+}
+
+function payload(result: RotaryScrollResult, warning: string | undefined) {
   return {
     success: result.success,
     message: result.success
@@ -96,11 +143,15 @@ function payload(result: RotaryScrollResult) {
     ...(result.method ? { method: result.method } : {}),
     attempts: result.attempts,
     ...(result.reason ? { reason: result.reason } : {}),
+    ...(warning ? { warning } : {}),
   };
 }
 
 export const createRotaryScrollHandler =
-  (makeScroller: RotaryScrollerFactory = defaultRotaryScrollerFactory) =>
+  (
+    makeScroller: RotaryScrollerFactory = defaultRotaryScrollerFactory,
+    checkWatch: WatchCheck = defaultWatchCheck,
+  ) =>
   async (
     device: BootedDevice,
     args: RotaryScrollArgs,
@@ -112,14 +163,18 @@ export const createRotaryScrollHandler =
         "rotaryScroll is Android-only: it drives a Wear OS crown over adb.",
       );
     }
+    const warning = watchWarning(await checkWatch(device));
     const result = await makeScroller(device).scroll({ delta: args.delta, signal });
-    return withIsErrorOnFailure(createStructuredToolResponse(payload(result)), result.success);
+    return withIsErrorOnFailure(
+      createStructuredToolResponse(payload(result, warning)),
+      result.success,
+    );
   };
 
 const rotaryScrollTool = defineDeviceTool({
   name: "rotaryScroll",
   description:
-    "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/design-docs/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged.",
+    "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/design-docs/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged. On a device that does not announce a watch build the input is still sent and the result carries a warning.",
   input: rotaryScrollInput,
   handler: createRotaryScrollHandler(),
   options: {

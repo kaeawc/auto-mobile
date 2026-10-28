@@ -555,7 +555,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     this.prototypes.attachRequestHost(host);
   }
   attachPrototypeChannelHost(host: PrototypeChannelHost | undefined): void {
-    this.prototypes.attachChannelHost(host);
+    this.prototypes.channels.attach(host);
   }
 
   async requestAddHighlight(

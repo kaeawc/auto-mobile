@@ -394,7 +394,7 @@ export class AndroidInboundMessageRouter {
    */
   private routePrototypeHostFrame(type: string, message: unknown): void {
     if (PROTOTYPE_CHANNEL_DEVICE_FRAME_TYPES.has(type)) {
-      this.ctx.prototypes.handlePrototypeChannelFrame(message);
+      this.ctx.prototypes.channels.handleFrame(message);
       return;
     }
     if (type === PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE) {

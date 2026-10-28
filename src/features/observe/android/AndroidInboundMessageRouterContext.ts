@@ -19,6 +19,7 @@ import type {
 import type { CtrlProxyCertificates } from "./CtrlProxyCertificates";
 import type { CtrlProxyFocus } from "./CtrlProxyFocus";
 import type { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
+import type { PrototypeChannelRelay } from "../../prototype/prototypeChannelHost";
 import type { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
 import type {
   AndroidDisplayTransition,
@@ -104,11 +105,8 @@ interface InboundDelegateContext {
   readonly focus: Pick<CtrlProxyFocus, "convertAccessibilityNodeToElement">;
   readonly prototypes: Pick<
     CtrlProxyPrototypes,
-    | "handlePrototypeEvent"
-    | "handlePrototypeRequest"
-    | "handlePrototypeRequestCancel"
-    | "handlePrototypeChannelFrame"
-  >;
+    "handlePrototypeEvent" | "handlePrototypeRequest" | "handlePrototypeRequestCancel"
+  > & { readonly channels: Pick<PrototypeChannelRelay, "handleFrame"> };
   readonly storage: { notifyStorageChangeListeners(event: StorageChangedEvent): void };
 }
 

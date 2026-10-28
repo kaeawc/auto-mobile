@@ -160,3 +160,25 @@ function reply(send: PrototypeChannelSender, message: PrototypeChannelOutboundMe
     logger.warn(`[PrototypeChannel] could not relay ${message.type}: ${errorMessage(error)}`);
   }
 }
+
+/** The channel host one device client holds: frames route to it and its socket's close ends it. */
+export class PrototypeChannelRelay {
+  private host: PrototypeChannelHost | undefined;
+
+  constructor(
+    private readonly getWebSocket: () => Pick<CtrlSocket, "readyState" | "send"> | null,
+  ) {}
+
+  attach(host: PrototypeChannelHost | undefined): void {
+    this.host = host;
+  }
+
+  /** Routes one `prototype_channel_open`, `_send` or `_close` frame; replies go to the same socket. */
+  handleFrame(frame: unknown): void {
+    routePrototypeChannelFrame(this.host, frame, webSocketChannelSender(this.getWebSocket));
+  }
+
+  handleDisconnect(): void {
+    this.host?.handleDisconnect();
+  }
+}

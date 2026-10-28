@@ -52,8 +52,10 @@ class RecordingContext implements Context {
   prototypes: Context["prototypes"] = {
     handlePrototypeRequest: async () => {},
     handlePrototypeRequestCancel: () => {},
-    handlePrototypeChannelFrame: (...args) => {
-      this.calls.push({ name: "channel", args });
+    channels: {
+      handleFrame: (...args) => {
+        this.calls.push({ name: "channel", args });
+      },
     },
     handlePrototypeEvent: (...args) => {
       this.calls.push({ name: "prototype", args });

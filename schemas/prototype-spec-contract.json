@@ -157,6 +157,35 @@
         }
       }
     },
+    "locationBlock": {
+      "kind": "object",
+      "fields": {
+        "accuracy": {
+          "rule": {
+            "kind": "enum",
+            "values": ["precise", "approximate"]
+          },
+          "optional": true
+        },
+        "minIntervalMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 1000,
+            "max": 3600000
+          },
+          "optional": true
+        },
+        "minDistanceM": {
+          "rule": {
+            "kind": "number",
+            "min": 0,
+            "max": 100000
+          },
+          "optional": true
+        }
+      }
+    },
     "iconEffectTrigger": {
       "kind": "object",
       "exactlyOne": ["key", "data"],
@@ -15394,6 +15423,10 @@
         },
         "auth": {
           "rule": { "kind": "ref", "name": "authBlock" },
+          "optional": true
+        },
+        "location": {
+          "rule": { "kind": "ref", "name": "locationBlock" },
           "optional": true
         },
         "channels": {

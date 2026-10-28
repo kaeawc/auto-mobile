@@ -28019,6 +28019,27 @@
               "additionalProperties": false,
               "description": "Fake sign-in accounts for auth.signIn (prototype_platform_auth_v1); unique ids, no passwords or tokens"
             },
+            "location": {
+              "type": "object",
+              "properties": {
+                "accuracy": {
+                  "type": "string",
+                  "enum": ["precise", "approximate"]
+                },
+                "minIntervalMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 3600000
+                },
+                "minDistanceM": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100000
+                }
+              },
+              "additionalProperties": false,
+              "description": "Foreground location updates for /platform/location/current (prototype_platform_location_v1); needs location in requires.platform and requires.permissions"
+            },
             "derive": {
               "type": "object",
               "additionalProperties": {

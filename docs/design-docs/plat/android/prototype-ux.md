@@ -2124,8 +2124,11 @@ reference both runtimes copy. A fix is written only when its coordinates are in 
 optional fields the platform reported. `<into>__meta` then gets `{durationMs, approximate}`. A failure leaves
 `into` untouched and records `{durationMs, error}`: a code outside the four above becomes `platform_error`, and
 only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the fix is rolled
-back. The root subscription block is not in the contract yet, and no production runtime advertises the
-module.
+back. The root `location` block `{accuracy?, minIntervalMs?, minDistanceM?}` subscribes to foreground updates:
+it keeps `/platform/location/current` current while the prototype is shown and raises `location.updated` for each
+write, at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
+`minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
+`requires.permissions`. No updates are delivered in the background. No production runtime advertises the module.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

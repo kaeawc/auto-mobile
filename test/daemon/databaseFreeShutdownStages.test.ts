@@ -232,7 +232,12 @@ async function helperPoolWithRunningHelper(
   const pool = new IosSimulatorCaptureHelperPool({ timer, createHelper: () => helper });
   const lease = pool.acquire({
     binaryPath: "/fake/screen-capture-helper",
-    target: { kind: "simulator", windowID: 42, fps: 15 },
+    target: {
+      kind: "simulator",
+      windowID: 42,
+      fps: 15,
+      encode: { codec: "h264", bitrate: { kind: "bitsPerPixel", bpp: 0.1 } },
+    },
   });
   await lease.start();
   expect(helper.isRunning).toBe(true);

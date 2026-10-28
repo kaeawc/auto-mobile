@@ -2214,6 +2214,26 @@ in `requires.permissions`. `audioRecorder.start` takes an optional `maxDurationM
 counts the current recording. A press-and-hold control uses the gesture action lists, and playback
 uses a `media` audio player. No production runtime advertises the module yet.
 
+**Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
+calls. `notifications.post` takes `id` (1-128 characters), `channel` (a key-shaped channel id) and `title`
+(non-blank, at most 128), plus optional `body` (at most 1024), `largeImage` (an asset id), `style`, `group`,
+`badge` (whole number 0-9999), `data` (JSON, at most 1 KiB, echoed in every event for the notification),
+`actions`, `progress`, `silent` and `ongoing`. `style` is discriminated by `type`, like every other union in
+the spec: `bigText`; `bigPicture` with `image`; `inbox` with 1-6 `lines` and an optional `summary`; or
+`messaging` with `self`, an optional `conversationTitle` and 1-7 `messages` of `{from?, text, image?}`, where
+an absent `from` is the user. `actions` holds 1-3 buttons of `{id, label, opensApp?, reply?: {placeholder?}}`,
+and `progress` is `{value: 0..1}` or `{indeterminate: true}`. `notifications.cancel` takes `id`, `group` or
+`all: true`, and `notifications.setBadge` takes `count` (0-9999). `post` and `setBadge` need `notifications`
+in `requires.permissions`; `cancel` does not. Events are `notifications.opened`, `.action`, `.reply` (marked
+sensitive, since it carries typed text) and `.dismissed`. State is `/platform/notifications/{badge, active,
+pending, authorization}`: `active` is at most 24 per prototype, and `authorization` uses the permission
+vocabulary (`granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The
+runtime homes follow the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and
+ProtoViewer advertise the module, the CtrlProxy overlay advertises it as a disclosed preview, and the iOS
+injected agent never does. The validators do not yet check the top-level `notifications.channels` block,
+that `channel` names a declared channel, unique action ids, or that `cancel` names exactly one target. No
+production runtime advertises the module yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

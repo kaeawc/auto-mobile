@@ -30,6 +30,51 @@ const spec = (extra: Record<string, unknown>, root: unknown = { type: "spacer" }
   root,
 });
 
+describe("notifications module contract", () => {
+  const notifications = PROTOTYPE_PLATFORM_MODULES.notifications;
+
+  test("post, cancel and setBadge; posting and badging need the notifications permission", () => {
+    expect(Object.keys(notifications.calls)).toEqual(["post", "cancel", "setBadge"]);
+    expect(notifications.calls.post.permissions).toEqual(["notifications"]);
+    expect(notifications.calls.setBadge.permissions).toEqual(["notifications"]);
+    expect(notifications.calls.cancel.permissions).toEqual([]);
+    expect(
+      Object.entries(notifications.calls.post.args)
+        .filter(([, arg]) => !arg.optional)
+        .map(([name]) => name),
+    ).toEqual(["id", "channel", "title"]);
+    expect(Object.values(notifications.calls.cancel.args).every((arg) => arg.optional)).toBe(true);
+  });
+
+  test("events are opened, action, reply and dismissed, and only reply is sensitive", () => {
+    expect(notifications.events).toEqual({
+      opened: { sensitive: false },
+      action: { sensitive: false },
+      reply: { sensitive: true },
+      dismissed: { sensitive: false },
+    });
+  });
+
+  test("state is the badge, active and pending counts and the authorization status", () => {
+    expect(Object.keys(notifications.state ?? {})).toEqual([
+      "badge",
+      "active",
+      "pending",
+      "authorization",
+    ]);
+    expect(notifications.state?.active?.value).toMatchObject({ min: 0, max: 24 });
+    expect(notifications.state?.authorization?.value.values).toEqual([
+      "granted",
+      "denied",
+      "blocked",
+      "notDetermined",
+      "limited",
+      "restricted",
+      "unavailable",
+    ]);
+  });
+});
+
 describe("platform module table", () => {
   test("resolves calls, events and pointer modules from the contract", () => {
     expect(prototypePlatformCall("test.echo")?.definition.args.message?.optional).toBe(false);

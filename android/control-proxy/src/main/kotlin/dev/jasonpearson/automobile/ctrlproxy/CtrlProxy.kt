@@ -945,7 +945,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private val prototypePlatform by lazy {
+  // Kept as a Lazy so teardown closes the service-owned modules only if they were ever created.
+  private val prototypePlatformDelegate = lazy {
     dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform(
       this,
       dev.jasonpearson.automobile.prototype.AndroidPrototypeClipboard(
@@ -957,6 +958,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       ),
     )
   }
+  private val prototypePlatform by prototypePlatformDelegate
 
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is
@@ -2324,10 +2326,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.destroy()
     }
 
-    if (::prototypeController.isInitialized) {
-      // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
-      // a pending request releases the controller mutex on cancellation, then cleanup resumes.
-      teardownScope.launch { prototypeController.destroy() }
+    // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
+    // a pending request releases the controller mutex on cancellation, then cleanup resumes. The
+    // platform modules are shared by every surface, so they close once, after the controller.
+    teardownScope.launch {
+      if (::prototypeController.isInitialized) prototypeController.destroy()
+      if (prototypePlatformDelegate.isInitialized()) {
+        dev.jasonpearson.automobile.ctrlproxy.prototype.closePrototypeModules(prototypePlatform)
+      }
     }
     if (::overlayManager.isInitialized) {
       overlayManager.destroy()

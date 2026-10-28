@@ -514,6 +514,9 @@ private object PrototypeMotionFeatures {
  * The feature names a spec envelope (not its nodes) asks for, in the strict policy's vocabulary.
  */
 internal object PrototypeEnvelopeFeatures {
+  /** Root `window` controls gated by prototype_platform_window_controls_v1 (#14320). */
+  val WINDOW_CONTROLS = listOf("keepScreenOn", "brightness", "orientation", "statusBar")
+
   fun collect(spec: JsonObject): List<String> = buildList {
     content(spec)
     presentation(spec)
@@ -543,6 +546,8 @@ internal object PrototypeEnvelopeFeatures {
     if (spec.text("motion") == "reduced") add("reduced_motion")
     if ((spec["window"] as? JsonObject)?.get("transition") != null) add("window_motion")
     if ((spec["window"] as? JsonObject)?.get("backdrop") != null) add("backdrop")
+    if (WINDOW_CONTROLS.any { (spec["window"] as? JsonObject)?.containsKey(it) == true })
+      add("platform_window_controls")
     if ((spec["theme"] as? JsonObject)?.text("design") == "platform") add("design_platform")
     val colors = (spec["theme"] as? JsonObject)?.get("colors") as? JsonObject
     if (colors?.get("light") != null || colors?.get("dark") != null) add("theme_modes")

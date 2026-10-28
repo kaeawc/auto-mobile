@@ -15184,6 +15184,44 @@
           },
           "optional": true
         },
+        "keepScreenOn": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        },
+        "brightness": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "enum",
+                "values": ["system"]
+              },
+              {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 100
+              }
+            ]
+          },
+          "optional": true
+        },
+        "orientation": {
+          "rule": {
+            "kind": "enum",
+            "values": ["portrait", "landscape", "unlocked"]
+          },
+          "optional": true
+        },
+        "statusBar": {
+          "rule": {
+            "kind": "enum",
+            "values": ["light", "dark", "auto"]
+          },
+          "optional": true
+        },
         "transition": {
           "rule": {
             "kind": "enum",

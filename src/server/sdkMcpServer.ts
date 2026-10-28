@@ -9,6 +9,7 @@ import {
   type Server,
   type ServerCapabilities,
 } from "@modelcontextprotocol/server";
+import { ENV, readEnvBool } from "../config/env";
 import { ErrorCode, McpError } from "../daemon/mcpError";
 import { isCreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 
@@ -18,6 +19,22 @@ type HandlerContext = Parameters<RequestHandler>[1];
 
 const INVALID_TOOLS_CALL_REQUEST = "Invalid tools/call request: ";
 const INVALID_TOOLS_CALL_RESULT = "Invalid tools/call result: ";
+
+/**
+ * The MCP `instructions` block (#13946). Off by default: it adds tokens to every client context,
+ * so it is sent only while the agent benchmark A/B measures whether it saves more than it costs.
+ */
+export const SERVER_INSTRUCTIONS =
+  "AutoMobile drives Android and iOS devices. Start with listDevices, getAndroid or getApple, then bind your session. " +
+  "Call observe before acting and again after each action; element ids are only valid for the observation that returned them. " +
+  "Prefer tapOn/sendKeys on observed elements over raw coordinates. " +
+  "Large artifacts (screenshots, logs) are resources, not inline output. " +
+  "Read the automobile usage skill (skill://auto-mobile-usage/SKILL.md) for the full workflow before your first device call.";
+
+/** The `instructions` to advertise: {@link SERVER_INSTRUCTIONS} only when `AUTOMOBILE_SERVER_INSTRUCTIONS` is on. */
+export function serverInstructions(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return readEnvBool(ENV.SERVER_INSTRUCTIONS, env) ? SERVER_INSTRUCTIONS : undefined;
+}
 
 /**
  * Builds an SDK v2 `McpServer` whose wire behaviour matches the v1 SDK (issue #4678).
@@ -46,6 +63,9 @@ const INVALID_TOOLS_CALL_RESULT = "Invalid tools/call result: ";
  *   otherwise add `content: []` to the task handle. Only a request that declared the
  *   extension ever gets such a result (see `src/server/tasks/runAsTask.ts`).
  *
+ * - Instructions: `initialize` carries `instructions` only when {@link serverInstructions} returns
+ *   them (off by default), so the default `initialize` result is unchanged.
+ *
  * The adjustments hook `Server._wrapHandler`, which `setRequestHandler` applies to every
  * handler registered after construction. All of our handlers are registered after this
  * returns, and they replace the SDK handlers the constructor installed.
@@ -55,11 +75,13 @@ export function createSdkMcpServer(
   capabilities: ServerCapabilities,
   cacheHints?: McpServerOptions["cacheHints"],
   requestState?: McpServerOptions["requestState"],
+  instructions: string | undefined = serverInstructions(),
 ): McpServer {
   const server = new McpServer(info, {
     capabilities: { ...capabilities, prompts: undefined },
     ...(cacheHints && { cacheHints }),
     ...(requestState && { requestState }),
+    ...(instructions !== undefined && { instructions }),
   });
   if (capabilities.prompts) {
     server.server.registerCapabilities({ prompts: capabilities.prompts });

@@ -364,6 +364,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: { ...base, window: { ...base.window, backdrop: { material: "thin" } } },
     ops: [],
   },
+  prototype_platform_window_controls_v1: {
+    minimalSpec: { ...base, window: { ...base.window, keepScreenOn: true } },
+    ops: [],
+  },
   prototype_network_v1: fixture({
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],

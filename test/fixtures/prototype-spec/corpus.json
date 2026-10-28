@@ -389,6 +389,8 @@
     "tooltip-tour.json",
     "transition-slide.json",
     "width-dp-at-max.json",
+    "window-controls-system.json",
+    "window-controls.json",
     "window-dead-taps.json",
     "window-motion.json",
     "z-effects-all-types.json",
@@ -1700,6 +1702,7 @@
     "strict-gate-prototype_platform_sound_v1.json",
     "strict-gate-prototype_platform_test_v1.json",
     "strict-gate-prototype_platform_v1.json",
+    "strict-gate-prototype_platform_window_controls_v1.json",
     "strict-gate-prototype_reduced_motion_v1.json",
     "strict-gate-prototype_refresh_v1.json",
     "strict-gate-prototype_rich_text_v1.json",
@@ -2164,6 +2167,13 @@
     "unknown-style.json",
     "weight-over-max.json",
     "width-dp-over-max.json",
+    "window-controls-brightness-fraction.json",
+    "window-controls-brightness-negative.json",
+    "window-controls-brightness-over.json",
+    "window-controls-brightness-word.json",
+    "window-controls-keep-screen-on-not-boolean.json",
+    "window-controls-orientation-unknown.json",
+    "window-controls-status-bar-unknown.json",
     "window-dead-taps-not-boolean.json",
     "window-transition.json",
     "wrong-type.json",
@@ -2884,6 +2894,8 @@
       "prototype_platform_location_v1",
       "prototype_platform_v1"
     ],
+    "window-controls.json": ["prototype_platform_window_controls_v1"],
+    "window-controls-system.json": ["prototype_platform_window_controls_v1"],
     "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"]
   }
 }

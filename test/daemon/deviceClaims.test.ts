@@ -5,6 +5,7 @@ import {
   beforeEach,
   describe,
   expect,
+  mock,
   spyOn,
   test,
 } from "bun:test";
@@ -468,5 +469,129 @@ describe("DeviceClaimMirrorHub", () => {
     await mirrors[0]!.idle();
     expect(store.rows.size).toBe(2);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+});
+
+describe("the claims mirror: late registry discovery", () => {
+  function harness() {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(10);
+    const store = new FakeDeviceClaims();
+    const hub = new DeviceClaimMirrorHub();
+    const pending = Promise.withResolvers<{ deviceClaims(): DeviceClaims }>();
+    let opening: typeof pending.promise | undefined;
+    let fileExists = false;
+    const probe = mock(() => fileExists);
+    const open = mock(() => {
+      opening = pending.promise;
+      return true;
+    });
+    const mirror = hub.register(
+      new StoreDeviceClaimMirror({
+        platform: "android",
+        timer,
+        store: lazyDeviceClaims(() => opening),
+        registryFileExists: probe,
+        openRegistry: open,
+        generationOf: () => undefined,
+      }),
+    );
+    return { timer, store, hub, pending, probe, open, mirror, appear: () => (fileExists = true) };
+  }
+
+  test("one ladder step discovers the registry; its opening backfills original times and owed releases", async () => {
+    const { timer, store, hub, pending, probe, open, mirror, appear } = harness();
+    await store.upsert({ ...CLAIM, deviceId: "emulator-5556" });
+    mirror.claimed("emulator-5554", OWNER);
+    mirror.released("emulator-5556", OWNER);
+    expect(open).not.toHaveBeenCalled();
+    appear();
+    timer.advanceTime(DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS[0]!);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(await store.get("android", "emulator-5554")).toBeUndefined();
+    const probes = probe.mock.calls.length;
+    // Opening is already handled: another device write and ladder step ask neither hook again.
+    mirror.claimed("emulator-5558", OWNER);
+    timer.advanceTime(DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS[1]!);
+    expect(probe).toHaveBeenCalledTimes(probes);
+    expect(open).toHaveBeenCalledTimes(1);
+
+    pending.resolve({ deviceClaims: () => store });
+    const registry = await pending.promise;
+    hub.registryOpened(registry.deviceClaims());
+    await hub.idle();
+    expect((await store.get("android", "emulator-5554"))?.claimedAtMs).toBe(10);
+    expect((await store.get("android", "emulator-5554"))?.updatedAtMs).toBe(timer.now());
+    expect(await store.get("android", "emulator-5556")).toBeUndefined();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    hub.dispose();
+  });
+
+  test("an absent file is probed only on the write and its five retry steps", () => {
+    const { timer, probe, open, mirror, hub } = harness();
+    mirror.claimed("emulator-5554", OWNER);
+    for (const delay of DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS) {
+      expect(timer.getPendingTimeouts()).toEqual([delay]);
+      timer.advanceTime(delay);
+    }
+    expect(probe).toHaveBeenCalledTimes(DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS.length + 1);
+    timer.advanceTime(1_000_000);
+    expect(probe).toHaveBeenCalledTimes(DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS.length + 1);
+    expect(open).not.toHaveBeenCalled();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+    expect(timer.getPendingSleepCount()).toBe(0);
+    hub.dispose();
+  });
+
+  test.each(["mirror", "hub"] as const)("%s disposal stops both hooks", (target) => {
+    const { timer, probe, open, mirror, hub, appear } = harness();
+    mirror.claimed("emulator-5554", OWNER);
+    if (target === "hub") {
+      hub.dispose();
+    } else {
+      mirror.dispose();
+    }
+    appear();
+    timer.advanceTime(1_000_000);
+    mirror.released("emulator-5554", OWNER);
+    hub.registryOpened(new FakeDeviceClaims());
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a file appearing after exhaustion is discovered by the next release", () => {
+    const { timer, open, mirror, hub, appear } = harness();
+    mirror.claimed("emulator-5554", OWNER);
+    for (const delay of DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS) {
+      timer.advanceTime(delay);
+    }
+    appear();
+    timer.advanceTime(1_000_000);
+    expect(open).not.toHaveBeenCalled();
+    mirror.released("emulator-5554", OWNER);
+    expect(open).toHaveBeenCalledTimes(1);
+    hub.dispose();
+  });
+
+  test.each(["probe", "open"] as const)("a thrown %s is logged and retried", (target) => {
+    const { timer, probe, open, mirror, hub, appear } = harness();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    appear();
+    const hook = target === "probe" ? probe : open;
+    hook.mockImplementationOnce(() => {
+      throw new Error("probe/open unavailable");
+    });
+    try {
+      mirror.claimed("emulator-5554", OWNER);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("Cannot start registry opening");
+      timer.advanceTime(DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS[0]!);
+      expect(open).toHaveBeenCalledTimes(target === "probe" ? 1 : 2);
+    } finally {
+      hub.dispose();
+      warn.mockRestore();
+    }
   });
 });

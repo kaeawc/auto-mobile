@@ -2,6 +2,7 @@ import {
   deleteInternalToolParams,
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_PARAM_NAMES,
@@ -74,4 +75,18 @@ export function adoptRestartResumeTargets<T>(
   targets: T,
 ): void {
   args.__restartResumeTargets ??= targets;
+}
+
+/** The key of the request's live (progress-extended) transport deadline (`__mcpLiveDeadlineKey`). */
+export function internalLiveDeadlineKey(args: object): string | undefined {
+  const value = internalParam(args, INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+  return typeof value === "string" ? value : undefined;
+}
+
+/** Record the session a restart-resume start recovers unless the args already name one. */
+export function adoptRestartResumeSessionUuid(
+  args: { __restartResumeSessionUuid?: string },
+  sessionUuid: string | undefined,
+): void {
+  args.__restartResumeSessionUuid ??= sessionUuid;
 }

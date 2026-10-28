@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  adoptRestartResumeSessionUuid,
   adoptRestartResumeTargets,
   internalExecutionId,
   internalExecutionStartTime,
+  internalLiveDeadlineKey,
   internalMcpSessionId,
   internalOneShotCli,
   internalRestartResumeSessionUuid,
@@ -59,5 +61,22 @@ describe("start-device handoff readers", () => {
     const empty: { __restartResumeTargets?: string[] } = {};
     adoptRestartResumeTargets(empty, ["other"]);
     expect(empty.__restartResumeTargets).toEqual(["other"]);
+  });
+});
+
+describe("provisioning handoff readers", () => {
+  test("the live deadline key reads only a string", () => {
+    expect(internalLiveDeadlineKey({ __mcpLiveDeadlineKey: "k1" })).toBe("k1");
+    expect(internalLiveDeadlineKey({ __mcpLiveDeadlineKey: 1 })).toBeUndefined();
+    expect(internalLiveDeadlineKey({})).toBeUndefined();
+  });
+
+  test("adopting a resume session never replaces one the args already name", () => {
+    const named: { __restartResumeSessionUuid?: string } = { __restartResumeSessionUuid: "mine" };
+    adoptRestartResumeSessionUuid(named, "other");
+    expect(named.__restartResumeSessionUuid).toBe("mine");
+    const empty: { __restartResumeSessionUuid?: string } = {};
+    adoptRestartResumeSessionUuid(empty, "other");
+    expect(empty.__restartResumeSessionUuid).toBe("other");
   });
 });

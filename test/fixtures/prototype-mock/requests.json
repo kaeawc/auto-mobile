@@ -1,0 +1,855 @@
+{
+  "note": "Sequential requests against one backend per case; each step names the expected status and JSON body (and headers when listed). The engine ids come from a generator that yields fake-1, fake-2, ... A future Kotlin/Swift twin replays these.",
+  "cases": [
+    {
+      "name": "list, filter, search and sort",
+      "definition": {
+        "collections": {
+          "posts": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            },
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "method": "GET",
+          "path": "/posts",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            },
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts?tag=a",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts?q=alpha",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts?q=BETA",
+          "status": 200,
+          "expect": [
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_sort=price",
+          "status": 200,
+          "expect": [
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            },
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            },
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_sort=-price",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            },
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_sort=title",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts?tag=a&q=gamma",
+          "status": 200,
+          "expect": [
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts/3",
+          "status": 200,
+          "expect": {
+            "id": 3,
+            "title": "Gamma Alpha",
+            "price": 20,
+            "tag": "a"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts/99",
+          "status": 404,
+          "expect": {
+            "error": "Not found"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/nope",
+          "status": 404,
+          "expect": {
+            "error": "No such route"
+          }
+        }
+      ]
+    },
+    {
+      "name": "page and limit",
+      "definition": {
+        "collections": {
+          "posts": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            },
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "method": "GET",
+          "path": "/posts?_page=1&_limit=3",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            }
+          ],
+          "headers": {
+            "x-total-count": "4"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_page=2&_limit=3",
+          "status": 200,
+          "expect": [
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            }
+          ],
+          "headers": {
+            "x-total-count": "4"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_page=3&_limit=3",
+          "status": 200,
+          "expect": [],
+          "headers": {
+            "x-total-count": "4"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_limit=2",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            }
+          ],
+          "headers": {
+            "x-total-count": "4"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_page=0",
+          "status": 400,
+          "expect": {
+            "error": "_page and _limit must be positive integers (_limit at most 100)"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_limit=101",
+          "status": 400,
+          "expect": {
+            "error": "_page and _limit must be positive integers (_limit at most 100)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cursor paging",
+      "definition": {
+        "collections": {
+          "posts": [
+            {
+              "id": 1,
+              "title": "Alpha",
+              "price": 30,
+              "tag": "a"
+            },
+            {
+              "id": 2,
+              "title": "beta",
+              "price": 10,
+              "tag": "b"
+            },
+            {
+              "id": 3,
+              "title": "Gamma Alpha",
+              "price": 20,
+              "tag": "a"
+            },
+            {
+              "id": 4,
+              "title": "Delta",
+              "price": 20,
+              "tag": "b"
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "method": "GET",
+          "path": "/posts?size=3",
+          "status": 200,
+          "expect": {
+            "items": [
+              {
+                "id": 1,
+                "title": "Alpha",
+                "price": 30,
+                "tag": "a"
+              },
+              {
+                "id": 2,
+                "title": "beta",
+                "price": 10,
+                "tag": "b"
+              },
+              {
+                "id": 3,
+                "title": "Gamma Alpha",
+                "price": 20,
+                "tag": "a"
+              }
+            ],
+            "next": 3
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?after=3&size=3",
+          "status": 200,
+          "expect": {
+            "items": [
+              {
+                "id": 4,
+                "title": "Delta",
+                "price": 20,
+                "tag": "b"
+              }
+            ],
+            "next": null
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?after=4&size=3",
+          "status": 200,
+          "expect": {
+            "items": [],
+            "next": null
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?_sort=-price&size=2",
+          "status": 200,
+          "expect": {
+            "items": [
+              {
+                "id": 1,
+                "title": "Alpha",
+                "price": 30,
+                "tag": "a"
+              },
+              {
+                "id": 3,
+                "title": "Gamma Alpha",
+                "price": 20,
+                "tag": "a"
+              }
+            ],
+            "next": 3
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?after=zzz",
+          "status": 400,
+          "expect": {
+            "error": "after names no item in this result"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts?size=0",
+          "status": 400,
+          "expect": {
+            "error": "size must be a positive integer of at most 100"
+          }
+        }
+      ]
+    },
+    {
+      "name": "create, patch, replace and delete",
+      "definition": {
+        "collections": {
+          "todos": [
+            {
+              "id": "t1",
+              "text": "one",
+              "done": false
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 201,
+          "body": {
+            "text": "two",
+            "done": false
+          },
+          "expect": {
+            "text": "two",
+            "done": false,
+            "id": "fake-1"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 201,
+          "body": {
+            "id": "mine",
+            "text": "three"
+          },
+          "expect": {
+            "id": "mine",
+            "text": "three"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 409,
+          "body": {
+            "id": "mine"
+          },
+          "expect": {
+            "error": "An item with that id already exists"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 400,
+          "body": [1],
+          "expect": {
+            "error": "Expected a JSON object body"
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/todos/t1",
+          "status": 200,
+          "body": {
+            "done": true
+          },
+          "expect": {
+            "id": "t1",
+            "text": "one",
+            "done": true
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/todos/t1",
+          "status": 400,
+          "body": {
+            "id": "x"
+          },
+          "expect": {
+            "error": "The id of an item cannot change"
+          }
+        },
+        {
+          "method": "PUT",
+          "path": "/todos/t1",
+          "status": 200,
+          "body": {
+            "text": "replaced"
+          },
+          "expect": {
+            "id": "t1",
+            "text": "replaced"
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/todos/none",
+          "status": 404,
+          "body": {
+            "a": 1
+          },
+          "expect": {
+            "error": "Not found"
+          }
+        },
+        {
+          "method": "DELETE",
+          "path": "/todos/t1",
+          "status": 200,
+          "expect": {}
+        },
+        {
+          "method": "DELETE",
+          "path": "/todos/t1",
+          "status": 404,
+          "expect": {
+            "error": "Not found"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/todos",
+          "status": 200,
+          "expect": [
+            {
+              "text": "two",
+              "done": false,
+              "id": "fake-1"
+            },
+            {
+              "id": "mine",
+              "text": "three"
+            }
+          ]
+        },
+        {
+          "method": "DELETE",
+          "path": "/todos",
+          "status": 405,
+          "expect": {
+            "error": "DELETE is not allowed here"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/todos/a/b",
+          "status": 404,
+          "expect": {
+            "error": "No such route"
+          }
+        }
+      ]
+    },
+    {
+      "name": "canned routes bind params, query and body",
+      "definition": {
+        "routes": [
+          {
+            "method": "GET",
+            "path": "/feed/:id",
+            "body": {
+              "id": "{params.id}",
+              "q": "{query.q}",
+              "label": "feed {params.id}/{query.q}",
+              "missing": "{query.none}",
+              "text": "x{query.none}y"
+            }
+          },
+          {
+            "method": "POST",
+            "path": "/echo",
+            "status": 201,
+            "headers": {
+              "x-mock": "1"
+            },
+            "body": {
+              "name": "{body:/user/name}",
+              "count": "{body:/n}",
+              "all": "{body:/user}"
+            }
+          },
+          {
+            "method": "GET",
+            "path": "/",
+            "body": "root"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "method": "GET",
+          "path": "/feed/42?q=hello",
+          "status": 200,
+          "expect": {
+            "id": "42",
+            "q": "hello",
+            "label": "feed 42/hello",
+            "missing": null,
+            "text": "xy"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/echo",
+          "status": 201,
+          "body": {
+            "user": {
+              "name": "Ada"
+            },
+            "n": 3
+          },
+          "expect": {
+            "name": "Ada",
+            "count": 3,
+            "all": {
+              "name": "Ada"
+            }
+          },
+          "headers": {
+            "x-mock": "1"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/",
+          "status": 200,
+          "expect": "root"
+        },
+        {
+          "method": "DELETE",
+          "path": "/feed/42",
+          "status": 404,
+          "expect": {
+            "error": "No such route"
+          }
+        }
+      ]
+    },
+    {
+      "name": "routes win over collections",
+      "definition": {
+        "collections": {
+          "posts": [
+            {
+              "id": 1
+            }
+          ]
+        },
+        "routes": [
+          {
+            "method": "GET",
+            "path": "/posts",
+            "status": 503,
+            "body": {
+              "down": true
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "method": "GET",
+          "path": "/posts",
+          "status": 503,
+          "expect": {
+            "down": true
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts/1",
+          "status": 200,
+          "expect": {
+            "id": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "every-nth fault",
+      "definition": {
+        "collections": {
+          "posts": [
+            {
+              "id": 1
+            }
+          ]
+        },
+        "faults": [
+          {
+            "path": "/posts",
+            "method": "GET",
+            "status": 500,
+            "every": 2
+          }
+        ]
+      },
+      "steps": [
+        {
+          "method": "GET",
+          "path": "/posts",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts",
+          "status": 500,
+          "expect": {
+            "error": "mock fault"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/posts",
+          "status": 200,
+          "expect": [
+            {
+              "id": 1
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/posts",
+          "status": 500,
+          "expect": {
+            "error": "mock fault"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/posts",
+          "status": 201,
+          "body": {},
+          "expect": {
+            "id": "fake-1"
+          }
+        }
+      ]
+    }
+  ]
+}

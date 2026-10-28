@@ -17,6 +17,7 @@ import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streamDevice
 import { DefaultDeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
 import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCtrlProxyClient";
 import { PrototypeAdbReverseManager } from "../../features/prototype/PrototypeAdbReverseManager";
+import { PrototypeMockBackendRegistry } from "../../features/prototype/PrototypeMockBackendRegistry";
 import { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import { PrototypeEventCoordinator } from "../../features/prototype/PrototypeEventCoordinator";
 import {
@@ -274,6 +275,8 @@ interface PrototypeHost {
   transports: PrototypeTransportCache;
   /** `adb reverse` ownership for via "device" request ports (#12530). */
   reverses: PrototypeAdbReverseManager;
+  /** Declarative mock backends of this session (#14271). */
+  mocks: PrototypeMockBackendRegistry;
   /** Subscribes any lifecycle hook that was not yet available; a no-op once all are active. */
   ensureLifecycle(): void;
   dispose(): void;
@@ -283,7 +286,11 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
   const store =
     dependencies.store ?? new InMemoryPrototypeStatusStore(prototypeClock(dependencies));
   const timer = dependencies.timer ?? defaultTimer;
-  const requests = requestWiring.createPrototypeRequestCoordinator(timer);
+  const mocks = new PrototypeMockBackendRegistry({
+    ids: dependencies.idGenerator ?? defaultIdGenerator,
+    timer,
+  });
+  const requests = requestWiring.createPrototypeRequestCoordinator(timer, mocks);
   const recorder = createTestSessionRecorder(dependencies, store);
   const events = new PrototypeEventCoordinator(
     timer,
@@ -307,12 +314,14 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
     patchQueue: createPrototypePatchQueue(),
     transports: { android: new WeakMap(), ios: new WeakMap(), requests },
     reverses,
+    mocks,
     ensureLifecycle: cleanup.ensureSubscribed,
     dispose: () => {
       if (!disposed) {
         disposed = true;
         cleanup.unsubscribe();
         events.dispose();
+        mocks.clearAll();
         void reverses.dispose();
       }
     },

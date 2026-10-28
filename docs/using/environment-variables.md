@@ -132,6 +132,7 @@ export AUTOMOBILE_DB_PATH="$PWD/.auto-mobile/auto-mobile.db"
 | `AUTOMOBILE_ALWAYS_LOAD_TOOLS`                  | Register optional tool definitions up front; `1`/`true` enables.                                                      | off        |
 | `AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS`    | Include a flattened `elements` list in observations; exact `1` enables, or the matching CLI flag.                     | off        |
 | `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit structured tool content; exact `1` enables, or the matching CLI flag.                                            | off        |
+| `AUTOMOBILE_SERVER_INSTRUCTIONS`                | Return a short usage instructions block when your MCP client connects; `1`/`true` enables.                            | off        |
 | `AUTOMOBILE_ACTIONS_DIFF_OBSERVE`               | Return differential observations after actions; exact `1` enables, or the matching CLI flag.                          | off        |
 | `AUTOMOBILE_ACTIONS_NO_OBSERVE`                 | Skip the observation after actions; exact `1` enables, or the matching CLI flag.                                      | off        |
 | `AUTOMOBILE_ACTIONS_COMPACT_METADATA`           | Omit unchanged metadata and duplicate matches from action results; exact `0` opts out, `1` opts in. CLI flags win.    | on         |

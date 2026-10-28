@@ -118,6 +118,8 @@ export interface RunOptions {
   claudeCommand: string;
   deviceSerial?: string;
   modelOverride?: string;
+  /** Arm B of the instructions A/B: the MCP config turns on the server's instructions block. */
+  serverInstructions?: boolean;
 }
 
 /**
@@ -455,7 +457,13 @@ async function launchClaude(
   const mcpConfigPath = join(run.runDirectory, "mcp-config.json");
   deps.fs.writeFile(
     mcpConfigPath,
-    `${JSON.stringify(buildMcpConfig(run.paths, deps.env, deps.platform), null, 2)}\n`,
+    `${JSON.stringify(
+      buildMcpConfig(run.paths, deps.env, deps.platform, undefined, {
+        instructions: options.serverInstructions,
+      }),
+      null,
+      2,
+    )}\n`,
   );
   const prompt = fillPlaceholders(suite.prompt, placeholders);
   deps.fs.writeFile(join(run.runDirectory, "prompt.md"), prompt);

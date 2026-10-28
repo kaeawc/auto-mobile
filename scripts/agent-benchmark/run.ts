@@ -12,6 +12,7 @@
  * Options:
  *   --device <serial>   target device (default: the single online device)
  *   --model <model>     override the suite's claude.model for a controlled comparison
+ *   --server-instructions  the server returns its MCP instructions block (A/B arm B)
  *   --json              print BenchmarkResult JSON (an array for several runs) on stdout
  *   --dry-run           validate suites and print the claude invocation; no device, no API
  *   --claude <command>  Claude Code executable (default: claude)
@@ -67,6 +68,7 @@ import {
   type DeviceClaims,
   type HarnessDeps,
   type HarnessFs,
+  type RunOptions,
 } from "./harness";
 import {
   buildClaudeArgs,
@@ -88,6 +90,7 @@ export interface CliOptions {
   fromResults: string[];
   device?: string;
   model?: string;
+  serverInstructions: boolean;
   json: boolean;
   dryRun: boolean;
   claude: string;
@@ -109,6 +112,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     suites: [],
     all: false,
     fromResults: [],
+    serverInstructions: false,
     json: false,
     dryRun: false,
     claude: "claude",
@@ -131,6 +135,9 @@ export function parseCliArgs(argv: string[]): CliOptions {
         break;
       case "--json":
         options.json = true;
+        break;
+      case "--server-instructions":
+        options.serverInstructions = true;
         break;
       case "--dry-run":
         options.dryRun = true;
@@ -502,7 +509,11 @@ export function dryRunReport(
     `suite ${suite.definition.name} (${suite.suitePath}) is valid`,
     `prompt ${suite.promptPath}`,
     `claude ${JSON.stringify([options.claude, ...args])}`,
-    `mcp-config ${JSON.stringify(buildMcpConfig(paths, env))}`,
+    `mcp-config ${JSON.stringify(
+      buildMcpConfig(paths, env, undefined, undefined, {
+        instructions: options.serverInstructions,
+      }),
+    )}`,
   ].join("\n");
 }
 
@@ -830,20 +841,28 @@ async function runSuites(
     results.push(
       await runSuite(
         suite,
-        {
-          outputRoot: options.output,
-          runtime: process.execPath,
-          serverEntry,
-          serverBuild,
-          claudeCommand,
-          deviceSerial: options.device,
-          modelOverride: options.model,
-        },
+        suiteRunOptions(options, { serverEntry, serverBuild, claudeCommand }),
         deps,
       ),
     );
   }
   return results;
+}
+
+/** What every suite run takes from the CLI, plus the resolved build and Claude command. */
+export function suiteRunOptions(
+  options: CliOptions,
+  resolved: Pick<RunOptions, "serverEntry" | "serverBuild" | "claudeCommand">,
+  runtime: string = process.execPath,
+): RunOptions {
+  return {
+    outputRoot: options.output,
+    runtime,
+    ...resolved,
+    deviceSerial: options.device,
+    modelOverride: options.model,
+    serverInstructions: options.serverInstructions,
+  };
 }
 
 async function main(argv: string[]): Promise<number> {

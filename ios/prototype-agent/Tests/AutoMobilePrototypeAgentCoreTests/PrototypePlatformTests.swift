@@ -45,10 +45,17 @@ final class PrototypePlatformTests: XCTestCase {
                     case let .json(maxBytes):
                         XCTAssertEqual(rule["kind"] as? String, "json", arg)
                         XCTAssertEqual(rule["maxBytes"] as? Int, maxBytes, arg)
-                    case let .string(empty, maxBytes):
+                    case let .string(swiftRule):
+                        // The Swift rule is the contract rule itself, so every limit must round-trip.
+                        let flag = { (key: String) in rule[key] as? Bool ?? false }
+                        let limit = { (key: String) in (rule[key] as? Int).map(Double.init) }
                         XCTAssertEqual(rule["kind"] as? String, "string", arg)
-                        XCTAssertEqual(rule["empty"] as? Bool ?? false, empty, arg)
-                        if let bytes = rule["maxBytes"] as? Int { XCTAssertEqual(bytes, maxBytes, arg) }
+                        XCTAssertEqual(swiftRule["kind"]?.stringValue, "string", arg)
+                        XCTAssertEqual(swiftRule["empty"] == .bool(true), flag("empty"), arg)
+                        XCTAssertEqual(swiftRule["nonblank"] == .bool(true), flag("nonblank"), arg)
+                        XCTAssertEqual(swiftRule["max"]?.numberValue, limit("max"), arg)
+                        XCTAssertEqual(swiftRule["maxBytes"]?.numberValue, limit("maxBytes"), arg)
+                        XCTAssertEqual(swiftRule["pattern"]?.stringValue, rule["pattern"] as? String, arg)
                     case .boolean:
                         XCTAssertEqual(rule["kind"] as? String, "boolean", arg)
                     case let .integer(min, max):

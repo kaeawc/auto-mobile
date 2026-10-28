@@ -228,6 +228,7 @@ test/package/webrtcRuntimeMetadata.integration.test.ts | unsafe | Bun.spawn of t
 test/scripts/xcodegenDriftCheck.integration.test.ts | unsafe | spawnSync bash running repo shell scripts L241/L245
 test/server/acquisitionEnableTools.integration.test.ts | safe | hermetic fixture and in-memory MCP transport L1
 test/server/androidNavigationWorkflow.integration.test.ts | safe | hermetic fixture; Explore stubbed with fake executor L1/L141
+test/server/appTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake app executors and spied ResetKeychain
 test/server/claudeCodeElicitation.integration.test.ts | unsafe | spawns a real Claude Code binary and a stdio child server, and skips without one
 test/server/configManagerDefaultRepositories.integration.test.ts | safe | getDatabase spied to createTestDatabase L29/L31
 test/server/daemonShutdownOutcomeWire.integration.test.ts | safe | hermetic fixture and McpTestFixture in-memory L14
@@ -235,9 +236,11 @@ test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-me
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
 test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
+test/server/interactionTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake action factories, spied HomeScreen/SystemTray execute
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
 test/server/mcpSessionAutolockRouting.integration.test.ts | safe | FakeDeviceUtils pool, FakeDeviceSessionPersistence L170/L186
+test/server/navigationTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake navigation graph and NavigateTo, spied Explore.execute
 test/server/observeAppResource.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L129
 test/server/observeAppShellMinified.integration.test.ts | safe | Bun.build of one source file and a fake window, written under os.tmpdir()
 test/server/outputSchema.sdk.integration.test.ts | safe | hermetic server fixture; in-memory McpTestFixture; in-test stub tool L7

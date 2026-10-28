@@ -23,6 +23,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -75,6 +77,9 @@ class PrototypeHostTest {
   private lateinit var manager: RecordingPrototypeWindowManager
   private lateinit var host: PrototypeHost
   private var density = 2.5f
+  private var awaitFirstRender: suspend (CompletableDeferred<Unit>, Long) -> Boolean = { _, _ ->
+    true
+  }
   private var blocked = false
   private var lost = 0
   private lateinit var escapeScheduler: FakePrototypeEscapeScheduler
@@ -115,6 +120,8 @@ class PrototypeHostTest {
         manager,
         isViewAttached = manager::isViewAttached,
         sdkInt = 30,
+        firstRenderWaiter =
+          PrototypeFirstRenderWaiter { applied, timeout -> awaitFirstRender(applied, timeout) },
         mainThread = main,
         settleTimer = timer,
         densityProvider = { density },
@@ -132,6 +139,69 @@ class PrototypeHostTest {
     // Warm platform/Compose constructors outside test bodies; no window attaches or composition
     // runs.
     ComposeView(RuntimeEnvironment.getApplication())
+  }
+
+  @Test
+  fun `show waits until its first composition is applied before returning success`() = runTest {
+    val received = CompletableDeferred<CompletableDeferred<Unit>>()
+    awaitFirstRender = { applied, timeout ->
+      assertEquals(2_000L, timeout)
+      received.complete(applied)
+      applied.await()
+      true
+    }
+    val showing = async(start = CoroutineStart.UNDISPATCHED) { host.show() }
+    assertFalse(showing.isCompleted)
+    received.await().complete(Unit)
+    assertTrue(showing.await())
+  }
+
+  @Test
+  fun `an in-place replacement awaits its own new composition marker`() = runTest {
+    val markers = mutableListOf<CompletableDeferred<Unit>>()
+    awaitFirstRender = { applied, _ ->
+      markers += applied
+      applied.await()
+      true
+    }
+    val first = async(start = CoroutineStart.UNDISPATCHED) { host.show() }
+    markers[0].complete(Unit)
+    assertTrue(first.await())
+    val replacement =
+      async(start = CoroutineStart.UNDISPATCHED) { host.replace(PrototypeRequest()) }
+    assertEquals(2, markers.size)
+    assertNotSame(markers[0], markers[1])
+    assertFalse(replacement.isCompleted)
+    markers[1].complete(Unit)
+    assertTrue(replacement.await())
+  }
+
+  @Test
+  fun `first composition timeout removes a fresh window and leaves no shown state`() = runTest {
+    awaitFirstRender = CoroutinePrototypeFirstRenderWaiter::await
+    val failure = runCatching { host.show() }.exceptionOrNull()
+    assertTrue(failure is PrototypeRenderFailedException)
+    assertTrue(failure?.message.orEmpty().contains("2000ms"))
+    assertFalse(host.isShowing)
+    assertNull(host.currentPlacement)
+    assertEquals(1, manager.removals)
+  }
+
+  @Test
+  fun `failed in-place first composition restores previous request and window`() = runTest {
+    val original = PrototypeRequest(opacityPercent = 70)
+    assertTrue(host.show(original))
+    val originalView = manager.view
+    awaitFirstRender = { _, _ -> false }
+    assertTrue(
+      runCatching { host.replace(PrototypeRequest(PrototypePlacement.Fullscreen())) }
+        .exceptionOrNull() is PrototypeRenderFailedException,
+    )
+    assertSame(originalView, manager.view)
+    assertEquals(original.placement, host.currentPlacement)
+    assertEquals(0.7f, checkNotNull(originalView).alpha, 0f)
+    assertEquals(0, manager.removals)
+    assertTrue(host.isShowing)
   }
 
   private fun chromelessRequest() =
@@ -627,7 +697,10 @@ class PrototypeHostTest {
     host.show()
     val owner = checkNotNull(manager.view?.findViewTreeLifecycleOwner())
     manager.failAdd = true
-    assertFalse(host.replace(PrototypeRequest(bringToFront = true, transition = "fade")))
+    assertTrue(
+      runCatching { host.replace(PrototypeRequest(bringToFront = true, transition = "fade")) }
+        .exceptionOrNull() is PrototypeRenderFailedException,
+    )
     assertTrue(host.isShowing)
     assertEquals(Lifecycle.State.RESUMED, owner.lifecycle.currentState)
     assertEquals(0, manager.removals)
@@ -686,24 +759,25 @@ class PrototypeHostTest {
   }
 
   @Test
-  fun `add failure returns false destroys owner has no stale state and skips hook`() = runTest {
-    manager.failAdd = true
-    assertFalse(host.show())
-    val failed = manager.view!!
-    assertEquals(
-      Lifecycle.State.DESTROYED,
-      failed.findViewTreeLifecycleOwner()!!.lifecycle.currentState,
-    )
-    assertFalse(host.isShowing)
-    assertNull(host.currentPlacement)
-    assertFalse(host.isTouchThroughActive)
-    assertEquals(listOf("add"), history)
-    assertTrue(host.dismiss())
-    assertEquals(0, manager.removals)
-    manager.failAdd = false
-    assertTrue(host.show())
-    assertNotSame(failed, manager.view)
-  }
+  fun `add failure throws typed error destroys owner has no stale state and skips hook`() =
+    runTest {
+      manager.failAdd = true
+      assertTrue(runCatching { host.show() }.exceptionOrNull() is PrototypeRenderFailedException)
+      val failed = manager.view!!
+      assertEquals(
+        Lifecycle.State.DESTROYED,
+        failed.findViewTreeLifecycleOwner()!!.lifecycle.currentState,
+      )
+      assertFalse(host.isShowing)
+      assertNull(host.currentPlacement)
+      assertFalse(host.isTouchThroughActive)
+      assertEquals(listOf("add"), history)
+      assertTrue(host.dismiss())
+      assertEquals(0, manager.removals)
+      manager.failAdd = false
+      assertTrue(host.show())
+      assertNotSame(failed, manager.view)
+    }
 
   @Test
   fun `replace update failure keeps the prior request and window`() = runTest {
@@ -1090,31 +1164,40 @@ class PrototypeHostTest {
     )
   }
 
+  /** show and replace hop to main twice (before and after the composition await); drain both. */
+  private fun TestScope.drainMain() {
+    repeat(2) {
+      runCurrent()
+      main.drain()
+    }
+    runCurrent()
+  }
+
   @Test
   fun `all host mutations post off main and run inline on main`() = runTest {
     main.onMain = false
     val show = async(start = CoroutineStart.UNDISPATCHED) { host.show() }
     assertFalse(host.isShowing)
     assertEquals(1, main.pending.size)
-    main.drain()
+    drainMain()
     assertTrue(show.await())
     val replace =
       async(start = CoroutineStart.UNDISPATCHED) {
         host.replace(PrototypeRequest(hasTextField = true))
       }
     assertTrue(manager.updated.isEmpty())
-    main.drain()
+    drainMain()
     assertTrue(replace.await())
     val opacity = async(start = CoroutineStart.UNDISPATCHED) { host.setOpacity(50) }
-    main.drain()
+    drainMain()
     opacity.await()
     assertEquals(0.5f, manager.view!!.alpha, 0f)
     val dismiss = async(start = CoroutineStart.UNDISPATCHED) { host.dismiss() }
     assertEquals(0, manager.removals)
-    main.drain()
+    drainMain()
     assertTrue(dismiss.await())
     val destroy = async(start = CoroutineStart.UNDISPATCHED) { host.destroy() }
-    main.drain()
+    drainMain()
     assertTrue(destroy.await())
     main.onMain = true
     assertFalse(host.show())
@@ -1346,6 +1429,7 @@ class PrototypeHostTest {
       manager,
       isViewAttached = manager::isViewAttached,
       sdkInt = sdk,
+      firstRenderWaiter = PrototypeFirstRenderWaiter { _, _ -> true },
       mainThread = main,
       settleTimer = timer,
       densityProvider = { density },

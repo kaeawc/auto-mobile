@@ -30,7 +30,7 @@ const validators = new Map<string, JsonSchemaValidator<unknown>>();
 beforeAll(() => {
   registerInteractionTools(interactionDeps);
   const provider = new AjvJsonSchemaValidator();
-  for (const name of ["sendKeys", "keyboard", "openLink"]) {
+  for (const name of ["sendKeys", "keyboard", "openLink", "shake"]) {
     const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
     // Disabled tools are still registered; use their registered schema directly.
     const schema =
@@ -225,19 +225,24 @@ for (const success of [true, false]) {
   });
 }
 
-test("neighbouring shake retains its text-only envelope", async () => {
-  const result = { success: true, duration: 10, intensity: 20 };
-  interactionDeps.shakeFactory = () => ({ execute: async () => result });
-  const tool = ToolRegistry.getTool("shake")!;
-  expect(tool.outputSchema).toBeUndefined();
-  expect(await tool.deviceAwareHandler!(device, { duration: 10, intensity: 20 })).toEqual(
-    createJSONToolResponse({
-      message: "Shook device for 10ms with intensity 20",
-      observation: undefined,
-      ...result,
-    }),
-  );
-});
+for (const success of [true, false]) {
+  test(`shake ${success ? "success" : "failure"} preserves text and isError`, async () => {
+    const result = { success, duration: 10, intensity: 20, ...(success ? {} : { error: "busy" }) };
+    interactionDeps.shakeFactory = () => ({ execute: async () => result });
+    await checkResponse(
+      "shake",
+      { duration: 10, intensity: 20 },
+      {
+        message: success
+          ? "Shook device for 10ms with intensity 20"
+          : "Failed to shake device: busy",
+        observation: undefined,
+        ...result,
+      },
+      success ? undefined : true,
+    );
+  });
+}
 
 // Source contract: follow registered schema handlers, local helpers and server-module
 // imports/factories. Device execution is deliberately outside this static guard.

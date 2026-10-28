@@ -121,7 +121,7 @@ const screenReaderNavigationSchema = z
   .passthrough();
 
 /** Shared optional action metadata, including finalized observation variants. */
-const lifecycleActionOutputFields = {
+export const lifecycleActionOutputFields = {
   message: z.string(),
   success: z.boolean().optional(),
   observation: observationOutputSchema.optional(),

@@ -1,3 +1,4 @@
+import { savedPrototypeFailure, type PrototypeSavedOutput } from "../prototypeSavedActions";
 import { shownBackdrop } from "../../features/prototype/prototypeBackdrop";
 import { cachedPrototypeShaderAssetProblem } from "../../features/prototype/prototypeShaders";
 import { defaultPrototypeAssetCache } from "../../features/prototype/prototypeAssetCache";
@@ -238,7 +239,7 @@ async function performMutation(
       withdrawGeneration(ordering);
     }
     const reverseReport = await reversing.prepare([resolved.failure, stage.failure]);
-    const { result, warning } = await withdrawOnAbort(
+    const { result, warning, mutationReply } = await withdrawOnAbort(
       ordering,
       undefined,
       sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
@@ -267,7 +268,7 @@ async function performMutation(
           }
         },
       }),
-    );
+    ).then(renderShowOutcome);
     endShownSpec(store, ordering, {
       action: args.action,
       success: result.success,
@@ -319,8 +320,7 @@ async function performMutation(
     });
     const spec = authoredArgs.spec;
     return {
-      success: result.success,
-      ...(result.error ? { error: result.error } : {}),
+      ...mutationReply,
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
@@ -350,6 +350,26 @@ function pseudoLocalizedArgs<T extends { action: string; pseudoLocale?: boolean;
   return args.action === "show" && args.pseudoLocale === true && args.spec
     ? { ...args, spec: pseudoLocalizeSpec(args.spec) }
     : args;
+}
+
+/** A typed render refusal is definitive, even if a malformed device reply also says success. */
+function renderShowOutcome(outcome: Awaited<ReturnType<typeof sendPrototype>>): Awaited<
+  ReturnType<typeof sendPrototype>
+> & {
+  mutationReply: Pick<PrototypeSavedOutput, "success" | "error" | "errorCode">;
+} {
+  const failure =
+    outcome.result.errorCode === "render_failed"
+      ? savedPrototypeFailure(outcome.result)
+      : undefined;
+  return {
+    ...outcome,
+    result: failure ? { ...outcome.result, success: false, error: failure.error } : outcome.result,
+    mutationReply: failure ?? {
+      success: outcome.result.success,
+      error: outcome.result.error ?? undefined,
+    },
+  };
 }
 
 /** Advisory platform notes, accessibility findings and watch screen shape for a successful show. */

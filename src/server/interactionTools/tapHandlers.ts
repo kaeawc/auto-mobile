@@ -19,6 +19,7 @@ import { resolveTransportDeadlineMs } from "../formTools";
 import { defaultTapOnElementFactory, isIosAppOpenAlertHierarchy } from "../interactionToolHandlers";
 import type { TapAnyArgs, TapAtArgs, TapOnArgs } from "../interactionToolTypes";
 import { ProgressCallback } from "../toolRegistry";
+import { internalTapAtContext } from "../internalToolParams";
 import type { InteractionToolDependencies, TapAtElementLike } from "./dependencies";
 import { hitTestSchema } from "./tapSchemas";
 
@@ -307,7 +308,7 @@ export async function tapAtHandler(
       layer: args.layer,
       pointer: args.pointer,
     } as Parameters<TapAtElementLike["execute"]>[0],
-    { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
+    { progress, signal, planContext: internalTapAtContext(args) },
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`

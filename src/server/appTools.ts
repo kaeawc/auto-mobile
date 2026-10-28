@@ -38,11 +38,7 @@ import type {
 import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import { logger } from "../utils/logger";
-import {
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  withIsErrorOnFailure,
-} from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import {
   invalidateInstalledAppsCache,
   notifyInstalledAppResourceUpdated,
@@ -54,6 +50,9 @@ import {
   crashAppResultSchema,
   getAppPermissionsResultSchema,
   inspectPackageSigningResultSchema,
+  resetKeychainResultSchema,
+  setAppPermissionsResultSchema,
+  uninstallAppResultSchema,
 } from "./appToolOutputSchemas";
 import {
   attachLaunchedViewer,
@@ -294,7 +293,7 @@ export const createSetAppPermissionsHandler =
       scheduleExactAlarm: args.scheduleExactAlarm,
     });
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? describeSetPermissionsSuccess(args.appId, result)
         : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
@@ -613,7 +612,7 @@ const createInstallAppHandler =
         ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
         : `Installed app from ${args.artifactPath}`;
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message,
         ...result,
       });
@@ -666,7 +665,7 @@ const createUninstallAppHandler =
         ? `Uninstalled app ${args.appId}${result.keepData ? " (data preserved)" : ""}`
         : `App ${args.appId} was not installed`;
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message,
         ...result,
       });
@@ -831,7 +830,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       explicitlyTargeted,
     });
 
-    return createJSONToolResponse({ ...result });
+    return createStructuredToolResponse({ ...result });
   };
 
   // Register with the tool registry
@@ -884,7 +883,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Uninstall app by package name or bundle identifier",
     uninstallAppSchema,
     uninstallAppHandler,
-    { defaultEnabled: true, stopsApp: true },
+    { defaultEnabled: true, outputSchema: uninstallAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -892,7 +891,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler,
-    { ...PLAN_RELEVANT, defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setAppPermissionsResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -924,7 +923,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
     resetKeychainSchema,
     resetKeychainHandler,
-    { ...PLAN_RELEVANT, defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: resetKeychainResultSchema },
   );
 
   listAppsTool.register(ToolRegistry, listAppsHandler);

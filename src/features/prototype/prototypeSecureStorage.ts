@@ -12,25 +12,37 @@ import type { PrototypePlatformError } from "./prototypePlatform";
  */
 export function prototypeSecureStorageError(root: Raw): PrototypePlatformError | undefined {
   const storage = record(root.storage);
-  const secure = Array.isArray(storage?.secure) ? storage.secure : undefined;
-  if (!storage || !secure) {
+  if (!storage) {
     return undefined;
   }
   const platform = strings(record(root.requires)?.platform);
+  const listed = Array.isArray(storage.secure);
+  const secure: unknown[] = listed ? (storage.secure as unknown[]) : [];
+  const error = listed ? secureListError(secure, root, strings(storage.keys), platform) : undefined;
+  // secureAuth is checked even without storage.secure: it may only name secure keys.
+  return error ?? secureAuthError(record(storage.secureAuth), secure, platform);
+}
+
+/** The module declaration, then each listed key, of a spec that has `storage.secure`. */
+function secureListError(
+  secure: unknown[],
+  root: Raw,
+  keys: string[],
+  platform: string[],
+): PrototypePlatformError | undefined {
   if (!platform.includes("secureStorage")) {
     return {
       path: "storage.secure",
       message: "storage.secure requires secureStorage in requires.platform",
     };
   }
-  const keys = strings(storage.keys);
   for (const [index, entry] of secure.entries()) {
     const message = secureKeyError(entry, root, keys);
     if (message) {
       return { path: `storage.secure[${index}]`, message };
     }
   }
-  return secureAuthError(record(storage.secureAuth), secure, platform);
+  return undefined;
 }
 
 /** A `secureAuth` entry that is not a secure key, or a biometric binding without its module. */
@@ -61,14 +73,28 @@ export function prototypeSecureStorageEmitError(
   const secure = strings(record(root.storage)?.secure);
   for (const [name, binding] of Object.entries(context ?? {})) {
     const key = record(binding)?.state;
-    if (typeof key === "string" && secure.includes(`state:${key}`)) {
+    const leaked = typeof key === "string" ? secureKeyFor(key, secure) : undefined;
+    if (leaked) {
       return {
         path: memberPath(`${path}.context`, name),
-        message: `Secure storage key state:${key} cannot be sent in an emit context`,
+        message: `Secure storage key ${leaked} cannot be sent in an emit context`,
       };
     }
   }
   return undefined;
+}
+
+/**
+ * The first secure `state:` key a context state reference can read. A repeat template such as
+ * `token_{item.id}` is expanded per row on the device, so each `{...}` placeholder may stand for any
+ * text there.
+ */
+function secureKeyFor(stateKey: string, secure: string[]): string | undefined {
+  const parts = stateKey.split(/\{[^}]*\}/);
+  const pattern = new RegExp(
+    `^${parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`,
+  );
+  return secure.find((entry) => entry.startsWith("state:") && pattern.test(entry.slice(6)));
 }
 
 function secureKeyError(entry: unknown, root: Raw, keys: string[]): string | undefined {

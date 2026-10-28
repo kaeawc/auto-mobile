@@ -18,22 +18,35 @@ import kotlinx.serialization.json.JsonPrimitive
 internal object PrototypeSecureStorageRules {
   fun blockError(root: JsonObject): PrototypeSpecError? {
     val storage = root.member("storage") ?: return null
-    val secure = storage["secure"] as? JsonArray ?: return null
     val platform = root.member("requires")?.strings("platform") ?: emptyList()
-    if ("secureStorage" !in platform)
-      return fail("storage.secure", "storage.secure requires secureStorage in requires.platform")
-    val keys = storage.strings("keys")
-    secure.forEachIndexed { index, entry ->
-      keyError((entry as? JsonPrimitive)?.takeIf { it.isString }?.content, root, keys)?.let {
-        return fail("storage.secure[$index]", it)
+    val secure = storage["secure"] as? JsonArray
+    if (secure != null)
+      listError(secure, root, storage.strings("keys"), platform)?.let {
+        return it
       }
-    }
-    val names = secure.mapNotNull { (it as? JsonPrimitive)?.content }
+    // secureAuth is checked even without storage.secure: it may only name secure keys.
+    val names = secure.orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }
     for (name in storage.member("secureAuth")?.keys.orEmpty()) {
       val path = keyPath("storage.secureAuth", name)
       if (name !in names) return fail(path, "secureAuth names a key that is not in storage.secure")
       if ("biometric" !in platform)
         return fail(path, "Biometric secure keys require biometric in requires.platform")
+    }
+    return null
+  }
+
+  private fun listError(
+    secure: JsonArray,
+    root: JsonObject,
+    keys: List<String>,
+    platform: List<String>,
+  ): PrototypeSpecError? {
+    if ("secureStorage" !in platform)
+      return fail("storage.secure", "storage.secure requires secureStorage in requires.platform")
+    secure.forEachIndexed { index, entry ->
+      keyError((entry as? JsonPrimitive)?.takeIf { it.isString }?.content, root, keys)?.let {
+        return fail("storage.secure[$index]", it)
+      }
     }
     return null
   }
@@ -44,13 +57,26 @@ internal object PrototypeSecureStorageRules {
     val secure = root.member("storage")?.strings("secure") ?: return null
     for ((name, binding) in context) {
       val key = (binding as? JsonObject)?.text("state") ?: continue
-      if ("state:$key" in secure)
-        return fail(
-          keyPath("$path.context", name),
-          "Secure storage key state:$key cannot be sent in an emit context",
-        )
+      val leaked = secureKeyFor(key, secure) ?: continue
+      return fail(
+        keyPath("$path.context", name),
+        "Secure storage key $leaked cannot be sent in an emit context",
+      )
     }
     return null
+  }
+
+  /**
+   * The first secure `state:` key a context state reference can read. A repeat template such as
+   * `token_{item.id}` is expanded per row on the device, so each `{...}` placeholder may stand for
+   * any text there.
+   */
+  private fun secureKeyFor(stateKey: String, secure: List<String>): String? {
+    val pattern =
+      Regex(stateKey.split(Regex("\\{[^}]*\\}")).joinToString(".*") { Regex.escape(it) })
+    return secure.firstOrNull {
+      it.startsWith("state:") && pattern.matches(it.removePrefix("state:"))
+    }
   }
 
   private fun keyError(entry: String?, root: JsonObject, keys: List<String>): String? {

@@ -111,7 +111,7 @@ enum PrototypePlatformValidator {
         /// Whether the spec has a root `auth` block for `auth.*` calls (#14303).
         var hasAuth = false
         /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
-        var secureKeys: Set<String> = []
+        var secureKeys: [String] = []
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.

@@ -74,6 +74,19 @@ describe("prototypeSecureStorageError", () => {
   });
 });
 
+describe("secureAuth without storage.secure", () => {
+  test("a secureAuth entry is still checked when storage.secure is absent", () => {
+    expect(
+      prototypeSecureStorageError(
+        spec({ storage: storage({ secureAuth: { "state:remember": "biometric" } }) }),
+      ),
+    ).toEqual({
+      path: 'storage.secureAuth["state:remember"]',
+      message: "secureAuth names a key that is not in storage.secure",
+    });
+  });
+});
+
 describe("prototypeSecureStorageEmitError", () => {
   test("an emit context cannot carry a secure key; other bindings pass", () => {
     const emit = (context: Record<string, unknown>) => ({ type: "emit", name: "save", context });
@@ -85,6 +98,23 @@ describe("prototypeSecureStorageEmitError", () => {
     });
     expect(
       prototypeSecureStorageEmitError(emit({ r: { state: "remember" } }), "root.onTap[0]", spec()),
+    ).toBeUndefined();
+    expect(
+      prototypeSecureStorageEmitError(
+        emit({ t: { state: "tok{item.id}" } }),
+        "root.onTap[0]",
+        spec(),
+      ),
+    ).toEqual({
+      path: "root.onTap[0].context.t",
+      message: "Secure storage key state:token cannot be sent in an emit context",
+    });
+    expect(
+      prototypeSecureStorageEmitError(
+        emit({ t: { state: "x{item.id}" } }),
+        "root.onTap[0]",
+        spec(),
+      ),
     ).toBeUndefined();
     expect(
       prototypeSecureStorageEmitError(

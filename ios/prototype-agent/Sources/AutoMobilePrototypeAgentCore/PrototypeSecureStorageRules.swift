@@ -6,19 +6,15 @@ import Foundation
 /// `biometric` module, and no secure key may leave the device through an emit context.
 enum PrototypeSecureStorageRules {
     static func validateBlock(_ storage: JSONValue?, requires: JSONValue?, state: [String: JSONValue]) throws {
-        guard let block = storage?.objectFields, case let .array(secure)? = block["secure"] else { return }
+        guard let block = storage?.objectFields else { return }
         let platform = PrototypeContractValidator.strings(requires?.objectFields?["platform"])
-        guard platform.contains("secureStorage") else {
-            throw PrototypeContractValidator.invalid(
-                "storage.secure", "storage.secure requires secureStorage in requires.platform"
-            )
+        var secure: [JSONValue] = []
+        if case let .array(listed)? = block["secure"] {
+            secure = listed
+            let keys = PrototypeContractValidator.strings(block["keys"])
+            try validateList(listed, keys: keys, platform: platform, state: state)
         }
-        let keys = PrototypeContractValidator.strings(block["keys"])
-        for (index, entry) in secure.enumerated() {
-            if let message = keyError(entry.stringValue, state: state, keys: keys) {
-                throw PrototypeContractValidator.invalid("storage.secure[\(index)]", message)
-            }
-        }
+        // secureAuth is checked even without storage.secure: it may only name secure keys.
         let names = secure.compactMap(\.stringValue)
         for name in (block["secureAuth"]?.objectFields ?? [:]).keys.sorted() {
             let path = PrototypeLimits.dataMemberPath("storage.secureAuth", key: name)
@@ -33,21 +29,52 @@ enum PrototypeSecureStorageRules {
         }
     }
 
-    /// The secure `state:` keys a spec lists, for the emit-context check.
-    static func secureKeys(_ storage: JSONValue?) -> Set<String> {
-        Set(PrototypeContractValidator.strings(storage?.objectFields?["secure"]))
+    private static func validateList(
+        _ secure: [JSONValue], keys: [String], platform: [String], state: [String: JSONValue]
+    ) throws {
+        guard platform.contains("secureStorage") else {
+            throw PrototypeContractValidator.invalid(
+                "storage.secure", "storage.secure requires secureStorage in requires.platform"
+            )
+        }
+        for (index, entry) in secure.enumerated() {
+            if let message = keyError(entry.stringValue, state: state, keys: keys) {
+                throw PrototypeContractValidator.invalid("storage.secure[\(index)]", message)
+            }
+        }
     }
 
-    static func validateEmit(_ fields: [String: JSONValue], path: String, secure: Set<String>) throws {
+    /// The secure `state:` keys a spec lists, for the emit-context check.
+    static func secureKeys(_ storage: JSONValue?) -> [String] {
+        PrototypeContractValidator.strings(storage?.objectFields?["secure"])
+    }
+
+    static func validateEmit(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
         guard fields["type"] == .string("emit"), !secure.isEmpty,
               let context = fields["context"]?.objectFields else { return }
         for name in context.keys.sorted() {
             guard case let .string(key)? = context[name]?.objectFields?["state"],
-                  secure.contains("state:\(key)") else { continue }
+                  let leaked = secureKey(for: key, secure: secure) else { continue }
             throw PrototypeContractValidator.invalid(
                 PrototypeLimits.dataMemberPath("\(path).context", key: name),
-                "Secure storage key state:\(key) cannot be sent in an emit context"
+                "Secure storage key \(leaked) cannot be sent in an emit context"
             )
+        }
+    }
+
+    /// The first secure `state:` key a context state reference can read. A repeat template such as
+    /// `token_{item.id}` is expanded per row on the device, so each `{...}` placeholder may stand for
+    /// any text there.
+    private static func secureKey(for stateKey: String, secure: [String]) -> String? {
+        let literals = stateKey
+            .replacingOccurrences(of: #"\{[^}]*\}"#, with: "\u{0}", options: .regularExpression)
+            .components(separatedBy: "\u{0}")
+        let pattern = "^" + literals.map(NSRegularExpression.escapedPattern(for:)).joined(separator: ".*") + "$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        return secure.first { entry in
+            guard entry.hasPrefix("state:") else { return false }
+            let key = String(entry.dropFirst("state:".count))
+            return regex.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)) != nil
         }
     }
 

@@ -587,6 +587,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_auth_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["auth"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, onTap: [{ type: "platform", call: "auth.signIn", args: {} }] }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_location_v1: {
     minimalSpec: {
       ...base,

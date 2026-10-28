@@ -1,3 +1,4 @@
+import { MOCK_BACKEND_ID } from "../../features/prototype/prototypeMockSchema";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
@@ -243,11 +244,14 @@ export const prototypeSchema = addDeviceTargetingToSchema(
           "testSessionBegin",
           "testSessionEnd",
           "testSessionReport",
+          "defineBackend",
+          "clearBackend",
+          "backendLog",
         ],
         {
           error: (issue) =>
             getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; host-only: screenMap",
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved, deleteSaved or open; storage action: clearStorage; timer action: simulate; host test-session actions: testSessionBegin, testSessionEnd or testSessionReport; mock backend actions: defineBackend, clearBackend or backendLog; host-only: screenMap",
         },
       ),
       goal: z
@@ -266,6 +270,25 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "testSessionBegin only: free label echoed in the report; no cross-session aggregation",
         ),
+      backendId: z
+        .string()
+        .regex(MOCK_BACKEND_ID, "backendId must match [a-z0-9][a-z0-9-]{0,30}")
+        .optional()
+        .describe(
+          "defineBackend, clearBackend and backendLog: the mock backend id; requests to https://<backendId>.mock.automobile.invalid are answered by it",
+        ),
+      backend: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?}. Replaces the backend of that id",
+        ),
+      since: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("backendLog only: return requests with a sequence number above this"),
       testSessionId: z
         .string()
         .min(1)
@@ -469,6 +492,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "goal",
     "cohort",
     "testSessionId",
+    "backendId",
+    "backend",
+    "since",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -493,6 +519,9 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     testSessionBegin: ["id", "goal", "cohort"],
     testSessionEnd: ["id"],
     testSessionReport: ["id", "testSessionId"],
+    defineBackend: ["backendId", "backend"],
+    clearBackend: ["backendId"],
+    backendLog: ["backendId", "since"],
     status: [],
     inspect: [],
     screenMap: ["spec", "specPath"],
@@ -508,6 +537,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     }
   }
   validateTestSessionInput(value, ctx);
+  validateMockBackendInput(value, ctx);
   validatePrototypeSavedInput(value, ctx);
   if (value.action === "patch") {
     (["id", "ops"] as const)
@@ -531,6 +561,27 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     });
   }
 });
+
+function validateMockBackendInput(
+  value: { action: string; backendId?: string; backend?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const mock = ["defineBackend", "clearBackend", "backendLog"].includes(value.action);
+  if (mock && value.backendId === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["backendId"],
+      message: `${value.action} requires backendId`,
+    });
+  }
+  if (value.action === "defineBackend" && value.backend === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["backend"],
+      message: "defineBackend requires backend (an object, {} for an empty backend)",
+    });
+  }
+}
 
 function validateTestSessionInput(
   value: { action: string; id?: string; testSessionId?: string },
@@ -605,6 +656,9 @@ export const PROTOTYPE_READ_ACTIONS: readonly string[] = [
   "testSessionBegin",
   "testSessionEnd",
   "testSessionReport",
+  "defineBackend",
+  "clearBackend",
+  "backendLog",
 ];
 
 export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {

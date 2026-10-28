@@ -13,6 +13,39 @@ On iOS nothing is reversed, and \`localhost\`, \`127.0.0.1\` and \`[::1]\` are r
 \`blocked_destination\` for \`via: "device"\`: call a Mac-local service by the Mac's LAN address instead.
 
 
+## Mock backends (no server code)
+
+Build a backend-driven prototype without running a server. \`defineBackend {backendId, backend}\`
+registers an in-process backend for this daemon session (\`backendId\` is lowercase letters, digits
+and hyphens); a \`request\` with \`via: "host"\` to \`https://<backendId>.mock.automobile.invalid/<path>\`
+is answered by it, with no network, DNS lookup or egress policy. The host must be connected, so it
+does not apply to \`via: "device"\` requests or saved prototypes. \`backendLog {backendId, since?}\` lists the requests it
+answered and \`clearBackend {backendId}\` removes it; defining the same id again replaces it and resets
+its data. Requests to a backend that is not defined fail with \`network\`.
+
+\`\`\`json
+{"action":"defineBackend","backendId":"shop","backend":{
+  "collections":{"products":[{"id":1,"title":"Mug","price":12},{"id":2,"title":"Tote","price":20}]},
+  "routes":[{"method":"GET","path":"/greeting/:name","body":{"text":"Hello {params.name}"}}],
+  "latencyMs":{"min":200,"max":600},"faults":[{"path":"/products","method":"POST","status":500,"every":3}],
+  "seed":7}}
+\`\`\`
+
+- **Collections** are REST over \`{name: [items]}\`; every item needs an \`id\` (a number, or a non-empty
+  string other than \`.\` and \`..\`). \`GET /products?title=Mug\`, \`q=mug\` (case-insensitive substring over
+  string and number members), \`_sort=price\` or \`-price\`, \`_page\` and \`_limit\` (an
+  \`x-total-count\` header reports the total), or \`after=<id>&size=<n>\` for \`{items, next}\` cursor paging.
+  \`GET /products/1\`, \`POST\` (201; the id is generated when absent, 409 if it exists), \`PATCH\` (merge),
+  \`PUT\` (replace) and \`DELETE\`. Writes persist for the session; a backend holds at most 1 MiB.
+- **Routes** are canned responses that win over collections. Paths are literal segments and
+  \`:name\` parameters. A body string that is exactly \`{params.x}\`, \`{query.x}\` or \`{body:/pointer}\`
+  takes that value's type; inside longer text it is inserted as text; an unbound one is \`null\` or empty.
+- **Latency and faults** replay identically for the same \`seed\`: \`latencyMs {min,max}\` delays every
+  answer, and a fault \`{path, method?, status, every | rate}\` fails every nth matching request or
+  that fraction of them with \`{error:"mock fault"}\`.
+- A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
+  with \`too_large\`.
+
 ## Value formatters (#14227)
 
 Use top-level \`derive: {priceText: {of: {data: "/price"}, format: {currency: {code: "USD"}}}}\`

@@ -59,6 +59,14 @@ export class PrototypeMockBackend {
     }
   }
 
+  get routeCount(): number {
+    return this.definition.routes?.length ?? 0;
+  }
+
+  get faultCount(): number {
+    return this.definition.faults?.length ?? 0;
+  }
+
   /** Requests answered so far with `seq` above `since`, oldest first; bounded to the latest 200. */
   requestLog(since = 0): MockLogEntry[] {
     return this.log.filter((entry) => entry.seq > since);

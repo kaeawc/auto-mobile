@@ -216,6 +216,33 @@ export const prototypeOutputSchema = z.object({
       deadTaps: z.enum(["enabled", "off"]),
     })
     .optional(),
+  backend: z
+    .object({
+      id: z.string(),
+      origin: z.string().describe("Base URL a spec requests to reach this backend"),
+      collections: z
+        .record(z.string(), z.number().int().nonnegative())
+        .optional()
+        .describe("defineBackend: item count per collection"),
+      routes: z.number().int().nonnegative().optional(),
+      faults: z.number().int().nonnegative().optional(),
+      cleared: z.boolean().optional().describe("clearBackend: false when no such backend existed"),
+    })
+    .optional()
+    .describe("defineBackend and clearBackend: the mock backend acted on"),
+  backendLog: z
+    .array(
+      z.object({
+        seq: z.number().int().positive(),
+        method: z.string(),
+        path: z.string(),
+        query: z.record(z.string(), z.string()),
+        status: z.number().int(),
+        body: z.json().optional(),
+      }),
+    )
+    .optional()
+    .describe("backendLog: requests the backend answered, oldest first (latest 200 kept)"),
   report: z.json().optional(),
   markdown: z.string().optional(),
   saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),

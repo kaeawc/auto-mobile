@@ -2565,6 +2565,13 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
   `rate`, answering `{error: "mock fault"}`.
 - Every answered request is logged (latest 200, with a sequence number) for assertions.
 
+The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
+{backendId, backend}` validates the definition and replaces the backend of that id (a failed
+definition leaves the old one), `clearBackend {backendId}` removes it, and `backendLog {backendId,
+since?}` returns the log. Their results report the origin a spec should call. A request that
+carries a `timeoutMs` is bounded by it like any host request, and a request that times out or is
+cancelled while waiting on latency never writes to the backend.
+
 ## Data, storage and network (#12531)
 
 The three features compose: a `request` writes its response into `/data`, data actions edit `/data`

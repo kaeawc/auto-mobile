@@ -4,7 +4,8 @@ import android.content.Context
 import dev.jasonpearson.automobile.prototype.*
 
 /**
- * The haptics and sound modules, the clipboard, and the contract test module debug builds carry.
+ * The haptics, sound and connectivity modules, the clipboard, and the contract test module debug
+ * builds carry.
  */
 internal fun prototypeRuntimePlatform(
   context: Context,
@@ -12,5 +13,6 @@ internal fun prototypeRuntimePlatform(
 ): PrototypePlatform =
   PrototypePlatform(
     prototypeFeedbackModules(context) +
-      listOfNotNull(TestPlatformModule(), clipboard?.let { PrototypeClipboardModule(it) }),
+      listOfNotNull(TestPlatformModule(), clipboard?.let { PrototypeClipboardModule(it) }) +
+      PrototypeConnectivityModule(AndroidConnectivitySource(context)),
   )

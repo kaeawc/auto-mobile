@@ -356,7 +356,6 @@
                                   "id": "playback",
                                   "afterMs": 1000,
                                   "everyMs": 1000,
-                                  "maxRuns": 3600,
                                   "actions": [
                                     {
                                       "type": "increment",
@@ -588,7 +587,6 @@
                     "id": "playback",
                     "afterMs": 1000,
                     "everyMs": 1000,
-                    "maxRuns": 3600,
                     "actions": [
                       {
                         "type": "increment",
@@ -626,7 +624,6 @@
                     "id": "playback",
                     "afterMs": 667,
                     "everyMs": 667,
-                    "maxRuns": 3600,
                     "actions": [
                       {
                         "type": "increment",
@@ -664,7 +661,6 @@
                     "id": "playback",
                     "afterMs": 500,
                     "everyMs": 500,
-                    "maxRuns": 3600,
                     "actions": [
                       {
                         "type": "increment",
@@ -862,7 +858,6 @@
                               "id": "playback",
                               "afterMs": 1000,
                               "everyMs": 1000,
-                              "maxRuns": 3600,
                               "actions": [
                                 {
                                   "type": "increment",
@@ -990,7 +985,6 @@
                               "id": "playback",
                               "afterMs": 1000,
                               "everyMs": 1000,
-                              "maxRuns": 3600,
                               "actions": [
                                 {
                                   "type": "increment",
@@ -1118,7 +1112,6 @@
                               "id": "playback",
                               "afterMs": 1000,
                               "everyMs": 1000,
-                              "maxRuns": 3600,
                               "actions": [
                                 {
                                   "type": "increment",
@@ -1244,7 +1237,6 @@
                     "id": "playback",
                     "afterMs": 1000,
                     "everyMs": 1000,
-                    "maxRuns": 3600,
                     "actions": [
                       {
                         "type": "increment",
@@ -1282,7 +1274,6 @@
                     "id": "playback",
                     "afterMs": 667,
                     "everyMs": 667,
-                    "maxRuns": 3600,
                     "actions": [
                       {
                         "type": "increment",
@@ -1320,7 +1311,6 @@
                     "id": "playback",
                     "afterMs": 500,
                     "everyMs": 500,
-                    "maxRuns": 3600,
                     "actions": [
                       {
                         "type": "increment",
@@ -1577,7 +1567,6 @@
                         "id": "playback",
                         "afterMs": 1000,
                         "everyMs": 1000,
-                        "maxRuns": 3600,
                         "actions": [
                           {
                             "type": "increment",
@@ -1616,7 +1605,6 @@
                         "id": "playback",
                         "afterMs": 667,
                         "everyMs": 667,
-                        "maxRuns": 3600,
                         "actions": [
                           {
                             "type": "increment",
@@ -1655,7 +1643,6 @@
                         "id": "playback",
                         "afterMs": 500,
                         "everyMs": 500,
-                        "maxRuns": 3600,
                         "actions": [
                           {
                             "type": "increment",
@@ -1739,7 +1726,6 @@
                         "id": "playback",
                         "afterMs": 1000,
                         "everyMs": 1000,
-                        "maxRuns": 3600,
                         "actions": [
                           {
                             "type": "increment",
@@ -1781,7 +1767,6 @@
                         "id": "playback",
                         "afterMs": 667,
                         "everyMs": 667,
-                        "maxRuns": 3600,
                         "actions": [
                           {
                             "type": "increment",
@@ -1823,7 +1808,6 @@
                         "id": "playback",
                         "afterMs": 500,
                         "everyMs": 500,
-                        "maxRuns": 3600,
                         "actions": [
                           {
                             "type": "increment",

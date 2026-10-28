@@ -6,6 +6,16 @@ enum SdkContractError: LocalizedError {
     case timedOut(seconds: UInt64)
     case listenerFailed(String)
     case unexpectedResponse(String)
+    case caseFailed(name: String, underlying: String)
+
+    /// Names the case and keeps the error domain and code, which a localized message loses.
+    static func describe(_ error: Error) -> String {
+        if let contractError = error as? SdkContractError {
+            return contractError.errorDescription ?? String(describing: contractError)
+        }
+        let nsError = error as NSError
+        return "\(nsError.localizedDescription) [\(nsError.domain) \(nsError.code)]"
+    }
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +27,8 @@ enum SdkContractError: LocalizedError {
             "Loopback listener failed: \(reason)"
         case let .unexpectedResponse(reason):
             "Loopback server returned an unexpected response: \(reason)"
+        case let .caseFailed(name, underlying):
+            "Case \(name) failed: \(underlying)"
         }
     }
 }
@@ -162,9 +174,29 @@ final class SdkContractLoopbackServer: @unchecked Sendable {
             + "Connection: close\r\n\r\n"
         var response = Data(head.utf8)
         response.append(body)
-        connection.send(content: response, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        // Send as the final message (a graceful write close), then wait for the client to
+        // close before cancelling, so the client never sees a reset mid-read.
+        connection.send(
+            content: response,
+            contentContext: .finalMessage,
+            isComplete: true,
+            completion: .contentProcessed { [weak self] _ in
+                self?.cancelWhenPeerCloses(connection)
+            }
+        )
+    }
+
+    private func cancelWhenPeerCloses(_ connection: NWConnection) {
+        connection.receive(
+            minimumIncompleteLength: 1,
+            maximumLength: 16 * 1024
+        ) { [weak self] _, _, isComplete, error in
+            if isComplete || error != nil {
+                connection.cancel()
+            } else {
+                self?.cancelWhenPeerCloses(connection)
+            }
+        }
     }
 
     private func receiveWebSocket(_ connection: NWConnection) {

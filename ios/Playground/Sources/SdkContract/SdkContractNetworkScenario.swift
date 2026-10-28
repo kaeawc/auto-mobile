@@ -13,10 +13,19 @@ struct SdkContractNetworkScenario {
     let recorder: NetworkCaptureRecorder
 
     func run() async throws -> [ExpectedNetworkEvent] {
-        var expected = try await [urlSession()]
-        try await expected.append(contentsOf: webSocket())
-        try await expected.append(nwConnection())
+        var expected = try await [named("urlsession", urlSession)]
+        try await expected.append(contentsOf: named("websocket", webSocket))
+        try await expected.append(named("nwconnection", nwConnection))
         return expected
+    }
+
+    /// Reports which case failed, with the error domain and code.
+    private func named<T>(_ name: String, _ body: () async throws -> T) async throws -> T {
+        do {
+            return try await body()
+        } catch {
+            throw SdkContractError.caseFailed(name: name, underlying: SdkContractError.describe(error))
+        }
     }
 
     private func contractURL(scheme: String, port: UInt16, caseName: String) throws -> URL {

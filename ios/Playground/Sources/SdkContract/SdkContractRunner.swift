@@ -48,7 +48,7 @@ enum SdkContractRunner {
             manifest.undecodableBatches = captured.undecodableBatches
             manifest.status = .complete
         } catch {
-            manifest.failure = error.localizedDescription
+            manifest.failure = SdkContractError.describe(error)
             manifest.status = .failed
         }
         do {

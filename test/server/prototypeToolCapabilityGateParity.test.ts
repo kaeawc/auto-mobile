@@ -677,6 +677,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_cast_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["cast"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, onTap: [{ type: "platform", call: "cast.stop", args: {} }] }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_contacts_v1: {
     minimalSpec: {
       ...base,

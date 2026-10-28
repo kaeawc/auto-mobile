@@ -96,7 +96,8 @@ internal fun linkIntent(url: String, plan: LinkPlan): Intent =
   }
 
 internal class SystemLinkGateway(private val context: Context) : LinkGateway {
-  private val packages: PackageManager = context.packageManager
+  // The overlay registers modules before its context is attached; resolve the manager on use.
+  private val packages: PackageManager by lazy { context.packageManager }
 
   override fun customTabsAvailable(): Boolean =
     packages.queryIntentServices(Intent(CustomTabs.SERVICE_ACTION), 0).isNotEmpty()

@@ -12,10 +12,12 @@ import { registerNavigationTools } from "../../src/server/navigationTools";
 import { isToolResponseFailure } from "../../src/server/pipeline/afterToolCall";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { getStructuredField, getStructuredPayload } from "../../src/utils/toolUtils";
 import type { ExportedGraph } from "../../src/utils/interfaces/NavigationGraph";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -23,7 +25,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
  * Pins the exact serialized CallTool result for the navigation tools as it leaves the
  * server transport (#11830): for the schema'd navigateTo and getNavigationGraph, the text
  * part, the retained `structuredContent`, the hoisted `success`/`error`, and `isError` only
- * on a failed navigateTo; for explore, its unchanged schemaless text-only wire. The real
+ * on a failed navigateTo; explore, like before it declared a schema, never sets `isError`. The real
  * registered handlers run against fakes; the MCP boundary, the client's outputSchema
  * validation and the finalizer are production code. An envelope change that alters a
  * single wire byte, or a payload the declared outputSchema rejects, fails here.
@@ -137,7 +139,7 @@ describe("navigationTools structured wire envelopes", () => {
     args: Record<string, unknown>,
   ): Promise<{ wire: string; failure: boolean }> {
     const tool = ToolRegistry.getRegisteredTool(name)!;
-    expect(tool.outputSchema !== undefined).toBe(name !== "explore");
+    expect(tool.outputSchema).toBeDefined();
     let failure: boolean | undefined;
     const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
       const response = await tool.deviceAwareHandler!(device, args);
@@ -169,10 +171,6 @@ describe("navigationTools structured wire envelopes", () => {
       structuredContent: payload,
       ...tail,
     });
-
-  /** The schemaless wire: the payload serialized once as the only text part. */
-  const textWire = (payload: Record<string, unknown>) =>
-    JSON.stringify({ content: [{ type: "text", text: JSON.stringify(payload) }] });
 
   test("navigateTo success", async () => {
     navigateResult = {
@@ -269,31 +267,32 @@ describe("navigationTools structured wire envelopes", () => {
     }
   });
 
-  // explore stays schemaless (#11830): its completed/dry-run union has no object root, so a
-  // spilled response keeps only `success`/`error` and would fail an advertised outputSchema.
   const completedMessage =
     "Exploration completed: 1 interactions, 1 new screens discovered, 100% coverage";
   test.each([
-    ["completed", exploreResult, false, textWire({ message: completedMessage, ...exploreResult })],
+    [
+      "completed",
+      exploreResult,
+      false,
+      structuredWire({ message: completedMessage, ...exploreResult }, { success: true }),
+    ],
     [
       "failed",
       { ...exploreResult, success: false, error: "explore failed" },
       true,
-      textWire({
-        message: completedMessage,
-        ...exploreResult,
-        success: false,
-        error: "explore failed",
-      }),
+      structuredWire(
+        { message: completedMessage, ...exploreResult, success: false, error: "explore failed" },
+        { success: false, error: "explore failed" },
+      ),
     ],
     [
       "dry run",
       dryRunResult,
       false,
-      textWire({
-        message: "Exploration dry run completed: 1 planned interactions",
-        ...dryRunResult,
-      }),
+      structuredWire(
+        { message: "Exploration dry run completed: 1 planned interactions", ...dryRunResult },
+        { success: true },
+      ),
     ],
   ] as const)("explore %s", async (_label, result, failure, expected) => {
     const execute = spyOn(Explore.prototype, "execute").mockResolvedValue(result);
@@ -302,6 +301,27 @@ describe("navigationTools structured wire envelopes", () => {
         failure,
         wire: expected,
       });
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
+  // A real dry run carries the observation it read; the finalizer renders it and the
+  // client validates the rendered payload against the advertised schema.
+  test("explore keeps a rendered dry-run observation schema-valid on the wire", async () => {
+    const execute = spyOn(Explore.prototype, "execute").mockResolvedValue({
+      ...dryRunResult,
+      observation: loadAndroidHomeObserve().observe,
+    });
+    try {
+      const { wire: sent, failure } = await callOnWire("explore", { dryRun: true });
+      const result = JSON.parse(sent) as {
+        content: Array<{ type: "text"; text: string }>;
+        structuredContent: Record<string, unknown>;
+      };
+      expect(failure).toBe(false);
+      expect(getStructuredField(result, "observation")).toBeDefined();
+      expect(JSON.parse(result.content[0].text)).toEqual(getStructuredPayload(result));
     } finally {
       execute.mockRestore();
     }

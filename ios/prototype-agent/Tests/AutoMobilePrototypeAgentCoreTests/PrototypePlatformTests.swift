@@ -66,8 +66,11 @@ final class PrototypePlatformTests: XCTestCase {
                     case let .enumeration(values):
                         XCTAssertEqual(rule["kind"] as? String, "enum", arg)
                         XCTAssertEqual(Set(rule["values"] as? [String] ?? []), values, arg)
-                    case .contract:
-                        XCTAssertEqual(rule["kind"] as? String, "array", arg)
+                    case let .contract(swiftRule):
+                        // Every other kind (array, tagged, choice, true, ...) keeps the contract rule
+                        // itself, so it must round-trip unchanged.
+                        let stored = try JSONSerialization.jsonObject(with: JSONEncoder().encode(swiftRule))
+                        XCTAssertEqual(stored as? NSDictionary, rule as NSDictionary, arg)
                     }
                 }
             }

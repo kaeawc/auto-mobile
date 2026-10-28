@@ -4419,6 +4419,10 @@
           "description": "Plan name",
           "type": "string"
         },
+        "resourceLink": {
+          "description": "Return the complete result as an automobile:tool-output resource and a resource_link block instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
+          "type": "boolean"
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -47928,7 +47932,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Start or stop device video recording.",
+    "description": "Start or stop device video recording. resourceLink on stop links its full result; required fields stay inline, bounded.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -48095,6 +48099,10 @@
             "required": ["shape"],
             "additionalProperties": false
           }
+        },
+        "resourceLink": {
+          "description": "Return the complete result as an automobile:tool-output resource and a resource_link block instead of inline (default off). Only the headline fields stay inline; read the link to get the rest.",
+          "type": "boolean"
         },
         "sessionUuid": {
           "description": "Session",

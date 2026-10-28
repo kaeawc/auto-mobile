@@ -1,4 +1,13 @@
 import {
+  FileAvdConfigReader,
+  type AvdConfigReader,
+} from "../utils/android-cmdline-tools/AvdConfigReader";
+import { avdConfigFormFactor } from "../utils/android-cmdline-tools/avdDeviceInfoEnrichment";
+import { isUnknownEmulatorName } from "../utils/android-cmdline-tools/emulatorReadinessEvaluation";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
+import {
   explicitReadTargetPlatform,
   matchRunningReadTarget,
   providedReadTargetNotFound,
@@ -12,16 +21,21 @@ import {
 } from "./resourceDeviceResolver";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { sequenceBackoff, type BackoffInput } from "../utils/Backoff";
-import { type Timer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import type { PooledDevice } from "../daemon/devicePoolTypes";
 
 export interface DeviceObservationAccess {
+  /** Host-only metadata; injected readers keep custom access independent of host AVD files. */
+  avdConfigReader?: AvdConfigReader;
   listBooted(signal: AbortSignal | undefined): Promise<BootedDevice[]>;
   listBootedWithStatus?(signal: AbortSignal | undefined): Promise<BootedResourceReadListing>;
   isAuthorized(device: BootedDevice): boolean;
 }
 
 export const defaultDeviceObservationAccess: DeviceObservationAccess = {
+  avdConfigReader: new FileAvdConfigReader(),
   listBooted: (signal) =>
     listBootedDevicesForResource("either", "observe", { signal, requireFresh: true }),
   listBootedWithStatus: (signal) => listBootedDevicesForReadWithStatus("either", "observe", signal),
@@ -72,7 +86,7 @@ async function findObservationReadTarget(
           : { devices: await access.listBooted(signal), scanned: { android: true, ios: true } };
         signal?.throwIfAborted();
         const fresh = listing.devices.filter((device) => listing.scanned[device.platform]);
-        const device = matchRunningReadTarget(fresh, deviceId, targetPlatform);
+        let device = matchRunningReadTarget(fresh, deviceId, targetPlatform);
         if (!device) {
           const failedPlatform = incompleteReadPlatform(listing, targetPlatform);
           if (failedPlatform && !(await confirmStopped?.(listing))) {
@@ -81,6 +95,10 @@ async function findObservationReadTarget(
               listing.discoveryErrors?.[failedPlatform],
             );
           }
+        }
+        if (device && access.avdConfigReader) {
+          device = await enrichBootedDeviceFormFactor(device, access.avdConfigReader);
+          signal?.throwIfAborted();
         }
         return { device, devices: fresh };
       },
@@ -166,4 +184,96 @@ export function sessionlessDeviceReadFor(
     },
     assertAuthorized: (device) => assertObservationReadAccess(device, access),
   };
+}
+
+/** Add only configured form-factor evidence, without issuing another device command. */
+async function enrichBootedDeviceFormFactor(
+  device: BootedDevice,
+  reader: AvdConfigReader,
+): Promise<BootedDevice> {
+  if (
+    device.platform !== "android" ||
+    !isAndroidEmulatorSerial(device.deviceId) ||
+    device.formFactor !== undefined ||
+    !device.name.trim() ||
+    device.name === device.deviceId ||
+    isUnknownEmulatorName(device.name, device.deviceId)
+  ) {
+    return device;
+  }
+  try {
+    const config = await reader.readConfig(device.name);
+    if (!config) {
+      // Optional host metadata: missing config leaves device reads usable without an inferred field.
+      logger.debug(`No AVD config for ${device.name}`);
+      return device;
+    }
+    const formFactor = avdConfigFormFactor(config);
+    return formFactor === "unknown" ? device : { ...device, formFactor };
+  } catch (error) {
+    // Optional host metadata: unreadable config leaves form factor absent and never blocks observe.
+    logger.debug(`AVD form factor unavailable for ${device.name}: ${errorMessage(error)}`);
+    return device;
+  }
+}
+
+const HELD_FORM_FACTOR_READ_TIMEOUT_MS = 2000;
+
+/** Optional form-factor metadata shared by all handlers using one held pool incarnation. */
+export class HeldDeviceFormFactorResolver {
+  // Weak keys follow the pool entry's lifetime, so retired devices do not accumulate here.
+  private readonly cache = new WeakMap<
+    PooledDevice,
+    { identity: string; value: Promise<BootedDevice["formFactor"]> }
+  >();
+
+  constructor(
+    private readonly reader: AvdConfigReader | undefined,
+    private readonly timer: Timer = defaultTimer,
+    private readonly timeoutMs: number = HELD_FORM_FACTOR_READ_TIMEOUT_MS,
+  ) {}
+
+  async enrich(device: BootedDevice, pooled: PooledDevice | null): Promise<BootedDevice> {
+    const formFactor = await this.resolve(device, pooled);
+    return formFactor === undefined ? device : { ...device, formFactor };
+  }
+
+  private resolve(
+    device: BootedDevice,
+    pooled: PooledDevice | null,
+  ): Promise<BootedDevice["formFactor"]> {
+    const known = pooled?.androidImage?.formFactor;
+    if (known !== undefined || !pooled || !this.reader) {
+      return Promise.resolve(known);
+    }
+    const identity = `${pooled.incarnation}:${pooled.avdName ?? device.name}`;
+    const cached = this.cache.get(pooled);
+    if (cached?.identity === identity) {
+      return cached.value;
+    }
+    // Unknown emulator metadata needs one host read, shared even by concurrent calls. Known
+    // phones above pay none. Cache settled absence too: missing/unreadable config is not polled.
+    const name = pooled.avdName ?? device.name;
+    const value: Promise<BootedDevice["formFactor"]> = raceWithDeadline(
+      enrichBootedDeviceFormFactor({ ...device, name }, this.reader).then(
+        (enriched) => enriched.formFactor,
+      ),
+      {
+        timer: this.timer,
+        timeoutMs: this.timeoutMs,
+        label: `AVD form factor read for ${name}`,
+        onTimeout: () => {
+          // Optional host metadata is safe to retry; never evict a replacement read.
+          if (this.cache.get(pooled)?.value === value) {
+            this.cache.delete(pooled);
+          }
+        },
+      },
+    ).catch((error) => {
+      logger.debug(`AVD form factor unavailable for ${name}: ${errorMessage(error)}`);
+      return undefined;
+    });
+    this.cache.set(pooled, { identity, value });
+    return value;
+  }
 }

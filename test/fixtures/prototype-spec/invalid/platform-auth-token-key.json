@@ -1,0 +1,97 @@
+{
+  "spec": {
+    "id": "a6",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "session": {}
+    },
+    "state": {
+      "signInStatus": "",
+      "expired": false
+    },
+    "requires": {
+      "platform": ["auth"]
+    },
+    "platform": {
+      "on": {
+        "auth.sessionExpired": [
+          {
+            "type": "setState",
+            "key": "expired",
+            "value": true
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Signed in as {platform:/auth/userId}",
+          "visibleWhen": {
+            "platform": "/auth/token",
+            "equals": "x"
+          }
+        },
+        {
+          "type": "button",
+          "label": "Sign in",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "auth.signIn",
+              "args": {
+                "style": {
+                  "value": "chooser"
+                }
+              },
+              "into": "/data/session",
+              "statusKey": "signInStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "expired",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Sign out",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "auth.signOut",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    },
+    "auth": {
+      "provider": "fake",
+      "accounts": [
+        {
+          "id": "u1",
+          "name": "Ada Lovelace",
+          "email": "ada@example.test",
+          "avatar": "ada"
+        },
+        {
+          "id": "u2",
+          "name": "Grace Hopper",
+          "email": "grace@example.com"
+        }
+      ],
+      "sessionTtlSeconds": 3600
+    }
+  },
+  "expectedPath": "root.children[0].visibleWhen.platform"
+}

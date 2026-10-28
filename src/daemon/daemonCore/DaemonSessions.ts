@@ -1,6 +1,7 @@
 import { lazyDeviceClaims, StoreDeviceClaimMirror, type DeviceClaimMirror } from "../deviceClaims";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { SqliteBindingRegistry } from "../sessionBroker/registry/sqliteBindingRegistry";
+import { bindingRegistryFileExists } from "../sessionBroker/registry/sqliteBindingRegistry";
 import type {
   DaemonCoreServices,
   DaemonIdentityState,
@@ -101,8 +102,9 @@ export interface DaemonSessionsHost {
     | "shutdownFallbackReleaseNotifications"
   >;
   bindingExclusionFactory: () => (timer: Timer) => BindingExclusion;
-  /** The open binding registry, observed only: the claims mirror never opens one. */
+  /** The current registry open, served only after it settles. */
   bindingRegistry: () => Promise<SqliteBindingRegistry> | undefined;
+  startBackgroundRegistryUpgrade: DaemonBroker["startBackgroundRegistryUpgrade"];
   deviceClaimMirrors: () => DeviceClaimMirrorHub;
   foreignCtrlProxyForwardEvidence: () => ForeignCtrlProxyForwardEvidence | undefined;
   deviceStateChangeNotifier: () => DeviceStateChangeNotifier;
@@ -133,6 +135,8 @@ export class DaemonSessions {
         new StoreDeviceClaimMirror({
           platform,
           store: claimStore,
+          registryFileExists: bindingRegistryFileExists,
+          openRegistry: () => this.host.startBackgroundRegistryUpgrade(),
           timer: this.host.services.timer(),
           daemonSessionId: this.host.identity.daemonSessionId(),
         }),

@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, expect, test, spyOn } from "bun:test"
 import { z } from "zod/v4";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
@@ -97,9 +98,13 @@ beforeEach(async () => {
     received.push(device.deviceId);
     return { content: [{ type: "text" as const, text: device.deviceId }] };
   });
-  ToolRegistry.register("setActiveDevice", "setActiveDevice", schema, async () => ({
-    content: [],
-  }));
+  ToolRegistry.register(
+    "setActiveDevice",
+    "setActiveDevice",
+    schema,
+    async () => ({ content: [] }),
+    SELECTS_ACTIVE_DEVICE,
+  );
   await fixture.client.callTool({ name: "getAndroid", arguments: {} });
   await fixture.client.callTool({ name: "getApple", arguments: {} });
 });

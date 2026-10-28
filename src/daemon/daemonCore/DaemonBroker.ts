@@ -55,6 +55,7 @@ import { sessionDisposition } from "../sessionBroker/sessionDisposition";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 import type { DaemonSessions } from "./DaemonSessions";
+import { BackgroundBindingRegistryUpgrade } from "../sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 
 export interface DaemonBrokerHost {
   readPersistedSession: DaemonDeviceSessionStore["getSession"];
@@ -141,6 +142,7 @@ export class DaemonBroker {
   private readonly bindingJournalInFlight = new BindingJournalInFlight();
 
   private bindingRedrive: BindingJournalRedriveLoop | undefined;
+  private registryClosing = false;
   constructor(private readonly host: DaemonBrokerHost) {}
 
   /**
@@ -301,6 +303,29 @@ export class DaemonBroker {
     // Broker startup awaits registry retirement; local startup upgrades after exposing its socket.
   }
 
+  /** The caller has observed an existing registry; local daemons never create one here. */
+  startBackgroundRegistryUpgrade(): boolean {
+    if (this.registryClosing || this.host.lifecycle.shutdownInProgress()) {
+      return false;
+    }
+    // Broker startup owns registry preparation, so mirrors need not ask for a local upgrade.
+    if (this.host.lifecycle.sessionBrokerConfigPath()) {
+      return true;
+    }
+    if (!this.host.identity.socketBindCommitted()) {
+      return false;
+    }
+    if (!this.host.lifecycle.backgroundRegistryUpgrade()) {
+      const upgrade = new BackgroundBindingRegistryUpgrade(
+        (signal) => this.host.openBindingRegistry(signal),
+        { timer: this.host.services.timer() },
+      );
+      this.host.lifecycle.setBackgroundRegistryUpgrade(upgrade);
+      upgrade.start();
+    }
+    return true;
+  }
+
   openBindingRegistry(signal?: AbortSignal): Promise<SqliteBindingRegistry> {
     if (this.host.bindingRegistry()) {
       return this.host.bindingRegistry()!;
@@ -374,6 +399,8 @@ export class DaemonBroker {
 
   /** Stop the drain's settlement watchers and close the binding registry if this daemon opened it. */
   async closeManagedExecutionRelease(): Promise<void> {
+    // Mirrors are disposed later: fence late probes before the first shutdown await.
+    this.registryClosing = true;
     await this.host.lifecycle.backgroundRegistryUpgrade()?.close();
     this.host.lifecycle.setBackgroundRegistryUpgrade(undefined);
     await this.sessionBrokerService?.close();
@@ -399,7 +426,7 @@ export class DaemonBroker {
     try {
       // The device allocation claims are released after this stage, when the table is gone: this
       // daemon's rows leave with its registry so a clean stop strands none (#11811 b).
-      await (await registry)?.deviceClaims().releaseOwnedBy(process.pid);
+      await this.host.deviceClaimMirrors().releaseOwnedClaims((await registry)?.deviceClaims());
     } catch (error) {
       logger.warn(
         `[Daemon] Withdrawing this daemon's device claims failed: ${errorMessage(error)}`,
@@ -469,6 +496,7 @@ export class DaemonBroker {
 
   get testHooks() {
     return {
+      startBackgroundRegistryUpgrade: (): boolean => this.startBackgroundRegistryUpgrade(),
       openBindingRegistry: (signal?: AbortSignal): Promise<SqliteBindingRegistry> =>
         this.host.openBindingRegistry(signal),
       closeManagedExecutionRelease: (): Promise<void> => this.closeManagedExecutionRelease(),

@@ -1,3 +1,4 @@
+import { internalExecutionId, internalExecutionStartTime } from "../internalToolParams";
 import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
@@ -93,8 +94,8 @@ function withAmbientDeviceContext(
   const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
   const needsExecution =
     execution &&
-    (args.__executionId !== execution.executionId ||
-      args.__executionStartTime !== execution.startTime);
+    (internalExecutionId(args) !== execution.executionId ||
+      internalExecutionStartTime(args) !== execution.startTime);
   if (!needsRoutingSession && !needsExecution) {
     return args;
   }
@@ -595,8 +596,8 @@ export async function invokeResolvedDeviceHandler(input: {
     return handler(target.device, args, progress, signal);
   }
   deviceActionClock.recordDispatch(
-    args.__executionId,
-    args.__executionStartTime,
+    internalExecutionId(args),
+    internalExecutionStartTime(args),
     target.device.deviceId,
   );
   const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);

@@ -19,6 +19,7 @@ import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { FakeDeviceReadiness } from "../fakes/FakeDeviceReadiness";
@@ -181,7 +182,7 @@ export class RealToolCallPath {
         resumeCtrlProxy: async () => undefined,
         legacyDeviceSelection: () => this.deviceReadiness,
       }),
-      { defaultEnabled: true },
+      { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
     );
     return this;
   }

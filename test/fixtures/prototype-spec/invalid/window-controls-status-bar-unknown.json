@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "w6",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "keepScreenOn": true,
+      "brightness": 100,
+      "orientation": "portrait",
+      "statusBar": "blue"
+    },
+    "root": {
+      "type": "text",
+      "text": "Boarding pass"
+    }
+  },
+  "expectedPath": "window.statusBar"
+}

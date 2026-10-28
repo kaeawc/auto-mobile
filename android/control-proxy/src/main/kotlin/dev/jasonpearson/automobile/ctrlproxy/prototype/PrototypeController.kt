@@ -961,6 +961,7 @@ class PrototypeController(
     action: suspend () -> Outcome,
   ) = mutex.withLock {
     var outcome = Outcome()
+    var renderFailure: PrototypeRenderFailedException? = null
     val error =
       try {
         check(!destroyed) { "Prototype host destroyed" }
@@ -968,13 +969,23 @@ class PrototypeController(
         outcome.error
       } catch (error: CancellationException) {
         throw error
+      } catch (error: PrototypeRenderFailedException) {
+        renderFailure = error
+        Log.w("PrototypeController", "Prototype first render failed", error)
+        error.reason
       } catch (error: Exception) {
         Log.w("PrototypeController", "Prototype request failed", error)
         error.message ?: "Prototype request failed (${error.javaClass.simpleName})"
       }
     val missing = outcome.missingAssets
     val appearance = outcome.appearance
-    if (patchId != null) {
+    if (renderFailure != null) {
+      sink.sendRefusal(
+        requestId,
+        dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode.RENDER_FAILED,
+        renderFailure.reason,
+      )
+    } else if (patchId != null) {
       val revision =
         outcome.revision ?: surfaces[patchId]?.runtime?.current?.takeIf { it.active }?.revision
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)

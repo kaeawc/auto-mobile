@@ -65,12 +65,17 @@ internal object PrototypePlatformRules {
     PrototypeChannels.error(root)?.let {
       return it
     }
+    PrototypeAuthRules.blockError(root)?.let {
+      return it
+    }
     requiresError(root)?.let {
       return it
     }
     for (use in uses(root, context)) {
       (useError(use, declared)
-          ?: (if (use is Use.Call) PrototypeChannels.callError(use.action, use.path, root)
+          ?: (if (use is Use.Call)
+            PrototypeChannels.callError(use.action, use.path, root)
+              ?: PrototypeAuthRules.callError(use.action, use.path, root)
           else null))
         ?.let {
           return it
@@ -266,6 +271,13 @@ object PrototypePlatformCalls {
     PrototypeSpecContract.limits.getValue("DEFAULT_PROTOTYPE_PLATFORM_TIMEOUT_MS").jsonPrimitive.int
 
   fun eventOwner(name: String): String? = eventModule(name)
+
+  /** The contract's trailing debounce for a module event, or null when it delivers at once. */
+  fun eventDebounceMs(name: String): Long? {
+    val owner = eventModule(name) ?: return null
+    val event = module(owner)?.member("events")?.member(name.substringAfter('.'))
+    return (event?.get("debounceMs") as? JsonPrimitive)?.content?.toLongOrNull()
+  }
 
   fun argumentsError(call: String, args: JsonObject): PrototypeSpecError? {
     val definition = callDefinition(call)?.second ?: return fail("call", "Unknown platform call")

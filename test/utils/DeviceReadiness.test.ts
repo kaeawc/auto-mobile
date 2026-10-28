@@ -1353,6 +1353,20 @@ describe("DeviceReadiness dual-platform resolution", () => {
     );
   });
 
+  test("all-Android ambiguity describes only Android candidates", async () => {
+    const second = { ...androidDevice, deviceId: "android-second", name: "Second Android" };
+    fakeAdb.setDevices([androidDevice, second]);
+    fakeSimctl.setBootedSimulators([]);
+    const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
+    await expect(
+      manager.ensureDeviceReady("either", undefined, {
+        skipCtrlProxyDownload: true,
+      }),
+    ).rejects.toThrow(
+      "Multiple Android devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
+    );
+  });
+
   test("mixed-platform ambiguity is the typed ambiguous_device_target with candidates (#15020)", async () => {
     const manager = createTestSessionManager(buildProvider(), fakeAdbFactory);
 

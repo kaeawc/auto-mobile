@@ -333,22 +333,38 @@ export class SessionRecovery {
     try {
       await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
     } catch (error) {
+      // Preserve terminal recovery fencing while surfacing the explicit-bind refusal itself.
+      logger.debug(
+        `[SessionManager] Recovery assignment refused for ${sessionId}: ${errorMessage(error)}`,
+      );
+      const recoveryError =
+        error instanceof DeviceOwnedByOtherDaemonError && recoveryTarget
+          ? new SessionRecoveryIdentityLossError(
+              sessionId,
+              recoveryTarget,
+              "owned-by-other-daemon",
+              {
+                deviceId: error.deviceId,
+                ownerPid: error.ownerPid,
+              },
+            )
+          : error;
       if (
         !persisted ||
-        !isSessionRecoveryIdentityLossError(error) ||
-        error.sessionUuid !== sessionId
+        !isSessionRecoveryIdentityLossError(recoveryError) ||
+        recoveryError.sessionUuid !== sessionId
       ) {
         throw error;
       }
       if (!this.host.isNameReissueOnlyRow(persisted)) {
-        await this.host.terminalizePersistedRecoveryFailure(sessionId, persisted, error);
+        await this.host.terminalizePersistedRecoveryFailure(sessionId, persisted, recoveryError);
         throw error;
       }
       // #11418: a re-issued plan session has no device identity to protect. Its old device being
       // taken or gone is not a loss; the UUID stays usable on whatever ordinary allocation grants.
       logger.info(
         `[SessionManager] Re-issuing session ${sessionId} on another device: its previous device ` +
-          `${persisted.device_id} cannot be reused (${error.reason})`,
+          `${persisted.device_id} cannot be reused (${recoveryError.reason})`,
       );
       await devicePool.assignDeviceToSession(sessionId, platform ?? persisted.platform);
     }

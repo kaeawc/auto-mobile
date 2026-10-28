@@ -938,8 +938,7 @@
         /// A card draws the authored uniform radius (a theme token resolves to one); without it,
         /// Material's 12 pt (#15445).
         private var cardCornerRadius: Double {
-            if case let .uniform(radius)? = style?.cornerRadius.map(shapes.resolve) { return radius }
-            return 12
+            PrototypeStyleCorners.cardRadius(style?.cornerRadius, shapes: shapes)
         }
 
         private var cornerShape: PrototypeStyleShape {
@@ -981,6 +980,7 @@
                 ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
+                    clipsContent: PrototypeStyleCorners.clipsContent(nodeType: node.type),
                     styleAnimation: styleAnimation,
                     shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                         .spatial,

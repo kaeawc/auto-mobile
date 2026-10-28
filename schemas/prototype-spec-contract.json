@@ -21893,6 +21893,66 @@
       },
       "events": {},
       "state": {}
+    },
+    "mediaLibrary": {
+      "capability": "prototype_platform_mediaLibrary_v1",
+      "calls": {
+        "pick": {
+          "args": {
+            "media": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["images", "videos", "imagesAndVideos"]
+              }
+            },
+            "maxItems": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 64
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "camera": {
+      "capability": "prototype_platform_camera_v1",
+      "calls": {
+        "capture": {
+          "args": {
+            "media": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["image", "video"]
+              }
+            },
+            "maxDurationMs": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 600000
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {

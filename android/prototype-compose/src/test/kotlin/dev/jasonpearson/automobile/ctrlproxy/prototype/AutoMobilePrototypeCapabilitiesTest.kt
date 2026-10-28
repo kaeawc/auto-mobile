@@ -72,6 +72,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_camera_v1",
       // Contract only; the fake store runtime is owed (#14314).
       "prototype_platform_commerce_v1",
+      // Contract only; the fake identity provider runtime is owed (#14303).
+      "prototype_platform_auth_v1",
     )
 
   @Test

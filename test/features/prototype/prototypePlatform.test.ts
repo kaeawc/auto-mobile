@@ -734,6 +734,27 @@ describe("system media picker and camera module contracts", () => {
   });
 });
 
+describe("auth module contract", () => {
+  const auth = PROTOTYPE_PLATFORM_MODULES.auth;
+
+  test("auth.signIn takes only an optional style and auth.signOut takes nothing", () => {
+    expect(Object.keys(auth.calls)).toEqual(["signIn", "signOut"]);
+    expect(Object.keys(auth.calls.signIn.args)).toEqual(["style"]);
+    expect(auth.calls.signIn.args.style.optional).toBe(true);
+    expect(auth.calls.signIn.args.style.value.values).toEqual(["chooser", "button"]);
+    expect(auth.calls.signIn.sensitive).toBe(true);
+    expect(auth.calls.signOut.args).toEqual({});
+    for (const call of Object.values(auth.calls)) {
+      expect(call.permissions).toEqual([]);
+    }
+  });
+
+  test("the session is visible only as signedIn and userId, never a token", () => {
+    expect(auth.events).toEqual({ sessionExpired: { sensitive: false } });
+    expect(Object.keys(auth.state ?? {})).toEqual(["signedIn", "userId"]);
+  });
+});
+
 describe("commerce module contract", () => {
   const commerce = PROTOTYPE_PLATFORM_MODULES.commerce;
 

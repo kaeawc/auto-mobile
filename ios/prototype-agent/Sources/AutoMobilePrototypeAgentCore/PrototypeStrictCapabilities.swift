@@ -77,6 +77,7 @@ enum PrototypeStrictCapabilities {
                 "adaptive": "adaptive",
                 "select": "menus",
                 "scrollTo": "chat_scroll",
+                "hideKeyboard": "hide_keyboard",
             ]
             if ["topAppBar", "bottomNav", "tabBar"].contains(type),
                fields["onScroll"] != nil || fields["scroll"] != nil { need("bar_scroll") }

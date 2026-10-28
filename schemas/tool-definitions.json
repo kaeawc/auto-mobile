@@ -19602,6 +19602,17 @@
                             "properties": {
                               "type": {
                                 "type": "string",
+                                "enum": ["hideKeyboard"]
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
                                 "enum": ["setData"]
                               },
                               "path": {
@@ -19671,10 +19682,10 @@
                                 "enum": ["appendData"]
                               },
                               "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/7/properties/path"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/8/properties/path"
                               },
                               "value": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/7/properties/value"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/8/properties/value"
                               },
                               "maxItems": {
                                 "type": "integer",
@@ -19693,10 +19704,10 @@
                                 "enum": ["upsertData"]
                               },
                               "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/7/properties/path"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/8/properties/path"
                               },
                               "value": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/7/properties/value"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/8/properties/value"
                               },
                               "key": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
@@ -19718,10 +19729,10 @@
                                 "enum": ["prependData"]
                               },
                               "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/7/properties/path"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/8/properties/path"
                               },
                               "value": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/7/properties/value"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/8/properties/value"
                               }
                             },
                             "required": ["type", "path", "value"],
@@ -19735,7 +19746,7 @@
                                 "enum": ["removeData"]
                               },
                               "path": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/7/properties/path"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/8/properties/path"
                               }
                             },
                             "required": ["type", "path"],
@@ -19759,7 +19770,7 @@
                                 "maximum": 3600000
                               },
                               "everyMs": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/12/properties/afterMs"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/13/properties/afterMs"
                               },
                               "maxRuns": {
                                 "type": "integer",
@@ -19786,7 +19797,7 @@
                                 "enum": ["cancelTimer"]
                               },
                               "id": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/12/properties/id"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/13/properties/id"
                               }
                             },
                             "required": ["type", "id"],
@@ -19844,7 +19855,7 @@
                               "query": {
                                 "type": "object",
                                 "additionalProperties": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/headers/additionalProperties"
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/headers/additionalProperties"
                                 },
                                 "propertyNames": {
                                   "minLength": 1
@@ -19853,7 +19864,7 @@
                               "body": {
                                 "anyOf": [
                                   {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/headers/additionalProperties/anyOf/1"
                                   },
                                   {
                                     "type": "object",
@@ -19870,7 +19881,7 @@
                                               "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])"
                                             },
                                             "value": {
-                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
+                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/headers/additionalProperties/anyOf/1"
                                             },
                                             "file": {
                                               "type": "object",
@@ -19885,7 +19896,7 @@
                                               "additionalProperties": false
                                             },
                                             "filename": {
-                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/name"
+                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/body/anyOf/1/properties/multipart/items/properties/name"
                                             },
                                             "contentType": {
                                               "type": "string",
@@ -19910,7 +19921,7 @@
                                       "form": {
                                         "type": "object",
                                         "additionalProperties": {
-                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/headers/additionalProperties/anyOf/1"
+                                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/headers/additionalProperties/anyOf/1"
                                         },
                                         "propertyNames": {
                                           "minLength": 1
@@ -19924,10 +19935,10 @@
                                     "type": "object",
                                     "properties": {
                                       "file": {
-                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/file"
+                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/body/anyOf/1/properties/multipart/items/properties/file"
                                       },
                                       "contentType": {
-                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/body/anyOf/1/properties/multipart/items/properties/contentType"
+                                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/body/anyOf/1/properties/multipart/items/properties/contentType"
                                       }
                                     },
                                     "required": ["file", "contentType"],
@@ -19979,7 +19990,7 @@
                                 "maxItems": 32
                               },
                               "onError": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/onSuccess"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/onSuccess"
                               }
                             },
                             "required": ["type", "url"],
@@ -20081,7 +20092,7 @@
                                 "maxItems": 32
                               },
                               "onError": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/onSuccess"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/16/properties/onSuccess"
                               }
                             },
                             "required": ["type", "call"],
@@ -20197,7 +20208,7 @@
                                       "minLength": 1
                                     },
                                     "params": {
-                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/16/properties/params"
+                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/17/properties/params"
                                     }
                                   },
                                   "required": ["screen"],
@@ -20287,10 +20298,10 @@
                                 "minLength": 1
                               },
                               "params": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/16/properties/params"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/17/properties/params"
                               },
                               "transition": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/16/properties/transition"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/17/properties/transition"
                               },
                               "source": {
                                 "type": "string",
@@ -26795,7 +26806,7 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
                     },
                     "transition": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/16/properties/transition"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/17/properties/transition"
                     },
                     "animate": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
@@ -27795,7 +27806,7 @@
                 "on": {
                   "type": "object",
                   "additionalProperties": {
-                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/onSuccess"
+                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/16/properties/onSuccess"
                   },
                   "propertyNames": {
                     "minLength": 1
@@ -27817,7 +27828,7 @@
                         "enum": ["websocket", "sse"]
                       },
                       "url": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/url"
+                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/url"
                       },
                       "protocols": {
                         "type": "array",
@@ -27828,7 +27839,7 @@
                         "maxItems": 4
                       },
                       "headers": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/14/properties/headers"
+                        "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/15/properties/headers"
                       },
                       "via": {
                         "type": "string",

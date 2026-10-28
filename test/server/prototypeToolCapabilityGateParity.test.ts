@@ -322,6 +322,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       { type: "startTimer", id: "tick", afterMs: 100, actions: [{ type: "emit", name: "tick" }] },
     ],
   }),
+  prototype_hide_keyboard_v1: fixture({ ...label, onTap: [{ type: "hideKeyboard" }] }),
   prototype_chat_scroll_v1: fixture({
     type: "scroll",
     id: "label",

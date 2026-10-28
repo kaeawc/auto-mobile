@@ -2041,6 +2041,12 @@ prototype is shown and is restored on dismiss; none writes a system setting. `or
 and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
 best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
 
+**Keyboard dismiss (#14320).** The `{type: "hideKeyboard"}` action, which takes no fields, needs
+`prototype_hide_keyboard_v1`. It is a plain UI action like `dismiss`, not a platform module, and touches only the
+prototype's own window: it hides the soft keyboard and clears text focus (Android `WindowInsetsControllerCompat`
+`hide(ime())`; iOS `endEditing(true)`). With no keyboard up it does nothing. No production runtime advertises
+the capability yet.
+
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name

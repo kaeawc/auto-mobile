@@ -227,6 +227,7 @@ const fixtures: Record<string, Node> = {
     ],
   },
   prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
+  prototype_hide_keyboard_v1: { ...label, onTap: [{ type: "hideKeyboard" }] },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },
@@ -404,6 +405,21 @@ test("the window controls gate reports each window control the spec sets", () =>
   ]);
   expect(gate.fields({ window: { brightness: 0 }, root: label })).toEqual(["window.brightness"]);
   expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the hide keyboard gate reports every hideKeyboard action and nothing else", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_hide_keyboard_v1",
+  )!;
+  const root = {
+    type: "column",
+    children: [
+      { ...label, onTap: [{ type: "emit", name: "done" }, { type: "hideKeyboard" }] },
+      { ...label, onTap: [{ type: "dismiss" }] },
+    ],
+  };
+  expect(gate.fields({ root })).toEqual(["root.children[0].onTap[1]"]);
   expect(gate.fields({ root: label })).toEqual([]);
 });
 

@@ -86,9 +86,7 @@ export function renderUnion(
         ...(variant.fields.length ? [`@SerialName("${variant.name}")`, "@Serializable"] : []),
         ...(variant.fields.length
           ? renderKotlinClass(variantType, variant.fields, ` : ${type}()`, options)
-          : [
-              `@SerialName("${variant.name}") @Serializable data object ${variantType} : ${type}()`,
-            ]),
+          : fieldlessKotlinVariant(variant.name, variantType, type)),
       );
     }
   } else {
@@ -209,4 +207,12 @@ function renderEncoder(tag: string, variants: Variant[], output: string[]): void
     );
   }
   output.push("        }", "    }");
+}
+
+/** A field-less variant on one line, or split the way ktfmt splits it once it passes 100 columns. */
+function fieldlessKotlinVariant(name: string, variantType: string, type: string): string[] {
+  const annotations = [`@SerialName("${name}")`, "@Serializable"];
+  const declaration = `data object ${variantType} : ${type}()`;
+  const singleLine = [...annotations, declaration].join(" ");
+  return singleLine.length <= 100 ? [singleLine] : [...annotations, declaration];
 }

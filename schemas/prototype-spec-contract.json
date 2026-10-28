@@ -1714,6 +1714,18 @@
             }
           }
         },
+        "hideKeyboard": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["hideKeyboard"]
+              },
+              "optional": false
+            }
+          }
+        },
         "decrement": {
           "kind": "object",
           "fields": {

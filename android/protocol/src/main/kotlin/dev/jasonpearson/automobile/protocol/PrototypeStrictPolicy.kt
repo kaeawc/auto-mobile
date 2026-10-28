@@ -272,6 +272,7 @@ internal object PrototypeStrictPolicy {
       "drawer" to "drawer",
       "select" to "menus",
       "scrollTo" to "chat_scroll",
+      "hideKeyboard" to "hide_keyboard",
       "request" to "network",
       "startTimer" to "timers",
       "cancelTimer" to "timers",

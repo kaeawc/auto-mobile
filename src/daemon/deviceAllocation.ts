@@ -479,14 +479,15 @@ export class DeviceAllocation {
 
   /**
    * A restarted daemon must not rehydrate a session onto a device another live daemon took over
-   * while it was down (#11076, #15738). Check even before discovery populated the pool.
+   * while it was down (#11076, #15738). Only the devices the target resolves to now are checked:
+   * its persisted serial may name another AVD today. An empty pool is checked again after discovery,
+   * before binding (see the caller).
    */
   private async assertRecoveryTargetNotForeignOwned(target: SessionRecoveryTarget): Promise<void> {
     const idle = this.port
       .getDevicesMatchingRecoveryTarget(target)
       .filter((device) => holderOf(device) === null);
-    const deviceIds = idle.length > 0 ? idle.map((device) => device.id) : [target.deviceId];
-    for (const deviceId of deviceIds) {
+    for (const { id: deviceId } of idle) {
       // Use the explicit-bind judgement: files first, then the table, with a fresh read.
       await this.port.assertNotClaimedByForeignDaemon(deviceId, target.platform);
     }

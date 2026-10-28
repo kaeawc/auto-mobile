@@ -4,7 +4,7 @@ import { prototypeDataPathPointer, prototypeDataPlaceholders } from "./prototype
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-import { repeatKeyInstances } from "./prototypeRepeat";
+import { repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { mapBindableFields, visitPrototypeHandlerFields } from "./prototypeTemplate";
 
@@ -74,23 +74,39 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
   const { requests, fields } = libraryFields(spec, nodes);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const errors: PrototypeValidationError[] = [];
-  for (const field of fields) {
+  const sinkFields = fields.filter(
     // Key fields name state entries, which a `/data` pointer cannot reach.
-    if (field.key || !requestSinkPath(field.path, requests)) {
+    (field) => !field.key && requestSinkPath(field.path, requests),
+  );
+  // Direct warning callers may precede repeat validation. Keep their authored-text scan
+  // for invalid repeats; the binder (including the budget probe) requires valid repeats.
+  const validRepeats = repeatErrors(spec) === undefined;
+  if (validRepeats) {
+    const budgetError = secureScanBudgetError(spec, sinkFields);
+    if (budgetError) {
+      return [budgetError];
+    }
+  }
+  const located = sinkFields.map((field) => ({ ...field, value: { stateKey: field.text } }));
+  const instances = validRepeats
+    ? repeatKeyInstances(spec, located)
+    : located.map((field) => ({ located: field, value: field.value }));
+  const errors = new Map<string, PrototypeValidationError>();
+  for (const { value, located: field } of instances) {
+    if (errors.has(field.path)) {
       continue;
     }
-    const reached = prototypeDataPlaceholders(field.text).some((pointer) =>
+    const reached = prototypeDataPlaceholders(String(value.stateKey)).some((pointer) =>
       tainted.some((taint) => pointersOverlap(taint, pointer)),
     );
     if (reached) {
-      errors.push({
+      errors.set(field.path, {
         path: field.path,
         message: "Sensitive value cannot be bound into a request",
       });
     }
   }
-  return errors;
+  return [...errors.values()];
 }
 
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {

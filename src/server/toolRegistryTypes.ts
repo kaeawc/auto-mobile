@@ -122,6 +122,8 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
    * `test/lint/toolReadControlClassification.test.ts`.
    */
   readOnly?: boolean | ((args: T) => boolean);
+  /** See {@link ToolTraits.selectsActiveDevice}. */
+  selectsActiveDevice?: boolean;
 }
 
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
@@ -163,6 +165,12 @@ export interface ToolTraits {
    * to declare it or be excluded there with a reason (#9928).
    */
   planRelevant?: boolean;
+  /**
+   * Selects the connection's active device (#15664): the call is device-routed although it needs
+   * no device, runs under the routed session, is exempt from named-session admission, and a
+   * successful result binds the connection to the selected session.
+   */
+  selectsActiveDevice?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
@@ -177,6 +185,9 @@ export const PLAN_RELEVANT = { planRelevant: true } as const;
 /** Both {@link PLAN_RELEVANT} and {@link SKELETON_OBSERVATION}, for the many tools that declare the pair. */
 export const PLAN_SKELETON = { ...PLAN_RELEVANT, ...SKELETON_OBSERVATION } as const;
 
+/** Spread into the options of a tool that declares {@link ToolTraits.selectsActiveDevice}. */
+export const SELECTS_ACTIVE_DEVICE = { selectsActiveDevice: true } as const;
+
 /** Just the trait fields of a registration's options, for the registered tool and the recorder. */
 export function pickToolTraits(options: ToolTraits): ToolTraits {
   const {
@@ -188,6 +199,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     defaultsToSkeletonObservation,
     stagesFiles,
     planRelevant,
+    selectsActiveDevice,
   } = options;
   return {
     stopsApp,
@@ -198,6 +210,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     defaultsToSkeletonObservation,
     stagesFiles,
     planRelevant,
+    selectsActiveDevice,
   };
 }
 

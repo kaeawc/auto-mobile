@@ -149,6 +149,7 @@
     "pager-indicator-dots.json",
     "pager-options.json",
     "pager-state-key-indicator.json",
+    "platform-auth.json",
     "platform-biometric.json",
     "platform-calendar.json",
     "platform-call.json",
@@ -159,6 +160,7 @@
     "platform-feedback-handler.json",
     "platform-feedback-haptics-sound.json",
     "platform-handler.json",
+    "platform-location.json",
     "platform-media-library-pick.json",
     "platform-reads.json",
     "platform-repeat.json",
@@ -1013,6 +1015,12 @@
     "placement-offset-x-over-max.json",
     "placement-offset-y-below-min.json",
     "platform-argument-value.json",
+    "platform-auth-password-arg.json",
+    "platform-auth-sign-out-arg.json",
+    "platform-auth-style-unknown.json",
+    "platform-auth-token-key.json",
+    "platform-auth-undeclared-module.json",
+    "platform-auth-unknown-event.json",
     "platform-biometric-credential-not-boolean.json",
     "platform-biometric-missing-title.json",
     "platform-biometric-subtitle-too-long.json",
@@ -1061,6 +1069,15 @@
     "platform-handlers-missing-on.json",
     "platform-into-array-element.json",
     "platform-into-platform.json",
+    "platform-location-accuracy-unknown.json",
+    "platform-location-into-array-element.json",
+    "platform-location-max-age-negative.json",
+    "platform-location-status-key-not-string.json",
+    "platform-location-undeclared-module.json",
+    "platform-location-undeclared-permission.json",
+    "platform-location-unknown-arg.json",
+    "platform-location-unknown-event.json",
+    "platform-location-unknown-key.json",
     "platform-media-pick-into-outside-data.json",
     "platform-media-pick-max-items-fractional.json",
     "platform-media-pick-max-items-over-limit.json",
@@ -1654,6 +1671,7 @@
     "strict-gate-prototype_pager_options_v1.json",
     "strict-gate-prototype_pager_state_key_v1.json",
     "strict-gate-prototype_platform_audio_v1.json",
+    "strict-gate-prototype_platform_auth_v1.json",
     "strict-gate-prototype_platform_battery_v1.json",
     "strict-gate-prototype_platform_biometric_v1.json",
     "strict-gate-prototype_platform_calendar_v1.json",
@@ -1664,6 +1682,7 @@
     "strict-gate-prototype_platform_device_v1.json",
     "strict-gate-prototype_platform_haptics_v1.json",
     "strict-gate-prototype_platform_links_v1.json",
+    "strict-gate-prototype_platform_location_v1.json",
     "strict-gate-prototype_platform_mediaLibrary_v1.json",
     "strict-gate-prototype_platform_media_items_v1.json",
     "strict-gate-prototype_platform_namespace_v1.json",
@@ -2847,6 +2866,16 @@
     "platform-camera-capture.json": [
       "prototype_data_model_v1",
       "prototype_platform_camera_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-auth.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_auth_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-location.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_location_v1",
       "prototype_platform_v1"
     ]
   }

@@ -487,7 +487,7 @@ export class SessionManager extends SessionManagerForwarders {
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly stateRestore: SessionDeviceStateRestore;
 
-  /** Retry delays for a live row's rewrite over its superseded release's terminal row (#11557). */
+  /** Retry delays for a live row's rewrite after an overlapping row write (#11557). */
   setSupersededRowReassertBackoff(backoff: BackoffPolicy): void {
     this.superseded.setBackoff(backoff);
   }

@@ -196,19 +196,23 @@ export class AppPermissions {
       this.device.platform === "ios"
         ? await this.setIosPermissions(appId, action, input)
         : await this.setAndroidPermissions(appId, action, input);
-    return this.withAudioInputDiagnostic(result, action, normalizePermissions(input.permissions));
+    return await this.withAudioInputDiagnostic(
+      result,
+      action,
+      normalizePermissions(input.permissions),
+    );
   }
 
   /** A microphone grant still succeeds on a device with no audio input, but says so (#13627). */
-  private withAudioInputDiagnostic(
+  private async withAudioInputDiagnostic(
     result: SetAppPermissionsResult,
     action: AppPermissionAction,
     permissions: string[],
-  ): SetAppPermissionsResult {
+  ): Promise<SetAppPermissionsResult> {
     if (action !== "grant" || !requestsMicrophone(this.device.platform, permissions)) {
       return result;
     }
-    const diagnostic = this.audioInputDiagnostic(this.device);
+    const diagnostic = await this.audioInputDiagnostic(this.device);
     return diagnostic ? { ...result, diagnostics: [diagnostic] } : result;
   }
 

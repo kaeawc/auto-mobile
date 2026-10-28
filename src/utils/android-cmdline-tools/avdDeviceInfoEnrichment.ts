@@ -19,15 +19,7 @@ export async function enrichDeviceInfoList(
         if (!config) {
           return device;
         }
-        const formFactor = androidProfileFormFactor({
-          systemImageTag: config.systemImagePackage
-            ? parseAndroidSystemImageRuntime(config.systemImagePackage)?.tag
-            : undefined,
-          profileId: config.deviceName,
-          width: config.screenWidth,
-          height: config.screenHeight,
-          density: config.screenDensity,
-        });
+        const formFactor = avdConfigFormFactor(config);
         return deviceInfoFromConfig(device, config, formFactor);
       } catch (error) {
         logger.debug(`Failed to enrich AVD ${device.name}: ${error}`);
@@ -58,4 +50,19 @@ function deviceInfoFromConfig(
     effectiveRamMb: config.effectiveRamMb ?? device.effectiveRamMb,
     effectiveCpuCores: config.effectiveCpuCores ?? device.effectiveCpuCores,
   };
+}
+
+/** The same configured profile and geometry classify inventory and sessionless reads. */
+export function avdConfigFormFactor(
+  config: AvdConfig,
+): ReturnType<typeof androidProfileFormFactor> {
+  return androidProfileFormFactor({
+    systemImageTag: config.systemImagePackage
+      ? parseAndroidSystemImageRuntime(config.systemImagePackage)?.tag
+      : undefined,
+    profileId: config.deviceName,
+    width: config.screenWidth,
+    height: config.screenHeight,
+    density: config.screenDensity,
+  });
 }

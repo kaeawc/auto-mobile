@@ -21953,6 +21953,99 @@
       },
       "events": {},
       "state": {}
+    },
+    "auth": {
+      "capability": "prototype_platform_auth_v1",
+      "calls": {
+        "signIn": {
+          "args": {
+            "style": {
+              "optional": true,
+              "value": {
+                "kind": "enum",
+                "values": ["chooser", "button"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        },
+        "signOut": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "sessionExpired": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "signedIn": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "userId": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "max": 64
+          }
+        }
+      }
+    },
+    "location": {
+      "capability": "prototype_platform_location_v1",
+      "calls": {
+        "request": {
+          "args": {
+            "accuracy": {
+              "optional": true,
+              "value": {
+                "kind": "enum",
+                "values": ["precise", "approximate"]
+              }
+            },
+            "maxAgeMs": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 86400000
+              }
+            }
+          },
+          "permissions": ["location"],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {
+        "updated": {
+          "sensitive": true
+        }
+      },
+      "state": {
+        "current": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "json",
+            "maxDepth": 1
+          }
+        },
+        "servicesEnabled": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

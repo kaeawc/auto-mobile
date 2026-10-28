@@ -4,9 +4,10 @@ import type { Timer } from "../utils/SystemTimer";
 import type { Session, SessionReleaseSnapshot } from "./sessionManager";
 
 /**
- * Retries of a live row's rewrite over its superseded release's terminal row (#11557): one failed
- * write (a busy database) must not leave the live session behind a terminal row. Bounded; after
- * the last one the rewrite stays owed and the session's next activity write issues it again.
+ * Retries of a live row's rewrite after an overlapping row write (#11557): an activity re-persist
+ * that a rebind overlapped may have written the binding from before it, and one failed rewrite (a
+ * busy database) must not leave the live session's row behind. Bounded; after the last one the
+ * rewrite stays owed and the session's next activity write issues it again.
  */
 export const SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS = 5;
 export const DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF: BackoffPolicy = exponentialBackoff({
@@ -27,7 +28,7 @@ export interface OwedSupersededRowReassertCallbacks<S extends SupersededRowIncar
   retryDuringDrain(entry: OwedSupersededRowReassert<S>): Promise<void>;
 }
 
-/** A live row's rewrite over its superseded release's terminal row that failed (#11557). */
+/** A live row's rewrite after an overlapping row write that is still owed (#11557). */
 export interface OwedSupersededRowReassert<S extends SupersededRowIncarnation = Session> {
   /** The incarnation the rewrite is owed to; a session revived under the UUID owes nothing. */
   session: S;
@@ -51,26 +52,24 @@ export interface SupersededRowReassertsCollaborators {
 }
 
 /**
- * The superseded-row state of the row writer (#11799 W3): which superseded releases' terminal
- * rows a live row may be rewritten over, which rewrites are under way or owed, and the owed
- * rewrites' retry scheduling. Holds no I/O and no row policy: every statement, read and
- * precondition stays with the caller, which keeps its original await sequence.
+ * The superseded-row state of the row writer (#11799 W3): the live-row rewrites that repair a
+ * rebind and an activity write overlapping (which are under way, which are owed, and the owed
+ * rewrites' retry scheduling), and the earlier reasons a terminal release's committed upgrade may
+ * replace. Holds no I/O and no row policy: every statement, read and precondition stays with the
+ * caller, which keeps its original await sequence.
  */
 export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session> {
   /** Only the exact earlier reasons of this release may be replaced by its committed upgrade. */
   private readonly reasonPredecessors = new WeakMap<SessionReleaseSnapshot, readonly string[]>();
-  /** A refused release wrote nothing, so superseding it owes no live-row rewrite. */
-  private readonly refusedWrites = new WeakSet<SessionReleaseSnapshot>();
   /**
-   * UUIDs whose live row this daemon is about to rewrite over a terminal row its own superseded
-   * release wrote or may still write (#11206), counted per pending rewrite. While one is pending,
-   * a terminal row under the live session is that release's, not the end of the UUID (#11498).
+   * UUIDs whose live row this daemon is rewriting after an overlapping row write, counted per
+   * pending rewrite. While one is pending, a refused activity write does not end the live session
+   * (#11498): the rewrite is about to leave its row live.
    */
   private readonly pendingReasserts = new Map<string, number>();
   /**
-   * Rewrites that failed and are still owed (#11557): retried with the backoff, then by the
-   * session's activity writes. While one is owed, its release's terminal row under the live
-   * session is not the UUID's end.
+   * Rewrites that failed, or that a rebind overtook, and are still owed (#11557): retried with
+   * the backoff, then by the session's activity writes once the retries are exhausted.
    */
   private readonly owedReasserts = new Map<string, OwedSupersededRowReassert<S>>();
   private backoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
@@ -90,14 +89,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
 
   predecessors(snapshot: SessionReleaseSnapshot): readonly string[] {
     return this.reasonPredecessors.get(snapshot) ?? [];
-  }
-
-  noteRefused(snapshot: SessionReleaseSnapshot): void {
-    this.refusedWrites.add(snapshot);
-  }
-
-  wasRefused(snapshot: SessionReleaseSnapshot): boolean {
-    return this.refusedWrites.has(snapshot);
   }
 
   /** Count a pending rewrite of `sessionId`'s live row; the returned function ends it, once. */

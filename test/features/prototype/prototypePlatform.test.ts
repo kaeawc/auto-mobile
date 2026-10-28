@@ -656,9 +656,17 @@ describe("settings module contract", () => {
 });
 
 describe("picker module contracts", () => {
-  test("contacts.pick takes one optional boolean and is sensitive", () => {
+  test("contacts.pick takes an optional field list and flag, and is sensitive", () => {
     const pick = PROTOTYPE_PLATFORM_MODULES.contacts.calls.pick;
-    expect(Object.keys(pick.args)).toEqual(["multiple"]);
+    expect(Object.keys(pick.args)).toEqual(["fields", "multiple"]);
+    expect(pick.args.fields.optional).toBe(true);
+    expect(pick.args.fields.value).toMatchObject({
+      kind: "array",
+      item: { kind: "enum", values: ["name", "phone", "email"] },
+      min: 1,
+      max: 3,
+      unique: true,
+    });
     expect(pick.args.multiple.optional).toBe(true);
     expect(pick.sensitive).toBe(true);
     expect(pick.permissions).toEqual([]);

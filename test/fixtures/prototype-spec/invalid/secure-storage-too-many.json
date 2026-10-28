@@ -1,0 +1,74 @@
+{
+  "spec": {
+    "id": "secure-storage-too-many",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "token": "",
+      "remember": false,
+      "k0": "",
+      "k1": "",
+      "k2": "",
+      "k3": "",
+      "k4": "",
+      "k5": "",
+      "k6": "",
+      "k7": "",
+      "k8": ""
+    },
+    "requires": {
+      "platform": ["secureStorage", "biometric"]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:remember"],
+      "secure": [
+        "state:k0",
+        "state:k1",
+        "state:k2",
+        "state:k3",
+        "state:k4",
+        "state:k5",
+        "state:k6",
+        "state:k7",
+        "state:k8"
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "token"
+        },
+        {
+          "type": "button",
+          "label": "Save",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "save",
+              "context": {
+                "r": {
+                  "state": "remember"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Locked",
+          "visibleWhen": {
+            "platform": "/secureStorage/locked",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "storage.secure"
+}

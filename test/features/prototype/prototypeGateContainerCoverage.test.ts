@@ -278,6 +278,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_device_v1: deviceRead,
   prototype_platform_battery_v1: statusRead("battery", "state", "charging"),
   prototype_platform_power_v1: statusRead("power", "thermal", "serious"),
+  prototype_platform_secureStorage_v1: statusRead("secureStorage", "locked", true),
   prototype_platform_audio_v1: statusRead("audio", "muted", true),
   prototype_platform_connectivity_v1: statusRead("connectivity", "online", false),
   prototype_platform_biometric_v1: biometricCall,

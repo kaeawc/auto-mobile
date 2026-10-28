@@ -2536,7 +2536,9 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
 - **Collections** are json-server style: `GET /<name>` filters by `?field=value`, `q` matches a
   case-insensitive substring of any string or number member, `_sort=price|-price` sorts stably
   (numbers numerically, strings by code point), `_page` and `_limit` page (default limit 10, at most 100) with an `x-total-count` header, and `after` and `size` cursor-page into `{items, next}`.
-  `GET /<name>/:id`, `POST` (201, id from the injected id generator when absent, 409 on a duplicate),
+  Every defined item needs an id (a non-empty string or a number) so a cursor can name it.
+  `GET /<name>/:id`, `POST` (201, id from the injected id generator when absent, 400 on an empty or
+  non-scalar id, 409 on a duplicate),
   `PATCH` (shallow merge), `PUT` (replace) and `DELETE` complete the surface; an item's id never
   changes, and a write that would exceed the size budget is refused with 413 and changes nothing.
 - **Routes** are canned responses `{method, path, status?, headers?, body?, delayMs?}` that win over

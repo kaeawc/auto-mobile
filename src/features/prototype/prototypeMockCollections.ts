@@ -5,7 +5,7 @@
  */
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
-import type { MockItem } from "./prototypeMockSchema";
+import { isMockItemId, type MockItem } from "./prototypeMockSchema";
 import contract from "../../../schemas/prototype-spec-contract.json";
 
 export interface MockResponse {
@@ -175,6 +175,9 @@ function answerWholeCollection(
   const created = bodyItem(request.body);
   if (created === undefined) {
     return error(400, "Expected a JSON object body");
+  }
+  if (created.id !== undefined && !isMockItemId(created.id)) {
+    return error(400, "id must be a non-empty string or a number");
   }
   const item = created.id === undefined ? { ...created, id: deps.ids.next() } : created;
   if (items.some((existing) => String(existing.id) === String(item.id))) {

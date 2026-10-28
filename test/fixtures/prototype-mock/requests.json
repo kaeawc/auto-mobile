@@ -565,6 +565,39 @@
           }
         },
         {
+          "method": "POST",
+          "path": "/todos",
+          "status": 400,
+          "body": {
+            "id": null
+          },
+          "expect": {
+            "error": "id must be a non-empty string or a number"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 400,
+          "body": {
+            "id": true
+          },
+          "expect": {
+            "error": "id must be a non-empty string or a number"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 400,
+          "body": {
+            "id": ""
+          },
+          "expect": {
+            "error": "id must be a non-empty string or a number"
+          }
+        },
+        {
           "method": "PATCH",
           "path": "/todos/t1",
           "status": 200,

@@ -85,7 +85,10 @@ describe("PrototypeMockBackendRegistry", () => {
       /at most 16 collections/,
     ],
     ["non-object item", { collections: { a: [1] } }, /collections\.a\.0/],
-    ["boolean id", { collections: { a: [{ id: true }] } }, /id must be a string or a number/],
+    ["boolean id", { collections: { a: [{ id: true }] } }, /every item needs an id/],
+    ["missing id", { collections: { a: [{ name: "x" }] } }, /every item needs an id/],
+    ["empty id", { collections: { a: [{ id: "" }] } }, /every item needs an id/],
+    ["null id", { collections: { a: [{ id: null }] } }, /every item needs an id/],
     [
       "deep item",
       { collections: { a: [{ a: { b: { c: { d: { e: { f: { g: { h: {} } } } } } } } }] } },
@@ -125,7 +128,7 @@ describe("PrototypeMockBackendRegistry", () => {
     ["fractional seed", { seed: 1.5 }, /seed/],
     [
       "over the byte budget",
-      { collections: { a: [{ t: "x".repeat(MAX_MOCK_BACKEND_BYTES) }] } },
+      { collections: { a: [{ id: 1, t: "x".repeat(MAX_MOCK_BACKEND_BYTES) }] } },
       /holds at most/,
     ],
   ])("rejects %s", (_name, definition, message) => {

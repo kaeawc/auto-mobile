@@ -45,12 +45,17 @@ function depthOf(value: unknown): number {
   return 0;
 }
 
+/** An id a cursor can name: a non-empty string or a finite number. */
+export function isMockItemId(id: unknown): id is string | number {
+  return (typeof id === "string" && id !== "") || (typeof id === "number" && Number.isFinite(id));
+}
+
 const itemSchema = z
   .record(jsonValue)
   .refine((item) => depthOf(item) <= MAX_DEPTH, `items may nest at most ${MAX_DEPTH} levels`)
   .refine(
-    (item) => item.id === undefined || typeof item.id === "string" || typeof item.id === "number",
-    "id must be a string or a number",
+    (item) => isMockItemId(item.id),
+    "every item needs an id: a non-empty string or a number",
   );
 
 const collectionSchema = z

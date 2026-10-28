@@ -347,6 +347,11 @@
                                   "value": true
                                 },
                                 {
+                                  "type": "setState",
+                                  "key": "speed",
+                                  "value": "x1"
+                                },
+                                {
                                   "type": "startTimer",
                                   "id": "playback",
                                   "afterMs": 1000,
@@ -561,8 +566,16 @@
                 "icon": "play_arrow",
                 "contentDescription": "Play",
                 "visibleWhen": {
-                  "key": "playing",
-                  "equals": false
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x1"
+                    }
+                  ]
                 },
                 "onTap": [
                   {
@@ -575,6 +588,82 @@
                     "id": "playback",
                     "afterMs": 1000,
                     "everyMs": 1000,
+                    "maxRuns": 3600,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x15"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 667,
+                    "everyMs": 667,
+                    "maxRuns": 3600,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x2"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 500,
+                    "everyMs": 500,
                     "maxRuns": 3600,
                     "actions": [
                       {
@@ -734,6 +823,11 @@
                               "value": true
                             },
                             {
+                              "type": "setState",
+                              "key": "speed",
+                              "value": "x1"
+                            },
+                            {
                               "type": "startTimer",
                               "id": "playback",
                               "afterMs": 1000,
@@ -855,6 +949,11 @@
                               "type": "setState",
                               "key": "playing",
                               "value": true
+                            },
+                            {
+                              "type": "setState",
+                              "key": "speed",
+                              "value": "x1"
                             },
                             {
                               "type": "startTimer",
@@ -980,6 +1079,11 @@
                               "value": true
                             },
                             {
+                              "type": "setState",
+                              "key": "speed",
+                              "value": "x1"
+                            },
+                            {
                               "type": "startTimer",
                               "id": "playback",
                               "afterMs": 1000,
@@ -1088,8 +1192,16 @@
                 "icon": "play_arrow",
                 "contentDescription": "Play",
                 "visibleWhen": {
-                  "key": "playing",
-                  "equals": false
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x1"
+                    }
+                  ]
                 },
                 "onTap": [
                   {
@@ -1102,6 +1214,82 @@
                     "id": "playback",
                     "afterMs": 1000,
                     "everyMs": 1000,
+                    "maxRuns": 3600,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x15"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 667,
+                    "everyMs": 667,
+                    "maxRuns": 3600,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x2"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 500,
+                    "everyMs": 500,
                     "maxRuns": 3600,
                     "actions": [
                       {
@@ -1219,11 +1407,32 @@
                     "testTag": "skip_back",
                     "icon": "fast_rewind",
                     "contentDescription": "Back 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "gt": 14
+                    },
                     "onTap": [
                       {
                         "type": "decrement",
                         "key": "positionSec",
                         "by": 15
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "skip_back",
+                    "icon": "fast_rewind",
+                    "contentDescription": "Back 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "lt": 15
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "positionSec",
+                        "value": 0
                       }
                     ]
                   },
@@ -1256,8 +1465,16 @@
                     "variant": "filled",
                     "contentDescription": "Play",
                     "visibleWhen": {
-                      "key": "playing",
-                      "equals": false
+                      "all": [
+                        {
+                          "key": "playing",
+                          "equals": false
+                        },
+                        {
+                          "key": "speed",
+                          "equals": "x1"
+                        }
+                      ]
                     },
                     "onTap": [
                       {
@@ -1282,14 +1499,113 @@
                   },
                   {
                     "type": "iconButton",
+                    "testTag": "player_play",
+                    "icon": "play_arrow",
+                    "variant": "filled",
+                    "contentDescription": "Play",
+                    "visibleWhen": {
+                      "all": [
+                        {
+                          "key": "playing",
+                          "equals": false
+                        },
+                        {
+                          "key": "speed",
+                          "equals": "x15"
+                        }
+                      ]
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 667,
+                        "everyMs": 667,
+                        "maxRuns": 3600,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "player_play",
+                    "icon": "play_arrow",
+                    "variant": "filled",
+                    "contentDescription": "Play",
+                    "visibleWhen": {
+                      "all": [
+                        {
+                          "key": "playing",
+                          "equals": false
+                        },
+                        {
+                          "key": "speed",
+                          "equals": "x2"
+                        }
+                      ]
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 500,
+                        "everyMs": 500,
+                        "maxRuns": 3600,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
                     "testTag": "skip_forward",
                     "icon": "fast_forward",
                     "contentDescription": "Forward 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "lt": 3586
+                    },
                     "onTap": [
                       {
                         "type": "increment",
                         "key": "positionSec",
                         "by": 15
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "skip_forward",
+                    "icon": "fast_forward",
+                    "contentDescription": "Forward 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "gt": 3585
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "positionSec",
+                        "value": 3600
                       }
                     ]
                   }

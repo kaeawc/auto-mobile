@@ -305,7 +305,7 @@ it.each([
 /** Server whose handler parks on a gate and records the per-request signal it was given. */
 class SignalProbeServer extends RequestResponseSocketServer<TestRequest, TestResponse> {
   public signals: Array<AbortSignal | undefined> = [];
-  private release: () => void = () => {};
+  private releases: Array<() => void> = [];
 
   constructor() {
     super("/fake/path/signal.sock", new FakeTimer(), "Signal");
@@ -316,7 +316,13 @@ class SignalProbeServer extends RequestResponseSocketServer<TestRequest, TestRes
   }
 
   finish(): void {
-    this.release();
+    for (const release of this.releases.splice(0)) {
+      release();
+    }
+  }
+
+  protected bypassesRequestChain(request: TestRequest): boolean {
+    return request.action === "bypass";
   }
 
   settled(socket: FakeSocket): Promise<void> | undefined {
@@ -329,7 +335,7 @@ class SignalProbeServer extends RequestResponseSocketServer<TestRequest, TestRes
   ): Promise<TestResponse> {
     this.signals.push(context?.signal);
     await new Promise<void>((resolve) => {
-      this.release = resolve;
+      this.releases.push(resolve);
     });
     return { id: request.id, type: "test_response", success: true };
   }
@@ -376,20 +382,36 @@ describe("per-request client-gone signal (#11817)", () => {
     await server.settled(socket);
   });
 
-  it("does not abort a finished request's signal or leak the close listener", async () => {
+  it("does not abort a finished request's signal", async () => {
     const server = new SignalProbeServer();
     const socket = new FakeSocket();
-    const baseline = socket.listenerCount("close");
     const pending = server.send(socket, { id: "1", action: "echo" });
     await Promise.resolve();
-    expect(socket.listenerCount("close")).toBe(baseline + 1);
 
     server.finish();
     await pending;
     await server.settled(socket);
 
-    expect(socket.listenerCount("close")).toBe(baseline);
     socket.emit("close");
     expect(server.signals[0]?.aborted).toBe(false);
+  });
+
+  it("uses one close listener per socket however many requests are pipelined", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    const baseline = socket.listenerCount("close");
+    for (let id = 1; id <= 12; id++) {
+      void server.send(socket, { id: String(id), action: "bypass" });
+    }
+    for (let turn = 0; turn < 20 && server.signals.length < 12; turn++) {
+      await Promise.resolve();
+    }
+    expect(server.signals).toHaveLength(12);
+    expect(socket.listenerCount("close")).toBe(baseline + 1);
+
+    socket.emit("close");
+
+    expect(server.signals.every((signal) => signal?.aborted)).toBe(true);
+    server.finish();
   });
 });

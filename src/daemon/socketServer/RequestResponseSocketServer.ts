@@ -12,6 +12,11 @@ export interface RequestResponseContext {
   signal: AbortSignal;
 }
 
+interface ClientGoneState {
+  /** Controllers of the requests currently in flight on the socket. */
+  controllers: Set<AbortController>;
+}
+
 const FRAME_TOO_LARGE_ERROR = "Invalid request: frame too large";
 
 /**
@@ -29,6 +34,7 @@ export abstract class RequestResponseSocketServer<
 > extends BaseSocketServer {
   /** Map of socket to pending promise chain for sequential processing */
   protected pendingBySocket: WeakMap<Socket, Promise<void>> = new WeakMap();
+  private pendingClientGoneBySocket: WeakMap<Socket, ClientGoneState> = new WeakMap();
 
   constructor(
     socketPath: string,
@@ -93,14 +99,7 @@ export abstract class RequestResponseSocketServer<
 
     // Aborts when the client goes away before the reply, so a handler that honours the signal can
     // stop work nobody will read (#11817).
-    const clientGone = new AbortController();
-    const abortOnClose = (): void => clientGone.abort(new Error("Client socket closed"));
-    socket.once("close", abortOnClose);
-    // A request queued behind another starts after the socket may already have closed, and that
-    // `close` event will not fire again.
-    if (socket.destroyed) {
-      abortOnClose();
-    }
+    const clientGone = this.trackClientGone(socket);
     try {
       const response = await this.handleRequest(request, { signal: clientGone.signal });
       this.sendJson(socket, response);
@@ -112,8 +111,35 @@ export abstract class RequestResponseSocketServer<
       };
       this.sendJson(socket, errorResponse);
     } finally {
-      socket.off("close", abortOnClose);
+      this.pendingClientGoneBySocket.get(socket)?.controllers.delete(clientGone);
     }
+  }
+
+  /**
+   * One `close` listener per socket aborts every in-flight request's controller, so pipelined
+   * requests do not each add a listener. A request that starts after the socket already closed
+   * (queued behind another) gets an already-aborted signal, since `close` will not fire again.
+   */
+  private trackClientGone(socket: Socket): AbortController {
+    const controller = new AbortController();
+    let state = this.pendingClientGoneBySocket.get(socket);
+    if (!state) {
+      const created: ClientGoneState = { controllers: new Set() };
+      state = created;
+      this.pendingClientGoneBySocket.set(socket, created);
+      socket.once("close", () => {
+        for (const pending of created.controllers) {
+          pending.abort(new Error("Client socket closed"));
+        }
+        created.controllers.clear();
+      });
+    }
+    if (socket.destroyed) {
+      controller.abort(new Error("Client socket closed"));
+    } else {
+      state.controllers.add(controller);
+    }
+    return controller;
   }
 
   /** Implement only for requests that may safely run outside per-socket ordering. */

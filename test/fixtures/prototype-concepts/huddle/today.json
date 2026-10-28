@@ -661,6 +661,15 @@
               "label": "Back",
               "onTap": [
                 {
+                  "type": "cancelTimer",
+                  "id": "huddle"
+                },
+                {
+                  "type": "setState",
+                  "key": "huddleOpen",
+                  "value": false
+                },
+                {
                   "type": "pop",
                   "stack": "nav"
                 }

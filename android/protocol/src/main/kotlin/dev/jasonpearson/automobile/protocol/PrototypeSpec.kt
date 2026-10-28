@@ -227,6 +227,14 @@ data class PrototypeWindow(
   /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
   val backdrop: PrototypeBackdrop? = null,
   val transition: String? = null,
+  /**
+   * Window controls (`prototype_platform_window_controls_v1`, #14320); no runtime applies them yet.
+   */
+  val keepScreenOn: Boolean? = null,
+  /** `"system"` or a whole 0-100 brightness. */
+  val brightness: JsonElement? = null,
+  val orientation: String? = null,
+  val statusBar: String? = null,
 )
 
 /**
@@ -320,6 +328,8 @@ data class PrototypeSpec(
   val platform: PrototypePlatformHandlers? = null,
   /** Validated channel declarations; no transport is installed by the contract slice. */
   val channels: Map<String, PrototypeChannel>? = null,
+  /** The fake identity provider's accounts (#14303); validated, not yet used by a runtime. */
+  val auth: JsonObject? = null,
   val strings: JsonObject? = null,
 )
 

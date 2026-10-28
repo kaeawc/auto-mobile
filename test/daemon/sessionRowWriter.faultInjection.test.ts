@@ -14,7 +14,10 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FaultPlan, type FaultKind } from "../fakes/FaultPlan";
-import type { SessionReleaseReason } from "../../src/models/releaseReasons";
+import {
+  isRecoverableDaemonReleaseReason,
+  type SessionReleaseReason,
+} from "../../src/models/releaseReasons";
 
 const UUID = "fault-uuid";
 const DEVICE = "fake-android";
@@ -30,6 +33,7 @@ const SCENARIOS = [
   "forced stuck release",
   "create after lift with parked terminal",
   "shutdown drain with failing write",
+  "activity repair overlapped by a rebind",
 ] as const;
 type Scenario = (typeof SCENARIOS)[number];
 interface Result {
@@ -62,6 +66,8 @@ class Run {
   lastGeneration = 0;
   private managerGeneration = 0;
   private unpark?: () => void;
+  /** Runs once, after the next activity repair's upsert landed and before it returns. */
+  private afterActivityRepair?: () => Promise<void>;
   private parked?: ReturnType<typeof Promise.withResolvers<void>>;
 
   constructor(
@@ -86,8 +92,14 @@ class Run {
     };
     const upsert = this.persistence.upsertActiveSession.bind(this.persistence);
     this.persistence.upsertActiveSession = async (...args) => {
+      // Taken before the write, so a faulted repair cannot leave the hook armed for a later one.
+      const hook = args[2]?.unlessTerminal ? this.afterActivityRepair : undefined;
+      if (hook) {
+        this.afterActivityRepair = undefined;
+      }
       const generation = await upsert(...args);
       this.lastGeneration = generation;
+      await hook?.();
       return generation;
     };
   }
@@ -207,27 +219,59 @@ class Run {
     await flush();
   }
 
-  async supersede(recreate: boolean): Promise<void> {
+  async supersede(): Promise<void> {
     this.parkTerminal();
-    let current = true;
-    const release = recreate
-      ? this.manager.releaseSession(UUID, "explicit-release")
-      : this.manager.releaseSessionUnlessSuperseded(UUID, `device-disconnected:${DEVICE}`, {
-          commitFence: () => current,
-        });
+    const release = this.manager.releaseSession(UUID, "explicit-release");
     // The gate parks the injected statement before its synchronous SQLite-equivalent effect.
     await flush();
-    current = false;
     await this.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS + 1);
     await this.complete(() => release);
-    if (recreate) {
-      lift(this.manager);
-      await this.complete(() => this.create());
-    } else {
-      await this.complete(() => this.manager.rebindSession(UUID, "fake-rebound", "android"));
-    }
+    lift(this.manager);
+    await this.complete(() => this.create());
     this.parked!.resolve();
     await flush();
+  }
+
+  /** A peer daemon's sweep expires the row this daemon's live session holds. */
+  private peerSweep(): Promise<void> {
+    return this.persistence.markStaleActiveSessionsExpired(
+      "fault-peer",
+      this.timer.now(),
+      "daemon-restart",
+      new Set(["fault-peer"]),
+    );
+  }
+
+  /**
+   * A peer's sweep expires the live row, so the next activity write misses and re-persists the
+   * whole row; a rebind lands while that re-persist is in flight, so the re-persist owes the live
+   * row's rewrite (#11557). The peer sweeps again before that rewrite's backoff retry, so only the
+   * rewrite leaves the live session's row active. Its first fault point, the initial
+   * `recordActivity`, comes from the shared `getOrCreateSession` preamble in `simulate`.
+   */
+  async overlapActivityWithRebind(): Promise<void> {
+    await this.peerSweep();
+    this.afterActivityRepair = async () => {
+      try {
+        await this.manager.rebindSession(UUID, "fake-rebound", "android");
+      } catch (error) {
+        // An injected fault can fail the rebind; the session then keeps its binding, owes no
+        // rewrite, and the repaired row stays.
+        this.effects.push(`rebind-failed:${String(error)}`);
+        return;
+      }
+      // The peer sweeps on its own clock: after this repair's write, before the owed retry.
+      this.timer.setTimeout(() => void this.peerSweep(), 5);
+    };
+    await this.complete(() => this.manager.getOrCreateSession(UUID));
+    // The owed rewrite's retry is armed with the 13 ms backoff; let it (and any retry) run.
+    await this.settle(
+      new Promise<void>((resolve) => this.timer.setTimeout(() => resolve(), 13 * 4)),
+    );
+    // Checked before the drain, whose own attempt at an owed rewrite would mask a lost retry.
+    if (writerOf(this.manager).superseded.owed(UUID)) {
+      this.violations.push("the live row's rewrite is still owed after its retries");
+    }
   }
 
   /** A durable release whose final supersede fence declines: it has no row to undo (#11799). */
@@ -315,7 +359,12 @@ class Run {
     if (crashed || intent) {
       // A crash oracle is the committed disk prefix, never the remainder of the scenario.
       const before = await this.persistence.getSession(UUID);
-      const expected = intent?.reason ?? before?.release_reason;
+      // A recoverable release (a peer's sweep) does not end the UUID: restart recovery revives it.
+      const recoverable =
+        !intent &&
+        typeof before?.release_reason === "string" &&
+        isRecoverableDaemonReleaseReason(before.release_reason);
+      const expected = intent?.reason ?? (recoverable ? undefined : before?.release_reason);
       await this.restart();
       const row = await this.persistence.getSession(UUID);
       if (expected && row?.release_reason !== expected) {
@@ -346,16 +395,19 @@ class Run {
     const live = this.manager.findSession(UUID);
     const liveScenario =
       (scenario.includes("declined") && !this.intentDegraded()) ||
-      scenario.includes("create after");
+      scenario.includes("create after") ||
+      scenario === "activity repair overlapped by a rebind";
     if (liveScenario) {
       if (
         !live ||
         row?.status !== "active" ||
+        row.device_id !== live.assignedDevice ||
         row.release_reason !== null ||
         row.stable_identity_generation !== this.lastGeneration
       ) {
         this.violations.push(
-          `live oracle: ${row?.status}/${row?.release_reason}/${row?.stable_identity_generation}, last=${this.lastGeneration}`,
+          `live oracle: ${row?.status}/${row?.release_reason}/${row?.device_id}/` +
+            `${row?.stable_identity_generation}, last=${this.lastGeneration}`,
         );
       }
     } else {
@@ -421,13 +473,16 @@ async function simulate(scenario: Scenario, at?: number, kind?: FaultKind): Prom
         await run.declineAtCommit();
         break;
       case "create after lift with parked terminal":
-        await run.supersede(true);
+        await run.supersede();
         break;
       case "forced stuck release":
         await run.force();
         break;
       case "shutdown drain with failing write":
         await run.shutdown();
+        break;
+      case "activity repair overlapped by a rebind":
+        await run.overlapActivityWithRebind();
         break;
     }
     run.plan.release();

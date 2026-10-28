@@ -30,6 +30,9 @@
   <!-- Prototype request actions with via "device" make their own HTTP calls (#12528). -->
   <uses-permission android:name="android.permission.INTERNET" />
 
+  <!-- Prototype /platform/connectivity reads the default network and Data Saver (#14273). -->
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
   <!-- Android 17 (API 37) drops outbound connections to local-network addresses (RFC 1918, -->
   <!-- loopback aliases such as the emulator host 10.0.2.2) from apps targeting 37 without this -->
   <!-- runtime permission, which surfaces as a timeout, not an error (#13018). Grant it with -->

@@ -53,6 +53,10 @@ const authCall = {
   ...label,
   onTap: [{ type: "platform", call: "auth.signOut", args: {} }],
 };
+const locationCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "location.request", args: {} }],
+};
 const openUrlCall = {
   ...label,
   onTap: [
@@ -277,6 +281,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_links_v1: openUrlCall,
   prototype_platform_contacts_v1: contactsCall,
   prototype_platform_mediaLibrary_v1: mediaPickCall,
+  prototype_platform_location_v1: locationCall,
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_calendar_v1: calendarCall,
   prototype_platform_auth_v1: authCall,
@@ -344,6 +349,7 @@ const ROOT_LEVEL_GATES = [
   "prototype_design_platform_v1",
   "prototype_reduced_motion_v1",
   "prototype_window_motion_v1",
+  "prototype_platform_window_controls_v1",
 ];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
@@ -377,6 +383,27 @@ test("the window motion gate reports window.transition and a repeat stagger", ()
   expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([
     "window.transition",
   ]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the window controls gate reports each window control the spec sets", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_platform_window_controls_v1",
+  )!;
+  const window = {
+    keepScreenOn: false,
+    brightness: "system",
+    orientation: "portrait",
+    statusBar: "auto",
+  };
+  expect(gate.fields({ window, root: label })).toEqual([
+    "window.keepScreenOn",
+    "window.brightness",
+    "window.orientation",
+    "window.statusBar",
+  ]);
+  expect(gate.fields({ window: { brightness: 0 }, root: label })).toEqual(["window.brightness"]);
+  expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([]);
   expect(gate.fields({ root: label })).toEqual([]);
 });
 

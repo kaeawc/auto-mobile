@@ -73,5 +73,22 @@
         ]
       }
     ]
+  },
+  "auth": {
+    "provider": "fake",
+    "accounts": [
+      {
+        "id": "u1",
+        "name": "Ada Lovelace",
+        "email": "ada@example.test",
+        "avatar": "ada"
+      },
+      {
+        "id": "u2",
+        "name": "Grace Hopper",
+        "email": "grace@example.com"
+      }
+    ],
+    "sessionTtlSeconds": 3600
   }
 }

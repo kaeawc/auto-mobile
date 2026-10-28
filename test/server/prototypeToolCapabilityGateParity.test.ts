@@ -364,6 +364,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: { ...base, window: { ...base.window, backdrop: { material: "thin" } } },
     ops: [],
   },
+  prototype_platform_window_controls_v1: {
+    minimalSpec: { ...base, window: { ...base.window, keepScreenOn: true } },
+    ops: [],
+  },
   prototype_network_v1: fixture({
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
@@ -591,9 +595,28 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: {
       ...base,
       requires: { platform: ["auth"] },
+      auth: {
+        provider: "fake",
+        accounts: [{ id: "u1", name: "Ada Lovelace", email: "ada@example.test" }],
+      },
       root: {
         ...base.root,
         children: [{ ...label, onTap: [{ type: "platform", call: "auth.signIn", args: {} }] }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_location_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["location"],
+        permissions: [{ name: "location", purpose: "Show rides near you" }],
+      },
+      root: {
+        ...base.root,
+        children: [{ ...label, onTap: [{ type: "platform", call: "location.request", args: {} }] }],
       },
     },
     ops: [],

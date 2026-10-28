@@ -2007,8 +2007,21 @@ path. No production runtime advertises them yet: the Android and iOS readers are
 **Connectivity (#14273).** The `connectivity` module (`prototype_platform_connectivity_v1`) follows the
 same shape: `/platform/connectivity/online` and `metered` and `constrained` are booleans, and
 `transport` is `wifi`, `cellular`, `ethernet`, `vpn`, `other` or `none`. `constrained` is iOS Low Data
-Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery per 500 ms. No
-production runtime advertises it yet.
+Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery per 500 ms.
+
+CtrlProxy registers the Android runtime and advertises the capability; the embedded renderer leaves the
+module to its host app. It reads the default network with `registerDefaultNetworkCallback`, registered on
+the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. The
+state is seeded from the active network before the callback registers, so the callback's first delivery
+is not a transition and a prototype does not see `connectivity.changed` just for starting. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
+`online: false` with `transport: "wifi"`. With no default network the state is offline on `none` with
+`metered` and `constrained` false. `transport` takes the first of `vpn`, `wifi`, `cellular`, `ethernet`
+that the network carries, so a VPN reports `vpn` over its underlying transport, and anything else is
+`other`. `metered` is the absence of `NET_CAPABILITY_NOT_METERED`. `constrained` is Data Saver on
+(`getRestrictBackgroundStatus` not `DISABLED`) on a metered network, because Data Saver restricts only
+metered networks. State updates at once; the event fires once the state has been quiet for the
+debounce, and a flap that settles back on the last delivered state is not an event. The iOS runtime and
+the offline simulation override are not built.
 
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
@@ -2020,6 +2033,15 @@ attempt while the prompt stays up. It has no `/platform` state and needs no decl
 call proves presence only and returns no biometric data. Failures use the typed codes: `cancelled`, and
 `unavailable` for a locked-out, unenrolled or hardware-less device. No production runtime advertises the
 module yet.
+
+**Window controls (#14320).** Four optional root `window` fields need
+`prototype_platform_window_controls_v1`; they are not a platform module, so no `requires.platform` entry.
+`keepScreenOn` (boolean) keeps the screen awake, `brightness` (whole 0-100, or `system`) sets the prototype
+window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) requests an orientation, and
+`statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
+prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
+and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
+best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
@@ -2046,7 +2068,20 @@ spec cannot name a component or an arbitrary handler, and a URL that begins with
 scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
 `SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
 `mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
-resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
+resolve. The module has no events or `/platform` state.
+
+CtrlProxy registers the Android `links` runtime and advertises the capability; the embedded renderer
+leaves the module to its host app. An omitted `mode` is `auto`. `tel:` starts `ACTION_DIAL` (never
+`ACTION_CALL`, so no call is placed and no `CALL_PHONE` is needed), `mailto:` and `sms:` start
+`ACTION_SENDTO` (a composer; nothing is sent), and every other scheme starts `ACTION_VIEW`, always with
+`FLAG_ACTIVITY_NEW_TASK` because the overlay is not an activity. Only `http` and `https` can open in a
+Custom Tab. The Custom Tab intent targets one Custom Tabs browser, the default browser when it provides
+them and otherwise the first that does, so an App Link app cannot take the URL. The runtime writes the
+Custom Tabs session extra itself, so CtrlProxy needs no `androidx.browser` dependency. `inApp` with no Custom Tabs service (AOSP images without Chrome) opens
+externally and reports `outcome: "fallback"`; `auto` makes the same choice and reports `opened`. Success
+writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, `mode` is how the URL
+actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
+fails with `unavailable`.
 
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.
@@ -2067,7 +2102,30 @@ an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated si
 `auth.signOut` takes no arguments. The `auth.sessionExpired` event and the read-only keys
 `/platform/auth/signedIn` (boolean) and `/platform/auth/userId` complete the module. No argument or key carries
 a password, secret or session token: the runtime keeps the token in the Keystore or Keychain and never exposes
-it. The root `auth` accounts block is not in the contract yet, and no production runtime advertises the module.
+it. The accounts come from a root `auth` block, which needs `auth` in `requires.platform`:
+`{provider: "fake", accounts, sessionTtlSeconds?}`. `accounts` holds 1 to 8 entries of `{id, name, email,
+avatar?}` with unique ids. Each email must use a reserved domain (`example.test`, `example.com` or any
+`.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
+`sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
+validation. No production runtime advertises the module yet.
+
+**Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
+`location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole
+milliseconds, 0 to one day). The call needs `location` in `requires.permissions`; `precise` maps to
+`ACCESS_FINE_LOCATION` on Android and full accuracy on iOS, `approximate` to `ACCESS_COARSE_LOCATION` and
+reduced accuracy. Its `into` receives `{latitude, longitude, accuracyM, altitudeM?, speedMps?, bearingDeg?,
+timestampMs, approximate}`; a grant of approximate only sets `approximate: true` rather than failing. Failures
+use the typed codes `permission_denied`, `unavailable` (location services off), `timeout` and `platform_error`.
+The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
+`/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
+are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
+that fix after the session ends. `applyPrototypeLocationOutcome` (`prototypeLocationOutcome.ts`) is the
+reference both runtimes copy. A fix is written only when its coordinates are in range, and it carries only the
+optional fields the platform reported. `<into>__meta` then gets `{durationMs, approximate}`. A failure leaves
+`into` untouched and records `{durationMs, error}`: a code outside the four above becomes `platform_error`, and
+only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the fix is rolled
+back. The root subscription block is not in the contract yet, and no production runtime advertises the
+module.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
@@ -3400,6 +3458,31 @@ in `PrototypeEffectShaders`.
 - **Owed device checks.** Goldens on API 30, 33 and 36 (`effects_all_types`, pending in
   `PrototypeSpecContentScreenshotTest`), and a real-GPU look at the AGSL effects. Robolectric covers
   decoding, API planning, the clock and budget on fakes, and bounds stability.
+
+## Maps (#14308, design for the `map` node)
+
+The `map` node (#14309) is not in the contract yet; these are the owner-decided rules its contract and
+renderers (#14310, #14311) follow.
+
+- **Backends.** A spec never names a tile URL or SDK. An optional `backend` defaults to `auto`: MapLibre on
+  Android, MapKit on iOS. Google Maps is an Android opt-in backend, offered only when the runtime holds a
+  host-configured key, because a disposable app's package and signature change per prototype and a key cannot
+  be pre-restricted to them. MapLibre on iOS stays optional, for the offline style and pixel parity.
+- **Styles.** `style` is a closed list, never a URL. `plain` is the default: offline and deterministic (a
+  background colour, an optional grid and graticule, then markers and polylines), with no network. CI and every
+  screenshot test use it. `streets` draws tiles from the runtime's configured source. `satellite` is not offered
+  until a source for it is chosen. On iOS, MapKit always fetches Apple tiles, so `plain` there is drawn by
+  MapLibre iOS or by an `MKTileOverlay` with `canReplaceMapContent` serving local tiles; #14311 picks one.
+- **Tile source.** The `streets` source is configured once per runtime (ProtoViewer settings, or the daemon
+  pushing configuration to a disposable app), never per spec. The public OpenStreetMap tile server is never
+  used.
+- **Keys.** A Google Maps or tile-provider key lives only in host configuration and reaches the runtime over
+  the device channel. It is never written into a spec, a saved bundle, `inspect`, `observe`, logs or a
+  ProtoViewer share; each renderer has a redaction test for this.
+- **Egress.** Tile fetches count as network for ProtoViewer's switch that allows network for imported
+  prototypes (#13622). With the switch off, `streets` falls back to `plain` with a visible "offline map" chip.
+  Only the configured tile origin is contacted, and the runtime draws the data attribution outside spec
+  control.
 
 ## Charts (#14209, not device-verified)
 

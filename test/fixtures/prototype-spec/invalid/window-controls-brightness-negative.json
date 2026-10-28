@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "w2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "keepScreenOn": true,
+      "brightness": -1,
+      "orientation": "portrait",
+      "statusBar": "light"
+    },
+    "root": {
+      "type": "text",
+      "text": "Boarding pass"
+    }
+  },
+  "expectedPath": "window.brightness"
+}

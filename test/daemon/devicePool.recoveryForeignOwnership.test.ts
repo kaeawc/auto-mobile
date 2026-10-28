@@ -1,23 +1,29 @@
 import { makePool } from "../helpers/makePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   DeviceOwnedByOtherDaemonError,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
 } from "../../src/models/deviceAcquisitionRefusals";
-import {
-  ForwardLeaseForeignDeviceOwnership,
-  type DeviceOwnershipFileSource,
-  type ForeignDeviceOwnership,
-} from "../../src/daemon/foreignDeviceOwnership";
-import { StoreDeviceClaimMirror, type DeviceClaim } from "../../src/daemon/deviceClaims";
-import { FakeDeviceClaims } from "../fakes/FakeDeviceClaims";
-import type { LockContent } from "../../src/utils/fileLock";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceClaims } from "../fakes/FakeDeviceClaims";
+import {
+  lazyDeviceClaims,
+  StoreDeviceClaimMirror,
+  type DeviceClaim,
+  type DeviceClaims,
+} from "../../src/daemon/deviceClaims";
+import {
+  ForwardLeaseForeignDeviceOwnership,
+  type DeviceOwnershipFileSource,
+  type ForeignDeviceOwnership,
+} from "../../src/daemon/foreignDeviceOwnership";
+import type { LockContent } from "../../src/utils/fileLock";
+import { logger } from "../../src/utils/logger";
 
 // #11076: daemon A crashed holding emulator-5554 for session S; daemon B took the lapsed claim.
 // When A restarts and S resumes, A must not rehydrate S onto the device B now drives.
@@ -316,4 +322,236 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
       a.pool.releaseDeviceClaimsForShutdown();
     },
   );
+});
+
+// #15738: separate claim roots make the host table the only evidence during startup recovery.
+describe("startup rehydration respects foreign device claims", () => {
+  const cleanup: Array<() => void> = [];
+  afterEach(() => {
+    for (const dispose of cleanup.splice(0).reverse()) {
+      dispose();
+    }
+  });
+
+  async function startup(options: { file?: boolean; dead?: boolean; deferredOpen?: boolean } = {}) {
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(persistedRow());
+    const sessions = new SessionManager(timer, persistence);
+    cleanup.push(() => sessions.stopCleanupTimer());
+    const store = new FakeDeviceClaims();
+    const foreign = {
+      platform: "android" as const,
+      deviceId: DEVICE_ID,
+      kind: "allocation" as const,
+      pid: DAEMON_B_PID,
+      ownerToken: "b-token",
+      processGenerationToken: "b-generation",
+      metadata: JSON.stringify({ socketPath: "/fake/b.sock", acquiredAt: 0 }),
+      claimedAtMs: 0,
+      updatedAtMs: 0,
+    };
+    await store.upsert(foreign);
+    const writes = mock(store.upsert.bind(store));
+    store.upsert = writes;
+    const files = new Map<string, LockContent>();
+    if (options.file) {
+      files.set(DEVICE_ID, { pid: DAEMON_B_PID, token: "b-token", metadata: foreign.metadata });
+    }
+    const source: DeviceOwnershipFileSource = {
+      leasePath: () => undefined,
+      legacyClaimPath: () => undefined,
+      claimPath: (id) => id,
+      read: (path) => files.get(path),
+      isProcessRunning: (pid) => pid === DAEMON_A_PID || (pid === DAEMON_B_PID && !options.dead),
+      tryAcquire: (path, owner) => {
+        if (files.has(path)) {
+          return false;
+        }
+        files.set(path, { pid: owner.pid, token: owner.ownerToken, metadata: owner.metadata });
+        return true;
+      },
+      takeOver: (path, observed, owner) => {
+        const held = files.get(path);
+        if (held?.pid !== observed.pid || held.token !== observed.token) {
+          return false;
+        }
+        files.set(path, { pid: owner.pid, token: owner.ownerToken, metadata: owner.metadata });
+        return true;
+      },
+      release: (path, owner) => {
+        const held = files.get(path);
+        if (held?.pid === owner.pid && held.token === owner.ownerToken) {
+          files.delete(path);
+        }
+      },
+    };
+    const opening = Promise.withResolvers<{ deviceClaims(): DeviceClaims }>();
+    if (!options.deferredOpen) {
+      opening.resolve({ deviceClaims: () => store });
+    }
+    const readStarted = Promise.withResolvers<void>();
+    const mirror = new StoreDeviceClaimMirror({
+      platform: "android",
+      timer,
+      store: lazyDeviceClaims(() => opening.promise),
+      whenOpen: async () => {
+        readStarted.resolve();
+        return (await opening.promise).deviceClaims();
+      },
+      generationOf: () => "a-generation",
+      generationVerdict: () => "same",
+    });
+    cleanup.push(() => mirror.dispose());
+    const claimed = mock(mirror.claimed.bind(mirror));
+    mirror.claimed = claimed;
+    const ownership = new ForwardLeaseForeignDeviceOwnership(
+      DAEMON_A_PID,
+      source,
+      {
+        query: async () => ({
+          kind: "status",
+          status: {
+            pid: DAEMON_B_PID,
+            deviceId: DEVICE_ID,
+            sessionId: "b-session",
+            activeExecutions: 0,
+            idleForMs: null,
+          },
+        }),
+      },
+      () => undefined,
+      timer,
+    );
+    ownership.attachClaimMirror(mirror);
+    const devices = new FakeDeviceManager();
+    const device = { deviceId: DEVICE_ID, name: AVD, platform: "android" as const };
+    devices.bootedDevices = [device];
+    const pool = makePool(sessions, "daemon-a-after-restart", {
+      timer,
+      deviceManager: devices,
+      foreignDeviceOwnership: ownership,
+      deviceClaimMirrors: { android: mirror },
+    });
+    cleanup.push(() => pool.releaseDeviceClaimsForShutdown());
+    await pool.initializeWithDevices([device]);
+    return {
+      sessions,
+      pool,
+      persistence,
+      store,
+      mirror,
+      foreign,
+      files,
+      writes,
+      claimed,
+      opening,
+      readStarted,
+      ownership,
+    };
+  }
+
+  test.each([false, true])(
+    "a live foreign owner terminalizes startup recovery (claim file=%s)",
+    async (file) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const a = await startup({ file });
+        // The file case must prove the file alone decides too.
+        if (file) {
+          a.store.rows.clear();
+        }
+
+        const result = await a.sessions.rehydratePersistedSessions(a.pool);
+
+        expect(result).toMatchObject({
+          rehydrated: [],
+          skipped: [],
+          terminalized: [
+            { sessionUuid: SESSION, reason: "identity-recovery-owned-by-other-daemon" },
+          ],
+        });
+        expect(a.pool.getDevice(DEVICE_ID)?.sessionId ?? null).toBeNull();
+        expect(a.sessions.getSession(SESSION)).toBeNull();
+        expect(a.writes).not.toHaveBeenCalled();
+        expect(a.claimed).not.toHaveBeenCalled();
+        expect((await a.persistence.getSession(SESSION))?.release_reason).toBe(
+          "identity-recovery-owned-by-other-daemon",
+        );
+        if (file) {
+          expect(a.files.get(DEVICE_ID)).toMatchObject({ pid: DAEMON_B_PID, token: "b-token" });
+        } else {
+          expect(await a.store.get("android", DEVICE_ID)).toEqual(a.foreign);
+          expect(a.files.size).toBe(0);
+        }
+        // The refusal reaches the log at warn and names the live owner.
+        const warned = warn.mock.calls.map((args) => args.map(String).join(" "));
+        expect(warned.some((line) => line.includes(`PID ${DAEMON_B_PID}`))).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  for (const file of [false, true]) {
+    test(`a dead ${file ? "file" : "table"} owner permits startup recovery and exactly one claim write`, async () => {
+      const a = await startup({ dead: true, file });
+      const result = await a.sessions.rehydratePersistedSessions(a.pool);
+      await a.mirror.idle();
+      expect(result).toMatchObject({ rehydrated: [SESSION], terminalized: [], skipped: [] });
+      expect(a.pool.getDevice(DEVICE_ID)?.sessionId).toBe(SESSION);
+      expect(a.writes).toHaveBeenCalledTimes(1);
+      expect(a.claimed).toHaveBeenCalledTimes(1);
+      expect(await a.store.get("android", DEVICE_ID)).toMatchObject({ pid: DAEMON_A_PID });
+    });
+  }
+
+  test("startup recovery waits for the in-flight registry and sees the live table owner", async () => {
+    const a = await startup({ deferredOpen: true });
+    const recovery = a.sessions.rehydratePersistedSessions(a.pool);
+    expect(
+      await Promise.race([
+        a.readStarted.promise.then(() => "waiting"),
+        recovery.then(() => "finished"),
+      ]),
+    ).toBe("waiting");
+    expect(a.writes).not.toHaveBeenCalled();
+    a.opening.resolve({ deviceClaims: () => a.store });
+    const result = await recovery;
+    expect(result.terminalized).toEqual([
+      { sessionUuid: SESSION, reason: "identity-recovery-owned-by-other-daemon" },
+    ]);
+    expect(a.pool.getDevice(DEVICE_ID)?.sessionId ?? null).toBeNull();
+    expect(a.writes).not.toHaveBeenCalled();
+    expect(a.claimed).not.toHaveBeenCalled();
+    expect(await a.store.get("android", DEVICE_ID)).toEqual(a.foreign);
+  });
+
+  test("a table owner arriving after the first check is named in the rollback warning", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const a = await startup();
+      a.store.rows.clear();
+      const claim = a.ownership.claim.bind(a.ownership);
+      a.ownership.claim = async (id) => {
+        await a.store.upsert(a.foreign);
+        return claim(id);
+      };
+
+      const result = await a.sessions.rehydratePersistedSessions(a.pool);
+
+      expect(result.terminalized).toEqual([
+        { sessionUuid: SESSION, reason: "identity-recovery-owned-by-other-daemon" },
+      ]);
+      expect(a.pool.getDevice(DEVICE_ID)?.sessionId ?? null).toBeNull();
+      expect(await a.store.get("android", DEVICE_ID)).toEqual(a.foreign);
+      expect(a.writes.mock.calls.map(([row]) => row.pid)).toEqual([DAEMON_B_PID]);
+      expect(a.claimed).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(`${DAEMON_B_PID}.*${DEVICE_ID}.*${SESSION}`)),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

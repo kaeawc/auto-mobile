@@ -3226,6 +3226,14 @@ pinned to LF for Windows; no binary assets are included. The worked examples abo
 `doc-example-N.json` fixtures and `test/parity/prototypeSpec.test.ts` asserts they match this page. The page
 is registered under How it Works in `mkdocs.yml` and linked from the design index.
 
+Reference concept slices live in `test/fixtures/prototype-concepts/<concept>/`: `today.json` (a
+whole concept app written only with capabilities Android and iOS both advertise, with literal `data`
+in place of a mock backend), `concept.json` (`{issue, name, capabilities}`, the gate capabilities the
+three strict policies must derive) and a `README.md` listing every required capability and each
+workaround or dead end with its spec path. The TypeScript, Kotlin and Swift suites load every concept
+directory; TypeScript also requires a `testTag` on every interactive node, a spec `id` of
+`<concept>-today` and zero static accessibility lint findings.
+
 ## Flow and grid contract (not device-verified)
 
 `prototype_flow_grid_v1` gates `flow` (wrapping row) and `grid`. Both support

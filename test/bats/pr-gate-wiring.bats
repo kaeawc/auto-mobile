@@ -88,6 +88,7 @@ wiring_requires_yq() {
     'test/fixtures/prototype-capabilities/**' \
     'test/fixtures/prototype-embedded-routing/**' \
     'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype-concepts/**' \
     'test/fixtures/prototype/**' \
     'test/fixtures/prototype-saved-layout/**' \
     'test/fixtures/desktop-wire/**' \
@@ -117,6 +118,7 @@ wiring_requires_yq() {
     'test/fixtures/prototype-capabilities/**' \
     'test/fixtures/prototype-embedded-routing/**' \
     'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype-concepts/**' \
     'test/fixtures/prototype/**' \
     'test/fixtures/refusal-wire/**' \
     'test/fixtures/refusal-wire-hints/**' \

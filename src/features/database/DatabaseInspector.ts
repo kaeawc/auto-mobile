@@ -195,13 +195,7 @@ export class DatabaseInspector {
     extras?: Record<string, string>,
   ): Promise<T> {
     const uri = `content://${appId}.automobile.database`;
-    let cmd = `shell content call --uri ${shellQuote(uri)} --method ${method}`;
-
-    if (extras) {
-      for (const [key, value] of Object.entries(extras)) {
-        cmd += ` --extra ${key}:s:${shellQuote(value)}`;
-      }
-    }
+    const cmd = `shell content call --uri ${shellQuote(uri)} --method ${method}${contentCallExtraFlags(extras)}`;
 
     // Read before the call: the call itself starts a dead app's process.
     const nonOwner = this.isNonOwnerReaderOfHeldDevice();
@@ -213,8 +207,9 @@ export class DatabaseInspector {
     if (nonOwner) {
       await this.assertReadOnlyEnforced(appId, uri);
     }
+    const context = { appId, databasePath: extras?.databasePath };
     try {
-      return await this.runContentCall<T>(cmd);
+      return await this.runContentCall<T>(cmd, undefined, context);
     } catch (error) {
       if (wasRunning || !isInspectionDisabled(error)) {
         throw error;
@@ -223,7 +218,7 @@ export class DatabaseInspector {
       // the SDK enables inspection (#10210). The first call already started it: retry once.
       await this.timer.sleep(DatabaseInspector.COLD_START_RETRY_DELAY_MS);
       try {
-        return await this.runContentCall<T>(cmd);
+        return await this.runContentCall<T>(cmd, undefined, context);
       } catch (retryError) {
         if (!isInspectionDisabled(retryError)) {
           throw retryError;
@@ -256,6 +251,7 @@ export class DatabaseInspector {
   private async runContentCall<T>(
     cmd: string,
     invalidReplyError?: (cause: unknown) => SdkTooOldError,
+    context?: { appId: string; databasePath?: string },
   ): Promise<T> {
     const result = await this.adb.executeCommand(cmd);
     const output = [result.stdout, result.stderr]
@@ -264,7 +260,7 @@ export class DatabaseInspector {
     // Transport failures above propagate unchanged. Only a received reply can indicate an
     // unknown SDK capability, including an old provider's INVALID_ARGUMENT reply or bad JSON.
     try {
-      return this.parseContentCallResult<T>(output);
+      return this.parseContentCallResult<T>(output, context);
     } catch (error) {
       if (isInspectionDisabled(error) || error instanceof ProviderUnavailableError) {
         throw error;
@@ -299,12 +295,20 @@ export class DatabaseInspector {
    *
    * Format: Bundle[{success=true, result={"databases":[...]}}]
    */
-  private parseContentCallResult<T>(output: string): T {
+  private parseContentCallResult<T>(
+    output: string,
+    context?: { appId: string; databasePath?: string },
+  ): T {
     // Check for success
     const success = this.extractBundleValue(output, "success") === "true";
 
     if (!success) {
       const { errorType, error } = this.extractError(output);
+      if (errorType === "InvalidPath" && context?.databasePath !== undefined) {
+        throw new ActionableError(
+          `Database error (InvalidPath): Invalid database path: ${context.databasePath}. The path must be absolute under the app's data directory, for example /data/data/${context.appId}/databases/<name>. List registered paths with the App Databases resource (automobile:devices/${encodeURIComponent(this.device.deviceId)}/databases?appId=${encodeURIComponent(context.appId)}).`,
+        );
+      }
       if (errorType === "PROVIDER_UNAVAILABLE") {
         throw new ProviderUnavailableError(`Database error (${errorType}): ${error}`);
       }
@@ -484,6 +488,16 @@ export class DatabaseInspector {
 
     return null;
   }
+}
+
+/** Render `--extra key:s:value` flags for a content call; empty when there are no extras. */
+function contentCallExtraFlags(extras?: Record<string, string>): string {
+  if (!extras) {
+    return "";
+  }
+  return Object.entries(extras)
+    .map(([key, value]) => ` --extra ${key}:s:${shellQuote(value)}`)
+    .join("");
 }
 
 const DISABLED_ERROR_PREFIX = "Database error (DISABLED):";

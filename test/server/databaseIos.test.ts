@@ -1,6 +1,8 @@
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { registerDatabaseResources } from "../../src/server/databaseResources";
 import { registerDatabaseTools } from "../../src/server/databaseTools";
@@ -157,6 +159,56 @@ describe("iOS database inspection server integration", function () {
       rows: [["1", "0xCAFE"]],
     });
   });
+
+  test("sqlQuery leaves an iOS bare database name unchanged", async () => {
+    const executeSQLForIos = mock(async (): Promise<SQLResult> => ({ type: "query", rows: [] }));
+    useIosClient({ executeSQLForIos });
+    registerDatabaseTools(iosClient);
+    await ToolRegistry.getTool("sqlQuery")!.deviceAwareHandler!(iosDevice, {
+      appId: "com.example.app",
+      databasePath: "sessions.db",
+      query: "SELECT 1",
+    });
+    expect(executeSQLForIos).toHaveBeenCalledWith(
+      "com.example.app",
+      "sessions.db",
+      "SELECT 1",
+      undefined,
+      true,
+    );
+  });
+
+  test.each(["sessions.db", "/data/data/com.example.app/databases/sessions.db"])(
+    "Android sqlQuery executes and notifies with the same absolute path: %s",
+    async (databasePath) => {
+      const device: BootedDevice = { deviceId: "android-test", platform: "android", name: "Fake" };
+      const resolvedPath = "/data/data/com.example.app/databases/sessions.db";
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell pidof 'com.example.app'", "4242");
+      const command = `shell content call --uri 'content://com.example.app.automobile.database' --method executeSQL --extra databasePath:s:'${resolvedPath}' --extra query:s:'DELETE FROM sessions'`;
+      adb.setCommandResult(
+        command,
+        'Bundle[{success=true, result={"type":"mutation","rowsAffected":1}}]',
+      );
+      const create = spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
+      const notify = spyOn(ResourceRegistry, "notifyResourceUpdated").mockResolvedValue(undefined);
+      try {
+        registerDatabaseTools();
+        await ToolRegistry.getTool("sqlQuery")!.deviceAwareHandler!(device, {
+          appId: "com.example.app",
+          databasePath,
+          query: "DELETE FROM sessions",
+        });
+        expect(adb.getAllCommands()).toContain(command);
+        expect(notify).toHaveBeenCalledWith(
+          `automobile:devices/android-test/databases/${encodeURIComponent(resolvedPath)}/tables/sessions/data?appId=com.example.app`,
+        );
+      } finally {
+        create.mockRestore();
+        notify.mockRestore();
+      }
+    },
+  );
 
   test("sqlQuery notifies database resources for iOS mutations", async function () {
     const executeSQLForIos = mock(async () => ({

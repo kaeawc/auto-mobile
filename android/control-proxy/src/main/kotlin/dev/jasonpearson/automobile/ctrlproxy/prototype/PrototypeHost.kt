@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -70,6 +72,25 @@ internal fun backdropBlurPx(request: PrototypeRequest, density: Float): Int =
   request.backdrop
     ?.takeIf { it.mode == PrototypeBackdropMode.BLUR }
     ?.let { (it.radiusDp * density).toInt() } ?: 0
+
+/** A show failed before its first composition was applied. */
+class PrototypeRenderFailedException(val reason: String, cause: Throwable? = null) :
+  IllegalStateException(reason, cause)
+
+/** Awaiting is injected so host tests never need a real Compose frame or wall-clock delay. */
+fun interface PrototypeFirstRenderWaiter {
+  /** Returns false when the composition marker does not arrive within [timeoutMillis]. */
+  suspend fun await(applied: CompletableDeferred<Unit>, timeoutMillis: Long): Boolean
+}
+
+/** Waits on the caller coroutine, leaving main free to apply the composition. */
+object CoroutinePrototypeFirstRenderWaiter : PrototypeFirstRenderWaiter {
+  override suspend fun await(applied: CompletableDeferred<Unit>, timeoutMillis: Long): Boolean =
+    withTimeoutOrNull(timeoutMillis) {
+      applied.await()
+      true
+    } ?: false
+}
 
 const val MIN_TOUCH_THROUGH_SETTLE_MILLIS = 100L
 const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
@@ -160,9 +181,11 @@ interface PrototypeClipboardHost {
 }
 
 /**
- * Mutations suspend until executed on main (inline if already there, posted otherwise). Boolean
- * results report platform success; show/replace return false after destroy. Replace without a
- * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
+ * Mutations execute on main (inline if already there, posted otherwise). Show/replace then await
+ * the first applied composition, throwing [PrototypeRenderFailedException] if it fails or times
+ * out. Boolean results report platform acceptance; show/replace return false after destroy. Replace
+ * without a window behaves as show. Read state is a snapshot, not a cross-thread compound
+ * transaction.
  */
 interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
   /** Best synchronous baseline; the Compose window size corrects it after attachment. */
@@ -282,6 +305,10 @@ class DefaultPrototypeHost(
   private val escapeTouchSlop: (Context) -> Int = { ViewConfiguration.get(it).scaledTouchSlop },
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
   private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
+  /** Must finish before the transport's 5000ms request timeout. */
+  private val firstRenderTimeoutMillis: Long = 2_000L,
+  /** Tests supply a deterministic waiter instead of driving real Compose frames. */
+  private val firstRenderWaiter: PrototypeFirstRenderWaiter = CoroutinePrototypeFirstRenderWaiter,
 ) : PrototypeHost {
   private class Window(
     val view: PrototypeComposeView,
@@ -295,6 +322,8 @@ class DefaultPrototypeHost(
     /** A floating window's screen position as its anchored root last placed it (#9316). */
     var anchoredOrigin: IntOffset? = null
     val visible = androidx.compose.runtime.mutableStateOf(true)
+    /** A new marker for every content revision, including in-place replacements. */
+    var firstComposition = CompletableDeferred<Unit>()
   }
 
   @Volatile private var window: Window? = null
@@ -317,8 +346,68 @@ class DefaultPrototypeHost(
   override val isTouchThroughActive: Boolean
     get() = touchThroughToken != null
 
-  override suspend fun show(request: PrototypeRequest): Boolean = mainThread.onMain {
-    showOnMain(request)
+  /** Serializes content revisions while main remains available to apply composition. */
+  private val showMutex = Mutex()
+
+  /** The last accepted revision, retained until the replacement's first composition applies. */
+  private class ShowSnapshot(val window: Window?) {
+    val request = window?.request
+    val params = window?.params
+    val origin = window?.anchoredOrigin
+    val composition = window?.firstComposition
+  }
+
+  override suspend fun show(request: PrototypeRequest): Boolean = showMutex.withLock {
+    var previous: ShowSnapshot? = null
+    var candidate: Window? = null
+    try {
+      val accepted = mainThread.onMain {
+        previous = ShowSnapshot(window)
+        showOnMain(request).also { if (it) candidate = window }
+      }
+      if (!accepted) return@withLock false
+      val added = checkNotNull(candidate)
+      // Never await inside onMain: its dispatcher must remain free to apply Compose changes.
+      if (!firstRenderWaiter.await(added.firstComposition, firstRenderTimeoutMillis)) {
+        throw PrototypeRenderFailedException(
+          "Prototype first composition did not complete within ${firstRenderTimeoutMillis}ms. " +
+            "Check the prototype content and retry.",
+        )
+      }
+      mainThread.onMain {
+        check(window === added) { "Prototype was dismissed before its first composition" }
+        previous
+          ?.window
+          ?.takeIf { it !== added }
+          ?.let {
+            if (!windowMotionEnabled(it) || !beginExit(it)) retire(it)
+          }
+        if (added !== previous?.window) onWindowAttached()
+      }
+      true
+    } catch (error: Exception) {
+      withContext(NonCancellable) {
+        mainThread.onMain { previous?.let { rollbackShow(it, candidate) } }
+      }
+      throw error
+    }
+  }
+
+  /** Restores the previous content revision, or removes a failed freshly attached window. */
+  private fun rollbackShow(previous: ShowSnapshot, candidate: Window?) {
+    val old = previous.window
+    val failed = candidate ?: window
+    if (old != null && failed === old && old.firstComposition !== previous.composition) {
+      old.request = checkNotNull(previous.request)
+      old.anchoredOrigin = previous.origin
+      update(old, checkNotNull(previous.params))
+      applyContent(old)
+      old.back.sync(old.request.focusable)
+    } else if (failed != null && failed !== old && window === failed) {
+      retire(failed)
+      window = old
+    }
+    placement = window?.request?.placement
   }
 
   override suspend fun replace(request: PrototypeRequest): Boolean = show(request)
@@ -386,7 +475,7 @@ class DefaultPrototypeHost(
       inPlace?.anchoredOrigin = null
       if (inPlace != null && (!request.bringToFront || !windowMotionEnabled(request, target)))
         updateInPlace(inPlace, request, params)
-      else addWindow(target, request, params, replacing = current)
+      else addWindow(target, request, params)
     }
 
   /** The keyboard's reach for a bottom sheet; other placements never read it. */
@@ -409,20 +498,27 @@ class DefaultPrototypeHost(
     if (!update(current, params)) return false
     current.request = request
     placement = request.placement
-    applyContent(current)
+    try {
+      applyContent(current)
+    } catch (error: Exception) {
+      throw PrototypeRenderFailedException(
+        "Prototype first composition failed: ${error.message}",
+        error,
+      )
+    }
     current.back.sync(request.focusable)
     return true
   }
 
   /**
    * Attaches a new window on the request's display. A window being replaced on another display is
-   * removed only after the new one is attached, so a failed add leaves the old prototype in place.
+   * retired only after the new content applies its first composition, so a failed show leaves the
+   * old prototype in place.
    */
   private fun addWindow(
     target: PrototypeDisplayWindow,
     request: PrototypeRequest,
     params: WindowManager.LayoutParams,
-    replacing: Window?,
   ): Boolean {
     val owner = PrototypeWindowOwner()
     val view =
@@ -450,22 +546,28 @@ class DefaultPrototypeHost(
         params,
         request,
       )
-    applyContent(added)
     try {
+      applyContent(added)
       target.windowManager.addView(view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to add prototype", error)
-      view.releaseEscape()
-      owner.destroy()
-      view.disposeComposition()
-      return false
+      // addView may throw after partially attaching the view/composition.
+      if (isViewAttached(view)) retire(added)
+      else {
+        view.releaseEscape()
+        added.back.release()
+        owner.destroy()
+        view.disposeComposition()
+      }
+      throw PrototypeRenderFailedException(
+        "Prototype window attach or first composition failed: ${error.message}. Check the content and retry.",
+        error,
+      )
     }
     window = added
     placement = request.placement
     owner.resume()
-    replacing?.let { if (!windowMotionEnabled(it) || !beginExit(it)) retire(it) }
     added.back.sync(request.focusable)
-    onWindowAttached()
     return true
   }
 
@@ -487,6 +589,8 @@ class DefaultPrototypeHost(
 
   private fun applyContent(current: Window) {
     val request = current.request
+    val applied = CompletableDeferred<Unit>()
+    current.firstComposition = applied
     // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
     val chrome = prototypeHostChrome(request)
     current.view.alpha = chrome.windowAlpha
@@ -494,6 +598,7 @@ class DefaultPrototypeHost(
     val target = current.target
     val geometry = windowGeometry(current)
     current.view.setContent {
+      SideEffect { applied.complete(Unit) }
       CompositionLocalProvider(LocalPrototypeWindowGeometry provides geometry) {
         PrototypeWindowMotion(
           current.visible.value,

@@ -714,6 +714,38 @@ describe("CtrlProxy prototypes", () => {
     });
   });
 
+  test("show preserves the typed first-render failure from the device", async () => {
+    const { client, socket, receive } = await harness();
+    let finish!: (value: Record<string, unknown>) => void;
+    const sent = new Promise<Record<string, unknown>>((resolve) => {
+      finish = resolve;
+    });
+    const send = spyOn(socket, "send").mockImplementation((data) =>
+      finish(JSON.parse(String(data))),
+    );
+    try {
+      const pending = client.requestShowPrototype(spec);
+      const message = await sent;
+      if (typeof message.requestId !== "string") {
+        throw new Error("Expected request ID");
+      }
+      await receive({
+        type: "prototype_result",
+        timestamp: 42,
+        requestId: message.requestId,
+        success: false,
+        errorCode: "render_failed",
+        error: "First composition timed out",
+      });
+      expect(await pending).toMatchObject({
+        success: false,
+        errorCode: "render_failed",
+        error: "First composition timed out",
+      });
+    } finally {
+      send.mockRestore();
+    }
+  });
   test.each(["show_prototype"])(
     "%s surfaces missingAssets as a warning on a successful result",
     async () => {
@@ -1610,9 +1642,12 @@ describe("saved shortcut reply validation", () => {
       expect(prototypeSavedReplyFields({ pin: { ...pin, shortcut } })).toEqual({ pin });
     },
   );
-  test.each(["pin_unsupported", "device_locked", "pin_failed"])("accepts %s", (errorCode) => {
-    expect(prototypeSavedReplyFields({ errorCode })).toEqual({ errorCode });
-  });
+  test.each(["pin_unsupported", "device_locked", "pin_failed", "render_failed"])(
+    "accepts %s",
+    (errorCode) => {
+      expect(prototypeSavedReplyFields({ errorCode })).toEqual({ errorCode });
+    },
+  );
   test.each([
     { id: "", icon: undefined },
     { id: "panel", icon: "" },

@@ -7,7 +7,10 @@ import dev.jasonpearson.automobile.ctrlproxy.prototypeResultFrame
 import dev.jasonpearson.automobile.ctrlproxy.prototypeStatusFrame
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -49,6 +52,7 @@ class PrototypeControllerTest {
       onDismissed = { dismissed++ },
       eventSink = PrototypeEventSink { if (connected) events += it },
       clock = { 42L },
+      requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
       lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
       render = { spec ->
         mapPrototypeSpec(spec).also { models += it }.request()
@@ -937,6 +941,56 @@ class PrototypeControllerTest {
     assertEquals(listOf("show", "destroy"), host.calls)
     controller.show("late", spec())
     assertResult("late", false, "destroyed")
+  }
+
+  @Test
+  fun `first render failure sends render_failed and never sends shown`() = runTest {
+    val refusals = mutableListOf<SavedPrototypeErrorCode>()
+    var shown = 0
+    val statuses = mutableListOf<PrototypeStatusEntry>()
+    val failing =
+      PrototypeController(
+        host,
+        object : PrototypeResultSink {
+          override suspend fun send(requestId: String?, success: Boolean, error: String?) {
+            fail("Expected typed refusal")
+          }
+
+          override suspend fun sendRefusal(
+            requestId: String?,
+            code: SavedPrototypeErrorCode,
+            error: String,
+          ) {
+            assertEquals("first composition timed out", error)
+            refusals += code
+          }
+
+          override suspend fun sendPrototypeStatus(
+            requestId: String?,
+            prototypes: List<PrototypeStatusEntry>,
+            droppedEvents: Long,
+          ) {
+            statuses.addAll(prototypes)
+          }
+
+          override suspend fun sendShown(
+            requestId: String?,
+            missingAssets: List<String>,
+            appearance: PrototypeAppearance,
+            hiddenReason: PrototypeHiddenReason?,
+          ) {
+            shown++
+          }
+        },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        render = { mapPrototypeSpec(it).request() },
+      )
+    host.failure = PrototypeRenderFailedException("first composition timed out")
+    failing.show("render", spec())
+    assertEquals(listOf(SavedPrototypeErrorCode.RENDER_FAILED), refusals)
+    assertEquals(0, shown)
+    failing.inspect("inspect")
+    assertTrue(statuses.isEmpty())
   }
 
   @Test

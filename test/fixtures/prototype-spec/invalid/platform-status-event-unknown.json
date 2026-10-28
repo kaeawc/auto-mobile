@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "platform-status-event-unknown",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "n": 0
+    },
+    "requires": {
+      "platform": ["battery"]
+    },
+    "platform": {
+      "on": {
+        "battery.drained": [
+          {
+            "type": "increment",
+            "key": "n"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "spacer"
+    }
+  },
+  "expectedPath": "platform.on[\"battery.drained\"]"
+}

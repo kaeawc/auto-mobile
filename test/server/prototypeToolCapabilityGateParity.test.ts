@@ -444,6 +444,42 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_battery_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["battery"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/battery/level}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_power_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["power"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/power/thermal}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_audio_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["audio"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/audio/volume}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_haptics_v1: {
     minimalSpec: {
       ...base,

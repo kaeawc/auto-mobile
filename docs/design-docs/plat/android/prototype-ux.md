@@ -1992,6 +1992,21 @@ table, so a module is added by adding its entry. The placeholder module `test` (
 `test.protected`, the `test.tick` event, capability `prototype_platform_test_v1`) makes the
 vocabulary testable before any real module exists; no production runtime advertises it.
 
+**Device status (#14316).** Three state-only modules expose read-only device status under
+`/platform/<module>/<key>`; a spec lists the module in `requires.platform` and reads keys with the
+`{platform}` forms. Each module has a `<module>.changed` event, debounced to one delivery per
+500 ms, whose `{event}` data carries the new values. Unknown keys and events fail validation with a
+path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
+
+| Module (capability)                         | Keys                                                                                                                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `battery` (`prototype_platform_battery_v1`) | `level` 0-100, absent when unknown; `state` `charging`, `full`, `unplugged` or `unknown`                                                                                              |
+| `power` (`prototype_platform_power_v1`)     | `saver` boolean; `thermal` `nominal`, `fair`, `serious` or `critical`                                                                                                                 |
+| `audio` (`prototype_platform_audio_v1`)     | `volume` 0-100 (media stream); `muted` boolean; `route` `speaker`, `wired`, `bluetooth`, `usb`, `airplay`, `cast` or `other`; `ringer` `normal`, `vibrate` or `silent` (Android only) |
+
+The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
+`fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

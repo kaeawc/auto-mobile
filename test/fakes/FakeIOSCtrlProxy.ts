@@ -1072,6 +1072,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _frameContext?: string,
   ): Promise<CtrlProxyPressHomeResult> {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");

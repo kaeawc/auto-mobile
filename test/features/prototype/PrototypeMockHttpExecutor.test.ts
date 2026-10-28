@@ -264,4 +264,16 @@ describe("MockRoutingPrototypeHttpExecutor", () => {
     await flush();
     expect(registry.get("shop")!.requestLog()).toEqual([]);
   });
+
+  test("a body that expands past the response cap through placeholders is too_large", async () => {
+    const { registry, executor } = setup();
+    registry.define("shop", {
+      routes: [{ method: "GET", path: "/x", body: "{query.q}".repeat(2000) }],
+    });
+    const outcome = await executor.execute(
+      { method: "GET", url: `https://shop.mock.automobile.invalid/x?q=${"x".repeat(1024)}` },
+      signal(),
+    );
+    expect(outcome).toMatchObject({ ok: false, error: { code: "too_large" } });
+  });
 });

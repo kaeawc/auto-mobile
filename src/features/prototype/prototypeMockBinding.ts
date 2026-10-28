@@ -6,6 +6,7 @@
  */
 import { logger } from "../../utils/logger";
 import { resolvePrototypeDataPointer } from "./prototypeData";
+import { MAX_PROTOTYPE_RESPONSE_BYTES } from "./prototypeRequestLimits";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
 
 export interface MockBindingContext {
@@ -41,26 +42,69 @@ function asText(value: PrototypeRequestJson | undefined): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+/** Binding would produce more than the response cap; the request then fails as `too_large`. */
+export class MockResponseTooLargeError extends Error {}
+
+/**
+ * Binds placeholders in `value`. The output is charged against `limit` characters as it is built,
+ * so a small body with many placeholders over a long query cannot expand to a huge string before
+ * the response cap is checked: the first charge past the limit throws.
+ */
 export function bindMockValue(
   value: PrototypeRequestJson,
   context: MockBindingContext,
+  limit: number = MAX_PROTOTYPE_RESPONSE_BYTES,
 ): PrototypeRequestJson {
-  if (typeof value === "string") {
-    const exact = EXACT.exec(value);
-    if (exact) {
-      return lookup(exact[1]!, context) ?? null;
+  let left = limit;
+  const charge = (size: number): void => {
+    left -= size;
+    if (left < 0) {
+      throw new MockResponseTooLargeError(`Response body exceeds ${limit} bytes.`);
     }
-    return value.replace(PLACEHOLDER, (_match, token: string) => asText(lookup(token, context)));
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => bindMockValue(entry, context));
-  }
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, bindMockValue(entry, context)]),
-    );
-  }
-  return value;
+  };
+  // A value bound by an exact placeholder is shared, not copied; its serialized size is charged
+  // per use and measured once per token.
+  const sizes = new Map<string, number>();
+  const sizeOf = (token: string, bound: PrototypeRequestJson): number => {
+    let size = sizes.get(token);
+    if (size === undefined) {
+      size = JSON.stringify(bound).length;
+      sizes.set(token, size);
+    }
+    return size;
+  };
+  const bind = (entry: PrototypeRequestJson): PrototypeRequestJson => {
+    if (typeof entry === "string") {
+      const exact = EXACT.exec(entry);
+      if (exact) {
+        const bound = lookup(exact[1]!, context) ?? null;
+        charge(sizeOf(exact[1]!, bound));
+        return bound;
+      }
+      charge(entry.length);
+      return entry.replace(PLACEHOLDER, (_match, token: string) => {
+        const text = asText(lookup(token, context));
+        charge(text.length);
+        return text;
+      });
+    }
+    if (Array.isArray(entry)) {
+      charge(2);
+      return entry.map(bind);
+    }
+    if (typeof entry === "object" && entry !== null) {
+      charge(2);
+      return Object.fromEntries(
+        Object.entries(entry).map(([key, member]) => {
+          charge(key.length + 3);
+          return [key, bind(member)];
+        }),
+      );
+    }
+    charge(8);
+    return entry;
+  };
+  return bind(value);
 }
 
 /** Matches `/feed/:id` against a request path; the captured parameters, or undefined on a miss. */

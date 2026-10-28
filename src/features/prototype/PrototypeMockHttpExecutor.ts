@@ -13,6 +13,7 @@ import type {
   PrototypeHttpRequest,
 } from "./PrototypeHttpExecutor";
 import type { PrototypeMockBackendRegistry } from "./PrototypeMockBackendRegistry";
+import { MockResponseTooLargeError } from "./prototypeMockBinding";
 import { mockTargetOf } from "./prototypeMockOrigin";
 import type { MockResponse } from "./PrototypeMockBackend";
 import {
@@ -129,6 +130,13 @@ export class MockRoutingPrototypeHttpExecutor implements PrototypeHttpExecutor {
     timeoutMs: number,
     durationMs: number,
   ): PrototypeHttpOutcome {
+    if (error instanceof MockResponseTooLargeError) {
+      return {
+        ok: false,
+        error: { code: "too_large", message: error.message },
+        durationMs,
+      };
+    }
     if (error === TIMED_OUT) {
       return {
         ok: false,

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { bindMockValue, matchMockPath } from "../../../src/features/prototype/prototypeMockBinding";
+import {
+  bindMockValue,
+  matchMockPath,
+  MockResponseTooLargeError,
+} from "../../../src/features/prototype/prototypeMockBinding";
 import { mockTargetOf } from "../../../src/features/prototype/prototypeMockOrigin";
 
 describe("mockTargetOf", () => {
@@ -84,5 +88,41 @@ describe("bindMockValue", () => {
     });
     expect(bindMockValue("{not a placeholder}", context)).toBe("{not a placeholder}");
     expect(bindMockValue("{body}", context)).toBe("{body}");
+  });
+
+  test("a literal is charged against the limit exactly", () => {
+    expect(bindMockValue("abc", context, 3)).toBe("abc");
+    expect(() => bindMockValue("abc", context, 2)).toThrow(MockResponseTooLargeError);
+  });
+
+  test("repeated placeholders over a long query stop at the limit instead of expanding", () => {
+    const long = { ...context, query: { q: "x".repeat(1024) } };
+    const template = "{query.q}".repeat(300);
+    // The template alone (2,700 characters) fits; only its expansion does not.
+    expect(bindMockValue(template.slice(0, 9 * 3), long, 4096)).toHaveLength(3 * 1024);
+    expect(() => bindMockValue(template, long, 4096)).toThrow(MockResponseTooLargeError);
+    expect(() => bindMockValue(["{query.q}", "{query.q}", "{query.q}"], long, 2048)).toThrow(
+      MockResponseTooLargeError,
+    );
+    expect(bindMockValue("{query.q}", long, 4096)).toBe("x".repeat(1024));
+  });
+
+  test("an exact placeholder bound to a large value is charged on every use", () => {
+    const big = { ...context, body: { blob: "y".repeat(10_000) } };
+    const uses = Array.from({ length: 20 }, () => "{body:/blob}");
+    expect(() => bindMockValue(uses, big, 100_000)).toThrow(MockResponseTooLargeError);
+    expect(bindMockValue(uses.slice(0, 5), big, 100_000)).toHaveLength(5);
+  });
+
+  test("keys and scalars are charged too", () => {
+    const wide = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`key${i}`, ""]));
+    expect(() => bindMockValue(wide, context, 5000)).toThrow(MockResponseTooLargeError);
+    expect(() =>
+      bindMockValue(
+        Array.from({ length: 1000 }, () => 1),
+        context,
+        5000,
+      ),
+    ).toThrow(MockResponseTooLargeError);
   });
 });

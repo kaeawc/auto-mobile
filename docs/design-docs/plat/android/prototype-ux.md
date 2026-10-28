@@ -2011,7 +2011,9 @@ Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery 
 
 CtrlProxy registers the Android runtime and advertises the capability; the embedded renderer leaves the
 module to its host app. It reads the default network with `registerDefaultNetworkCallback`, registered on
-the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
+the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. The
+state is seeded from the active network before the callback registers, so the callback's first delivery
+is not a transition and a prototype does not see `connectivity.changed` just for starting. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
 `online: false` with `transport: "wifi"`. With no default network the state is offline on `none` with
 `metered` and `constrained` false. `transport` takes the first of `vpn`, `wifi`, `cellular`, `ethernet`
 that the network carries, so a VPN reports `vpn` over its underlying transport, and anything else is
@@ -2066,7 +2068,20 @@ spec cannot name a component or an arbitrary handler, and a URL that begins with
 scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
 `SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
 `mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
-resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
+resolve. The module has no events or `/platform` state.
+
+CtrlProxy registers the Android `links` runtime and advertises the capability; the embedded renderer
+leaves the module to its host app. An omitted `mode` is `auto`. `tel:` starts `ACTION_DIAL` (never
+`ACTION_CALL`, so no call is placed and no `CALL_PHONE` is needed), `mailto:` and `sms:` start
+`ACTION_SENDTO` (a composer; nothing is sent), and every other scheme starts `ACTION_VIEW`, always with
+`FLAG_ACTIVITY_NEW_TASK` because the overlay is not an activity. Only `http` and `https` can open in a
+Custom Tab. The Custom Tab intent targets one Custom Tabs browser, the default browser when it provides
+them and otherwise the first that does, so an App Link app cannot take the URL. The runtime writes the
+Custom Tabs session extra itself, so CtrlProxy needs no `androidx.browser` dependency. `inApp` with no Custom Tabs service (AOSP images without Chrome) opens
+externally and reports `outcome: "fallback"`; `auto` makes the same choice and reports `opened`. Success
+writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, `mode` is how the URL
+actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
+fails with `unavailable`.
 
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.
@@ -2087,7 +2102,12 @@ an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated si
 `auth.signOut` takes no arguments. The `auth.sessionExpired` event and the read-only keys
 `/platform/auth/signedIn` (boolean) and `/platform/auth/userId` complete the module. No argument or key carries
 a password, secret or session token: the runtime keeps the token in the Keystore or Keychain and never exposes
-it. The root `auth` accounts block is not in the contract yet, and no production runtime advertises the module.
+it. The accounts come from a root `auth` block, which needs `auth` in `requires.platform`:
+`{provider: "fake", accounts, sessionTtlSeconds?}`. `accounts` holds 1 to 8 entries of `{id, name, email,
+avatar?}` with unique ids. Each email must use a reserved domain (`example.test`, `example.com` or any
+`.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
+`sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
+validation. No production runtime advertises the module yet.
 
 **Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
 `location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole

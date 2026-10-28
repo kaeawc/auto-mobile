@@ -244,3 +244,35 @@ Android \`indication: "ripple"|"none"\` controls the node's clickable feedback; 
 Stack \`predictiveBack.style\` uses the existing pop for \`default\`, horizontal movement with fade
 for \`crossActivity\` within the prototype activity, or snaps without predictive scrubbing for \`none\`.
 Use notes to confirm what the current renderer can apply before relying on a namespace field.`;
+
+export const GUIDE_PLATFORM = `## Platform features
+
+A spec reaches a platform feature through a module. Declare every module it uses in a root \`requires: {platform: [<module>], permissions?: [{name, purpose}], background?: [...]}\`; a call, handler or read of an undeclared module fails validation with a path, and a call's permissions must appear in \`requires.permissions\`. The host reads \`requires\` before show and refuses a device that lacks a module's capability, before anything is drawn.
+
+- **Call.** \`{type:"platform", call:"<module>.<op>", args, into?, statusKey?, timeoutMs?, onSuccess?, onError?}\` in any action list. \`args\` are strict per call; values are \`{value}\`, \`{state}\`, \`{data}\`, \`{platform}\`, \`{item}\`/\`{index}\` in a repeat, or \`{event}\` in a handler. \`into\` (a \`/data\` path) and \`statusKey\` (a declared string state key that moves loading, then success or error) behave as for \`request\`. A failure writes one of unsupported, unavailable, permission_denied, invalid_args, cancelled, timeout, too_many_in_flight or platform_error to \`<into>__meta.error\`. Each finished call is an emit event \`prototype_platform\` (\`{callId, call, outcome, error?, durationMs}\`).
+- **Handler.** A root \`platform: {on: {"<module>.<event>": [actions]}}\`. Inside a handler only, \`{event: "/pointer"}\` reads the event's data. Handlers run atomically like a tap and may use \`push\`, \`pop\`, data actions and further calls. A delivered event is an emit event \`prototype_platform_event\` (\`{event, data, truncated?}\`).
+- **Read.** \`/platform/<module>/<key>\` is device-owned, read-only JSON: \`{platform:/device/os}\` in text, \`{platform: "/device/widthClass", equals: "expanded"}\` as a condition, \`{platform: pointer}\` as a value. It is not patchable or stored and is not part of the \`/data\` revision log.
+- **Names.** Authored emit names cannot start with \`prototype_\`.
+
+Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists exactly what a spec can use:
+`;
+
+export const GUIDE_PLATFORM_EXAMPLE = `Example: copy a link on tap and re-show a hint when the window changes size.
+
+\`\`\`json
+{
+  "id": "share-link",
+  "window": {"placement": {"type": "fullscreen"}},
+  "state": {"copyStatus": "idle", "resized": false},
+  "requires": {"platform": ["clipboard", "device"]},
+  "platform": {"on": {"device.changed": [{"type": "setState", "key": "resized", "value": true}]}},
+  "root": {
+    "type": "column",
+    "children": [
+      {"type": "text", "text": "Window {platform:/device/windowWidth} wide"},
+      {"type": "text", "text": "Layout changed", "visibleWhen": {"key": "resized", "equals": true}},
+      {"type": "button", "label": "Copy link", "onTap": [{"type": "platform", "call": "clipboard.copy", "args": {"text": {"value": "https://example.com/episode/1"}}, "statusKey": "copyStatus"}]}
+    ]
+  }
+}
+\`\`\``;

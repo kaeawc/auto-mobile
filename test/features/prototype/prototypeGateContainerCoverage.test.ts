@@ -27,6 +27,26 @@ const settingsCall = {
   ...label,
   onTap: [{ type: "platform", call: "settings.open", args: { page: { value: "app" } } }],
 };
+const contactsCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
+};
+const calendarCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "calendar.insert",
+      args: { title: { value: "Dinner" }, start: { value: 1 }, end: { value: 2 } },
+    },
+  ],
+};
+const openUrlCall = {
+  ...label,
+  onTap: [
+    { type: "platform", call: "links.open", args: { url: { value: "https://example.com" } } },
+  ],
+};
 const hapticsCall = {
   ...label,
   onTap: [
@@ -242,6 +262,9 @@ const fixtures: Record<string, Node> = {
   prototype_platform_connectivity_v1: statusRead("connectivity", "online", false),
   prototype_platform_biometric_v1: biometricCall,
   prototype_platform_settings_v1: settingsCall,
+  prototype_platform_links_v1: openUrlCall,
+  prototype_platform_contacts_v1: contactsCall,
+  prototype_platform_calendar_v1: calendarCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

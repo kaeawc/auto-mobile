@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "recipient": {},
+      "saved": {}
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["contacts"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "contacts.pick",
+          "args": {
+            "multiple": {
+              "value": true
+            }
+          },
+          "into": "/data/recipient",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_data_model_v1, prototype_platform_contacts_v1"
+}

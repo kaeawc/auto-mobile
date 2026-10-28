@@ -13,7 +13,8 @@
     "stringKey": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
     "localeTag": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
     "uploadDisposition": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])",
-    "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])"
+    "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])",
+    "openUrl": "^(?:https?|mailto|tel|sms|geo|maps):[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -21771,6 +21772,117 @@
               "value": {
                 "kind": "enum",
                 "values": ["app", "notifications", "location", "wifi", "bluetooth", "display"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "contacts": {
+      "capability": "prototype_platform_contacts_v1",
+      "calls": {
+        "pick": {
+          "args": {
+            "multiple": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "calendar": {
+      "capability": "prototype_platform_calendar_v1",
+      "calls": {
+        "insert": {
+          "args": {
+            "title": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 256
+              }
+            },
+            "start": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 253402300799000
+              }
+            },
+            "end": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 253402300799000
+              }
+            },
+            "allDay": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            },
+            "location": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 256
+              }
+            },
+            "notes": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 2048
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "links": {
+      "capability": "prototype_platform_links_v1",
+      "calls": {
+        "open": {
+          "args": {
+            "url": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "pattern": "openUrl",
+                "max": 2048
+              }
+            },
+            "mode": {
+              "optional": true,
+              "value": {
+                "kind": "enum",
+                "values": ["external", "inApp", "auto"]
               }
             }
           },

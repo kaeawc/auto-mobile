@@ -2028,6 +2028,24 @@ another. The module has no events or `/platform` state. Pages other than `app` a
 Android only; the host validator does not yet know the target platform, so that restriction is reported by the
 runtime. No production runtime advertises the module yet.
 
+**Contact and calendar pickers (#14318).** Two modules reach the system pickers, which return only what the
+user picks and need no declared permission. `contacts` (`prototype_platform_contacts_v1`) has
+`contacts.pick` with an optional `multiple` boolean; it is `sensitive` because the result is personal data.
+`calendar` (`prototype_platform_calendar_v1`) has `calendar.insert` with `title` (required, 1-256
+characters), `start` and `end` (required, whole milliseconds since the epoch), `allDay`, `location` (1-256) and
+`notes` (1-2048). Neither module has events or `/platform` state, and a back-out is the typed error
+`cancelled`. The contract cannot yet check an enum list, so the contact `fields` selector is not an argument.
+No production runtime advertises either module yet.
+
+**Outbound links (#14238).** The `links` module (`prototype_platform_links_v1`) has one call, `links.open`
+with `url` (required, at most 2048 characters) and `mode` (optional: `external`, `inApp` or `auto`). The
+`openUrl` contract pattern is an allowlist: the URL must start with a lowercase `http`, `https`, `mailto`,
+`tel`, `sms`, `geo` or `maps` scheme and contain no whitespace or control characters. `intent:`, `file:`,
+`content:`, `javascript:`, `data:` and any custom scheme fail validation in all three validators, so a
+spec cannot name a component or an arbitrary handler. The validator does not yet reject a mode that a scheme
+cannot honour (`tel:` in `inApp`) or a URL that begins with a placeholder; the runtime reports those. The
+module has no events or `/platform` state. No production runtime advertises it yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

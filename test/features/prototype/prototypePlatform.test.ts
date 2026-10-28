@@ -609,3 +609,87 @@ describe("settings module contract", () => {
     expect(settings.calls.open.permissions).toEqual([]);
   });
 });
+
+describe("picker module contracts", () => {
+  test("contacts.pick takes one optional boolean and is sensitive", () => {
+    const pick = PROTOTYPE_PLATFORM_MODULES.contacts.calls.pick;
+    expect(Object.keys(pick.args)).toEqual(["multiple"]);
+    expect(pick.args.multiple.optional).toBe(true);
+    expect(pick.sensitive).toBe(true);
+    expect(pick.permissions).toEqual([]);
+  });
+
+  test("calendar.insert bounds its text and requires title, start and end", () => {
+    const insert = PROTOTYPE_PLATFORM_MODULES.calendar.calls.insert;
+    expect(Object.keys(insert.args)).toEqual([
+      "title",
+      "start",
+      "end",
+      "allDay",
+      "location",
+      "notes",
+    ]);
+    const required = Object.entries(insert.args)
+      .filter(([, argument]) => !argument.optional)
+      .map(([name]) => name);
+    expect(required).toEqual(["title", "start", "end"]);
+    expect(insert.args.title.value.max).toBe(256);
+    expect(insert.args.location.value.max).toBe(256);
+    expect(insert.args.notes.value.max).toBe(2048);
+    expect(insert.args.start.value.integer).toBe(true);
+    expect(insert.sensitive).toBe(false);
+  });
+
+  test("neither picker module has events, state or a declared permission", () => {
+    for (const name of ["contacts", "calendar"]) {
+      expect(PROTOTYPE_PLATFORM_MODULES[name].events).toEqual({});
+      expect(PROTOTYPE_PLATFORM_MODULES[name].state).toEqual({});
+    }
+  });
+});
+
+describe("links module contract", () => {
+  const open = PROTOTYPE_PLATFORM_MODULES.links.calls.open;
+  const allowed = new RegExp(contract.patterns.openUrl);
+
+  test("open takes a bounded url and an optional mode from the closed list", () => {
+    expect(Object.keys(open.args)).toEqual(["url", "mode"]);
+    expect(open.args.url.optional).toBe(false);
+    expect(open.args.url.value.max).toBe(2048);
+    expect(open.args.url.value.pattern).toBe("openUrl");
+    expect(open.args.mode.value.values).toEqual(["external", "inApp", "auto"]);
+  });
+
+  test("the scheme allowlist accepts web, mail, phone, sms and map links", () => {
+    for (const url of [
+      "https://example.com/a?b=1",
+      "http://example.com",
+      "mailto:ada@example.test?subject=Hi%20there",
+      "tel:+15551234567",
+      "sms:+15551234567",
+      "geo:37.78,-122.41",
+      "maps://?q=coffee",
+      "https://example.com/{id}",
+    ]) {
+      expect(allowed.test(url)).toBe(true);
+    }
+  });
+
+  test("the scheme allowlist refuses component, local and script schemes", () => {
+    for (const url of [
+      "intent://scan/#Intent;scheme=zxing;end",
+      "file:///etc/passwd",
+      "content://com.android.contacts/contacts",
+      "javascript:alert(1)",
+      "data:text/html,hello",
+      "myapp://open",
+      "HTTPS://example.com",
+      "example.com",
+      "https://example.com/a b",
+      "https://example.com/\u0000",
+      "https:",
+    ]) {
+      expect(allowed.test(url)).toBe(false);
+    }
+  });
+});

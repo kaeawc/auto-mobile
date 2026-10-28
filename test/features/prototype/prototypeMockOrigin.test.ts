@@ -64,6 +64,18 @@ describe("bindMockValue", () => {
     ).toBe('id=5 n=2 l={"x":"y"} z=.');
   });
 
+  test("only own properties bind, so inherited names are unbound", () => {
+    for (const token of [
+      "query.toString",
+      "query.constructor",
+      "query.__proto__",
+      "params.hasOwnProperty",
+    ]) {
+      expect(bindMockValue(`{${token}}`, context)).toBeNull();
+      expect(bindMockValue(`a{${token}}b`, context)).toBe("ab");
+    }
+  });
+
   test("binds recursively through arrays and objects and leaves other values alone", () => {
     expect(
       bindMockValue({ a: ["{params.id}", 1, true, null, { b: "{query.q}" }] }, context),

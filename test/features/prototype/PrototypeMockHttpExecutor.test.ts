@@ -7,6 +7,7 @@ import type {
 import { FetchPrototypeHttpExecutor } from "../../../src/features/prototype/PrototypeHttpExecutor";
 import { PrototypeMockBackendRegistry } from "../../../src/features/prototype/PrototypeMockBackendRegistry";
 import { MockRoutingPrototypeHttpExecutor } from "../../../src/features/prototype/PrototypeMockHttpExecutor";
+import { MAX_PROTOTYPE_REQUEST_TIMEOUT_MS } from "../../../src/features/prototype/prototypeRequestLimits";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -142,5 +143,80 @@ describe("MockRoutingPrototypeHttpExecutor", () => {
       signal(),
     );
     expect(outcome).toMatchObject({ ok: false, error: { code: "too_large" } });
+  });
+
+  test("an inherited placeholder name yields a null body instead of failing the request", async () => {
+    const { registry, executor } = setup();
+    registry.define("shop", { routes: [{ method: "GET", path: "/x", body: "{query.toString}" }] });
+    const outcome = await executor.execute(
+      { method: "GET", url: "https://shop.mock.automobile.invalid/x" },
+      signal(),
+    );
+    expect(outcome).toMatchObject({ ok: true, status: 200, body: null });
+  });
+
+  test("latency or a route delay beyond the request timeout is a timeout", async () => {
+    const timer = new FakeTimer();
+    const registry = new PrototypeMockBackendRegistry({ ids: new FakeIdGenerator(), timer });
+    registry.define("slow", {
+      latencyMs: { min: 1000, max: 1000 },
+      collections: { items: [] },
+    });
+    registry.define("delayed", {
+      routes: [{ method: "GET", path: "/x", delayMs: 1000, body: "y" }],
+    });
+    const executor = new MockRoutingPrototypeHttpExecutor(new RecordingExecutor(), registry, timer);
+    const slow = executor.execute(
+      {
+        method: "POST",
+        url: "https://slow.mock.automobile.invalid/items",
+        body: {},
+        timeoutMs: 10,
+      },
+      signal(),
+    );
+    const delayed = executor.execute(
+      { method: "GET", url: "https://delayed.mock.automobile.invalid/x", timeoutMs: 10 },
+      signal(),
+    );
+    timer.advanceTime(10);
+    expect(await slow).toMatchObject({ ok: false, error: { code: "timeout" } });
+    expect(await delayed).toMatchObject({ ok: false, error: { code: "timeout" } });
+    // The write never happened: the deadline passed while the request still waited on latency.
+    timer.advanceTime(5000);
+    expect(registry.get("slow")!.snapshot().items).toEqual([]);
+  });
+
+  test("an answer inside the timeout is delivered and the deadline timer is cleared", async () => {
+    const timer = new FakeTimer();
+    const registry = new PrototypeMockBackendRegistry({ ids: new FakeIdGenerator(), timer });
+    registry.define("slow", {
+      latencyMs: { min: 500, max: 500 },
+      routes: [{ method: "GET", path: "/x", body: "y" }],
+    });
+    const executor = new MockRoutingPrototypeHttpExecutor(new RecordingExecutor(), registry, timer);
+    const pending = executor.execute(
+      { method: "GET", url: "https://slow.mock.automobile.invalid/x", timeoutMs: 1000 },
+      signal(),
+    );
+    timer.advanceTime(500);
+    expect(await pending).toMatchObject({ ok: true, body: "y" });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a request timeout above the maximum is clamped to it", async () => {
+    const timer = new FakeTimer();
+    const registry = new PrototypeMockBackendRegistry({ ids: new FakeIdGenerator(), timer });
+    registry.define("slow", {
+      latencyMs: { min: 10_000, max: 10_000 },
+      routes: [{ method: "GET", path: "/x", body: "y" }],
+    });
+    const executor = new MockRoutingPrototypeHttpExecutor(new RecordingExecutor(), registry, timer);
+    const pending = executor.execute(
+      { method: "GET", url: "https://slow.mock.automobile.invalid/x", timeoutMs: 3_600_000 },
+      signal(),
+    );
+    timer.advanceTime(MAX_PROTOTYPE_REQUEST_TIMEOUT_MS);
+    expect(await pending).toMatchObject({ ok: false, error: { code: "timeout" } });
   });
 });

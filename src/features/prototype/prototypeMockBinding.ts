@@ -18,15 +18,20 @@ const PLACEHOLDER = /\{(params\.[A-Za-z][A-Za-z0-9_]*|query\.[^{}\s]+|body:\/[^{
 const EXACT = new RegExp(`^${PLACEHOLDER.source}$`);
 
 function lookup(token: string, context: MockBindingContext): PrototypeRequestJson | undefined {
+  // Own properties only: `{query.toString}` must be unbound, not the inherited function.
   if (token.startsWith("params.")) {
-    return context.params[token.slice("params.".length)];
+    return ownValue(context.params, token.slice("params.".length));
   }
   if (token.startsWith("query.")) {
-    return context.query[token.slice("query.".length)];
+    return ownValue(context.query, token.slice("query.".length));
   }
   return resolvePrototypeDataPointer(context.body, token.slice("body:".length)) as
     | PrototypeRequestJson
     | undefined;
+}
+
+function ownValue(values: Record<string, string>, name: string): string | undefined {
+  return Object.hasOwn(values, name) ? values[name] : undefined;
 }
 
 function asText(value: PrototypeRequestJson | undefined): string {
@@ -77,7 +82,7 @@ export function matchMockPath(pattern: string, path: string): Record<string, str
   return params;
 }
 
-function decodeURIComponentSafe(segment: string): string {
+export function decodeURIComponentSafe(segment: string): string {
   try {
     return decodeURIComponent(segment);
   } catch (error) {

@@ -5,7 +5,7 @@
  */
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
-import { MAX_MOCK_BACKEND_BYTES, type MockItem } from "./prototypeMockSchema";
+import type { MockItem } from "./prototypeMockSchema";
 import contract from "../../../schemas/prototype-spec-contract.json";
 
 export interface MockResponse {
@@ -124,14 +124,14 @@ function bodyItem(body: PrototypeRequestJson | undefined): MockItem | undefined 
   return isItem(body) ? body : undefined;
 }
 
-function withinBudget(items: MockItem[]): boolean {
-  return (
-    items.length <= MAX_ITEMS && Buffer.byteLength(JSON.stringify(items)) <= MAX_MOCK_BACKEND_BYTES
-  );
-}
-
 export interface CollectionDeps {
   ids: IdGenerator;
+  /** Whether the backend, with this collection replaced by `next`, stays within its size budget. */
+  fits(next: MockItem[]): boolean;
+}
+
+function withinBudget(items: MockItem[], deps: CollectionDeps): boolean {
+  return items.length <= MAX_ITEMS && deps.fits(items);
 }
 
 /** Applies one request to a collection, mutating `items` in place for writes. */
@@ -153,7 +153,7 @@ export function answerCollection(
       return index === -1 ? error(404, "Not found") : json(200, items[index]!);
     case "PATCH":
     case "PUT":
-      return replaceItem(items, index, request);
+      return replaceItem(items, index, request, deps);
     case "DELETE":
       return deleteItem(items, index);
     default:
@@ -181,14 +181,19 @@ function answerWholeCollection(
     return error(409, "An item with that id already exists");
   }
   const next = [...items, item];
-  if (!withinBudget(next)) {
+  if (!withinBudget(next, deps)) {
     return error(413, "The collection is full");
   }
   items.push(item);
   return json(201, item);
 }
 
-function replaceItem(items: MockItem[], index: number, request: CollectionRequest): MockResponse {
+function replaceItem(
+  items: MockItem[],
+  index: number,
+  request: CollectionRequest,
+  deps: CollectionDeps,
+): MockResponse {
   const patch = bodyItem(request.body);
   if (patch === undefined) {
     return error(400, "Expected a JSON object body");
@@ -205,7 +210,7 @@ function replaceItem(items: MockItem[], index: number, request: CollectionReques
       ? { ...current, ...patch, id: current.id! }
       : { ...patch, id: current.id! };
   const next = items.map((item, at) => (at === index ? updated : item));
-  if (!withinBudget(next)) {
+  if (!withinBudget(next, deps)) {
     return error(413, "The collection is full");
   }
   items[index] = updated;

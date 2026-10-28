@@ -180,4 +180,47 @@ describe("PrototypeMockBackend", () => {
     expect(refused.status).toBe(413);
     expect(engine.snapshot().blobs).toHaveLength(1);
   });
+
+  test("ids and collection names are compared percent-decoded", async () => {
+    const { engine } = backend({
+      collections: {
+        "my-items": [
+          { id: "a b", n: 1 },
+          { id: "€", n: 2 },
+        ],
+      },
+    });
+    const call = (method: string, path: string, body?: PrototypeRequestJson) =>
+      engine.answer({ method, path, query: {}, body });
+    expect((await call("GET", "/my-items/a%20b")).body).toEqual({ id: "a b", n: 1 });
+    expect((await call("GET", "/my-items/%E2%82%AC")).body).toEqual({ id: "€", n: 2 });
+    expect((await call("PATCH", "/my-items/a%20b", { n: 9 })).status).toBe(200);
+    expect((await call("DELETE", "/my-items/%E2%82%AC")).status).toBe(200);
+    expect(engine.snapshot()).toEqual({ "my-items": [{ id: "a b", n: 9 }] });
+    expect((await call("GET", "/my%2Ditems")).status).toBe(200);
+  });
+
+  test("the size budget covers every collection and the canned routes together", async () => {
+    const big = { text: "x".repeat(600 * 1024) };
+    const two = backend({ collections: { a: [], b: [] } }).engine;
+    expect((await two.answer({ method: "POST", path: "/a", query: {}, body: big })).status).toBe(
+      201,
+    );
+    expect((await two.answer({ method: "POST", path: "/b", query: {}, body: big })).status).toBe(
+      413,
+    );
+    expect(two.snapshot().b).toEqual([]);
+
+    const withRoute = backend({
+      collections: { a: [] },
+      routes: [{ method: "GET", path: "/r", body: "y".repeat(700 * 1024) }],
+    }).engine;
+    expect(
+      (await withRoute.answer({ method: "POST", path: "/a", query: {}, body: big })).status,
+    ).toBe(413);
+    const small = { text: "x".repeat(200 * 1024) };
+    expect(
+      (await withRoute.answer({ method: "POST", path: "/a", query: {}, body: small })).status,
+    ).toBe(201);
+  });
 });

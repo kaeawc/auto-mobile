@@ -8,8 +8,14 @@ import type { IdGenerator } from "../../utils/IdGenerator";
 import type { Random } from "../../utils/Random";
 import type { Timer } from "../../utils/SystemTimer";
 import { answerCollection, type MockResponse } from "./prototypeMockCollections";
-import { bindMockValue, matchMockPath } from "./prototypeMockBinding";
-import type { MockBackendDefinition, MockFault, MockItem, MockRoute } from "./prototypeMockSchema";
+import { bindMockValue, decodeURIComponentSafe, matchMockPath } from "./prototypeMockBinding";
+import {
+  MAX_MOCK_BACKEND_BYTES,
+  type MockBackendDefinition,
+  type MockFault,
+  type MockItem,
+  type MockRoute,
+} from "./prototypeMockSchema";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
 
 export type { MockResponse };
@@ -140,7 +146,8 @@ export class PrototypeMockBackend {
   }
 
   private collectionResponse(method: string, request: MockRequest): MockResponse | undefined {
-    const [, name, ...rest] = request.path.split("/");
+    // The path keeps its percent-encoding; names and ids are compared decoded, like route params.
+    const [, name, ...rest] = request.path.split("/").map(decodeURIComponentSafe);
     const items = name === undefined ? undefined : this.collections.get(name);
     if (items === undefined) {
       return undefined;
@@ -148,7 +155,18 @@ export class PrototypeMockBackend {
     return answerCollection(
       items,
       { method, rest, query: request.query, body: request.body },
-      { ids: this.deps.ids },
+      { ids: this.deps.ids, fits: (next) => this.fitsWith(items, next) },
+    );
+  }
+
+  /** The whole backend (every collection and the routes) must stay within one budget. */
+  private fitsWith(items: MockItem[], next: MockItem[]): boolean {
+    const collections = Object.fromEntries(
+      [...this.collections].map(([name, current]) => [name, current === items ? next : current]),
+    );
+    return (
+      Buffer.byteLength(JSON.stringify([collections, this.definition.routes])) <=
+      MAX_MOCK_BACKEND_BYTES
     );
   }
 

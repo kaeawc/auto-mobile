@@ -3,7 +3,9 @@
  * everything else to the real executor. A mock request never reaches DNS, the egress policy or a
  * socket, so the unfiltered `fetch` path is not involved.
  */
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type {
   PrototypeHttpExecutor,
@@ -12,7 +14,12 @@ import type {
 } from "./PrototypeHttpExecutor";
 import type { PrototypeMockBackendRegistry } from "./PrototypeMockBackendRegistry";
 import { mockTargetOf } from "./prototypeMockOrigin";
-import { MAX_PROTOTYPE_RESPONSE_BYTES } from "./prototypeRequestLimits";
+import type { MockResponse } from "./PrototypeMockBackend";
+import {
+  DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
+  MAX_PROTOTYPE_REQUEST_TIMEOUT_MS,
+  MAX_PROTOTYPE_RESPONSE_BYTES,
+} from "./prototypeRequestLimits";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
 
 /** A raw text body that is JSON is parsed, as a real server's JSON body would be on the device. */
@@ -29,11 +36,14 @@ function requestBody(body: PrototypeRequestJson | undefined): PrototypeRequestJs
   }
 }
 
+/** Rejection marker for the request deadline, so it cannot be mistaken for any other failure. */
+const TIMED_OUT = Symbol("mock request timed out");
+
 export class MockRoutingPrototypeHttpExecutor implements PrototypeHttpExecutor {
   constructor(
     private readonly inner: PrototypeHttpExecutor,
     private readonly registry: PrototypeMockBackendRegistry,
-    private readonly timer: Pick<Timer, "now">,
+    private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   ) {}
 
   async execute(request: PrototypeHttpRequest, signal: AbortSignal): Promise<PrototypeHttpOutcome> {
@@ -61,18 +71,30 @@ export class MockRoutingPrototypeHttpExecutor implements PrototypeHttpExecutor {
         durationMs: durationMs(),
       };
     }
-    const response = await backend.answer({
-      method: request.method,
-      path: target.path,
-      query: target.query,
-      body: requestBody(request.body),
-    });
-    if (signal.aborted) {
-      return {
-        ok: false,
-        error: { code: "cancelled", message: "Request was cancelled." },
-        durationMs: durationMs(),
-      };
+    const timeoutMs = Math.min(
+      request.timeoutMs ?? DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
+      MAX_PROTOTYPE_REQUEST_TIMEOUT_MS,
+    );
+    let response: MockResponse;
+    try {
+      response = await raceWithDeadline(
+        () =>
+          backend.answer({
+            method: request.method,
+            path: target.path,
+            query: target.query,
+            body: requestBody(request.body),
+          }),
+        {
+          timer: this.timer,
+          timeoutMs,
+          signal,
+          label: "Mock request",
+          timeoutError: () => TIMED_OUT,
+        },
+      );
+    } catch (error) {
+      return this.failure(error, signal, timeoutMs, durationMs());
     }
     if (Buffer.byteLength(JSON.stringify(response.body)) > MAX_PROTOTYPE_RESPONSE_BYTES) {
       return {
@@ -90,6 +112,34 @@ export class MockRoutingPrototypeHttpExecutor implements PrototypeHttpExecutor {
       headers: response.headers,
       body: request.method === "HEAD" ? null : response.body,
       durationMs: durationMs(),
+    };
+  }
+
+  private failure(
+    error: unknown,
+    signal: AbortSignal,
+    timeoutMs: number,
+    durationMs: number,
+  ): PrototypeHttpOutcome {
+    if (error === TIMED_OUT) {
+      return {
+        ok: false,
+        error: { code: "timeout", message: `Request timed out after ${timeoutMs}ms.` },
+        durationMs,
+      };
+    }
+    if (signal.aborted) {
+      return {
+        ok: false,
+        error: { code: "cancelled", message: "Request was cancelled." },
+        durationMs,
+      };
+    }
+    logger.warn(`[PrototypeMock] backend failed: ${errorMessage(error)}`, error);
+    return {
+      ok: false,
+      error: { code: "network", message: "The mock backend failed." },
+      durationMs,
     };
   }
 }

@@ -1,5 +1,6 @@
 import { prototypeShareArgumentsError } from "./prototypeShare";
-import { prototypePlatformUses } from "./prototypePlatform";
+import { prototypePlatformCall, prototypePlatformUses } from "./prototypePlatform";
+import { prototypeDataPathPointer, prototypeDataPlaceholders } from "./prototypeData";
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -33,26 +34,115 @@ export function prototypeStrictPolicyError(
   if (assets) {
     return assets;
   }
+  return options.library ? libraryPolicyError(spec, actions) : undefined;
+}
+
+function libraryPolicyError(
+  spec: unknown,
+  actions: readonly Located[],
+): PrototypeValidationError | undefined {
   const window = object(object(spec)?.window);
-  if (options.library) {
-    const shader = prototypeShaderFields(spec)[0];
-    if (shader) {
-      return { path: "$", message: "ProtoViewer bundles refuse custom AGSL shaders" };
-    }
-    if (window?.layer === "system") {
-      return { path: "window.layer", message: "Privileged window layer" };
-    }
-    if (window?.persistence === "device") {
-      return { path: "window.persistence", message: "Privileged window persistence" };
-    }
-    // Located actions exclude opaque data, request bodies and emit payloads.
-    const host = actions.find(({ value }) => value.type === "request" && value.via === "host");
-    if (host) {
-      return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
-    }
-    return hostChannelsError(spec) ?? secureLibraryError(spec);
+  const shader = prototypeShaderFields(spec)[0];
+  if (shader) {
+    return { path: "$", message: "ProtoViewer bundles refuse custom AGSL shaders" };
   }
-  return undefined;
+  if (window?.layer === "system") {
+    return { path: "window.layer", message: "Privileged window layer" };
+  }
+  if (window?.persistence === "device") {
+    return { path: "window.persistence", message: "Privileged window persistence" };
+  }
+  // Located actions exclude opaque data, request bodies and emit payloads.
+  const host = actions.find(({ value }) => value.type === "request" && value.via === "host");
+  if (host) {
+    return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
+  }
+  return hostChannelsError(spec) ?? secureLibraryError(spec) ?? sensitiveLibraryError(spec);
+}
+
+/**
+ * Sink paths (R2) where a `/data` pointer written by a `sensitive` platform call is bound into a
+ * request URL, header, query or body, or a channel URL or header. Every such path is returned in
+ * authored order; the library refusal reports the first one, and MCP-direct shows may warn on all.
+ */
+export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidationError[] {
+  const tainted = sensitiveDataPointers(spec);
+  if (!tainted.length) {
+    return [];
+  }
+  const nodes: { value: Record<string, unknown>; path: string }[] = [];
+  walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
+  const { requests, fields } = libraryFields(spec, nodes);
+  fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const errors: PrototypeValidationError[] = [];
+  for (const field of fields) {
+    // Key fields name state entries, which a `/data` pointer cannot reach.
+    if (field.key || !requestSinkPath(field.path, requests)) {
+      continue;
+    }
+    const reached = prototypeDataPlaceholders(field.text).some((pointer) =>
+      tainted.some((taint) => pointersOverlap(taint, pointer)),
+    );
+    if (reached) {
+      errors.push({
+        path: field.path,
+        message: "Sensitive value cannot be bound into a request",
+      });
+    }
+  }
+  return errors;
+}
+
+function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
+  return prototypeSensitiveSinkErrors(spec)[0];
+}
+
+/** The `/data` pointers written by `sensitive` calls, in authored order (`into` of each). */
+function sensitiveDataPointers(spec: unknown): string[] {
+  const pointers: string[] = [];
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind !== "call" || typeof use.action.into !== "string") {
+      continue;
+    }
+    if (!prototypePlatformCall(use.action.call)?.definition.sensitive) {
+      continue;
+    }
+    const pointer = prototypeDataPathPointer(use.action.into);
+    if (pointer !== undefined) {
+      pointers.push(pointer);
+    }
+  }
+  return pointers;
+}
+
+/**
+ * Whether two RFC 6901 pointers name overlapping data: one is a segment-wise prefix of the other
+ * (a binding of a parent object carries its sensitive member). A `{index}` segment in an `into`
+ * path stands for any repeat row, so it matches any segment.
+ */
+function pointersOverlap(taint: string, pointer: string): boolean {
+  const left = taint.slice(1).split("/");
+  const right = pointer.slice(1).split("/");
+  return left.every(
+    (segment, index) =>
+      index >= right.length ||
+      segment === right[index] ||
+      segment === "{index}" ||
+      right[index] === "{index}",
+  );
+}
+
+/** Request and channel members a value reaches on the wire: url, headers, query and body. */
+function requestSinkPath(path: string, requests: readonly string[]): boolean {
+  return requests.some(
+    (at) =>
+      path === `${at}.url` ||
+      path === `${at}.body` ||
+      path.startsWith(`${at}.body.`) ||
+      ["headers", "query"].some(
+        (name) => path.startsWith(`${at}.${name}.`) || path.startsWith(`${at}.${name}[`),
+      ),
+  );
 }
 
 function secureScanBudgetError(

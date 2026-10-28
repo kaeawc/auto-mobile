@@ -49,6 +49,10 @@ const calendarCall = {
     },
   ],
 };
+const commerceCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "commerce.restore", args: {} }],
+};
 const openUrlCall = {
   ...label,
   onTap: [
@@ -275,6 +279,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_mediaLibrary_v1: mediaPickCall,
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_calendar_v1: calendarCall,
+  prototype_platform_commerce_v1: commerceCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

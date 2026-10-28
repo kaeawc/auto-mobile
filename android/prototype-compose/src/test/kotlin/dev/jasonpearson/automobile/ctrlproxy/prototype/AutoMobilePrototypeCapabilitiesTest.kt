@@ -70,6 +70,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       // Contract only; the system media picker and camera runtimes are owed (#14197).
       "prototype_platform_mediaLibrary_v1",
       "prototype_platform_camera_v1",
+      // Contract only; the fake store runtime is owed (#14314).
+      "prototype_platform_commerce_v1",
     )
 
   @Test

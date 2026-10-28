@@ -21953,6 +21953,53 @@
       },
       "events": {},
       "state": {}
+    },
+    "commerce": {
+      "capability": "prototype_platform_commerce_v1",
+      "calls": {
+        "purchase": {
+          "args": {
+            "productId": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "pattern": "stateKey",
+                "max": 64
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "restore": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "entitlementsChanged": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "entitlements": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "json",
+            "maxDepth": 1
+          }
+        },
+        "lastTransaction": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "json",
+            "maxDepth": 1
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

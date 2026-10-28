@@ -471,7 +471,9 @@ export class WcagAudit {
 
     // Compute the candidate label TextViews once, not once per input
     // (hasNearbyLabel was O(inputs * elements) just rebuilding this list).
-    const textViews = elements.filter((e) => e.class?.includes("TextView") && e.text);
+    // Compose draws a field's label as a classless text node, so a node with text and no class
+    // counts too (#14126).
+    const textViews = elements.filter((e) => (!e.class || e.class.includes("TextView")) && e.text);
 
     // Scale the proximity gate for this device's pixel density once per audit.
     const gapThresholdPx = this.labelGapThresholdPx(density);

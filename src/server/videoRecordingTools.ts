@@ -636,7 +636,7 @@ export function registerVideoRecordingTools(
 
   ToolRegistry.registerDeviceAware(
     "videoRecording",
-    "Start or stop device video recording.",
+    "Start or stop device video recording. resourceLink on stop links its full result; required fields stay inline, bounded.",
     videoRecordingSchema,
     videoRecordingHandler,
     {

@@ -1,3 +1,4 @@
+import { IOS_FILES_FIXTURE_BUNDLE_ID } from "../../constants/iosFilesFixture";
 import { ActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -8,6 +9,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type { ResetOutcome } from "./devicePort";
 import { assertIosResetInput, type IosResetProfile } from "./iosResetTarget";
+import { isUserFilesScopedKey } from "./mutations/appContainerFileKey";
 import type { MutationRecordingGaps } from "./mutations/recordingGaps";
 import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./mutations/reset";
 import {
@@ -51,7 +53,8 @@ export interface IosMinimalResetDependencies {
  * destroy the simulator, so a half-cleaned device is never reused.
  *
  * Steps, in order: terminate+uninstall each app the session installed (journaled
- * `installed-app`), `simctl keychain reset`, `simctl privacy reset all`, then set appearance and
+ * `installed-app`), uninstall the managed Files fixture if user_files were staged,
+ * `simctl keychain reset`, `simctl privacy reset all`, then set appearance and
  * content size back to the pool-entry defaults and empty the pasteboard.
  */
 export class IosMinimalReset {
@@ -137,6 +140,12 @@ export class IosMinimalReset {
         this.dependencies.mutations.revert(entry, context),
       );
     }
+    if (entries.some((entry) => entry.kind === "shared-file" && isUserFilesScopedKey(entry.key))) {
+      // The fixture install is not journaled; uninstalling it also removes Documents/automobile.
+      await step("files-fixture", (context) =>
+        this.simctl(["uninstall", udid, IOS_FILES_FIXTURE_BUNDLE_ID], context),
+      );
+    }
     await step("keychain", (context) => this.simctl(["keychain", udid, "reset"], context));
     await step("privacy", (context) => this.simctl(["privacy", udid, "reset", "all"], context));
     await step("appearance", (context) =>
@@ -157,6 +166,16 @@ export class IosMinimalReset {
       context.signal,
     );
     if (result.error) {
+      if (
+        args[0] === "uninstall" &&
+        /\b(?:app|application)\b[^\n]*\bis not installed\b/i.test(
+          `${result.error}\n${result.stderr}`,
+        )
+      ) {
+        // An already-absent fixture also has no staged files left to expose.
+        logger.debug("iOS minimal reset Files fixture already absent", result.error);
+        return;
+      }
       throw new ActionableError(`iOS minimal reset ${args[0]} failed: ${result.error}`);
     }
   }

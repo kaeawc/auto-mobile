@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { IOS_FILES_FIXTURE_BUNDLE_ID } from "../../../src/constants/iosFilesFixture";
+import {
+  isUserFilesScopedKey,
+  scopedAppFileKey,
+} from "../../../src/daemon/sessionBroker/mutations/appContainerFileKey";
 import { IosMinimalReset } from "../../../src/daemon/sessionBroker/iosMinimalReset";
 import type { IosResetProfile } from "../../../src/daemon/sessionBroker/iosResetTarget";
 import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
@@ -34,15 +39,22 @@ async function harness(options: { maxUses?: number } = {}) {
     calls.push(`revert:${mutation.kind}:${mutation.key}`);
     await originalRevert(mutation, context);
   };
-  const state = { failOn: undefined as string | undefined, owned: true };
+  const state = {
+    failOn: undefined as string | undefined,
+    failure: "boom",
+    stderr: "",
+    owned: true,
+  };
   const simctl = {
     executeCommandArgs: async (args: string[]) => {
       calls.push(args.join(" "));
       return {
         stdout: "",
-        stderr: "",
+        stderr: state.stderr,
         error:
-          state.failOn !== undefined && args.join(" ").includes(state.failOn) ? "boom" : undefined,
+          state.failOn !== undefined && args.join(" ").includes(state.failOn)
+            ? state.failure
+            : undefined,
       };
     },
   } as never;
@@ -78,7 +90,95 @@ const installed = (key: string) => ({
   toolName: "installApp",
 });
 
+const sharedFile = (domain: string) => ({
+  kind: "shared-file" as const,
+  key: scopedAppFileKey({ domain, namespace: "client-a" }, undefined, "secret.txt"),
+  priorValue: { state: "unobservable" as const },
+  toolName: "putAppFile",
+});
+
+test.each([
+  [sharedFile("user_files").key, true],
+  [
+    scopedAppFileKey(
+      { domain: "app_containers", appId: "app", container: "documents" },
+      undefined,
+      "a.txt",
+    ),
+    false,
+  ],
+  ["broken", false],
+  ["null", false],
+  ["{}", false],
+])("isUserFilesScopedKey(%s) is %s", (key, expected) => {
+  expect(isUserFilesScopedKey(key)).toBe(expected);
+});
+
 describe("IosMinimalReset", () => {
+  test.each([false, true])(
+    "removes user_files fixture even with fixture install journaled=%s",
+    async (journaled) => {
+      const { journal, calls, run } = await harness();
+      await journal.record(SCOPE, installed("com.example.one"));
+      if (journaled) {
+        await journal.record(SCOPE, installed(IOS_FILES_FIXTURE_BUNDLE_ID));
+      }
+      await journal.record(SCOPE, sharedFile("user_files"));
+      await journal.record(SCOPE, sharedFile("user_files"));
+      expect((await run()).outcome).toBe("clean");
+      const uninstall = `uninstall UDID ${IOS_FILES_FIXTURE_BUNDLE_ID}`;
+      expect(calls.filter((call) => call === uninstall)).toHaveLength(1);
+      expect(calls.indexOf(uninstall)).toBe(calls.indexOf("keychain UDID reset") - 1);
+      expect(calls.indexOf(uninstall)).toBeGreaterThan(
+        calls.indexOf("revert:installed-app:com.example.one"),
+      );
+      expect(await journal.list(SCOPE)).toEqual([]);
+    },
+  );
+
+  test("fixture uninstall failure returns pending before keychain and preserves the journal", async () => {
+    const { journal, calls, state, run } = await harness();
+    await journal.record(SCOPE, sharedFile("user_files"));
+    state.failOn = "uninstall";
+    const outcome = await run();
+    expect(outcome.outcome).toBe("pending");
+    expect(outcome.fallbackReason).toContain("boom");
+    expect(calls).toEqual([`uninstall UDID ${IOS_FILES_FIXTURE_BUNDLE_ID}`]);
+    expect(await journal.list(SCOPE)).toHaveLength(1);
+  });
+
+  test.each(["error", "stderr"])(
+    "fixture reported as not installed in %s counts as clean",
+    async (field) => {
+      const { journal, calls, state, run } = await harness();
+      await journal.record(SCOPE, sharedFile("user_files"));
+      state.failOn = "uninstall";
+      const message = `Application ${IOS_FILES_FIXTURE_BUNDLE_ID} is not installed`;
+      if (field === "error") {
+        state.failure = message;
+      } else {
+        state.stderr = message;
+      }
+      expect((await run()).outcome).toBe("clean");
+      expect(calls).toContain("keychain UDID reset");
+      expect(await journal.list(SCOPE)).toEqual([]);
+    },
+  );
+
+  test.each(["app_containers", undefined])(
+    "no fixture uninstall without user_files rows (%s)",
+    async (domain) => {
+      const { journal, calls, run } = await harness();
+      if (domain !== undefined) {
+        await journal.record(SCOPE, sharedFile(domain));
+      }
+      const outcome = await run();
+      expect(outcome.outcome).toBe("clean");
+      expect(calls[0]).toBe("keychain UDID reset");
+      expect(calls.some((call) => call.includes(IOS_FILES_FIXTURE_BUNDLE_ID))).toBe(false);
+    },
+  );
+
   test("uninstalls session apps then resets keychain, privacy, appearance, content size and pasteboard in order", async () => {
     const { journal, calls, run } = await harness();
     await journal.record(SCOPE, installed("com.example.one"));

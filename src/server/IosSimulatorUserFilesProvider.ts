@@ -15,8 +15,7 @@ import { win32 } from "node:path";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 
-/** The managed fixture app; `IosFilesFixtureInstaller` builds and installs it on first use. */
-export const IOS_FILES_FIXTURE_BUNDLE_ID = "dev.jasonpearson.automobile.FilesFixture";
+export { IOS_FILES_FIXTURE_BUNDLE_ID } from "../constants/iosFilesFixture";
 
 /** Host staging only; completion makes no assertion about document-picker visibility. */
 export interface IosFilesFixtureContainer {

@@ -17,6 +17,12 @@ const platformCall = {
   ...label,
   onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
 };
+const biometricCall = {
+  ...label,
+  onTap: [
+    { type: "platform", call: "biometric.authenticate", args: { title: { value: "Unlock" } } },
+  ],
+};
 const hapticsCall = {
   ...label,
   onTap: [
@@ -230,6 +236,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_power_v1: statusRead("power", "thermal", "serious"),
   prototype_platform_audio_v1: statusRead("audio", "muted", true),
   prototype_platform_connectivity_v1: statusRead("connectivity", "online", false),
+  prototype_platform_biometric_v1: biometricCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

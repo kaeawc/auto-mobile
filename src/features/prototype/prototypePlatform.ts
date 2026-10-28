@@ -6,6 +6,7 @@ import {
 } from "./prototypeChannels";
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeShareArgumentsError } from "./prototypeShare";
+import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -548,7 +549,7 @@ export function prototypePlatformError(
     ),
     background: strings(requires.background),
   };
-  const error = prototypeChannelsError(root) ?? requiresError(root);
+  const error = rootBlockError(root);
   if (error) {
     return error;
   }
@@ -565,6 +566,11 @@ export function prototypePlatformError(
     }
   }
   return undefined;
+}
+
+/** The first error in the root-level blocks: realtime channels, the auth block, then `requires`. */
+function rootBlockError(root: Raw): PrototypePlatformError | undefined {
+  return prototypeChannelsError(root) ?? prototypeAuthBlockError(root) ?? requiresError(root);
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */
@@ -709,5 +715,8 @@ function argumentValueError(
 }
 
 function channelUseError(use: PrototypePlatformUse, root: Raw): PrototypePlatformError | undefined {
-  return use.kind === "call" ? prototypeChannelCallError(use.action, use.path, root) : undefined;
+  return use.kind === "call"
+    ? (prototypeChannelCallError(use.action, use.path, root) ??
+        prototypeAuthCallError(use.action, use.path, root))
+    : undefined;
 }

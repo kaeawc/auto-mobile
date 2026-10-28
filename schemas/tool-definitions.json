@@ -27969,6 +27969,56 @@
                 }
               ]
             },
+            "auth": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "const": "fake"
+                },
+                "accounts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "\\S"
+                      },
+                      "email": {
+                        "type": "string",
+                        "maxLength": 254,
+                        "pattern": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])",
+                        "description": "Reserved domain only: example.test, example.com or *.invalid"
+                      },
+                      "avatar": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      }
+                    },
+                    "required": ["id", "name", "email"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 8
+                },
+                "sessionTtlSeconds": {
+                  "type": "integer",
+                  "minimum": 60,
+                  "maximum": 2592000
+                }
+              },
+              "required": ["provider", "accounts"],
+              "additionalProperties": false,
+              "description": "Fake sign-in accounts for auth.signIn (prototype_platform_auth_v1); unique ids, no passwords or tokens"
+            },
             "derive": {
               "type": "object",
               "additionalProperties": {

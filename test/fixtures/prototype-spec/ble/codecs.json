@@ -21,6 +21,13 @@
       "expected": "hé"
     },
     {
+      "name": "utf8 keeps a leading byte order mark",
+      "codec": "utf8",
+      "op": "decode",
+      "input": "efbbbf68",
+      "expected": "\ufeffh"
+    },
+    {
       "name": "utf8 refuses invalid bytes",
       "codec": "utf8",
       "op": "decode",

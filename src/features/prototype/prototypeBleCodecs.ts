@@ -112,8 +112,9 @@ function decodeHeartRate(bytes: Uint8Array): PrototypeBleCodecResult<Json> {
 function decodeKnown(codec: PrototypeBleCodec, bytes: Uint8Array): PrototypeBleCodecResult<Json> {
   switch (codec) {
     case "utf8": {
-      // Invalid UTF-8 decodes to replacement characters, so it does not round-trip.
-      const text = new TextDecoder().decode(bytes);
+      // Invalid UTF-8 decodes to replacement characters, so it does not round-trip. `ignoreBOM`
+      // keeps a leading U+FEFF, as the Kotlin and Swift decoders do.
+      const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
       return Buffer.from(text, "utf8").equals(bytes) ? ok(text) : fail("format");
     }
     case "hex":

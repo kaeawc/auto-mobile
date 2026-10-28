@@ -28,6 +28,7 @@ import {
   isAndroidResetFile,
 } from "./androidMutationBaseline";
 import { settingsBackedRawMutations } from "./androidSettingsBackedRevert";
+import { appLocaleJournalAppId, appLocalePrior } from "./appLocaleJournalKey";
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationEntry, DeviceMutationInput } from "./mutations/types";
@@ -59,6 +60,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       this.nightModeCommands(mutation) ??
       this.screenStateCommands(mutation) ??
       this.settingsBackedCommands(mutation) ??
+      this.appLocaleCommands(mutation) ??
       deviceStateSettingCommands(mutation),
     clock: (mutation) =>
       this.timezoneCommands(mutation) ??
@@ -436,6 +438,33 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     }
     const commands = raw.map((row) => this.settingCommands(row));
     return commands.every((command) => command !== null) ? commands.flat() : null;
+  }
+
+  /**
+   * Puts back an app's locale list (`""` clears its override) for the user changeLocalization
+   * targeted, then reads it back: `cmd locale` exits 0 and prints nothing on success, and an
+   * unknown package is reported on stderr, which fails the command.
+   */
+  private appLocaleCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const appId = appLocaleJournalAppId(key);
+    const prior = appLocalePrior(priorValue);
+    if (appId === null || !PACKAGE_PATTERN.test(appId) || !prior) {
+      return null;
+    }
+    const { userId, locales } = prior;
+    return [
+      {
+        command: `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${userId} --locales ${shellQuote(locales)}`,
+        success: "",
+      },
+      {
+        command: `shell cmd locale get-app-locales ${shellQuote(appId)} --user ${userId}`,
+        success: `Locales for ${appId} for user ${userId} are [${locales}]`,
+      },
+    ];
   }
 
   private connectivityCommands({

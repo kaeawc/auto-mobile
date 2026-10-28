@@ -8,6 +8,7 @@ import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityD
 import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
+import { appLocaleJournalKey } from "../daemon/sessionBroker/appLocaleJournalKey";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
@@ -371,7 +372,7 @@ function stateToolMutations(
             ? mutation("clock", "timezone")
             : mutation(
                 "device-setting",
-                key === "locale" && args.appId ? JSON.stringify(["app-locale", args.appId]) : key,
+                key === "locale" && args.appId ? appLocaleJournalKey(String(args.appId)) : key,
               ),
         );
     case "setDeviceState":

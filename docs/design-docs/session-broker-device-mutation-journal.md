@@ -41,9 +41,18 @@ rows also force fallback unless baseline cleaning already restores their effects
 On Android this covers packages, clipboard, rotation, screen reader, keep-awake,
 raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`), transient
 opened URLs, and screen state via the next wakeAndUnlock. Settings-backed adapter
-keys (`fontScale`, `timeFormat` and accessibility display preferences) require a
-journal revert or fallback; the Android port reverts them by writing back (or
-deleting) their raw settings rows when the journaled prior is readable. A failed non-critical Android settings restore escalates
+keys (`fontScale`, `timeFormat`, `textDirection` and accessibility display preferences)
+require a journal revert or fallback; the Android port reverts them by writing back (or
+deleting) their raw settings rows when the journaled prior is readable. The Android
+`textDirection` prior is the raw `global:debug.force_rtl` and `global:force_rtl` rows.
+`calendarSystem` forces fallback: its prior is the derived calendar (the locale's, or
+`gregory` for an unset `calendar_type` row), which device-setting defaults also read, so
+it does not say what the row held. changeLocalization's
+per-app locale row (`["app-locale", appId]`) journals `{ userId, locales }`, read with
+`cmd locale get-app-locales` for the user the tool resolves; the port writes the list
+back with `set-app-locales` (an empty list clears the override) and reads it back. Below
+Android 13, or when the user or list cannot be read, the prior is unobservable and the row
+forces fallback, as does the device-wide locale. A failed non-critical Android settings restore escalates
 unless a single post-loop re-read of its namespace confirms the baseline value; any
 differing key forces fallback. Critical settings restore failures force fallback immediately.
 Preferences are skipped by replay and require fallback unless their JSON key

@@ -35,8 +35,9 @@ export function isAndroidCriticalSetting(key: string): boolean {
 /**
  * Baseline cleaning covers installed apps, clipboard, rotation, screen-reader, keep-awake,
  * transient opened URLs, raw global/secure/system settings and verified display rows
- * (density, nightMode and display:*). Settings-backed adapter keys (fontScale, timeFormat
- * and accessibility display fields) require a journal revert because they are not raw
+ * (density, nightMode and display:*). Settings-backed adapter keys (fontScale, timeFormat,
+ * textDirection and accessibility display fields) and per-app locales
+ * require a journal revert because they are not raw
  * settings rows. Failed raw settings restores are re-read against the baseline.
  * Screen state is restored by wakeAndUnlock.
  * App-owned interaction breadcrumbs are exempted separately from store preferences.

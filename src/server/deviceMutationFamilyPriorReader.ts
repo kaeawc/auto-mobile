@@ -7,6 +7,7 @@ import { AppearanceMutationPriorReader } from "./deviceMutationAppearancePriorRe
 import { InteractionMutationPriorReader } from "./deviceMutationInteractionPriorReader";
 import { LifecycleMutationPriorReader } from "./deviceMutationLifecyclePriorReader";
 import { OrchestrationMutationPriorReader } from "./deviceMutationOrchestrationPriorReader";
+import { LocalizationMutationPriorReader } from "./deviceMutationLocalizationPriorReader";
 import { PermissionMutationPriorReader } from "./deviceMutationPermissionPriorReader";
 
 /**
@@ -22,6 +23,7 @@ export class FamilyMutationPriorReader implements MutationPriorReader {
       new InteractionMutationPriorReader(),
       new OrchestrationMutationPriorReader(),
       new PermissionMutationPriorReader(),
+      new LocalizationMutationPriorReader(),
     ],
   ) {}
 

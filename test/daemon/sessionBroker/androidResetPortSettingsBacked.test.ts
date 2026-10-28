@@ -45,6 +45,14 @@ describe("AndroidDeviceMutationResetPort settings-backed display rows", () => {
       ["shell settings --user 0 delete system time_12_24"],
     ],
     [
+      "textDirection",
+      setting("textDirection", { state: "present", value: "1,null" }),
+      [
+        "shell settings --user 0 put global debug.force_rtl '1'",
+        "shell settings --user 0 delete global force_rtl",
+      ],
+    ],
+    [
       "increaseContrast",
       setting("increaseContrast", { state: "present", value: "0" }),
       ["shell settings --user 0 put secure high_text_contrast_enabled '0'"],
@@ -93,6 +101,13 @@ describe("AndroidDeviceMutationResetPort settings-backed display rows", () => {
     ["non-string accessibility prior", setting("extraDim", { state: "present", value: 1 })],
     ["Android locale", setting("locale", { state: "present", value: "en-US" })],
     ["calendarSystem", setting("calendarSystem", { state: "present", value: "gregorian" })],
+    [
+      "a raw calendarSystem row",
+      setting("calendarSystem", { state: "present", value: { calendar_type: "gregorian" } }),
+    ],
+    ["unobservable textDirection", setting("textDirection", { state: "unobservable" })],
+    ["one textDirection row", setting("textDirection", { state: "present", value: "1" })],
+    ["boolean textDirection", setting("textDirection", { state: "present", value: true })],
   ])("cannot restore %s", (_label, mutation) => {
     expect(rig().port.canRevert(mutation)).toBe(false);
   });

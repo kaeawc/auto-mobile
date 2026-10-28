@@ -73,7 +73,7 @@ type HelperProcess = Pick<
 export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
 
 /**
- * In-helper H.264 encode settings (issue #4789). Present on a simulator target
+ * In-helper H.264 encode settings (issue #4789). Present on a capture target
  * requests the helper's `--encode h264` mode (420v capture + VTCompressionSession
  * Annex-B output) instead of streaming raw BGRA. The bitrate *policy* stays here
  * in the supervisor — the helper only carries the chosen flag and does the
@@ -105,7 +105,7 @@ export type EncodeBitratePolicy =
  * AVFoundation) or a macOS iOS Simulator window (via ScreenCaptureKit).
  */
 export type CaptureTarget =
-  | { kind: "device"; deviceId?: string }
+  | { kind: "device"; deviceId?: string; encode?: EncodeSettings }
   | { kind: "simulator"; windowID: number; fps?: number; audio?: boolean; encode?: EncodeSettings };
 
 /** Valid range for the simulator capture frame rate, mirrors the Swift CLI. */
@@ -455,9 +455,8 @@ export class IosScreenCaptureHelper extends EventEmitter {
    * Ask the in-helper encoder to emit a fresh IDR on its next frame by writing
    * `{"cmd":"forceKeyFrame"}` on the newline-delimited STDIN control channel the
    * helper opens in `--encode h264` mode (issue #4789 / the channel added by
-   * #4788). Unlike the raw ffmpeg path — which could only get an IDR by restarting
-   * the encoder — this is a cheap in-process signal, so the caller may throttle
-   * it far more loosely. Returns false (a logged no-op) when the helper is not
+   * #4788). This is an in-process signal to the existing encoder. Returns false
+   * (a logged no-op) when the helper is not
    * running or the write fails; a not-yet-started or raw-mode helper has no
    * control channel to signal. The write is a tiny control line, so backpressure
    * is not tracked.
@@ -478,7 +477,7 @@ export class IosScreenCaptureHelper extends EventEmitter {
       proc.stdin.write(`${JSON.stringify({ cmd: "forceKeyFrame" })}\n`);
       return true;
     } catch (error) {
-      // The encoder restarts on the next capture frame's periodic GOP even if
+      // The encoder still emits periodic keyframes even if
       // this control write is lost, so a failed signal is a best-effort miss,
       // not a stream failure.
       logger.debug(`[IOSScreenCaptureHelper] forceKeyFrame control write failed: ${error}`);
@@ -682,8 +681,11 @@ const defaultProcessGroupKiller: HelperProcessGroupKiller = (pid, signal) => {
 
 function buildArgs(target: CaptureTarget): string[] {
   switch (target.kind) {
-    case "device":
-      return target.deviceId !== undefined ? ["--device-id", target.deviceId] : [];
+    case "device": {
+      const args = target.deviceId !== undefined ? ["--device-id", target.deviceId] : [];
+      appendEncodeArgs(args, target.encode);
+      return args;
+    }
     case "simulator": {
       const args = ["--simulator-window", String(target.windowID)];
       if (target.fps !== undefined) {

@@ -1,3 +1,4 @@
+import { requestAdvertisesMcpApps } from "./mcpAppsSupport";
 import {
   ResourceNotFoundError,
   type ReadResourceResult,
@@ -24,7 +25,7 @@ export interface ResourceReadContext {
   /** A released session identity, available only to handlers that safely report inactivity. */
   releasedSessionUuid?: string;
   signal?: AbortSignal;
-  /** The reading client advertised MCP Apps support (`io.modelcontextprotocol/ui`) at initialize. */
+  /** The reading client advertised MCP Apps support (`io.modelcontextprotocol/ui`) at initialize or on this request. */
   clientSupportsApps?: boolean;
 }
 
@@ -503,10 +504,19 @@ class ResourceRegistryClass {
         }
       }
 
+      const readContext = () => {
+        const context = getReadContext(ctx.mcpReq.signal);
+        const apps = requestAdvertisesMcpApps({
+          envelope: ctx.mcpReq.envelope,
+          meta: ctx.mcpReq._meta,
+        });
+        return apps === undefined ? context : { ...context, clientSupportsApps: apps };
+      };
+
       // First, try to find an exact match resource
       const resource = this.getResource(uri);
       if (resource) {
-        const content = await resource.handler(getReadContext(ctx.mcpReq.signal));
+        const content = await resource.handler(readContext());
         return {
           contents: [content],
         } as ReadResourceResult;
@@ -519,7 +529,7 @@ class ResourceRegistryClass {
         try {
           const content =
             "handlerWithReadContext" in template
-              ? await template.handlerWithReadContext(params, getReadContext(ctx.mcpReq.signal))
+              ? await template.handlerWithReadContext(params, readContext())
               : await template.handler(params);
           return {
             contents: [content],

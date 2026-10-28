@@ -6,18 +6,12 @@ import {
   IosScreenCaptureHelper,
   type CapturePermission,
   type CaptureTarget,
-  type FrameQueueMetrics,
   type IosScreenCaptureHelperEvents,
   type IosScreenCaptureHelperOptions,
   type IosScreenCaptureReadiness,
   type NativeFrameMetrics,
 } from "./IosScreenCaptureHelper";
-import type {
-  DecodedAudio,
-  DecodedEncodedVideo,
-  DecodedFrame,
-  MalformedFrameError,
-} from "./frameProtocol";
+import type { DecodedAudio, DecodedEncodedVideo, MalformedFrameError } from "./frameProtocol";
 
 export const IOS_SIMULATOR_HELPER_IDLE_TTL_MS = 45_000;
 /** Ceiling for a helper stop while holding a target's serialized transition. */
@@ -27,18 +21,13 @@ export interface IosSimulatorCaptureHelperLease {
   start(): void | Promise<void>;
   stop(): Promise<unknown>;
   invalidate(): Promise<void>;
-  /**
-   * Ask the in-helper encoder to emit a fresh IDR (encoded leases only). No-op on
-   * a raw-BGRA helper, which has no STDIN control channel. See issue #4789.
-   */
+  /** Ask the in-helper encoder to emit a fresh IDR. */
   requestKeyFrame(): boolean;
-  on(event: "frame", listener: (frame: DecodedFrame) => void): this;
   on(event: "idle", listener: (info: { windowID: number }) => void): this;
   on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): this;
   on(event: "capability", listener: (token: string) => void): this;
   on(event: "permission", listener: (permission: CapturePermission) => void): this;
   on(event: "permissionTarget", listener: (target: string) => void): this;
-  on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
   on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
   on(event: "audio", listener: (audio: DecodedAudio) => void): this;
   on(event: "malformed", listener: (error: MalformedFrameError) => void): this;
@@ -75,15 +64,6 @@ interface HelperEntry {
   helper: SimulatorHelper;
   capabilities: Set<string>;
   leases: Set<PooledSimulatorCaptureHelperLease>;
-  /**
-   * Raw-frame warm-start cache (raw leases only). A late lease is primed by
-   * replaying this last BGRA frame. Meaningless in encoded mode — a single cached
-   * H.264 access unit is a P-frame the new lease cannot decode — so encoded
-   * entries leave it null and force a fresh IDR on attach instead (issue #4789).
-   */
-  latestFrame: DecodedFrame | null;
-  /** True when this entry's helper runs the in-helper H.264 encode path (#4789). */
-  encoded: boolean;
   idleTimer: NodeJS.Timeout | null;
   failed: boolean;
   failedStopFailed: boolean;
@@ -91,17 +71,8 @@ interface HelperEntry {
 }
 
 /**
- * Keeps ScreenCaptureKit sessions warm per macOS host and target. Each WebRTC
- * source gets a lease, so its ffmpeg encoder and callbacks stay stream-scoped
- * while capture survives short reconnect gaps. A new window identity never
- * retargets an active helper; it gets an independent, TTL-bounded entry.
- *
- * In-helper encoding (issue #4789) collapses the raw path's "capture is
- * host-scoped, encoding is stream-scoped" separation, so on the encoded path the
- * encoder config (mode + bitrate) becomes part of the target key — a mismatched
- * acquire gets a new entry, never a live reconfigure — the raw-frame warm-start
- * cache is disabled, and every lease attach forces a fresh IDR so a late lease
- * never starts on undecodable P-frames. Raw-lease behavior is unchanged.
+ * Keeps encoded Simulator helpers warm across reconnect gaps. Encoder settings
+ * are part of the target identity; each attaching lease requests a fresh IDR.
  */
 export class IosSimulatorCaptureHelperPool {
   private readonly idleTtlMs: number;
@@ -121,6 +92,9 @@ export class IosSimulatorCaptureHelperPool {
   acquire(options: IosScreenCaptureHelperOptions): IosSimulatorCaptureHelperLease {
     if (options.target.kind !== "simulator") {
       throw new Error("IOSSimulatorCaptureHelperPool only accepts simulator targets.");
+    }
+    if (!options.target.encode) {
+      throw new Error("IOSSimulatorCaptureHelperPool requires H.264 encode settings.");
     }
     return new PooledSimulatorCaptureHelperLease(this, options);
   }
@@ -203,8 +177,6 @@ export class IosSimulatorCaptureHelperPool {
       helper: this.createHelper(lease.options),
       capabilities: new Set(),
       leases: new Set(),
-      latestFrame: null,
-      encoded: isEncodedTarget(lease.options.target),
       idleTimer: null,
       failed: false,
       failedStopFailed: false,
@@ -228,9 +200,6 @@ export class IosSimulatorCaptureHelperPool {
     for (const token of entry.capabilities) {
       lease.forward("capability", token);
     }
-    if (!entry.encoded && entry.latestFrame) {
-      lease.forward("frame", { ...entry.latestFrame, replayed: true });
-    }
     if (!entry.helper.isRunning) {
       try {
         entry.helper.start();
@@ -241,15 +210,8 @@ export class IosSimulatorCaptureHelperPool {
         throw error;
       }
     }
-    if (entry.encoded) {
-      // In-helper encoding collapses the raw path's capture-host / encoder-stream
-      // separation: a late lease attaching to a warm encoded helper would start
-      // mid-GOP on P-frames it cannot decode. Force an IDR so every attach — the
-      // first and every subsequent lease — begins on a self-decodable keyframe
-      // (issue #4789). Safe before the helper's first frame: the encoder honors
-      // the pending force on its first encoded frame.
-      entry.helper.requestKeyFrame();
-    }
+    // A warm helper may be mid-GOP; every attaching lease needs a fresh IDR.
+    entry.helper.requestKeyFrame();
   }
 
   /**
@@ -257,7 +219,7 @@ export class IosSimulatorCaptureHelperPool {
    * (issue #4789). Synchronous best-effort: it reads the current entry directly
    * rather than serializing through a transition chain, because a PLI-driven IDR
    * must not queue behind a slow helper stop. Returns false
-   * when the lease is detached or its helper is raw / not running.
+   * when the lease is detached or its helper is not running.
    */
   requestKeyFrame(lease: PooledSimulatorCaptureHelperLease): boolean {
     const entryKey = lease.entryKey;
@@ -316,10 +278,6 @@ export class IosSimulatorCaptureHelperPool {
   }
 
   private wireHelper(entry: HelperEntry): void {
-    entry.helper.on("frame", (frame) => {
-      entry.latestFrame = frame;
-      this.broadcast(entry, "frame", frame);
-    });
     entry.helper.on("idle", (info) => this.broadcast(entry, "idle", info));
     entry.helper.on("encodedVideo", (video) => this.broadcast(entry, "encodedVideo", video));
     entry.helper.on("capability", (token) => {
@@ -330,7 +288,6 @@ export class IosSimulatorCaptureHelperPool {
     entry.helper.on("permissionTarget", (target) =>
       this.broadcast(entry, "permissionTarget", target),
     );
-    entry.helper.on("frameMetrics", (metrics) => this.broadcast(entry, "frameMetrics", metrics));
     entry.helper.on("captureMetrics", (metrics) =>
       this.broadcast(entry, "captureMetrics", metrics),
     );
@@ -495,7 +452,7 @@ function helperTargetKey(target: CaptureTarget, binaryPath: string): string {
     windowID: target.windowID,
     fps: target.fps,
     audio: target.audio === true,
-    encode: target.encode ?? null,
+    encode: target.encode,
   });
 }
 
@@ -504,10 +461,6 @@ function simulatorWindowID(target: CaptureTarget): number {
     throw new Error("Simulator helper pool received a non-simulator target.");
   }
   return target.windowID;
-}
-
-function isEncodedTarget(target: CaptureTarget): boolean {
-  return target.kind === "simulator" && target.encode !== undefined;
 }
 
 function isFatalHelperStderr(line: string): boolean {

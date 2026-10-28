@@ -112,6 +112,37 @@ describe("IosScreenCaptureHelper", () => {
     expect(spawnArgs.args).toEqual([]);
   });
 
+  test.each([
+    [{ kind: "videoToolboxDefault" }, []],
+    [{ kind: "explicitBps", bps: 2_500_000 }, ["--bitrate-bps", "2500000"]],
+    [{ kind: "bitsPerPixel", bpp: 0.2 }, ["--bits-per-pixel", "0.2"]],
+  ] as const)("passes device encode flags for %j", (bitrate, flags) => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "device",
+      deviceId: "00008140-001A2B3C0AE2401E",
+      encode: { codec: "h264", bitrate, maxLongSide: 720 },
+    });
+    helper.start();
+    expect(spawnArgs.args).toEqual([
+      "--device-id",
+      "00008140-001A2B3C0AE2401E",
+      "--encode",
+      "h264",
+      "--max-long-side",
+      "720",
+      ...flags,
+    ]);
+  });
+
+  test("passes encode flags for the default physical device", () => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "device",
+      encode: { codec: "h264", bitrate: { kind: "videoToolboxDefault" } },
+    });
+    helper.start();
+    expect(spawnArgs.args).toEqual(["--encode", "h264"]);
+  });
+
   test("passes --simulator-window for simulator target", () => {
     const { spawnArgs, helper } = withFakeSpawner({ kind: "simulator", windowID: 98765 });
     helper.start();

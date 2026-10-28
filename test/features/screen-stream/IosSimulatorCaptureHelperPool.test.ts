@@ -2,10 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
-import type {
-  IosScreenCaptureHelperEvents,
-  IosScreenCaptureHelperOptions,
-} from "../../../src/features/screen-stream/IosScreenCaptureHelper";
+import type { IosScreenCaptureHelperOptions } from "../../../src/features/screen-stream/IosScreenCaptureHelper";
 import {
   IOS_SIMULATOR_HELPER_IDLE_TTL_MS,
   IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS,
@@ -37,13 +34,6 @@ class FakeSimulatorHelper extends EventEmitter {
     this.keyFrameRequests++;
     return true;
   }
-
-  override on<E extends keyof IosScreenCaptureHelperEvents>(
-    event: E,
-    listener: IosScreenCaptureHelperEvents[E],
-  ): this {
-    return super.on(event, listener as (...args: any[]) => void);
-  }
 }
 
 class NeverStoppingSimulatorHelper extends FakeSimulatorHelper {
@@ -51,13 +41,6 @@ class NeverStoppingSimulatorHelper extends FakeSimulatorHelper {
     this.stops++;
     return new Promise<null>(() => {});
   }
-}
-
-function simulatorOptions(windowID = 42): IosScreenCaptureHelperOptions {
-  return {
-    binaryPath: "/fake/screen-capture-helper",
-    target: { kind: "simulator", windowID, fps: 15 },
-  };
 }
 
 function encodedOptions(windowID = 42): IosScreenCaptureHelperOptions {
@@ -93,14 +76,14 @@ describe("IosSimulatorCaptureHelperPool", () => {
     });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const first = pool.acquire(simulatorOptions(42));
+      const first = pool.acquire(encodedOptions(42));
       await first.start();
       const stopping = first.invalidate();
       await flushMicrotasks();
 
-      const sameWindow = pool.acquire(simulatorOptions(42));
+      const sameWindow = pool.acquire(encodedOptions(42));
       const sameStarting = sameWindow.start();
-      const otherWindow = pool.acquire(simulatorOptions(99));
+      const otherWindow = pool.acquire(encodedOptions(99));
       await otherWindow.start();
       expect(helpers).toHaveLength(2);
       expect(helpers[1].starts).toBe(1);
@@ -135,9 +118,9 @@ describe("IosSimulatorCaptureHelperPool", () => {
     });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const first = pool.acquire(simulatorOptions(42));
-      const second = pool.acquire(simulatorOptions(43));
-      const remaining = pool.acquire(simulatorOptions(44));
+      const first = pool.acquire(encodedOptions(42));
+      const second = pool.acquire(encodedOptions(43));
+      const remaining = pool.acquire(encodedOptions(44));
       await Promise.all([first.start(), second.start(), remaining.start()]);
       const stopping = [first.invalidate(), second.invalidate()];
       await flushMicrotasks(30);
@@ -176,11 +159,11 @@ describe("IosSimulatorCaptureHelperPool", () => {
     });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const oldWindow = pool.acquire(simulatorOptions(42));
+      const oldWindow = pool.acquire(encodedOptions(42));
       await oldWindow.start();
       await oldWindow.stop();
 
-      const newWindow = pool.acquire(simulatorOptions(43));
+      const newWindow = pool.acquire(encodedOptions(43));
       const attaching = newWindow.start();
       await attaching;
       expect(helpers[1].starts).toBe(1);
@@ -232,11 +215,15 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const oldLease = pool.acquire(simulatorOptions());
+    const oldLease = pool.acquire(encodedOptions());
     await oldLease.start();
     await oldLease.stop();
 
-    const newLease = pool.acquire(encodedOptions());
+    const replacement = encodedOptions();
+    if (replacement.target.kind === "simulator") {
+      replacement.target.encode = { codec: "h264", bitrate: { kind: "explicitBps", bps: 500_000 } };
+    }
+    const newLease = pool.acquire(replacement);
     const attaching = newLease.start();
     await flushMicrotasks();
     expect(helpers).toHaveLength(1);
@@ -268,13 +255,13 @@ describe("IosSimulatorCaptureHelperPool", () => {
     });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const first = pool.acquire(simulatorOptions());
+      const first = pool.acquire(encodedOptions());
       first.on("error", () => {});
       await first.start();
       helpers[0].emit("error", new Error("capture failed"));
       await flushMicrotasks();
 
-      const replacement = pool.acquire(simulatorOptions());
+      const replacement = pool.acquire(encodedOptions());
       const attaching = replacement.start();
       await flushMicrotasks();
       expect(helpers).toHaveLength(1);
@@ -294,58 +281,6 @@ describe("IosSimulatorCaptureHelperPool", () => {
     }
   });
 
-  test("reuses a warm helper and replays its latest frame to the next lease", async () => {
-    const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IosSimulatorCaptureHelperPool({
-      createHelper: () => {
-        const helper = new FakeSimulatorHelper();
-        helpers.push(helper);
-        return helper;
-      },
-    });
-    const first = pool.acquire(simulatorOptions());
-    const firstFrames: number[] = [];
-    const firstQueueDepths: number[] = [];
-    first.on("frame", (frame) => firstFrames.push(frame.header.width));
-    first.on("frameMetrics", (metrics) => firstQueueDepths.push(metrics.queueDepth));
-
-    await first.start();
-    helpers[0].emit("frame", {
-      header: { width: 1, height: 1, bytesPerRow: 4, timestampMs: 1 },
-      pixels: Buffer.alloc(4),
-    });
-    helpers[0].emit("frameMetrics", {
-      captureTimestampMs: 1,
-      frameAgeMs: 0,
-      queueDepth: 1,
-      droppedFrames: 0,
-      bytesQueued: 4,
-      highWaterMarkBytes: 4,
-      maxFrameBytes: 32 * 1024 * 1024,
-    });
-    await first.stop();
-
-    const second = pool.acquire(simulatorOptions());
-    const secondFrames: number[] = [];
-    const secondReplayFlags: Array<boolean | undefined> = [];
-    second.on("frame", (frame) => {
-      secondFrames.push(frame.header.width);
-      secondReplayFlags.push(frame.replayed);
-    });
-    await second.start();
-    helpers[0].emit("frame", {
-      header: { width: 2, height: 1, bytesPerRow: 8, timestampMs: 2 },
-      pixels: Buffer.alloc(8),
-    });
-
-    expect(helpers).toHaveLength(1);
-    expect(helpers[0].starts).toBe(1);
-    expect(firstFrames).toEqual([1]);
-    expect(firstQueueDepths).toEqual([1]);
-    expect(secondFrames).toEqual([1, 2]);
-    expect(secondReplayFlags).toEqual([true, undefined]);
-  });
-
   test("discards a helper reporting a fatal capture error before the next lease", async () => {
     const helpers: FakeSimulatorHelper[] = [];
     const pool = new IosSimulatorCaptureHelperPool({
@@ -355,18 +290,19 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const first = pool.acquire(simulatorOptions());
+    const first = pool.acquire(encodedOptions());
     await first.start();
-    helpers[0].emit("frame", {
-      header: { width: 1, height: 1, bytesPerRow: 4, timestampMs: 1 },
-      pixels: Buffer.alloc(4),
+    helpers[0].emit("encodedVideo", {
+      keyframe: true,
+      presentationTimestampMs: 1,
+      payload: Buffer.from([0x65]),
     });
     helpers[0].emit("stderr", "error: ScreenCaptureKit stream stopped");
     await flushMicrotasks();
 
-    const second = pool.acquire(simulatorOptions());
+    const second = pool.acquire(encodedOptions());
     const secondFrames: number[] = [];
-    second.on("frame", (frame) => secondFrames.push(frame.header.width));
+    second.on("encodedVideo", (video) => secondFrames.push(video.presentationTimestampMs));
     await second.start();
 
     expect(helpers).toHaveLength(2);
@@ -387,8 +323,8 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const silent = pool.acquire(simulatorOptions(42));
-    const concurrent = pool.acquire(simulatorOptions(99));
+    const silent = pool.acquire(encodedOptions(42));
+    const concurrent = pool.acquire(encodedOptions(99));
     await silent.start();
     await concurrent.start();
 
@@ -398,7 +334,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
     );
     await flushMicrotasks();
 
-    const replacement = pool.acquire(simulatorOptions(42));
+    const replacement = pool.acquire(encodedOptions(42));
     await replacement.start();
 
     expect(helpers).toHaveLength(3);
@@ -420,7 +356,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const lease = pool.acquire(simulatorOptions());
+    const lease = pool.acquire(encodedOptions());
     lease.on("error", () => {});
     await lease.start();
     helpers[0].stopError = new Error("stop failed");
@@ -449,7 +385,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const first = pool.acquire(simulatorOptions(42));
+    const first = pool.acquire(encodedOptions(42));
     first.on("error", () => {});
     await first.start();
     // The next stop() throws exactly once, then the fake reports as stopped.
@@ -469,7 +405,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
       // A later attach to the SAME window key must create a fresh helper rather
       // than re-throwing the sticky stop failure forever.
       helpers[0].stopError = null;
-      const second = pool.acquire(simulatorOptions(42));
+      const second = pool.acquire(encodedOptions(42));
       await second.start();
 
       expect(helpers).toHaveLength(2);
@@ -498,7 +434,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const lease = pool.acquire(simulatorOptions());
+    const lease = pool.acquire(encodedOptions());
 
     const starting = lease.start();
     await lease.stop();
@@ -513,7 +449,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
     const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => new FakeSimulatorHelper(),
     });
-    const lease = pool.acquire(simulatorOptions());
+    const lease = pool.acquire(encodedOptions());
 
     await lease.start();
     await lease.stop();
@@ -536,11 +472,11 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const first = pool.acquire(simulatorOptions(42));
+    const first = pool.acquire(encodedOptions(42));
     await first.start();
     await first.stop();
 
-    const replacement = pool.acquire(simulatorOptions(99));
+    const replacement = pool.acquire(encodedOptions(99));
     await replacement.start();
 
     expect(helpers).toHaveLength(2);
@@ -557,8 +493,8 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const first = pool.acquire(simulatorOptions(42));
-    const second = pool.acquire(simulatorOptions(99));
+    const first = pool.acquire(encodedOptions(42));
+    const second = pool.acquire(encodedOptions(99));
 
     await first.start();
     await second.start();
@@ -582,7 +518,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
         return helper;
       },
     });
-    const lease = pool.acquire(simulatorOptions());
+    const lease = pool.acquire(encodedOptions());
     await lease.start();
     await lease.stop();
 
@@ -592,13 +528,13 @@ describe("IosSimulatorCaptureHelperPool", () => {
     await flushMicrotasks();
     expect(helpers[0].stops).toBe(1);
 
-    const second = pool.acquire(simulatorOptions());
+    const second = pool.acquire(encodedOptions());
     await second.start();
     await pool.shutdown();
     expect(helpers[1].stops).toBe(1);
   });
 
-  test("forces an IDR on every encoded lease attach and never replays a raw frame", async () => {
+  test("forces an IDR on every lease attach without replaying cached records", async () => {
     const helpers: FakeSimulatorHelper[] = [];
     const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
@@ -614,11 +550,10 @@ describe("IosSimulatorCaptureHelperPool", () => {
     expect(helpers[0].keyFrameRequests).toBe(1);
 
     // A late lease adopting the warm encoded helper must also force an IDR — it
-    // would otherwise begin mid-GOP on undecodable P-frames. The raw warm-start
-    // frame replay is disabled on the encoded path.
+    // would otherwise begin mid-GOP on undecodable P-frames.
     const replayed: number[] = [];
     const second = pool.acquire(encodedOptions());
-    second.on("frame", (frame) => replayed.push(frame.header.width));
+    second.on("encodedVideo", (video) => replayed.push(video.presentationTimestampMs));
     helpers[0].emit("encodedVideo", {
       keyframe: false,
       presentationTimestampMs: 1,
@@ -675,18 +610,20 @@ describe("IosSimulatorCaptureHelperPool", () => {
       },
     });
 
-    // Raw and encoded leases on the same window get separate entries: encoder
-    // config is part of the pool key, and there is no live reconfiguration.
-    const raw = pool.acquire(simulatorOptions());
-    await raw.start();
+    // Bitrate is part of the pool key; a mismatch needs an independent encoder.
+    const different = encodedOptions();
+    if (different.target.kind === "simulator") {
+      different.target.encode = { codec: "h264", bitrate: { kind: "explicitBps", bps: 1_000_000 } };
+    }
+    const first = pool.acquire(different);
+    await first.start();
     const encoded = pool.acquire(encodedOptions());
     await encoded.start();
 
     expect(helpers).toHaveLength(2);
     expect(helpers[0].starts).toBe(1);
     expect(helpers[1].starts).toBe(1);
-    // The raw entry never had an IDR forced; only the encoded one did.
-    expect(helpers[0].keyFrameRequests).toBe(0);
+    expect(helpers[0].keyFrameRequests).toBe(1);
     expect(helpers[1].keyFrameRequests).toBe(1);
     await pool.shutdown();
   });

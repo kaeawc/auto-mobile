@@ -2,7 +2,7 @@ import { type ProcessTracker } from "../../utils/ChildProcessTracker";
 import { type Timer } from "../../utils/SystemTimer";
 import { type FfmpegClient, type FfmpegProcess } from "../../utils/media/FfmpegClient";
 import { type IosScreenCaptureHelperOptions } from "../screen-stream/IosScreenCaptureHelper";
-import type { DecodedEncodedVideo } from "../screen-stream/frameProtocol";
+import type { DecodedEncodedVideo, MalformedFrameError } from "../screen-stream/frameProtocol";
 import { type VideoCaptureConfig } from "./VideoRecorderService";
 
 /**
@@ -39,6 +39,7 @@ export interface PhysicalIosCaptureHelper {
   start(): void | Promise<void>;
   stop(): Promise<unknown>;
   on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): unknown;
+  on(event: "malformed", listener: (error: MalformedFrameError) => void): unknown;
   on(event: "stderr", listener: (line: string) => void): unknown;
   on(
     event: "exit",

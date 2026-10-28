@@ -316,6 +316,14 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(Buffer.concat(harness.ffmpeg.processes[0].written)).toEqual(Buffer.from([1, 2]));
   });
 
+  test("names undecodable helper output when no record ever arrived", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emit("malformed", { reason: "header_unsupported_record" });
+
+    await expect(harness.backend.stop(handle)).rejects.toThrow("header_unsupported_record");
+  });
+
   test("does not spawn the muxer once a stop was requested", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());

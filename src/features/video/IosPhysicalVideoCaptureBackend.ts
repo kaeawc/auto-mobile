@@ -135,6 +135,15 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
         state.helperStderr.shift();
       }
     });
+    helper.on("malformed", (error) => {
+      // A helper that predates `--encode h264` streams raw frames, which decode as
+      // malformed records. Keep the reason so the "no frames" failure names it
+      // instead of blaming the USB trust prompt.
+      state.helperStderr.push(`malformed record from the helper (${error.reason})\n`);
+      if (state.helperStderr.length > HELPER_STDERR_TAIL) {
+        state.helperStderr.shift();
+      }
+    });
     helper.on("exit", (info) => {
       state.helperExit = info;
       // Classify at the moment of exit: afterwards, `stopRequested` cannot tell

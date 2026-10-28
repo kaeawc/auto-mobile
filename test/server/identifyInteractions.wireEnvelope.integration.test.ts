@@ -19,10 +19,12 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 /**
  * Pins the exact serialized CallTool result for identifyInteractions as it leaves the
  * server transport (#11830), for a successful analysis and for the no-observation
- * failure, plus the pipeline failure verdict on each handler result. The real registered
+ * failure: the text part, the retained `structuredContent` and the hoisted
+ * `success`/`error`, plus the pipeline failure verdict on each handler result. The real registered
  * handler runs against fakes (the analyzer's verdict is stubbed); the MCP boundary, the
  * client's outputSchema validation and the finalizer are production code. An envelope
- * change that alters a single wire byte fails here.
+ * change that alters a single wire byte, or a payload the declared outputSchema rejects,
+ * fails here.
  */
 const device: BootedDevice = { name: "fake", deviceId: "fake-11830", platform: "android" };
 
@@ -121,6 +123,7 @@ describe("identifyInteractions wire envelopes", () => {
     const name = "identifyInteractions";
     const args = { includeContext: { navigationGraph: false } };
     const tool = ToolRegistry.getRegisteredTool(name)!;
+    expect(tool.outputSchema).toBeDefined();
     let failure: boolean | undefined;
     const navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
       new FakeNavigationGraphManager(),
@@ -151,21 +154,29 @@ describe("identifyInteractions wire envelopes", () => {
     }
   }
 
-  /** The schemaless wire: the payload serialized once as the only text part. */
-  const textWire = (payload: object) =>
-    JSON.stringify({ content: [{ type: "text", text: JSON.stringify(payload) }] });
+  /**
+   * The structured wire: the payload serialized once as the text part, the same payload
+   * retained as `structuredContent`, then the hoisted `success`/`error`. A failure never
+   * sets `isError`, as before the tool declared a schema.
+   */
+  const structuredWire = (payload: object, tail: Record<string, unknown>) =>
+    JSON.stringify({
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload,
+      ...tail,
+    });
 
   test("identified interactions", async () => {
     expect(await callOnWire(identified)).toEqual({
       failure: false,
-      wire: textWire(identified),
+      wire: structuredWire(identified, { success: true }),
     });
   });
 
   test("no observation", async () => {
     expect(await callOnWire(unobserved)).toEqual({
       failure: true,
-      wire: textWire(unobserved),
+      wire: structuredWire(unobserved, { success: false, error: unobserved.error }),
     });
   });
 });

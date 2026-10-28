@@ -10,6 +10,7 @@ import {
   prototypeMediaError,
   prototypeMediaPlayers,
   prototypeMediaReadValid,
+  prototypeVideoPlayerError,
 } from "./prototypeMedia";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
@@ -614,6 +615,7 @@ function rootBlockError(root: Raw): PrototypePlatformError | undefined {
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
     prototypeMediaError(root) ??
+    prototypeVideoPlayerError(root) ??
     requiresError(root)
   );
 }

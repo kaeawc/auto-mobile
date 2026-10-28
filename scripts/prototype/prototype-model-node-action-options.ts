@@ -67,6 +67,10 @@ export const nodeModelOptions = {
     "stack.screens": {
       kotlin: "Map<String, PrototypeNode>",
     },
+    // A one-key media source union (#14253); the contract walk validates it.
+    "videoPlayer.source": { kotlin: "JsonObject" },
+    // `true`, `false` or `"whenVisible"` (#14253).
+    "videoPlayer.autoplay": { kotlin: "JsonElement" },
   },
   fieldDefaults: {
     "image.contentScale": {

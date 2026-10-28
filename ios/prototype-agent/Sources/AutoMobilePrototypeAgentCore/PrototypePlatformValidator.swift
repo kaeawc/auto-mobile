@@ -154,7 +154,7 @@ enum PrototypePlatformValidator {
         declared.channels = channels?.objectFields ?? [:]
         declared.hasAuth = auth?.objectFields != nil
         declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
-        declared.players = PrototypeMedia.players(media)
+        declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(

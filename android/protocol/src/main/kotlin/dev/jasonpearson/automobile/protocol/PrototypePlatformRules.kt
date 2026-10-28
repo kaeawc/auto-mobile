@@ -44,7 +44,7 @@ object PrototypePlatform {
  * `{event}` scope, the `into` path and the reserved `prototype_` emit prefix.
  */
 internal object PrototypePlatformRules {
-  private class Declared(root: JsonObject) {
+  private class Declared(root: JsonObject, nodes: List<PrototypeStateChecks.Located>) {
     private val requires = root.member("requires") ?: JsonObject(emptyMap())
     val modules = requires.strings("platform").toSet()
     val permissions =
@@ -53,7 +53,7 @@ internal object PrototypePlatformRules {
         .mapNotNull { (it as? JsonObject)?.text("name") }
         .toSet()
     val channels = root.member("channels") ?: JsonObject(emptyMap())
-    val players = PrototypeMedia.players(root)
+    val players = PrototypeMedia.players(root, nodes)
     val background = requires.strings("background").toSet()
   }
 
@@ -65,12 +65,11 @@ internal object PrototypePlatformRules {
       PrototypeSecureStorageRules::blockError,
       PrototypeLocationRules::blockError,
       PrototypeMedia::error,
-      ::requiresError,
     )
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val root = value as? JsonObject ?: return null
-    val declared = Declared(root)
+    val declared = Declared(root, context.nodes)
     reservedTestTagError(context)?.let {
       return it
     }
@@ -79,6 +78,11 @@ internal object PrototypePlatformRules {
       ?.let {
         return it
       }
+    // Node-level media rules need the node list, so they run after the root checks and before
+    // requires, in the host validator's order.
+    (PrototypeMedia.videoPlayerError(root, context.nodes) ?: requiresError(root))?.let {
+      return it
+    }
     for (use in uses(root, context)) {
       (useError(use, declared)
           ?: (if (use is Use.Call)

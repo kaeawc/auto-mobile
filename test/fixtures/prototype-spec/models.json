@@ -518,6 +518,7 @@
   "nodeProgress": {
     "type": "progress"
   },
+  "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {

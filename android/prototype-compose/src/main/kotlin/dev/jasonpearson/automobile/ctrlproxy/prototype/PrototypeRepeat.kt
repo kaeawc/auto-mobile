@@ -79,6 +79,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
+import dev.jasonpearson.automobile.protocol.PrototypeVideoPlayerNode
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -730,6 +731,16 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
+      )
+    // Contract only (#14253): no renderer draws a video player yet.
+    is PrototypeVideoPlayerNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
       )
     is PrototypeListNode -> this // Nested lists in repeat templates are rejected by validation.
     is PrototypeChartNode ->

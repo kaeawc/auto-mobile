@@ -1,0 +1,80 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "scrub": 0
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "hero",
+          "player": "main",
+          "poster": "trailerPoster",
+          "controls": "builtin",
+          "contentScale": "fit",
+          "autoplay": false,
+          "muted": false,
+          "positionKey": "scrub",
+          "contentDescription": "Trailer"
+        },
+        {
+          "type": "videoPlayer",
+          "id": "clip",
+          "source": {
+            "sample": "countdown"
+          },
+          "controls": "none",
+          "contentScale": "crop",
+          "autoplay": "whenVisible",
+          "muted": true,
+          "loop": true,
+          "startMs": 1500
+        },
+        {
+          "type": "text",
+          "text": "{platform:/media/players/clip/positionMs}"
+        },
+        {
+          "type": "button",
+          "label": "Play clip",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.play",
+              "args": {
+                "player": {
+                  "value": "clip"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1", "prototype_data_model_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_media_v1"
+}

@@ -7,6 +7,9 @@ import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -54,6 +57,39 @@ function factory(round: boolean | undefined) {
 }
 
 describe("prototypeScreenShapeOutput", () => {
+  test.each([true, false])(
+    "device-reported %s skips both reader and ADB factories",
+    async (round) => {
+      const { asked, screenRoundFactory } = factory(!round);
+      const adbFactory = new FakeAdbClientFactory();
+      expect(
+        await prototypeScreenShapeOutput(
+          { action: "show", success: true, device: watch, deviceScreenRound: round },
+          { screenRoundFactory, adbFactory },
+        ),
+      ).toEqual({ screenRound: round });
+      expect(asked).toEqual([]);
+      expect(adbFactory.getCallCount()).toBe(0);
+    },
+  );
+
+  test("absent device shape falls back to the ADB reader", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell dumpsys display",
+      createExecResult("DisplayInfo{displayId 0, FLAG_ROUND}", ""),
+    );
+    const adbFactory = new FakeAdbClientFactory(adb);
+    expect(
+      await prototypeScreenShapeOutput(
+        { action: "show", success: true, device: watch },
+        { adbFactory },
+      ),
+    ).toEqual({ screenRound: true });
+    expect(adbFactory.getCalls().map(({ device }) => device?.deviceId)).toEqual([watch.deviceId]);
+    expect(adb.getExecutedCommands()).toEqual(["shell dumpsys display"]);
+  });
+
   test("a successful show on a round watch reports screenRound", async () => {
     const { asked, screenRoundFactory } = factory(true);
     const output = await prototypeScreenShapeOutput(
@@ -84,6 +120,7 @@ describe("prototypeScreenShapeOutput", () => {
 
   test("phones, iOS, failed shows and other actions pay no read", async () => {
     const { asked, screenRoundFactory } = factory(true);
+    const adbFactory = new FakeAdbClientFactory();
     const cases = [
       { action: "show", success: true, device: phone },
       { action: "show", success: true, device: ios },
@@ -91,9 +128,15 @@ describe("prototypeScreenShapeOutput", () => {
       { action: "dismiss", success: true, device: watch },
     ];
     for (const input of cases) {
-      expect(await prototypeScreenShapeOutput(input, { screenRoundFactory })).toStrictEqual({});
+      expect(
+        await prototypeScreenShapeOutput(
+          { ...input, deviceScreenRound: true },
+          { screenRoundFactory, adbFactory },
+        ),
+      ).toStrictEqual({});
     }
     expect(asked).toEqual([]);
+    expect(adbFactory.getCallCount()).toBe(0);
   });
 });
 
@@ -101,11 +144,12 @@ describe("prototype tool screenRound", () => {
   let restore: () => void;
   let unsubscribe: () => void;
   let asked: string[];
+  let client: FakeCtrlProxy;
 
   beforeEach(() => {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
-    const client = new FakeCtrlProxy(timer);
+    client = new FakeCtrlProxy(timer);
     const fake = factory(true);
     asked = fake.asked;
     unsubscribe = registerPrototypeTools({
@@ -137,7 +181,20 @@ describe("prototype tool screenRound", () => {
     expect(asked).toEqual(["emulator-5560"]);
   });
 
+  test.each([true, false])(
+    "watch show forwards device-reported %s without a fallback read",
+    async (round) => {
+      client.setPrototypeResult({ success: true, screenRound: round });
+      const output = await show(watch);
+      expect(output.success).toBe(true);
+      expect(output.screenRound).toBe(round);
+      expect(prototypeOutputSchema.safeParse(output).success).toBe(true);
+      expect(asked).toEqual([]);
+    },
+  );
+
   test("a phone show has no screenRound", async () => {
+    client.setPrototypeResult({ success: true, screenRound: true });
     const output = await show(phone);
     expect(output.success).toBe(true);
     expect(output).not.toHaveProperty("screenRound");

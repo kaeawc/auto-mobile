@@ -61,10 +61,9 @@ is only worth building if some supported environment cannot reach the gRPC port.
 
 ## Discovery and auth
 
-- The emulator writes `pid_<pid>.ini` under `<dir>/avd/running`, where `<dir>` is, in order:
-  `$ANDROID_EMULATOR_HOME`, `$ANDROID_SDK_HOME/.android`, `$ANDROID_AVD_HOME`,
-  `~/.android`, then `$XDG_RUNTIME_DIR` or `/run/user/<uid>` on Linux and
-  `~/Library/Caches/TemporaryItems` on macOS.
+- The emulator writes `pid_<pid>.ini` under `<dir>/avd/running`, where `<dir>` is
+  `~/Library/Caches/TemporaryItems` on macOS, `$XDG_RUNTIME_DIR` (else `/tmp/android-<user>`)
+  on Linux, and the temp dir. These are the same directories the AVD launch guard reads.
 - The emulator for `emulator-<N>` is the file whose `port.serial` is `N`. Files whose pid is
   no longer running are skipped, because a crashed emulator leaves its file behind and a later
   emulator can reuse the port.

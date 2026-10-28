@@ -3,11 +3,12 @@ import { errorMessage } from "../../../models/describeUnknownError";
 import type { FileSystem } from "../../filesystem/DefaultFileSystem";
 import { logger } from "../../logger";
 import { isProcessRunning } from "../../processLiveness";
+import { defaultRunningAvdAdvertisementDirs } from "../RunningAvdAdvertisementReader";
 
 /**
  * Each running emulator advertises itself in `<dir>/avd/running/pid_<pid>.ini` with its console
- * port (`port.serial`), its gRPC port, and how to authenticate. The directories mirror the
- * emulator's own `ConfigDirs` and the official `aemu-grpc` client.
+ * port (`port.serial`), its gRPC port, and how to authenticate. The directories are the ones
+ * {@link defaultRunningAvdAdvertisementDirs} resolves for the launch guard.
  */
 
 export type EmulatorGrpcAuth =
@@ -24,44 +25,8 @@ export interface EmulatorGrpcEndpoint {
   descriptionFile: string;
 }
 
-export interface DiscoveryEnvironment {
-  platform: NodeJS.Platform;
-  env: Readonly<Record<string, string | undefined>>;
-  homeDir: string;
-  uid?: number;
-}
-
 const DEFAULT_GRPC_PORT = 8554;
 const PID_FILE = /^pid_(\d+)\.ini$/;
-
-/** Candidate `avd/running` directories, most specific first. */
-export function emulatorDiscoveryDirectories(environment: DiscoveryEnvironment): string[] {
-  const { env, homeDir, platform } = environment;
-  const roots: string[] = [];
-  if (env.ANDROID_EMULATOR_HOME) {
-    roots.push(env.ANDROID_EMULATOR_HOME);
-  }
-  if (env.ANDROID_SDK_HOME) {
-    roots.push(path.join(env.ANDROID_SDK_HOME, ".android"));
-  }
-  if (env.ANDROID_AVD_HOME) {
-    roots.push(env.ANDROID_AVD_HOME);
-  }
-  roots.push(path.join(homeDir, ".android"));
-  if (platform === "linux") {
-    if (env.XDG_RUNTIME_DIR) {
-      roots.push(env.XDG_RUNTIME_DIR);
-    }
-    if (environment.uid !== undefined) {
-      roots.push(path.join("/run/user", String(environment.uid)));
-    }
-  } else if (platform === "darwin") {
-    roots.push(path.join(homeDir, "Library", "Caches", "TemporaryItems"));
-  } else if (platform === "win32" && env.LOCALAPPDATA) {
-    roots.push(path.join(env.LOCALAPPDATA, "Temp"));
-  }
-  return [...new Set(roots.map((root) => path.join(root, "avd", "running")))];
-}
 
 /** `key=value` lines; the first `=` splits, so values may contain `=`. */
 export function parseDiscoveryIni(text: string): Record<string, string> {
@@ -113,13 +78,13 @@ export interface EmulatorGrpcDiscovery {
 export class FileEmulatorGrpcDiscovery implements EmulatorGrpcDiscovery {
   constructor(
     private readonly fs: Pick<FileSystem, "readdir" | "readFile">,
-    private readonly environment: DiscoveryEnvironment,
+    private readonly runningDirs: readonly string[] = defaultRunningAvdAdvertisementDirs(),
     /** A crashed emulator leaves its file behind, and a later emulator may reuse its port. */
     private readonly isAlive: (pid: number) => boolean = (pid) => isProcessRunning(pid),
   ) {}
 
   async findByConsolePort(consolePort: number): Promise<EmulatorGrpcEndpoint | undefined> {
-    for (const dir of emulatorDiscoveryDirectories(this.environment)) {
+    for (const dir of this.runningDirs) {
       for (const file of await this.listDescriptionFiles(dir)) {
         const endpoint = await this.readEndpoint(dir, file);
         if (endpoint?.consolePort === consolePort && this.isAlive(endpoint.pid)) {

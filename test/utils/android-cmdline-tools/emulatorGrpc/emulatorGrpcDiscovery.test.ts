@@ -1,36 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import {
-  emulatorDiscoveryDirectories,
   endpointFromDescription,
   FileEmulatorGrpcDiscovery,
   parseDiscoveryIni,
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 
 const HOME = "/home/ci";
-
-describe("emulatorDiscoveryDirectories", () => {
-  test("linux checks env overrides, ~/.android, then the runtime dir", () => {
-    const dirs = emulatorDiscoveryDirectories({
-      platform: "linux",
-      env: { ANDROID_EMULATOR_HOME: "/emu", XDG_RUNTIME_DIR: "/run/user/1000" },
-      homeDir: HOME,
-      uid: 1000,
-    });
-    expect(dirs).toEqual([
-      path.join("/emu", "avd", "running"),
-      path.join(HOME, ".android", "avd", "running"),
-      path.join("/run/user/1000", "avd", "running"),
-    ]);
-  });
-
-  test("macOS uses Library/Caches/TemporaryItems", () => {
-    const dirs = emulatorDiscoveryDirectories({ platform: "darwin", env: {}, homeDir: HOME });
-    expect(dirs.at(-1)).toBe(
-      path.join(HOME, "Library", "Caches", "TemporaryItems", "avd", "running"),
-    );
-  });
-});
 
 describe("endpointFromDescription", () => {
   test("prefers the bearer token when the emulator was launched with -grpc-use-token", () => {
@@ -90,7 +66,7 @@ describe("FileEmulatorGrpcDiscovery", () => {
   test("finds the live emulator by console port and skips stale files", async () => {
     const discovery = new FileEmulatorGrpcDiscovery(
       fs,
-      { platform: "linux", env: {}, homeDir: HOME },
+      ["/missing/avd/running", runningDir],
       (pid) => pid !== 200,
     );
     expect((await discovery.findByConsolePort(5556))?.address).toBe("localhost:9999");

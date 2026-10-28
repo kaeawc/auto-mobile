@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "w5",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "keepScreenOn": true,
+      "brightness": 100,
+      "orientation": "upsideDown",
+      "statusBar": "light"
+    },
+    "root": {
+      "type": "text",
+      "text": "Boarding pass"
+    }
+  },
+  "expectedPath": "window.orientation"
+}

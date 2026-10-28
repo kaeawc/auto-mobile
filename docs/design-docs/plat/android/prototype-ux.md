@@ -2036,6 +2036,15 @@ call proves presence only and returns no biometric data. Failures use the typed 
 `unavailable` for a locked-out, unenrolled or hardware-less device. No production runtime advertises the
 module yet.
 
+**Window controls (#14320).** Four optional root `window` fields need
+`prototype_platform_window_controls_v1`; they are not a platform module, so no `requires.platform` entry.
+`keepScreenOn` (boolean) keeps the screen awake, `brightness` (whole 0-100, or `system`) sets the prototype
+window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) requests an orientation, and
+`statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
+prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
+and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
+best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
+
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
 list is closed and the target package is always the prototype's own runtime package; a spec cannot name
@@ -2094,8 +2103,13 @@ use the typed codes `permission_denied`, `unavailable` (location services off), 
 The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
 `/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
 are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
-that fix after the session ends. The root subscription block and the reference outcome reducer are not in the
-contract yet, and no production runtime advertises the module.
+that fix after the session ends. `applyPrototypeLocationOutcome` (`prototypeLocationOutcome.ts`) is the
+reference both runtimes copy. A fix is written only when its coordinates are in range, and it carries only the
+optional fields the platform reported. `<into>__meta` then gets `{durationMs, approximate}`. A failure leaves
+`into` untouched and records `{durationMs, error}`: a code outside the four above becomes `platform_error`, and
+only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the fix is rolled
+back. The root subscription block is not in the contract yet, and no production runtime advertises the
+module.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

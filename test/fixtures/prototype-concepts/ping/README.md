@@ -15,7 +15,7 @@ vocabulary: the peer, the delivery receipts and the call are timers over literal
 - `prototype_gestures_v1`: long press on a message to reply, long press on the mic to record.
 - `prototype_text_field_actions_v1`: the composer's send key.
 - `prototype_string_conditions_v1`: the reply bar and send button follow the draft and quote length.
-- `prototype_checks_v1`: `enabledWhen` on the send button.
+- `prototype_checks_v1`: `enabledWhen` on the send button, and a required check on the composer that `message_sent`'s `requireValid` uses so the keyboard's send key cannot send an empty draft.
 - `prototype_pager_state_key_v1`: the status pager and its progress segments share `statusPage`.
 - `prototype_semantics_v1`: headings and live regions for recording and the call state.
 - `prototype_emit_context_v1`: `message_sent`, `voice_note_sent` and `call_ended` carry their values.

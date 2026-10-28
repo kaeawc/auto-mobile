@@ -177,6 +177,11 @@
                               "value": "{chat.name}"
                             },
                             {
+                              "type": "setState",
+                              "key": "replyTo",
+                              "value": ""
+                            },
+                            {
                               "type": "setData",
                               "path": "/data/pending/text",
                               "value": {
@@ -1317,6 +1322,13 @@
                 "stateKey": "draft",
                 "placeholder": "Message",
                 "imeAction": "send",
+                "checks": [
+                  {
+                    "message": "Type a message first",
+                    "required": true
+                  }
+                ],
+                "validateOn": "submit",
                 "style": {
                   "weight": 1
                 },
@@ -1343,6 +1355,7 @@
                   {
                     "type": "emit",
                     "name": "message_sent",
+                    "requireValid": ["draft"],
                     "context": {
                       "chat": {
                         "state": "chatId"
@@ -1435,6 +1448,7 @@
                   {
                     "type": "emit",
                     "name": "message_sent",
+                    "requireValid": ["draft"],
                     "context": {
                       "chat": {
                         "state": "chatId"

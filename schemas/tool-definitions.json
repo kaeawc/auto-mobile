@@ -32380,7 +32380,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/design-docs/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged.",
+    "description": "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/design-docs/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged. On a device that does not announce a watch build the input is still sent and the result carries a warning.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -32453,6 +32453,10 @@
           }
         },
         "reason": {
+          "type": "string"
+        },
+        "warning": {
+          "description": "Set when the device is not confirmed to be a watch; the input is still sent",
           "type": "string"
         }
       },

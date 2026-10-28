@@ -3,7 +3,12 @@ import {
   createRotaryScrollHandler,
   rotaryScrollResultSchema,
   rotaryScrollSchema,
+  traitsWatchCheck,
+  type WatchCheck,
 } from "../../src/server/rotaryScrollTool";
+import { DEVICE_TRAITS_TIMEOUT_MS } from "../../src/server/bootedDeviceTraits";
+import { androidDeviceTraits, FakeDeviceTraits } from "../fakes/FakeDeviceTraits";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type { RotaryScroller, RotaryScrollResult } from "../../src/features/wear/RotaryScroll";
 import { screenFingerprint } from "../../src/server/rotaryScrollTool";
@@ -15,16 +20,34 @@ import { toolJson } from "../helpers/toolResponse";
 const android: BootedDevice = { name: "Wear", deviceId: "emulator-5554", platform: "android" };
 const ios: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 
-function setup(result: RotaryScrollResult) {
+function setup(result: RotaryScrollResult, watch: boolean | "unreadable" = true) {
   const calls: number[] = [];
+  const watchChecks: string[] = [];
   const scroller: RotaryScroller = {
     scroll: async ({ delta }) => {
       calls.push(delta);
       return result;
     },
   };
-  return { calls, handler: createRotaryScrollHandler(() => scroller) };
+  const checkWatch: WatchCheck = async (device) => {
+    watchChecks.push(device.deviceId);
+    return watch === "unreadable" ? undefined : watch;
+  };
+  return { calls, watchChecks, handler: createRotaryScrollHandler(() => scroller, checkWatch) };
 }
+
+const scrolled: RotaryScrollResult = {
+  success: true,
+  delta: 2,
+  method: "input_rotaryencoder",
+  attempts: [
+    {
+      method: "input_rotaryencoder",
+      command: "shell input rotaryencoder scroll 2",
+      outcome: "scrolled",
+    },
+  ],
+};
 
 describe("rotaryScroll tool", () => {
   test("reports the working method and the attempts", async () => {
@@ -63,9 +86,34 @@ describe("rotaryScroll tool", () => {
     expect(toolJson(response).reason).toContain("No rotary candidate");
   });
 
-  test("is Android-only", async () => {
-    const { handler } = setup({ success: true, delta: 1, attempts: [] });
+  test("is Android-only, refused before the watch check", async () => {
+    const { handler, watchChecks } = setup({ success: true, delta: 1, attempts: [] });
     await expect(handler(ios, { delta: 1 })).rejects.toBeInstanceOf(ActionableError);
+    expect(watchChecks).toEqual([]);
+  });
+
+  test("a watch gets no warning", async () => {
+    const { handler, watchChecks } = setup(scrolled, true);
+    const json = toolJson(await handler(android, { delta: 2 }));
+    expect(watchChecks).toEqual(["emulator-5554"]);
+    expect(json.success).toBe(true);
+    expect(json).not.toHaveProperty("warning");
+  });
+
+  test("a non-watch device still scrolls but the result warns", async () => {
+    const { handler, calls } = setup(scrolled, false);
+    const json = toolJson(await handler(android, { delta: 2 }));
+    expect(calls).toEqual([2]);
+    expect(json.success).toBe(true);
+    expect(json.warning).toContain("does not announce a watch build");
+    expect(rotaryScrollResultSchema.safeParse(json).success).toBe(true);
+  });
+
+  test("unreadable traits still scroll and warn that the watch is unconfirmed", async () => {
+    const { handler, calls } = setup(scrolled, "unreadable");
+    const json = toolJson(await handler(android, { delta: 2 }));
+    expect(calls).toEqual([2]);
+    expect(json.warning).toContain("Could not read the device traits");
   });
 
   test("delta must be a non-zero integer within the cap", () => {
@@ -74,6 +122,31 @@ describe("rotaryScroll tool", () => {
     expect(rotaryScrollSchema.safeParse({ delta: 0 }).success).toBe(false);
     expect(rotaryScrollSchema.safeParse({ delta: 51 }).success).toBe(false);
     expect(rotaryScrollSchema.safeParse({ delta: 1.5 }).success).toBe(false);
+  });
+});
+
+describe("traitsWatchCheck", () => {
+  test("reads the device traits once with the traits timeout", async () => {
+    const traits = new FakeDeviceTraits(androidDeviceTraits({ formFactor: "watch" }));
+    const check = traitsWatchCheck(traits, new FakeAdbClientFactory());
+    expect(await check(android)).toBe(true);
+    expect(traits.reads).toEqual([
+      { deviceId: "emulator-5554", options: { timeoutMs: DEVICE_TRAITS_TIMEOUT_MS } },
+    ]);
+  });
+
+  test("a phone and an automotive build are not watches", async () => {
+    const traits = new FakeDeviceTraits(androidDeviceTraits({ formFactor: null }));
+    const check = traitsWatchCheck(traits, new FakeAdbClientFactory());
+    expect(await check(android)).toBe(false);
+    traits.setTraits(androidDeviceTraits({ formFactor: "automotive" }));
+    expect(await check(android)).toBe(false);
+  });
+
+  test("a failed traits read is undefined, not a rejection", async () => {
+    const traits = new FakeDeviceTraits(new Error("getprop timed out"));
+    const check = traitsWatchCheck(traits, new FakeAdbClientFactory());
+    expect(await check(android)).toBeUndefined();
   });
 });
 

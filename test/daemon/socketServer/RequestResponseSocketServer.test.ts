@@ -1,7 +1,10 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../../../src/models/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
-import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
+import {
+  RequestResponseSocketServer,
+  type RequestResponseContext,
+} from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import { SocketRequest, SocketResponse } from "../../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
@@ -297,4 +300,118 @@ it.each([
     expect(response).not.toHaveProperty("code");
     expect(response).not.toHaveProperty("retryable");
   }
+});
+
+/** Server whose handler parks on a gate and records the per-request signal it was given. */
+class SignalProbeServer extends RequestResponseSocketServer<TestRequest, TestResponse> {
+  public signals: Array<AbortSignal | undefined> = [];
+  private releases: Array<() => void> = [];
+
+  constructor() {
+    super("/fake/path/signal.sock", new FakeTimer(), "Signal");
+  }
+
+  send(socket: FakeSocket, request: TestRequest): Promise<void> {
+    return this.processLine(socket, JSON.stringify(request));
+  }
+
+  finish(): void {
+    for (const release of this.releases.splice(0)) {
+      release();
+    }
+  }
+
+  protected bypassesRequestChain(request: TestRequest): boolean {
+    return request.action === "bypass";
+  }
+
+  settled(socket: FakeSocket): Promise<void> | undefined {
+    return this.pendingBySocket.get(socket);
+  }
+
+  protected async handleRequest(
+    request: TestRequest,
+    context?: RequestResponseContext,
+  ): Promise<TestResponse> {
+    this.signals.push(context?.signal);
+    await new Promise<void>((resolve) => {
+      this.releases.push(resolve);
+    });
+    return { id: request.id, type: "test_response", success: true };
+  }
+
+  protected createErrorResponse(id: string | undefined, error: string): TestResponse {
+    return { id: id ?? "unknown", type: "test_response", success: false, error };
+  }
+}
+
+describe("per-request client-gone signal (#11817)", () => {
+  it("aborts the handler's signal when the client socket closes mid-request", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    const pending = server.send(socket, { id: "1", action: "echo" });
+    await Promise.resolve();
+    const signal = server.signals[0];
+    expect(signal?.aborted).toBe(false);
+
+    socket.emit("close");
+
+    expect(signal?.aborted).toBe(true);
+    server.finish();
+    await pending;
+  });
+
+  it("starts a queued request's signal aborted when its client disconnected while queued", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    void server.send(socket, { id: "1", action: "echo" });
+    void server.send(socket, { id: "2", action: "echo" });
+    await Promise.resolve();
+    expect(server.signals).toHaveLength(1);
+
+    socket.destroy();
+    socket.emit("close");
+    server.finish();
+    for (let turn = 0; turn < 20 && server.signals.length < 2; turn++) {
+      await Promise.resolve();
+    }
+
+    expect(server.signals).toHaveLength(2);
+    expect(server.signals[1]?.aborted).toBe(true);
+    server.finish();
+    await server.settled(socket);
+  });
+
+  it("does not abort a finished request's signal", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    const pending = server.send(socket, { id: "1", action: "echo" });
+    await Promise.resolve();
+
+    server.finish();
+    await pending;
+    await server.settled(socket);
+
+    socket.emit("close");
+    expect(server.signals[0]?.aborted).toBe(false);
+  });
+
+  it("uses one close listener per socket however many requests are pipelined", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    const baseline = socket.listenerCount("close");
+    for (let id = 1; id <= 12; id++) {
+      void server.send(socket, { id: String(id), action: "bypass" });
+    }
+    for (let turn = 0; turn < 20 && server.signals.length < 12; turn++) {
+      await Promise.resolve();
+    }
+    expect(server.signals).toHaveLength(12);
+    expect(socket.listenerCount("close")).toBe(baseline + 1);
+
+    socket.emit("close");
+
+    expect(server.signals.every((signal) => signal?.aborted)).toBe(true);
+    server.finish();
+  });
 });

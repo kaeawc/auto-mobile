@@ -1,0 +1,57 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "recipient": {},
+      "saved": {}
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["calendar"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "calendar.insert",
+          "args": {
+            "title": {
+              "value": "Dinner"
+            },
+            "start": {
+              "value": 1793000000000
+            },
+            "end": {
+              "value": 1793003600000
+            },
+            "allDay": {
+              "value": false
+            },
+            "location": {
+              "value": "Cafe"
+            },
+            "notes": {
+              "value": "Bring the menu"
+            }
+          },
+          "into": "/data/saved",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_data_model_v1, prototype_platform_calendar_v1"
+}

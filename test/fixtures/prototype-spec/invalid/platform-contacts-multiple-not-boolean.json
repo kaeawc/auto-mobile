@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "c2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "recipient": {},
+      "saved": {}
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["contacts"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "contacts.pick",
+          "args": {
+            "multiple": {
+              "value": "yes"
+            }
+          },
+          "into": "/data/recipient",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.multiple.value"
+}

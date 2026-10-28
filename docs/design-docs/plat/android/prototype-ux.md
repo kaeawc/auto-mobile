@@ -2028,6 +2028,15 @@ another. The module has no events or `/platform` state. Pages other than `app` a
 Android only; the host validator does not yet know the target platform, so that restriction is reported by the
 runtime. No production runtime advertises the module yet.
 
+**Contact and calendar pickers (#14318).** Two modules reach the system pickers, which return only what the
+user picks and need no declared permission. `contacts` (`prototype_platform_contacts_v1`) has
+`contacts.pick` with an optional `multiple` boolean; it is `sensitive` because the result is personal data.
+`calendar` (`prototype_platform_calendar_v1`) has `calendar.insert` with `title` (required, 1-256
+characters), `start` and `end` (required, whole milliseconds since the epoch), `allDay`, `location` (1-256) and
+`notes` (1-2048). Neither module has events or `/platform` state, and a back-out is the typed error
+`cancelled`. The contract cannot yet check an enum list, so the contact `fields` selector is not an argument.
+No production runtime advertises either module yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

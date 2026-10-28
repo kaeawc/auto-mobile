@@ -12,6 +12,10 @@ enum PrototypePlatformValidator {
         case string([String: JSONValue])
         case boolean
         case integer(min: Double, max: Double)
+        /// A contract number without `integer`, such as a playback rate or a 0-1 volume.
+        case number(min: Double, max: Double)
+        /// A state key name (the contract's `key` kind), such as a media player or camera preview id.
+        case key
         case enumeration(Set<String>)
         /// Any other contract rule (arrays, objects), checked by the shared contract walk.
         case contract(JSONValue)
@@ -75,7 +79,11 @@ enum PrototypePlatformValidator {
             } else {
                 preconditionFailure("platform enum argument without values")
             }
-        case "number": .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        case "key": .key
+        case "number" where rule["integer"] == .bool(true):
+            .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        case "number":
+            .number(min: rule["min"]?.numberValue ?? -.infinity, max: rule["max"]?.numberValue ?? .infinity)
         default: .contract(.object(rule))
         }
     }
@@ -481,6 +489,14 @@ enum PrototypePlatformValidator {
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")
+            }
+        case let .number(min, max):
+            guard case let .number(value) = literal, value.isFinite, (min ... max).contains(value) else {
+                throw fail(path, "Invalid number value")
+            }
+        case .key:
+            guard let text = literal.stringValue, PrototypeRepeat.isFieldName(text) else {
+                throw fail(path, "Invalid key value")
             }
         case let .enumeration(values):
             guard case let .string(value) = literal, values.contains(value) else {

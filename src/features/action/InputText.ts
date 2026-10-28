@@ -350,6 +350,15 @@ export class InputText extends BaseVisualChange {
     };
   }
 
+  /** An event mode that cannot type this text runs the plain a11y path and reports it as such. */
+  private async a11yFallback(
+    text: string,
+    options: { imeAction?: ImeAction; dismissKeyboard?: boolean; signal?: AbortSignal },
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const result = await this.executeAndroidTextInput(text, { ...options, mode: "a11y" });
+    return { ...result, method: "a11y" };
+  }
+
   private async executeAndroidEventLastTextInput(
     text: string,
     imeAction?: ImeAction,
@@ -363,13 +372,7 @@ export class InputText extends BaseVisualChange {
       logger.info(
         "[InputText] eventLast requested but no printable non-whitespace ASCII character was found; using a11y",
       );
-      const result = await this.executeAndroidTextInput(text, {
-        imeAction,
-        dismissKeyboard,
-        mode: "a11y",
-        signal,
-      });
-      return { ...result, method: "a11y" };
+      return this.a11yFallback(text, { imeAction, dismissKeyboard, signal });
     }
 
     const { index, char } = split;
@@ -381,13 +384,7 @@ export class InputText extends BaseVisualChange {
       logger.info(
         `[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`,
       );
-      const result = await this.executeAndroidTextInput(text, {
-        imeAction,
-        dismissKeyboard,
-        mode: "a11y",
-        signal,
-      });
-      return { ...result, method: "a11y" };
+      return this.a11yFallback(text, { imeAction, dismissKeyboard, signal });
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
@@ -447,13 +444,7 @@ export class InputText extends BaseVisualChange {
     assertInputNotAborted(signal);
     const chars = Array.from(text);
     if (!(await this.hasAsciiKeyEventPlan(chars, signal))) {
-      const result = await this.executeAndroidTextInput(text, {
-        imeAction,
-        dismissKeyboard,
-        mode: "a11y",
-        signal,
-      });
-      return { ...result, method: "a11y" };
+      return this.a11yFallback(text, { imeAction, dismissKeyboard, signal });
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);

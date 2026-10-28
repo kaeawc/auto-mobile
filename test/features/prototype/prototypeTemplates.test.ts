@@ -2,9 +2,9 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderPrototypeGuide } from "../../../src/features/prototype/prototypeGuide";
-import { PROTOTYPE_NODE_TYPES } from "../../../src/features/prototype/prototypeSpec";
 import { prototypeAccessibilityOutput } from "../../../src/features/prototype/prototypeAccessibilityLint";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
+import { untaggedInteractiveNodes } from "../../helpers/prototypeTestTags";
 
 const root = join(import.meta.dir, "../../..");
 const validDirectory = join(root, "test/fixtures/prototype-spec/valid");
@@ -21,54 +21,7 @@ const TEMPLATES = [
   "template-dashboard.json",
 ];
 
-/** Node types a user taps, types into or drags; each needs a testTag so scripts can find it. */
-const INTERACTIVE_TYPES = new Set([
-  "button",
-  "iconButton",
-  "fab",
-  "chip",
-  "textField",
-  "switch",
-  "checkbox",
-  "radioGroup",
-  "select",
-  "slider",
-  "segmentedButton",
-  "tabBar",
-  "bottomNav",
-  "searchBar",
-  "datePicker",
-  "timePicker",
-  "listItem",
-]);
-const GESTURE_KEYS = ["onTap", "onLongPress", "onDoubleTap"];
-const NODE_TYPES = new Set<string>(PROTOTYPE_NODE_TYPES);
-
 type Json = Record<string, unknown>;
-const isObject = (value: unknown): value is Json =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
-
-/** Every node object under `value`; a list item's `trailing` control is part of its row. */
-function nodes(value: unknown, found: Json[] = []): Json[] {
-  if (Array.isArray(value)) {
-    for (const child of value) {
-      nodes(child, found);
-    }
-    return found;
-  }
-  if (!isObject(value)) {
-    return found;
-  }
-  if (typeof value.type === "string" && NODE_TYPES.has(value.type)) {
-    found.push(value);
-  }
-  for (const [key, child] of Object.entries(value)) {
-    if (key !== "trailing") {
-      nodes(child, found);
-    }
-  }
-  return found;
-}
 
 const read = (path: string): string => readFileSync(join(root, path), "utf8");
 const decoded = new Map<string, Json>();
@@ -105,13 +58,7 @@ describe("prototype template gallery", () => {
       });
 
       test("sets a testTag on every interactive node", () => {
-        const untagged = nodes(decoded.get(name)).filter(
-          (node) =>
-            (INTERACTIVE_TYPES.has(node.type as string) ||
-              GESTURE_KEYS.some((key) => node[key] !== undefined)) &&
-            typeof node.testTag !== "string",
-        );
-        expect(untagged.map((node) => JSON.stringify(node).slice(0, 80))).toEqual([]);
+        expect(untaggedInteractiveNodes(decoded.get(name))).toEqual([]);
       });
 
       test("passes the accessibility lint with zero findings (#14126)", () => {

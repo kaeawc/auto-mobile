@@ -374,6 +374,28 @@
                     }
                   },
                   {
+                    "type": "cancelTimer",
+                    "id": "driver"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "pickup"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "dropoff"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "rideId",
+                    "value": ""
+                  },
+                  {
+                    "type": "setState",
+                    "key": "rideName",
+                    "value": ""
+                  },
+                  {
                     "type": "setState",
                     "key": "stage",
                     "value": "matching"

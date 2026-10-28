@@ -40,17 +40,26 @@ final class HostTransportRegistryTests: XCTestCase {
         XCTAssertEqual(
             descriptor(.urlSession, registered: true),
             SdkCapabilityDescriptor(
-                id: "network.transport.urlsession", state: .supported, reason: nil, faultEnforcement: .enforced
+                id: "network.transport.urlsession", state: .supported, reason: nil, faultEnforcement: .enforced,
+                faultActions: ["closeConnection", "dropBytes", "error", "latency", "response", "status"]
             )
         )
     }
 
-    func testRegisteredAdapterTransportsOnlyEvaluateFaults() {
-        for transport in [HostTransport.backgroundURLSession, .webSocket, .nwConnection] {
+    func testRegisteredWebSocketAndNWConnectionEnforceDelayAndFail() {
+        for transport in [HostTransport.webSocket, .nwConnection] {
             let result = descriptor(transport, registered: true)
             XCTAssertEqual(result.state, .supported, transport.rawValue)
-            XCTAssertEqual(result.faultEnforcement, .evaluateOnly, transport.rawValue)
+            XCTAssertEqual(result.faultEnforcement, .enforced, transport.rawValue)
+            XCTAssertEqual(result.faultActions, ["closeConnection", "error", "latency"], transport.rawValue)
         }
+    }
+
+    func testRegisteredBackgroundSessionOnlyEvaluatesFaults() {
+        let result = descriptor(.backgroundURLSession, registered: true)
+        XCTAssertEqual(result.state, .supported)
+        XCTAssertEqual(result.faultEnforcement, .evaluateOnly)
+        XCTAssertEqual(result.faultActions, [])
     }
 
     func testWithoutFaultRulesNoTransportEnforces() {

@@ -95,15 +95,28 @@ final class HostTransportRegistry: Sendable {
         } else {
             (.supported, nil)
         }
+        let enforcedActions = state == .supported && faultRulesAvailable ? enforcedFaultActions(transport) : nil
         let enforcement: SdkFaultEnforcement = if state != .supported || !faultRulesAvailable {
             .notEnforceable
-        } else if transport == .urlSession {
+        } else if enforcedActions != nil {
             .enforced
         } else {
             .evaluateOnly
         }
         return SdkCapabilityDescriptor(
-            id: transport.rawValue, state: state, reason: reason, faultEnforcement: enforcement
+            id: transport.rawValue, state: state, reason: reason, faultEnforcement: enforcement,
+            faultActions: (enforcedActions ?? []).map(\.rawValue)
         )
+    }
+
+    /// The fault actions the SDK applies on `transport`, or nil when the host must apply decisions.
+    /// The URLProtocol serves fail, delayed and synthetic responses; the WebSocket and NWConnection
+    /// adapters apply delay and fail (#5163). Background sessions only evaluate.
+    static func enforcedFaultActions(_ transport: HostTransport) -> [NetworkFaultAction]? {
+        switch transport {
+        case .urlSession: [.closeConnection, .dropBytes, .error, .latency, .response, .status]
+        case .webSocket, .nwConnection: AdapterFaultOutcome.enforcedActions
+        case .backgroundURLSession, .other: nil
+        }
     }
 }

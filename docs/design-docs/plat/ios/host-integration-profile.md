@@ -11,8 +11,8 @@ tracked in #15693.
 The SDK reports each family as an `SdkCapabilityDescriptor` (`ios/sdk-wire`). It has the same
 `id` / `state` / `reason` shape and the same `SdkCapabilityState` spelling as the Android SDK's
 `SdkCapabilityDocument`, so one host-side parser reads both platforms. A state the reader does not
-know decodes as `UNKNOWN` on both platforms. Transport descriptors add `faultEnforcement`, which
-Android-shaped parsers drop.
+know decodes as `UNKNOWN` on both platforms. Transport descriptors add `faultEnforcement` and
+`faultActions`, which Android-shaped parsers drop.
 
 | Profile term | `state`           | `reason`                          | Meaning                                                      |
 | ------------ | ----------------- | --------------------------------- | ------------------------------------------------------------ |
@@ -25,7 +25,8 @@ Android-shaped parsers drop.
 `faultEnforcement` is `ENFORCED` when the SDK applies a matched fault rule itself, `EVALUATE_ONLY`
 when it returns a decision the host must apply, and `NONE` when no rule can take effect. Only a
 `SUPPORTED` transport in a DEBUG build reports anything other than `NONE`, because fault rules
-exist only in DEBUG builds.
+exist only in DEBUG builds. `faultActions` lists the rule actions an `ENFORCED` transport applies;
+any other action is matched, recorded as `fault_outcome: unsupported` and not applied.
 
 An unregistered family is never `SUPPORTED`: missing registration reads as host opt-in rather
 than full coverage. `SUPPORTED` means the host registered the family. For the adapter families it
@@ -41,12 +42,35 @@ one descriptor per `HostTransport`, in declaration order.
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------ |
 | Default and custom `URLSession` (`network.transport.urlsession`)    | `registerURLSession(configuration)` before `URLSession(configuration:)`                                  | SDK `URLProtocol`                   | `ENFORCED`                     |
 | Background `URLSession` (`network.transport.urlsession.background`) | `registerURLSession(backgroundConfiguration)`, then forward delegate callbacks to `registration.adapter` | `URLSessionNetworkCaptureAdapter`   | `EVALUATE_ONLY`                |
-| `URLSessionWebSocketTask` (`network.transport.websocket`)           | `registerWebSocket()`, then forward sent and received frames                                             | `WebSocketNetworkCaptureAdapter`    | `EVALUATE_ONLY`                |
-| `NWConnection` (`network.transport.nwconnection`)                   | `registerNWConnection()`, then forward state, send and receive callbacks                                 | `NWConnectionNetworkCaptureAdapter` | `EVALUATE_ONLY`                |
+| `URLSessionWebSocketTask` (`network.transport.websocket`)           | `registerWebSocket()`, then send and receive through the adapter                                         | `WebSocketNetworkCaptureAdapter`    | `ENFORCED`                     |
+| `NWConnection` (`network.transport.nwconnection`)                   | `registerNWConnection()`, start through the adapter, then forward state, send and receive callbacks      | `NWConnectionNetworkCaptureAdapter` | `ENFORCED`                     |
 | Anything else (`network.transport.other`)                           | none                                                                                                     | `recordRequest`                     | `NONE`                         |
 
-Fault enforcement on the three adapter transports is #5163. It changes their `faultEnforcement`,
-not their registration.
+### Fault enforcement
+
+The `URLProtocol` applies `error` and `closeConnection` as a `URLError`, and serves `status`,
+`response` and `dropBytes` as a synthetic response, after any `delayMs`. The WebSocket and
+NWConnection adapters apply only delay and fail (#5163). The host gives the adapter the call that
+moves traffic:
+
+- `WebSocketNetworkCaptureAdapter.send(_:on:connectionId:completionHandler:)` and
+  `receive(on:connectionId:completionHandler:)`, used instead of the task's own `send` and
+  `receive`. `latency` holds the frame for `delayMs`. `error` and `closeConnection` close the task
+  with `goingAway`, or reset it for a `reset` error type, and complete with
+  `URLError(.networkConnectionLost)`. Rules match `SEND` or `RECEIVE` by direction.
+- `NWConnectionNetworkCaptureAdapter.start(_:queue:endpoint:connectionId:requestId:onFault:)`,
+  used instead of `connection.start(queue:)`. `latency` delays the start. `error` and
+  `closeConnection` never start the connection: they cancel it and pass `NWError.posix` to
+  `onFault` (`ECONNRESET`, `ETIMEDOUT` or `EHOSTUNREACH` by error type, otherwise
+  `ECONNREFUSED`).
+
+Each decision is evaluated once, so a rule's `limit` and one-shot expiry count exchanges, not
+retries. A fail is recorded as a failed exchange with error `fault:<id>:<action>`, the same form the
+`URLProtocol` uses. Delay and unsupported decisions add `fault_id`, `fault_action`, `fault_outcome`
+and `fault_delay_ms` metadata, either on the host's request (NWConnection `requestId`) or on a
+record of their own. With no matching rule, or in a release build, the adapter calls straight
+through. Background sessions and the forwarding-only adapter methods (`recordFrame`,
+`evaluateFault`) never change traffic.
 
 ### Ownership and lifecycle
 

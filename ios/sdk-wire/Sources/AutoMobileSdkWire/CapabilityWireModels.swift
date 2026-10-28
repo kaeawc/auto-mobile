@@ -28,22 +28,28 @@ public enum SdkFaultEnforcement: String, Codable, Equatable, Sendable {
 }
 
 /// One capability and its current state, in the Android `SdkCapabilityDescriptor` shape. Transport
-/// descriptors also carry ``faultEnforcement``; Android parsers ignore the extra key.
+/// descriptors also carry ``faultEnforcement`` and ``faultActions``; Android parsers ignore the
+/// extra keys.
 public struct SdkCapabilityDescriptor: Codable, Equatable, Sendable {
     public let id: String
     public let state: SdkCapabilityState
     public let reason: String?
     public let faultEnforcement: SdkFaultEnforcement?
+    /// The fault-rule actions the SDK applies on this transport, sorted. Any other action is
+    /// matched but not applied. Empty unless ``faultEnforcement`` is `ENFORCED`.
+    public let faultActions: [String]?
 
     public init(
         id: String,
         state: SdkCapabilityState,
         reason: String? = nil,
-        faultEnforcement: SdkFaultEnforcement? = nil
+        faultEnforcement: SdkFaultEnforcement? = nil,
+        faultActions: [String]? = nil
     ) {
         self.id = id
         self.state = state
         self.reason = reason
         self.faultEnforcement = faultEnforcement
+        self.faultActions = faultActions?.sorted()
     }
 }

@@ -565,10 +565,13 @@ public final class URLSessionNetworkCaptureAdapter: Sendable
   public func didFail(requestId: String, error: Error)
 public final class WebSocketNetworkCaptureAdapter: Sendable
   public init(recorder: NetworkCaptureRecorder)
+  public func send( _ message: URLSessionWebSocketTask.Message, on task: URLSessionWebSocketTask, connectionId: String?, sessionId: String? = nil, completionHandler: @escaping @Sendable (Error?) -> Void )
+  public func receive( on task: URLSessionWebSocketTask, connectionId: String?, sessionId: String? = nil, completionHandler: @escaping @Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void )
   public func evaluateFault( url: String, connectionId: String?, direction: NetworkCaptureDirection, sessionId: String? = nil )
   public func recordFrame( url: String, connectionId: String?, direction: NetworkCaptureDirection, frameType: WebSocketFrameType, payloadSize: Int? )
 public final class NWConnectionNetworkCaptureAdapter: Sendable
   public init(recorder: NetworkCaptureRecorder)
+  public func start( _ connection: NWConnection, queue: DispatchQueue, endpoint: String, connectionId: String, requestId: String? = nil, sessionId: String? = nil, onFault: @escaping @Sendable (NWError) -> Void )
   public func evaluateFault( endpoint: String, connectionId: String, sessionId: String? = nil )
   @discardableResult public func begin( endpoint: String, connectionId: String )
   public func didSend(requestId: String, bytes: Int)
@@ -995,7 +998,8 @@ public struct SdkCapabilityDescriptor: Codable, Equatable, Sendable
   public let state: SdkCapabilityState
   public let reason: String?
   public let faultEnforcement: SdkFaultEnforcement?
-  public init( id: String, state: SdkCapabilityState, reason: String? = nil, faultEnforcement: SdkFaultEnforcement? = nil )
+  public let faultActions: [String]?
+  public init( id: String, state: SdkCapabilityState, reason: String? = nil, faultEnforcement: SdkFaultEnforcement? = nil, faultActions: [String]? = nil )
 
 // sdk-wire/NetworkWireModels.swift
 public struct NetworkMockRuleDTO: Codable, Sendable, Equatable

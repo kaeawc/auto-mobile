@@ -1,0 +1,90 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "voiceNote": {}
+      }
+    },
+    "state": {
+      "recStatus": ""
+    },
+    "requires": {
+      "platform": ["audioRecorder"],
+      "permissions": [
+        {
+          "name": "microphone",
+          "purpose": "Record a voice note"
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "audioRecorder.statusChanged": [
+          {
+            "type": "emit",
+            "name": "recorder_status"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{platform:/audioRecorder/status} {platform:/audioRecorder/elapsedMs} {platform:/audioRecorder/level}"
+        },
+        {
+          "type": "button",
+          "label": "Hold to record",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.start",
+              "args": {
+                "maxDurationMs": {
+                  "value": 60000
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.stop",
+              "args": {},
+              "into": "/data/draft/voiceNote",
+              "statusKey": "recStatus"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Discard",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.cancel",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1", "prototype_data_model_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_audioRecorder_v1"
+}

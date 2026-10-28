@@ -36,6 +36,14 @@ public struct PlatformEvent: Equatable, Sendable {
     }
 }
 
+extension PlatformEvent {
+    /// A module's own signal that its state changed with no authored event to deliver: the driver
+    /// refreshes `/platform` and runs no handler. The name is outside the contract's event names.
+    static func stateRefresh(_ module: String) -> PlatformEvent {
+        PlatformEvent(event: "\(module).$state", data: .null)
+    }
+}
+
 /// Modules run on the same actor as interactions. Snapshots must be JSON objects; events notify
 /// the driver to refresh state. A module must cooperate with task cancellation and bound its stream.
 @MainActor

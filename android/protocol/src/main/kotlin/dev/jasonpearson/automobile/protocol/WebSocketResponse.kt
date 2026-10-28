@@ -887,6 +887,8 @@ data class PrototypeResult(
    * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  /** Only a successful show reply, when the host knows the target display shape. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val screenRound: Boolean? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val saved: SavedPrototypeInfo? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val savedPrototypes: List<SavedPrototypeEntry>? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val errorCode: SavedPrototypeErrorCode? = null,

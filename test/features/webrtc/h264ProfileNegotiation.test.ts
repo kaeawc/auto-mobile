@@ -76,7 +76,7 @@ const REAL_H264_SOURCES: readonly RealH264Source[] = [
   },
   {
     name: "iOS helper (VideoToolbox baseline, level 4.2)",
-    origin: "ios/screen-capture/Sources/ScreenCaptureHelper/H264VideoEncoder.swift",
+    origin: "src/features/webrtc/IosH264Source.ts",
     profile: "constrained-baseline",
     advertisedProfileLevelId: WEBRTC_H264_PROFILE_LEVEL_ID,
     profileIdc: BASELINE_PROFILE_IDC,

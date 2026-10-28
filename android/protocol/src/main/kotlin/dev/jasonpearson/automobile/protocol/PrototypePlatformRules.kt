@@ -262,6 +262,13 @@ object PrototypePlatformCalls {
 
   fun eventOwner(name: String): String? = eventModule(name)
 
+  /** The contract's trailing debounce for a module event, or null when it delivers at once. */
+  fun eventDebounceMs(name: String): Long? {
+    val owner = eventModule(name) ?: return null
+    val event = module(owner)?.member("events")?.member(name.substringAfter('.'))
+    return (event?.get("debounceMs") as? JsonPrimitive)?.content?.toLongOrNull()
+  }
+
   fun argumentsError(call: String, args: JsonObject): PrototypeSpecError? {
     val definition = callDefinition(call)?.second ?: return fail("call", "Unknown platform call")
     val bound = JsonObject(args.mapValues { JsonObject(mapOf("value" to it.value)) })

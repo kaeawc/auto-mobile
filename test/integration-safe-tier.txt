@@ -274,6 +274,7 @@ test/server/unissuedSessionBoundConnection.integration.test.ts | safe | hermetic
 test/setup/realDeviceToolSpawnGuardPreload.integration.test.ts | unsafe | Bun.spawnSync of bun test and adb devices fixtures L26/L40/L94
 test/utils/FileDownloader.integration.test.ts | safe | fake response streams, no network or spawn; writes only under cwd/scratch L186
 test/utils/FileDownloaderNodeHttp.integration.test.ts | safe | loopback 127.0.0.1:0 server, curl/wget stubbed unavailable L36/L52
+test/utils/android-cmdline-tools/emulatorGrpc/Http2GrpcTransport.integration.test.ts | safe | in-process node:http2 fake emulator on a 127.0.0.1 ephemeral port; no files, processes or devices
 test/utils/deviceSnapshotStore.integration.test.ts | safe | store rooted in mkdtemp tmpdir L12
 test/utils/image/backend/JimpBackend.integration.test.ts | safe | in-process Jimp image processing only
 test/utils/image/backend/JimpCliBackend.integration.test.ts | safe | FakeWebpCodec injected, no CLI spawn L42

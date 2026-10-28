@@ -53,3 +53,15 @@ export function appContainerFileAppId(key: string): string | undefined {
     return undefined;
   }
 }
+
+/** Whether a journal key identifies files staged in the managed Files fixture. */
+export function isUserFilesScopedKey(key: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(key);
+    return Array.isArray(parsed) && parsed[0] === "user_files";
+  } catch (error) {
+    // Malformed legacy keys do not identify a user_files scope.
+    logger.debug("User-files journal key is not JSON; leaving it unmatched", error);
+    return false;
+  }
+}

@@ -68,7 +68,8 @@ not select `erase`.
 `reuse.ios.mode: "minimal"` (#14682) keeps the simulator booted and runs only these
 steps on release, in order, each with its own time budget (`AUTOMOBILE_IOS_RESET_STEP_BUDGET_MS`):
 
-1. terminate and uninstall each app the session installed (from the mutation journal),
+1. terminate and uninstall each app the session installed (from the mutation journal), and uninstall
+   the managed Files fixture app when the session staged `user_files` files,
 2. `simctl keychain reset`,
 3. `simctl privacy reset all`,
 4. `simctl ui appearance light` and `content_size large` (the defaults a broker-created

@@ -96,6 +96,11 @@ export abstract class RequestResponseSocketServer<
     const clientGone = new AbortController();
     const abortOnClose = (): void => clientGone.abort(new Error("Client socket closed"));
     socket.once("close", abortOnClose);
+    // A request queued behind another starts after the socket may already have closed, and that
+    // `close` event will not fire again.
+    if (socket.destroyed) {
+      abortOnClose();
+    }
     try {
       const response = await this.handleRequest(request, { signal: clientGone.signal });
       this.sendJson(socket, response);

@@ -355,6 +355,27 @@ describe("per-request client-gone signal (#11817)", () => {
     await pending;
   });
 
+  it("starts a queued request's signal aborted when its client disconnected while queued", async () => {
+    const server = new SignalProbeServer();
+    const socket = new FakeSocket();
+    void server.send(socket, { id: "1", action: "echo" });
+    void server.send(socket, { id: "2", action: "echo" });
+    await Promise.resolve();
+    expect(server.signals).toHaveLength(1);
+
+    socket.destroy();
+    socket.emit("close");
+    server.finish();
+    for (let turn = 0; turn < 20 && server.signals.length < 2; turn++) {
+      await Promise.resolve();
+    }
+
+    expect(server.signals).toHaveLength(2);
+    expect(server.signals[1]?.aborted).toBe(true);
+    server.finish();
+    await server.settled(socket);
+  });
+
   it("does not abort a finished request's signal or leak the close listener", async () => {
     const server = new SignalProbeServer();
     const socket = new FakeSocket();

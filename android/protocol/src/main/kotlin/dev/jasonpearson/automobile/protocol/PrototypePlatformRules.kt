@@ -62,6 +62,7 @@ internal object PrototypePlatformRules {
       PrototypeChannels::error,
       PrototypeAuthRules::blockError,
       PrototypeSecureStorageRules::blockError,
+      PrototypeLocationRules::blockError,
       ::requiresError,
     )
 

@@ -11,6 +11,7 @@ import {
   prototypeSecureStorageEmitError,
   prototypeSecureStorageError,
 } from "./prototypeSecureStorage";
+import { prototypeLocationBlockError } from "./prototypeLocationBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -574,13 +575,14 @@ export function prototypePlatformError(
 
 /**
  * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
- * then `requires`.
+ * the location block, then `requires`.
  */
 function rootBlockError(root: Raw): PrototypePlatformError | undefined {
   return (
     prototypeChannelsError(root) ??
     prototypeAuthBlockError(root) ??
     prototypeSecureStorageError(root) ??
+    prototypeLocationBlockError(root) ??
     requiresError(root)
   );
 }

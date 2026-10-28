@@ -9,6 +9,7 @@ import {
 import {
   createNativeCrashReportFinder,
   createNativeCrashReportReader,
+  IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS,
   PHYSICAL_IOS_CRASH_REPORTS_UNSUPPORTED_REASON,
   PollingCrashReportFinder,
 } from "../../../src/features/crashReports/NativeCrashReportFinder";
@@ -229,6 +230,50 @@ describe("crash report lookup wiring (#14103)", () => {
     });
     expect(calls).toBe(3);
     expect(timer.getSleepHistory()).toEqual([500, 500]);
+  });
+
+  const SIMULATOR_DEVICE = { deviceId: SIMULATOR, name: "iPhone 17", platform: "ios" } as const;
+  const elapsed = (timer: FakeTimer) => timer.getSleepHistory().reduce((sum, ms) => sum + ms, 0);
+
+  test("waits for a Simulator .ips that ReportCrash writes 12 s after the crash", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const reports = new MemoryReports();
+    // The report only exists once 12 s of polling have passed (seen under host load).
+    const lateReports: CrashReportFileSystem = {
+      readdir: async (path) => {
+        if (elapsed(timer) >= 12_000 && reports.files.size === 0) {
+          reports.add("late.ips", IPS);
+        }
+        return reports.readdir(path);
+      },
+      stat: (path) => reports.stat(path),
+      readFileBuffer: (path) => reports.readFileBuffer(path),
+    };
+    const finder = new PollingCrashReportFinder(
+      new IosSimulatorCrashReportFinder(SIMULATOR, lateReports, REPORTS),
+      timer,
+      IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS,
+    );
+
+    expect(await finder.find(query)).toMatchObject({
+      status: "found",
+      report: { processId: 4321 },
+    });
+  });
+
+  test("gives up on a missing Simulator .ips after about 20 s", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const finder = createNativeCrashReportFinder(SIMULATOR_DEVICE, {
+      adb: new FakeAdbClient(),
+      fileSystem: new MemoryReports(),
+      timer,
+    });
+
+    expect(await finder.find(query)).toEqual({ status: "notFound" });
+    expect(timer.getSleepHistory()).toEqual([...IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS]);
+    expect(elapsed(timer)).toBe(20_000);
   });
 
   test("gates physical iOS with a typed unsupported reason", async () => {

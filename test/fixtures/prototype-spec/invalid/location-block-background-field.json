@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "location-block-background-field",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "fixes": 0
+    },
+    "requires": {
+      "platform": ["location"],
+      "permissions": [
+        {
+          "name": "location",
+          "purpose": "Show rides near you"
+        }
+      ]
+    },
+    "location": {
+      "accuracy": "approximate",
+      "minIntervalMs": 5000,
+      "minDistanceM": 25,
+      "background": true
+    },
+    "platform": {
+      "on": {
+        "location.updated": [
+          {
+            "type": "increment",
+            "key": "fixes"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Fixes {fixes}"
+    }
+  },
+  "expectedPath": "location.background"
+}

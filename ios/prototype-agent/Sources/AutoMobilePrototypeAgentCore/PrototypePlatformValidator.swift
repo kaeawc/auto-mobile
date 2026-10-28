@@ -117,13 +117,14 @@ enum PrototypePlatformValidator {
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
         requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
-        storage: JSONValue? = nil, root: JSONValue, state: [String: JSONValue]
+        storage: JSONValue? = nil, location: JSONValue? = nil, root: JSONValue, state: [String: JSONValue]
     )
         throws
     {
         try PrototypeChannels.validate(channels?.objectFields, requires: requires, state: state)
         try PrototypeAuthRules.validateBlock(auth, requires: requires)
         try PrototypeSecureStorageRules.validateBlock(storage, requires: requires, state: state)
+        try PrototypeLocationRules.validateBlock(location, requires: requires)
         var declared = try validateRequires(requires)
         declared.channels = channels?.objectFields ?? [:]
         declared.hasAuth = auth?.objectFields != nil

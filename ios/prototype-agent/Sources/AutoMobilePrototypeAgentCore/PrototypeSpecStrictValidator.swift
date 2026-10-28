@@ -43,6 +43,7 @@ public enum PrototypeSpecStrictValidator {
                 channels: fields["channels"],
                 auth: fields["auth"],
                 storage: fields["storage"],
+                location: fields["location"],
                 root: root,
                 state: state
             )

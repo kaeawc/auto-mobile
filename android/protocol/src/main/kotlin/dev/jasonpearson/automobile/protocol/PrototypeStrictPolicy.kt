@@ -398,26 +398,19 @@ internal object PrototypeStrictPolicy {
       val type = fields.text("type") ?: ""
       if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
-        if (key == "form" && field == "body") {
-          (child as? JsonObject)?.values?.forEach { scan(it) }
-          continue
+        when {
+          scansValuesOnly(key, field, type) -> (child as? JsonObject)?.values?.forEach { scan(it) }
+          skipsScan(key, type) -> Unit
+          key == "repeat" -> repeatFeatures(child)
+          else -> {
+            if (key == "transition" && type in setOf("stack", "push", "replace")) {
+              need("stack_transitions")
+            } else {
+              fieldFeatures(key, child, field)
+            }
+            descend(key, child, routeAlias)
+          }
         }
-        // Header and query names are free-form strings, so the map itself is never a typed object.
-        if (type == "request" && key in listOf("headers", "query")) {
-          (child as? JsonObject)?.values?.forEach { scan(it) }
-          continue
-        }
-        if (skipsScan(key, type)) continue
-        if (key == "repeat") {
-          repeatFeatures(child)
-          continue
-        }
-        if (key == "transition" && type in setOf("stack", "push", "replace")) {
-          need("stack_transitions")
-        } else {
-          fieldFeatures(key, child, field)
-        }
-        descend(key, child, routeAlias)
       }
     }
 
@@ -608,3 +601,8 @@ private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (Strin
     PrototypeSpecContract.definitions.getValue("node").jsonObject.getValue("variants").jsonObject
   if (type in nodeTypes && PrototypeGlassRules.needsNamespace(fields)) need("platform_namespace")
 }
+
+// A form body and a request's header and query maps have free-form names, so only their values
+// can be typed objects.
+private fun scansValuesOnly(key: String, field: String, type: String): Boolean =
+  (key == "form" && field == "body") || (type == "request" && key in listOf("headers", "query"))

@@ -9,6 +9,8 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
+import { MAX_MOCK_DOCUMENT_BYTES } from "../../src/features/prototype/prototypeMockSchema";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -17,16 +19,19 @@ import type { BootedDevice } from "../../src/models";
 
 const device: BootedDevice = { deviceId: "test-device", platform: "android", name: "Test" };
 let dispose: () => void, restore: () => void, client: FakeCtrlProxy;
+let files: FakePrototypeAssetFileReader;
 
 beforeEach(() => {
   restore = preserveToolRegistry();
   const timer = new FakeTimer();
+  files = new FakePrototypeAssetFileReader();
   client = new FakeCtrlProxy(timer);
   client.setSupportedCommands(["prototype_persistence_replay_v1"]);
   dispose = registerPrototypeTools({
     clientFactory: () => client,
     adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
     lastRenderedObservation: () => undefined,
+    assetFileReader: files,
     clock: timer,
     timer,
     idGenerator: new CountingIdGenerator(),
@@ -199,4 +204,170 @@ test("schema accepts the three actions with their fields", () => {
   ]) {
     expect(prototypeSchema.safeParse(args).success).toBe(true);
   }
+});
+
+const window = { placement: { type: "fullscreen" as const } };
+const shownSpec = { id: "p", window, root: { type: "text" as const, text: "hi" } };
+
+async function requestBody(url: string): Promise<unknown> {
+  const sent: unknown[] = [];
+  await client
+    .getPrototypeRequestHost()!
+    .handleRequest(
+      { type: "prototype_request", requestId: "r", prototypeId: "p", method: "GET", url },
+      (response) => {
+        sent.push(response);
+      },
+    );
+  return sent[0];
+}
+
+test("show with mock defines the backends before the spec is sent, replacing earlier ones", async () => {
+  await call({
+    action: "defineBackend",
+    backendId: "shop",
+    backend: { routes: [{ method: "GET", path: "/v", body: 1 }] },
+  });
+  const shown = await call({
+    action: "show",
+    spec: shownSpec,
+    mock: {
+      shop: { routes: [{ method: "GET", path: "/v", body: 2 }] },
+      news: { collections: { posts: [{ id: 1 }] } },
+    },
+  });
+  expect(shown.success).toBe(true);
+  expect(await requestBody("https://shop.mock.automobile.invalid/v")).toMatchObject({
+    ok: true,
+    body: 2,
+  });
+  expect(await requestBody("https://news.mock.automobile.invalid/posts")).toMatchObject({
+    ok: true,
+    body: [{ id: 1 }],
+  });
+});
+
+test("show with mockPath reads the document from the file", async () => {
+  files.addFile(
+    "/mocks/shop.json",
+    Buffer.from(JSON.stringify({ shop: { collections: { items: [{ id: "a" }] } } })),
+  );
+  const shown = await call({ action: "show", spec: shownSpec, mockPath: "/mocks/shop.json" });
+  expect(shown.success).toBe(true);
+  expect(files.reads).toEqual(["/mocks/shop.json"]);
+  expect(await requestBody("https://shop.mock.automobile.invalid/items/a")).toMatchObject({
+    ok: true,
+    body: { id: "a" },
+  });
+});
+
+test.each<[string, () => void, Record<string, unknown>, RegExp]>([
+  [
+    "a relative path",
+    () => {},
+    { mockPath: "mocks.json" },
+    /mockPath mocks.json: path must be absolute/,
+  ],
+  [
+    "a missing file",
+    () => {},
+    { mockPath: "/mocks/none.json" },
+    /mockPath \/mocks\/none.json: cannot read file/,
+  ],
+  [
+    "invalid JSON",
+    () => files.addFile("/m.json", Buffer.from("{nope")),
+    { mockPath: "/m.json" },
+    /mockPath \/m.json: invalid JSON/,
+  ],
+  [
+    "an array document",
+    () => files.addFile("/m.json", Buffer.from("[]")),
+    { mockPath: "/m.json" },
+    /expected an object of \{backendId: definition\}/,
+  ],
+  [
+    "a null document",
+    () => files.addFile("/m.json", Buffer.from("null")),
+    { mockPath: "/m.json" },
+    /expected an object/,
+  ],
+  [
+    "an oversize file",
+    () => files.addFile("/m.json", Buffer.alloc(MAX_MOCK_DOCUMENT_BYTES + 1, 32)),
+    { mockPath: "/m.json" },
+    /the limit is 2097152/,
+  ],
+  [
+    "an invalid definition",
+    () => {},
+    { mock: { shop: { collections: { items: [{ id: 1 }, { id: 1 }] } } } },
+    /shop\.collections\.items/,
+  ],
+  [
+    "an invalid backend id",
+    () => {},
+    { mock: { "Bad Id": {} } },
+    /Mock backend id "Bad Id" must match/,
+  ],
+])(
+  "show with %s fails without sending the spec or defining anything",
+  async (_name, arrange, extra, message) => {
+    arrange();
+    await call({ action: "defineBackend", backendId: "keep", backend: {} });
+    const shown = await call({ action: "show", spec: shownSpec, ...extra });
+    expect(shown.success).toBe(false);
+    expect(shown.error).toMatch(message);
+    expect((await call({ action: "status" })).prototypes ?? []).toEqual([]);
+    expect((await call({ action: "backendLog", backendId: "keep" })).success).toBe(true);
+  },
+);
+
+test("a show with several mocks defines all or none", async () => {
+  await call({
+    action: "defineBackend",
+    backendId: "shop",
+    backend: { routes: [{ method: "GET", path: "/v", body: 1 }] },
+  });
+  const shown = await call({
+    action: "show",
+    spec: shownSpec,
+    mock: { shop: { routes: [{ method: "GET", path: "/v", body: 2 }] }, broken: { seed: -1 } },
+  });
+  expect(shown.success).toBe(false);
+  expect(shown.error).toMatch(/broken\.seed/);
+  expect(await call({ action: "backendLog", backendId: "broken" })).toMatchObject({
+    success: false,
+  });
+  // Still the old definition.
+  await call({ action: "show", spec: shownSpec });
+  expect(await requestBody("https://shop.mock.automobile.invalid/v")).toMatchObject({ body: 1 });
+});
+
+test("schema rejects mock with mockPath, and mock on actions other than show", () => {
+  const both = prototypeSchema.safeParse({
+    action: "show",
+    spec: shownSpec,
+    mock: {},
+    mockPath: "/a.json",
+  });
+  expect(both.success).toBe(false);
+  expect(JSON.stringify(both.error?.issues)).toMatch(/either mock or mockPath/);
+  for (const action of ["patch", "dismiss", "status", "defineBackend"]) {
+    const parsed = prototypeSchema.safeParse({
+      action,
+      id: "p",
+      ops: [{ op: "add" }],
+      backendId: "a",
+      backend: {},
+      mock: {},
+    });
+    expect(parsed.success).toBe(false);
+  }
+  expect(prototypeSchema.safeParse({ action: "show", spec: shownSpec, mock: {} }).success).toBe(
+    true,
+  );
+  expect(
+    prototypeSchema.safeParse({ action: "show", spec: shownSpec, mockPath: "/a.json" }).success,
+  ).toBe(true);
 });

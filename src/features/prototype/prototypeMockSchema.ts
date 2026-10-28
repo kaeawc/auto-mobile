@@ -12,6 +12,8 @@ export const MAX_MOCK_ROUTES = 64;
 export const MAX_MOCK_FAULTS = 16;
 /** Collection data plus routes, as JSON text. */
 export const MAX_MOCK_BACKEND_BYTES = 1024 * 1024;
+/** A mock document file: up to every backend at its own size cap, with JSON overhead. */
+export const MAX_MOCK_DOCUMENT_BYTES = 2 * MAX_MOCK_BACKEND_BYTES;
 export const MAX_MOCK_LATENCY_MS = 10_000;
 export const MAX_MOCK_ROUTE_DELAY_MS = 10_000;
 

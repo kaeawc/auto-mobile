@@ -31,6 +31,11 @@ its data. Requests to a backend that is not defined fail with \`network\`.
   "seed":7}}
 \`\`\`
 
+A \`show\` can define backends itself: \`mock\` is \`{backendId: definition}\` (the same definition shape),
+or \`mockPath\` names an absolute local JSON file holding that object (up to 2 MiB; the path never
+reaches the device). They are defined, all or none, once the spec is accepted and before it is
+sent, replacing backends of the same id, and a saved prototype does not carry them.
+
 - **Collections** are REST over \`{name: [items]}\`; every item needs an \`id\` (a number, or a non-empty
   string other than \`.\` and \`..\`). \`GET /products?title=Mug\`, \`q=mug\` (case-insensitive substring over
   string and number members), \`_sort=price\` or \`-price\`, \`_page\` and \`_limit\` (an

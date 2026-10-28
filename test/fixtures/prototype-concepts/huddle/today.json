@@ -197,6 +197,37 @@
                       },
                       "onTap": [
                         {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
                           "type": "setState",
                           "key": "channelId",
                           "value": "general"
@@ -287,6 +318,37 @@
                       },
                       "onTap": [
                         {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
                           "type": "setState",
                           "key": "channelId",
                           "value": "design"
@@ -376,6 +438,37 @@
                         "minHeight": 48
                       },
                       "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
                         {
                           "type": "setState",
                           "key": "channelId",
@@ -476,6 +569,37 @@
                         "minHeight": 48
                       },
                       "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
                         {
                           "type": "setState",
                           "key": "channelId",
@@ -1492,6 +1616,13 @@
                 "stateKey": "draft",
                 "placeholder": "Message",
                 "imeAction": "send",
+                "checks": [
+                  {
+                    "message": "Type a message first",
+                    "required": true
+                  }
+                ],
+                "validateOn": "submit",
                 "style": {
                   "weight": 1
                 },
@@ -1511,6 +1642,7 @@
                   {
                     "type": "emit",
                     "name": "message_sent",
+                    "requireValid": ["draft"],
                     "context": {
                       "channel": {
                         "state": "channelId"
@@ -1595,6 +1727,7 @@
                   {
                     "type": "emit",
                     "name": "message_sent",
+                    "requireValid": ["draft"],
                     "context": {
                       "channel": {
                         "state": "channelId"

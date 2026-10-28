@@ -114,6 +114,22 @@ describe("PressButton Android system actions (#14095)", () => {
     }
   });
 
+  test("forwards the frame context into the system-action request", async () => {
+    const frameContexts: Array<string | undefined> = [];
+    class FrameRecordingClient extends FakeSystemClient {
+      override async requestGlobalAction(
+        ...args: Parameters<SystemClient["requestGlobalAction"]>
+      ): Promise<GlobalActionResult> {
+        frameContexts.push(args[3]);
+        return super.requestGlobalAction(...args);
+      }
+    }
+    const client = new FrameRecordingClient(new Set(["global_action_lock_screen_v1"]));
+    const { press } = pressButton(androidDevice, client);
+    await press.press("lock", undefined, "frame-3");
+    expect(frameContexts).toEqual(["frame-3"]);
+  });
+
   test("button matching is case-insensitive", async () => {
     const client = new FakeSystemClient(new Set(["global_action_lock_screen_v1"]));
     const { press } = pressButton(androidDevice, client);

@@ -653,6 +653,30 @@ describe("PressButton Android keycode dispatch", () => {
       expect(capturedSignal).toBe(controller.signal);
     });
 
+    test("forwards the frame context into the CtrlProxy global-action request", async () => {
+      const frameContexts: Array<string | undefined> = [];
+      globalActionClient = {
+        requestGlobalAction: async (
+          _action: string,
+          _timeoutMs?: number,
+          _perf?: unknown,
+          frameContext?: string,
+        ) => {
+          frameContexts.push(frameContext);
+          return { success: true, action: "back", totalTimeMs: 0 };
+        },
+      };
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        globalActionClient,
+        frameContextClient,
+        window: launcherWindow(),
+      });
+
+      await dispatch(pressButton, "back", undefined, "frame-9");
+
+      expect(frameContexts).toEqual(["frame-9"]);
+    });
+
     test("forwards the signal into the CtrlProxy frame-context validation wait", async () => {
       let capturedSignal: AbortSignal | undefined;
       globalActionClient = {

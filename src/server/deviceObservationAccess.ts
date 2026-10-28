@@ -1,4 +1,13 @@
 import {
+  FileAvdConfigReader,
+  type AvdConfigReader,
+} from "../utils/android-cmdline-tools/AvdConfigReader";
+import { avdConfigFormFactor } from "../utils/android-cmdline-tools/avdDeviceInfoEnrichment";
+import { isUnknownEmulatorName } from "../utils/android-cmdline-tools/emulatorReadinessEvaluation";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
+import {
   explicitReadTargetPlatform,
   matchRunningReadTarget,
   providedReadTargetNotFound,
@@ -16,12 +25,15 @@ import { type Timer } from "../utils/SystemTimer";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 
 export interface DeviceObservationAccess {
+  /** Host-only metadata; injected readers keep custom access independent of host AVD files. */
+  avdConfigReader?: AvdConfigReader;
   listBooted(signal: AbortSignal | undefined): Promise<BootedDevice[]>;
   listBootedWithStatus?(signal: AbortSignal | undefined): Promise<BootedResourceReadListing>;
   isAuthorized(device: BootedDevice): boolean;
 }
 
 export const defaultDeviceObservationAccess: DeviceObservationAccess = {
+  avdConfigReader: new FileAvdConfigReader(),
   listBooted: (signal) =>
     listBootedDevicesForResource("either", "observe", { signal, requireFresh: true }),
   listBootedWithStatus: (signal) => listBootedDevicesForReadWithStatus("either", "observe", signal),
@@ -72,7 +84,7 @@ async function findObservationReadTarget(
           : { devices: await access.listBooted(signal), scanned: { android: true, ios: true } };
         signal?.throwIfAborted();
         const fresh = listing.devices.filter((device) => listing.scanned[device.platform]);
-        const device = matchRunningReadTarget(fresh, deviceId, targetPlatform);
+        let device = matchRunningReadTarget(fresh, deviceId, targetPlatform);
         if (!device) {
           const failedPlatform = incompleteReadPlatform(listing, targetPlatform);
           if (failedPlatform && !(await confirmStopped?.(listing))) {
@@ -81,6 +93,10 @@ async function findObservationReadTarget(
               listing.discoveryErrors?.[failedPlatform],
             );
           }
+        }
+        if (device && access.avdConfigReader) {
+          device = await enrichObservationReadFormFactor(device, access.avdConfigReader);
+          signal?.throwIfAborted();
         }
         return { device, devices: fresh };
       },
@@ -166,4 +182,35 @@ export function sessionlessDeviceReadFor(
     },
     assertAuthorized: (device) => assertObservationReadAccess(device, access),
   };
+}
+
+/** Add only configured form-factor evidence, without issuing another device command. */
+async function enrichObservationReadFormFactor(
+  device: BootedDevice,
+  reader: AvdConfigReader,
+): Promise<BootedDevice> {
+  if (
+    device.platform !== "android" ||
+    !isAndroidEmulatorSerial(device.deviceId) ||
+    device.formFactor !== undefined ||
+    !device.name.trim() ||
+    device.name === device.deviceId ||
+    isUnknownEmulatorName(device.name, device.deviceId)
+  ) {
+    return device;
+  }
+  try {
+    const config = await reader.readConfig(device.name);
+    if (!config) {
+      // Optional host metadata: missing config leaves device reads usable without an inferred field.
+      logger.debug(`No AVD config for observation read of ${device.name}`);
+      return device;
+    }
+    const formFactor = avdConfigFormFactor(config);
+    return formFactor === "unknown" ? device : { ...device, formFactor };
+  } catch (error) {
+    // Optional host metadata: unreadable config leaves form factor absent and never blocks observe.
+    logger.debug(`AVD form factor unavailable for ${device.name}: ${errorMessage(error)}`);
+    return device;
+  }
 }

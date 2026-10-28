@@ -56,24 +56,26 @@ internal object PrototypePlatformRules {
     val background = requires.strings("background").toSet()
   }
 
+  // Root-level blocks, checked in order before any call or event use.
+  private val rootChecks: List<(JsonObject) -> PrototypeSpecError?> =
+    listOf(
+      PrototypeChannels::error,
+      PrototypeAuthRules::blockError,
+      PrototypeSecureStorageRules::blockError,
+      ::requiresError,
+    )
+
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val root = value as? JsonObject ?: return null
     val declared = Declared(root)
     reservedTestTagError(context)?.let {
       return it
     }
-    PrototypeChannels.error(root)?.let {
-      return it
-    }
-    PrototypeAuthRules.blockError(root)?.let {
-      return it
-    }
-    PrototypeSecureStorageRules.blockError(root)?.let {
-      return it
-    }
-    requiresError(root)?.let {
-      return it
-    }
+    rootChecks
+      .firstNotNullOfOrNull { it(root) }
+      ?.let {
+        return it
+      }
     for (use in uses(root, context)) {
       (useError(use, declared)
           ?: (if (use is Use.Call)

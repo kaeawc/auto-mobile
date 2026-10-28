@@ -451,6 +451,99 @@ describe("InputText", () => {
     expect(inputCommands(factory)).toEqual([]);
   });
 
+  test.each([
+    ["eventLast with no printable ASCII", "eventLast", "  你好  ", "31\n"],
+    ["eventLast with an unmappable shifted char", "eventLast", "HellO", "30\n"],
+    ["eventAll with an unmappable shifted char", "eventAll", "A", "30\n"],
+  ] as const)(
+    "%s falls back to a11y and still runs the IME action and keyboard dismissal",
+    async (_label, mode, text, sdk) => {
+      const factory = new FakeAdbClientFactory();
+      factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", sdk);
+      const closeCalls: string[] = [];
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const inputText = new InputText(
+        androidDevice,
+        factory as AdbClientFactory,
+        () => ({
+          close: async () => {
+            closeCalls.push("close");
+            return { success: true, open: false, message: "Keyboard closed" };
+          },
+        }),
+        timer,
+      );
+      stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+      const result = await inputText.testHooks.executeAndroidTextInput(text, "done", true, mode);
+
+      expect(result.method).toBe("a11y");
+      expect(result.success).toBe(true);
+      expect(result.imeAction).toBe("done");
+      expect(closeCalls).toEqual(["close"]);
+      expect(inputCommands(factory)).toContain("shell input keyevent KEYCODE_ENTER");
+    },
+  );
+
+  test.each([
+    ["eventLast", "ab", [false], "failed before real key event: boom"],
+    ["eventLast", "ab  ", [true, false], "failed after real key event: boom"],
+    ["eventAll", "abc", [false], "failed before eventAll input: boom"],
+    ["eventAll", "a你b", [true, false], "failed during eventAll input: boom"],
+  ] as const)(
+    "%s names the failing setText phase and keeps its method: %s",
+    async (mode, text, outcomes, message) => {
+      const factory = new FakeAdbClientFactory();
+      factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+      const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+      let call = 0;
+      stubAndroidSetText(async () => {
+        const succeeds = outcomes[call++] ?? false;
+        return succeeds
+          ? { success: true, totalTimeMs: 1 }
+          : { success: false, error: "boom", totalTimeMs: 1 };
+      });
+
+      const result = await inputText.testHooks.executeAndroidTextInput(
+        text,
+        undefined,
+        false,
+        mode,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.method).toBe(mode);
+      expect(result.error).toContain(message);
+    },
+  );
+
+  test("eventAll names the failing final setText phase when dismissing the keyboard", async () => {
+    const factory = new FakeAdbClientFactory();
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => ({ success: true, open: false }),
+    }));
+    const outcomes = [true, false];
+    let call = 0;
+    stubAndroidSetText(async () =>
+      outcomes[call++]
+        ? { success: true, totalTimeMs: 1 }
+        : { success: false, error: "boom", totalTimeMs: 1 },
+    );
+
+    const result = await inputText.testHooks.executeAndroidTextInput(
+      "ab",
+      undefined,
+      true,
+      "eventAll",
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.method).toBe("eventAll");
+    expect(result.error).toContain("failed after eventAll input: boom");
+  });
+
   test("eventAll uses a11y instead of shifted keyevents before Android 12", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory);
@@ -1190,6 +1283,22 @@ describe("InputText", () => {
     expect(result.charsSent).toBeUndefined();
     // Exactly one attempt: the deadline is not multiplied by the retry count.
     expect(keyEventCalls).toBe(1);
+  });
+
+  test("append dispatches every key event with noRetry so one budget covers the whole append", async () => {
+    const exec = (command: string): Promise<ExecResult> =>
+      Promise.resolve(execResult(command.includes("getprop ro.build.version.sdk") ? "31\n" : ""));
+    const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
+    const execute = spyOn(adb, "execute");
+    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+
+    const result = await inputText.appendText("ab", 5000);
+
+    expect(result.success).toBe(true);
+    const keyEventOptions = execute.mock.calls
+      .filter(([args]) => args.includes("keyevent"))
+      .map(([, options]) => options?.noRetry);
+    expect(keyEventOptions).toEqual([true, true]);
   });
 
   test("a timed-out later append key leaves the retry boundary ambiguous", async () => {

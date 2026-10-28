@@ -15,6 +15,7 @@ import {
 } from "../../devices/DisplayInventoryProvider";
 import {
   defaultDeviceObservationAccess,
+  HeldDeviceFormFactorResolver,
   sessionlessDeviceReadFor,
   type DeviceObservationAccess,
 } from "../deviceObservationAccess";
@@ -92,6 +93,7 @@ export interface ExecutionTargetResolver {
 
 export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private readonly defaultDeviceRead: SessionlessDeviceRead;
+  private readonly sessionFormFactor: HeldDeviceFormFactorResolver;
 
   constructor(
     private readonly log: Logger = logger,
@@ -99,6 +101,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     deviceReadAccess: DeviceObservationAccess = defaultDeviceObservationAccess,
   ) {
     this.defaultDeviceRead = sessionlessDeviceReadFor(deviceReadAccess);
+    this.sessionFormFactor = new HeldDeviceFormFactorResolver(deviceReadAccess.avdConfigReader);
   }
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
     // Awaited only when a first-seen transport must be probed: every other call resolves its id
@@ -567,7 +570,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     };
     state.device = await this.hydrateDisplays(
       state,
-      device,
+      await this.sessionFormFactor.enrich(device, pooledDevice),
       `${pooledDevice?.incarnation ?? "unknown"}:${pooledDevice?.avdName ?? device.name}`,
     );
     logger.info(

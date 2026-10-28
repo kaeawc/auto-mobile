@@ -2099,8 +2099,13 @@ use the typed codes `permission_denied`, `unavailable` (location services off), 
 The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
 `/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
 are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
-that fix after the session ends. The root subscription block and the reference outcome reducer are not in the
-contract yet, and no production runtime advertises the module.
+that fix after the session ends. `applyPrototypeLocationOutcome` (`prototypeLocationOutcome.ts`) is the
+reference both runtimes copy. A fix is written only when its coordinates are in range, and it carries only the
+optional fields the platform reported. `<into>__meta` then gets `{durationMs, approximate}`. A failure leaves
+`into` untouched and records `{durationMs, error}`: a code outside the four above becomes `platform_error`, and
+only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the fix is rolled
+back. The root subscription block is not in the contract yet, and no production runtime advertises the
+module.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

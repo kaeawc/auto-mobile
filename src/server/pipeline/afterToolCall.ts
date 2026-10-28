@@ -12,7 +12,7 @@ import { logger } from "../../utils/logger";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Timer } from "../../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/wire/constants";
+import { INTERNAL_MCP_SESSION_PARAM, INTERNAL_NO_DIFF_PARAM } from "../../daemon/wire/constants";
 import { getToolCallRecorder } from "../../daemon/toolCallRecordingManager";
 import { formatToolResultLog } from "../toolResultLog";
 import { formatStructuredToolError } from "../../utils/formatStructuredToolError";
@@ -57,8 +57,21 @@ interface AfterToolCallResult {
   finalizedResponse: any;
 }
 
+export interface PlainToolFinalizeInput {
+  name: string;
+  outputSchema: unknown;
+  args: unknown;
+  response: unknown;
+  timer: Timer;
+}
+
 export interface AfterToolCallHandler {
   handle(input: AfterToolCallInput): Promise<AfterToolCallResult>;
+}
+
+/** Finalizes a plain `register()` tool's response: hard ceiling and `resourceLink` only (#13942). */
+export interface PlainToolFinalizer {
+  finalizePlain(input: PlainToolFinalizeInput): unknown;
 }
 
 export function isToolResponseFailure(response: unknown): boolean {
@@ -132,7 +145,7 @@ export type SettleObserveFactory = (
   timer: Timer,
 ) => SettleObserve | undefined;
 
-export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
+export class DefaultAfterToolCallHandler implements AfterToolCallHandler, PlainToolFinalizer {
   // One writer per (timer, resolved directory), built lazily through the factory.
   // The writer's directory-validation cache and 60s prune throttle are instance
   // state, so a writer per tool call defeated both (issue #10079). Keyed by timer
@@ -162,6 +175,35 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       writersByDirectory.set(key, writer);
     }
     return writer;
+  }
+
+  /** The writer for an agent-facing call; internal calls never spill. */
+  private agentFacingArtifactWriter(
+    internalCall: boolean,
+    timer: Timer,
+  ): ObservationArtifactWriter | undefined {
+    if (internalCall) {
+      return undefined;
+    }
+    return this.getArtifactWriter(
+      serverConfig.getToolOutputsDir() ?? getDefaultToolOutputsDir(),
+      timer,
+    );
+  }
+
+  finalizePlain(input: PlainToolFinalizeInput): unknown {
+    const { name, outputSchema, args, response, timer } = input;
+    const internal = isRecord(args) && args[INTERNAL_NO_DIFF_PARAM] === true;
+    // `plainTool` never reads the artifact mode: a configured output directory only
+    // chooses where a spill lands, and only device tools artifact every response.
+    return finalizeToolResponse(response, {
+      name,
+      outputSchema,
+      args: isRecord(args) ? args : undefined,
+      internal,
+      plainTool: true,
+      artifactWriter: this.agentFacingArtifactWriter(internal, timer),
+    });
   }
 
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
@@ -223,12 +265,8 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const sessionManager = cacheObservedHierarchy(input);
 
     const baselineStore = observationBaselineStore(sessionUuid, sessionManager);
-    const configuredArtifactDirectory = serverConfig.getToolOutputsDir();
-    const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
-    const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
-    const artifactWriter = !internalCall
-      ? this.getArtifactWriter(artifactDirectory, timer)
-      : undefined;
+    const artifactMode = serverConfig.getToolOutputsDir() ? "always" : "oversized";
+    const artifactWriter = this.agentFacingArtifactWriter(internalCall, timer);
 
     const finalizedResponse = finalizeToolResponse(response, {
       name,

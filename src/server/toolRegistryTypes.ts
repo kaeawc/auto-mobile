@@ -26,7 +26,7 @@ import type { SessionToolSelectionService } from "../features/toolSelection/Sess
 import { ExecutionTargetResolver } from "./pipeline/executionTarget";
 import { AuditRunner } from "./pipeline/audit";
 import { NavigationToolCallRecorder } from "./pipeline/navigationRecording";
-import { AfterToolCallHandler } from "./pipeline/afterToolCall";
+import { AfterToolCallHandler, type PlainToolFinalizer } from "./pipeline/afterToolCall";
 import { PlanLifecycleManager } from "./pipeline/planLifecycle";
 
 // Progress notification interface
@@ -335,6 +335,8 @@ export interface ToolRegistryPipelineOverrides {
   auditRunner?: AuditRunner;
   mutationRecording?: DeviceMutationRecording;
   afterToolCall?: AfterToolCallHandler;
+  /** Plain `register()` tool finalization (#13942); independent of `afterToolCall`. */
+  plainToolFinalizer?: PlainToolFinalizer;
   planLifecycleManager?: PlanLifecycleManager;
 }
 

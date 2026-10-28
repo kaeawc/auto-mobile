@@ -350,8 +350,8 @@ export class SessionActivityPersistence {
   async endSessionTerminallyReleasedInRow(session: Session): Promise<Error> {
     const sessionId = session.sessionId;
     if (this.host.superseded.isReassertPending(sessionId)) {
-      // The terminal row is this daemon's own superseded release's, about to be rewritten live
-      // (#11206): the session lives on, and only this activity write did not persist.
+      // This daemon is rewriting the live row after an overlapping row write (#11557): the
+      // session lives on, and only this activity write did not persist.
       return new DeviceSessionNotActiveError(sessionId);
     }
     const persistedRelease = await this.host.getPersistedTerminalRelease(sessionId);

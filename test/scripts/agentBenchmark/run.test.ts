@@ -16,6 +16,7 @@ import {
   killProcessGroupRemnants,
   killProcessTree,
   parseCliArgs,
+  suiteRunOptions,
   resolveCommand,
   resolveSuitePath,
   staleBuildSource,
@@ -182,6 +183,18 @@ describe("agent benchmark dry run", () => {
       ADB_SERVER_SOCKET: "tcp:10.0.0.5:5037",
     });
     expect(report).toContain('"ADB_SERVER_SOCKET":"tcp:10.0.0.5:5037"');
+    expect(report).not.toContain("AUTOMOBILE_SERVER_INSTRUCTIONS");
+  });
+
+  test("--server-instructions shows the instructions arm in the MCP config", () => {
+    const root = resolve(import.meta.dir, "../../..");
+    const suite = loadSuite(join(root, "benchmark/agent/suites/bug-repro.yml"), root);
+    const report = dryRunReport(
+      suite,
+      parseCliArgs(["--suite", "bug-repro", "--dry-run", "--server-instructions"]),
+      {},
+    );
+    expect(report).toContain('"AUTOMOBILE_SERVER_INSTRUCTIONS":"1"');
   });
 });
 
@@ -207,9 +220,37 @@ describe("agent benchmark CLI arguments", () => {
       dryRun: false,
       claude: "claude",
     });
-    expect(parseCliArgs(["--all", "--dry-run"])).toMatchObject({ all: true, dryRun: true });
+    expect(parseCliArgs(["--all", "--dry-run"])).toMatchObject({
+      all: true,
+      dryRun: true,
+      serverInstructions: false,
+    });
+    expect(parseCliArgs(["--all", "--server-instructions"]).serverInstructions).toBe(true);
     expect(parseCliArgs(["--from-result", "/out/run"]).fromResults).toEqual(["/out/run"]);
     expect(parseCliArgs(["--all", "--output", "rel/dir"]).output).toBe(resolve("rel/dir"));
+  });
+
+  test("every suite run carries the CLI overrides and the instructions arm", () => {
+    const resolved = {
+      serverEntry: "/repo/dist/src/index.js",
+      serverBuild: "b",
+      claudeCommand: "c",
+    };
+    expect(
+      suiteRunOptions(
+        parseCliArgs(["--suite", "bug-repro", "--model", "m", "--server-instructions"]),
+        resolved,
+        "/usr/bin/bun",
+      ),
+    ).toMatchObject({
+      ...resolved,
+      runtime: "/usr/bin/bun",
+      modelOverride: "m",
+      serverInstructions: true,
+    });
+    expect(
+      suiteRunOptions(parseCliArgs(["--suite", "bug-repro"]), resolved).serverInstructions,
+    ).toBe(false);
   });
 
   test("a relative --claude path is resolved now; a bare name is left for PATH", () => {

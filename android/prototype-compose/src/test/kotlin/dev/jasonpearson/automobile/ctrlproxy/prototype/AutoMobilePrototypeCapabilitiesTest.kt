@@ -56,7 +56,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_battery_v1",
       "prototype_platform_power_v1",
       "prototype_platform_audio_v1",
-      // Contract only; the connectivity runtimes are owed (#14273).
+      // CtrlProxy registers connectivity (#14273); the embedded renderer leaves it to the app.
       "prototype_platform_connectivity_v1",
       // Contract only; the biometric prompt runtime is owed (#14328).
       "prototype_platform_biometric_v1",
@@ -67,6 +67,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       // Contract only; the system picker runtimes are owed (#14318).
       "prototype_platform_contacts_v1",
       "prototype_platform_calendar_v1",
+      // Contract only; the location runtimes are owed (#14325, #14326).
+      "prototype_platform_location_v1",
       // Contract only; the system media picker and camera runtimes are owed (#14197).
       "prototype_platform_mediaLibrary_v1",
       "prototype_platform_camera_v1",

@@ -1,3 +1,8 @@
+import {
+  internalExecutionId,
+  internalExecutionStartTime,
+  internalMcpSessionId,
+} from "../internalToolParams";
 import type { ExecutionTargetInput } from "./executionTarget";
 import type { ConnectedPlatformScan } from "../../daemon/readiness/DeviceReadiness";
 import { BootedDevice, SomePlatform } from "../../models";
@@ -62,7 +67,7 @@ export function createTargetResolution(
     getConnectedPlatforms,
     shouldResolveDevice: options.shouldEnsureDevice ? options.shouldEnsureDevice(args) : true,
     baseSessionUuid: args.sessionUuid,
-    mcpSessionId: typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined,
+    mcpSessionId: internalMcpSessionId(args),
     deviceConnectionId: deviceConnectionIdFor(args),
     execution: executionMetadataFromArgs(args),
     keepScreenAwake: typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined,
@@ -77,16 +82,18 @@ export function createTargetResolution(
   };
 }
 
-function executionMetadataFromArgs(args: any): TargetResolution["execution"] {
-  if (typeof args.__executionId !== "string" || typeof args.__executionStartTime !== "number") {
+function executionMetadataFromArgs(args: object): TargetResolution["execution"] {
+  const executionId = internalExecutionId(args);
+  const startTime = internalExecutionStartTime(args);
+  if (executionId === undefined || startTime === undefined) {
     return undefined;
   }
   return {
-    executionId: args.__executionId,
-    startTime: args.__executionStartTime,
+    executionId,
+    startTime,
     // The forwarded start is a wall-clock stamp; session expiry judges the session-clock
     // one the tracker took when the call started (#11290).
-    sessionClockStartTime: executionTracker.getSessionClockStartTime(args.__executionId),
+    sessionClockStartTime: executionTracker.getSessionClockStartTime(executionId),
   };
 }
 

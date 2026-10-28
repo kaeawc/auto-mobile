@@ -1,0 +1,23 @@
+{
+  "id": "location-block-minimal",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {},
+  "requires": {
+    "platform": ["location"],
+    "permissions": [
+      {
+        "name": "location",
+        "purpose": "Show rides near you"
+      }
+    ]
+  },
+  "location": {},
+  "root": {
+    "type": "text",
+    "text": "Nearby"
+  }
+}

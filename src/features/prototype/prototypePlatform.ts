@@ -7,6 +7,7 @@ import {
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import { prototypeLocationBlockError } from "./prototypeLocationBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -568,9 +569,17 @@ export function prototypePlatformError(
   return undefined;
 }
 
-/** The first error in the root-level blocks: realtime channels, the auth block, then `requires`. */
+/**
+ * The first error in the root-level blocks: realtime channels, the auth block, the location block,
+ * then `requires`.
+ */
 function rootBlockError(root: Raw): PrototypePlatformError | undefined {
-  return prototypeChannelsError(root) ?? prototypeAuthBlockError(root) ?? requiresError(root);
+  return (
+    prototypeChannelsError(root) ??
+    prototypeAuthBlockError(root) ??
+    prototypeLocationBlockError(root) ??
+    requiresError(root)
+  );
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */

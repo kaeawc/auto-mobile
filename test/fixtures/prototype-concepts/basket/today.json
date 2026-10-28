@@ -1,0 +1,1536 @@
+{
+  "id": "basket-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "derive": {
+    "selectedPriceText": {
+      "of": {
+        "state": "selectedPrice"
+      },
+      "format": {
+        "currency": {
+          "code": "USD"
+        }
+      },
+      "locale": "en-US"
+    }
+  },
+  "storage": {
+    "version": 1,
+    "keys": [
+      "state:cartCount",
+      "state:qty_mug",
+      "state:qty_tote",
+      "state:qty_lamp",
+      "state:qty_board",
+      "state:qty_pack",
+      "state:qty_throw"
+    ]
+  },
+  "state": {
+    "query": "",
+    "category": "all",
+    "sort": "featured",
+    "selectedId": "",
+    "selectedTitle": "",
+    "selectedPrice": 0,
+    "selectedRating": 0,
+    "variant": "medium",
+    "addedToast": false,
+    "cartCount": 0,
+    "qty_mug": 0,
+    "qty_tote": 0,
+    "qty_lamp": 0,
+    "qty_board": 0,
+    "qty_pack": 0,
+    "qty_throw": 0,
+    "name": "",
+    "street": "",
+    "postcode": "",
+    "deliveryDate": "2026-11-02",
+    "slot": "morning",
+    "orderStep": 0
+  },
+  "data": {
+    "products": [
+      {
+        "id": "mug",
+        "title": "Stoneware mug",
+        "category": "kitchen",
+        "price": 18,
+        "rating": 4.6
+      },
+      {
+        "id": "tote",
+        "title": "Canvas tote",
+        "category": "bags",
+        "price": 24.99,
+        "rating": 4.4
+      },
+      {
+        "id": "lamp",
+        "title": "Desk lamp",
+        "category": "home",
+        "price": 59,
+        "rating": 4.8
+      },
+      {
+        "id": "board",
+        "title": "Bamboo board",
+        "category": "kitchen",
+        "price": 32.5,
+        "rating": 4.2
+      },
+      {
+        "id": "pack",
+        "title": "Day pack",
+        "category": "bags",
+        "price": 74,
+        "rating": 4.7
+      },
+      {
+        "id": "throw",
+        "title": "Wool throw",
+        "category": "home",
+        "price": 89,
+        "rating": 4.9
+      }
+    ],
+    "byPrice": [
+      {
+        "id": "mug",
+        "title": "Stoneware mug",
+        "category": "kitchen",
+        "price": 18,
+        "rating": 4.6
+      },
+      {
+        "id": "tote",
+        "title": "Canvas tote",
+        "category": "bags",
+        "price": 24.99,
+        "rating": 4.4
+      },
+      {
+        "id": "board",
+        "title": "Bamboo board",
+        "category": "kitchen",
+        "price": 32.5,
+        "rating": 4.2
+      },
+      {
+        "id": "lamp",
+        "title": "Desk lamp",
+        "category": "home",
+        "price": 59,
+        "rating": 4.8
+      },
+      {
+        "id": "pack",
+        "title": "Day pack",
+        "category": "bags",
+        "price": 74,
+        "rating": 4.7
+      },
+      {
+        "id": "throw",
+        "title": "Wool throw",
+        "category": "home",
+        "price": 89,
+        "rating": 4.9
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "shop",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "shop": {
+        "type": "column",
+        "style": {
+          "weight": 1
+        },
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "shop_bar",
+            "title": "Basket",
+            "actions": [
+              {
+                "icon": "shopping_cart",
+                "label": "Cart, {cartCount} items",
+                "onTap": [
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "cart"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "searchBar",
+            "testTag": "search_bar",
+            "stateKey": "query",
+            "placeholder": "Search Basket",
+            "leadingIcon": "search",
+            "onSubmit": [
+              {
+                "type": "emit",
+                "name": "search_submitted",
+                "context": {
+                  "query": {
+                    "state": "query"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "testTag": "search_note",
+            "visibleWhen": {
+              "key": "query",
+              "lengthGt": 0
+            },
+            "text": "Showing everything: search-as-you-type needs a filter.",
+            "style": {
+              "textStyle": "bodySmall",
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 4,
+                "bottom": 0
+              }
+            }
+          },
+          {
+            "type": "segmentedButton",
+            "testTag": "category_picker",
+            "stateKey": "category",
+            "options": [
+              {
+                "value": "all",
+                "label": "All"
+              },
+              {
+                "value": "kitchen",
+                "label": "Kitchen"
+              },
+              {
+                "value": "bags",
+                "label": "Bags"
+              },
+              {
+                "value": "home",
+                "label": "Home"
+              }
+            ]
+          },
+          {
+            "type": "segmentedButton",
+            "testTag": "sort_picker",
+            "stateKey": "sort",
+            "options": [
+              {
+                "value": "featured",
+                "label": "Featured"
+              },
+              {
+                "value": "price",
+                "label": "Price: low to high"
+              }
+            ]
+          },
+          {
+            "type": "scroll",
+            "testTag": "catalog_scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                }
+              },
+              "children": [
+                {
+                  "type": "grid",
+                  "testTag": "catalog_featured",
+                  "visibleWhen": {
+                    "key": "sort",
+                    "equals": "featured"
+                  },
+                  "columns": 2,
+                  "style": {
+                    "spacing": 12
+                  },
+                  "repeat": {
+                    "items": {
+                      "path": "/products"
+                    },
+                    "as": "item",
+                    "key": "id",
+                    "derive": {
+                      "priceText": {
+                        "of": {
+                          "item": "price"
+                        },
+                        "format": {
+                          "currency": {
+                            "code": "USD"
+                          }
+                        },
+                        "locale": "en-US"
+                      }
+                    }
+                  },
+                  "children": [
+                    {
+                      "type": "card",
+                      "testTag": "product_card",
+                      "variant": "outlined",
+                      "visibleWhen": {
+                        "any": [
+                          {
+                            "key": "category",
+                            "equals": "all"
+                          },
+                          {
+                            "key": "category",
+                            "equals": "{item.category}"
+                          }
+                        ]
+                      },
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "selectedId",
+                          "value": "{item.id}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedTitle",
+                          "value": "{item.title}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedPrice",
+                          "value": "{item.price}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedRating",
+                          "value": "{item.rating}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "variant",
+                          "value": "medium"
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "product"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "column",
+                          "style": {
+                            "padding": {
+                              "start": 12,
+                              "end": 12,
+                              "top": 12,
+                              "bottom": 12
+                            },
+                            "spacing": 4
+                          },
+                          "children": [
+                            {
+                              "type": "box",
+                              "style": {
+                                "aspectRatio": 1,
+                                "width": "fill",
+                                "background": "surfaceVariant",
+                                "cornerRadius": "small",
+                                "alignment": "center"
+                              },
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "name": "shopping_bag",
+                                  "variant": "outlined",
+                                  "contentDescription": "Product photo"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "text": "{item.title}",
+                              "style": {
+                                "textStyle": "titleSmall",
+                                "maxLines": 1,
+                                "overflow": "ellipsis"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "product_price",
+                              "text": "{item.priceText}",
+                              "style": {
+                                "textStyle": "labelLarge"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "★ {item.rating}",
+                              "style": {
+                                "textStyle": "labelSmall"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "grid",
+                  "testTag": "catalog_price",
+                  "visibleWhen": {
+                    "key": "sort",
+                    "equals": "price"
+                  },
+                  "columns": 2,
+                  "style": {
+                    "spacing": 12
+                  },
+                  "repeat": {
+                    "items": {
+                      "path": "/byPrice"
+                    },
+                    "as": "item",
+                    "key": "id",
+                    "derive": {
+                      "priceText": {
+                        "of": {
+                          "item": "price"
+                        },
+                        "format": {
+                          "currency": {
+                            "code": "USD"
+                          }
+                        },
+                        "locale": "en-US"
+                      }
+                    }
+                  },
+                  "children": [
+                    {
+                      "type": "card",
+                      "testTag": "product_card",
+                      "variant": "outlined",
+                      "visibleWhen": {
+                        "any": [
+                          {
+                            "key": "category",
+                            "equals": "all"
+                          },
+                          {
+                            "key": "category",
+                            "equals": "{item.category}"
+                          }
+                        ]
+                      },
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "selectedId",
+                          "value": "{item.id}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedTitle",
+                          "value": "{item.title}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedPrice",
+                          "value": "{item.price}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedRating",
+                          "value": "{item.rating}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "variant",
+                          "value": "medium"
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "product"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "column",
+                          "style": {
+                            "padding": {
+                              "start": 12,
+                              "end": 12,
+                              "top": 12,
+                              "bottom": 12
+                            },
+                            "spacing": 4
+                          },
+                          "children": [
+                            {
+                              "type": "box",
+                              "style": {
+                                "aspectRatio": 1,
+                                "width": "fill",
+                                "background": "surfaceVariant",
+                                "cornerRadius": "small",
+                                "alignment": "center"
+                              },
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "name": "shopping_bag",
+                                  "variant": "outlined",
+                                  "contentDescription": "Product photo"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "text": "{item.title}",
+                              "style": {
+                                "textStyle": "titleSmall",
+                                "maxLines": 1,
+                                "overflow": "ellipsis"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "product_price",
+                              "text": "{item.priceText}",
+                              "style": {
+                                "textStyle": "labelLarge"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "★ {item.rating}",
+                              "style": {
+                                "textStyle": "labelSmall"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "product": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "product_bar",
+            "title": "{selectedTitle}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              },
+              "children": [
+                {
+                  "type": "carousel",
+                  "testTag": "product_gallery",
+                  "itemWidth": 240,
+                  "itemSpacing": 8,
+                  "variant": "uncontained",
+                  "children": [
+                    {
+                      "type": "box",
+                      "style": {
+                        "width": {
+                          "dp": 240
+                        },
+                        "height": {
+                          "dp": 200
+                        },
+                        "background": "surfaceVariant",
+                        "cornerRadius": "medium",
+                        "alignment": "center"
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Front",
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "box",
+                      "style": {
+                        "width": {
+                          "dp": 240
+                        },
+                        "height": {
+                          "dp": 200
+                        },
+                        "background": "surfaceVariant",
+                        "cornerRadius": "medium",
+                        "alignment": "center"
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Side",
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "box",
+                      "style": {
+                        "width": {
+                          "dp": 240
+                        },
+                        "height": {
+                          "dp": 200
+                        },
+                        "background": "surfaceVariant",
+                        "cornerRadius": "medium",
+                        "alignment": "center"
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Detail",
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "text": "{selectedTitle}",
+                  "semantics": {
+                    "heading": true
+                  },
+                  "style": {
+                    "textStyle": "headlineSmall"
+                  }
+                },
+                {
+                  "type": "text",
+                  "testTag": "detail_price",
+                  "text": "{derived:selectedPriceText}",
+                  "style": {
+                    "textStyle": "titleLarge"
+                  }
+                },
+                {
+                  "type": "text",
+                  "text": "★ {selectedRating}",
+                  "style": {
+                    "textStyle": "labelLarge"
+                  }
+                },
+                {
+                  "type": "select",
+                  "testTag": "variant_select",
+                  "stateKey": "variant",
+                  "label": "Size",
+                  "options": [
+                    {
+                      "value": "small",
+                      "label": "Small"
+                    },
+                    {
+                      "value": "medium",
+                      "label": "Medium"
+                    },
+                    {
+                      "value": "large",
+                      "label": "Large"
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "testTag": "add_to_cart",
+                  "label": "Add to cart",
+                  "icon": "add_shopping_cart",
+                  "visibleWhen": {
+                    "key": "selectedId",
+                    "equals": "mug"
+                  },
+                  "onTap": [
+                    {
+                      "type": "increment",
+                      "key": "qty_mug"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "cartCount"
+                    },
+                    {
+                      "type": "emit",
+                      "name": "added_to_cart",
+                      "context": {
+                        "product": {
+                          "value": "mug"
+                        },
+                        "variant": {
+                          "state": "variant"
+                        }
+                      }
+                    },
+                    {
+                      "type": "setState",
+                      "key": "addedToast",
+                      "value": true
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "testTag": "add_to_cart",
+                  "label": "Add to cart",
+                  "icon": "add_shopping_cart",
+                  "visibleWhen": {
+                    "key": "selectedId",
+                    "equals": "tote"
+                  },
+                  "onTap": [
+                    {
+                      "type": "increment",
+                      "key": "qty_tote"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "cartCount"
+                    },
+                    {
+                      "type": "emit",
+                      "name": "added_to_cart",
+                      "context": {
+                        "product": {
+                          "value": "tote"
+                        },
+                        "variant": {
+                          "state": "variant"
+                        }
+                      }
+                    },
+                    {
+                      "type": "setState",
+                      "key": "addedToast",
+                      "value": true
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "testTag": "add_to_cart",
+                  "label": "Add to cart",
+                  "icon": "add_shopping_cart",
+                  "visibleWhen": {
+                    "key": "selectedId",
+                    "equals": "lamp"
+                  },
+                  "onTap": [
+                    {
+                      "type": "increment",
+                      "key": "qty_lamp"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "cartCount"
+                    },
+                    {
+                      "type": "emit",
+                      "name": "added_to_cart",
+                      "context": {
+                        "product": {
+                          "value": "lamp"
+                        },
+                        "variant": {
+                          "state": "variant"
+                        }
+                      }
+                    },
+                    {
+                      "type": "setState",
+                      "key": "addedToast",
+                      "value": true
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "testTag": "add_to_cart",
+                  "label": "Add to cart",
+                  "icon": "add_shopping_cart",
+                  "visibleWhen": {
+                    "key": "selectedId",
+                    "equals": "board"
+                  },
+                  "onTap": [
+                    {
+                      "type": "increment",
+                      "key": "qty_board"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "cartCount"
+                    },
+                    {
+                      "type": "emit",
+                      "name": "added_to_cart",
+                      "context": {
+                        "product": {
+                          "value": "board"
+                        },
+                        "variant": {
+                          "state": "variant"
+                        }
+                      }
+                    },
+                    {
+                      "type": "setState",
+                      "key": "addedToast",
+                      "value": true
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "testTag": "add_to_cart",
+                  "label": "Add to cart",
+                  "icon": "add_shopping_cart",
+                  "visibleWhen": {
+                    "key": "selectedId",
+                    "equals": "pack"
+                  },
+                  "onTap": [
+                    {
+                      "type": "increment",
+                      "key": "qty_pack"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "cartCount"
+                    },
+                    {
+                      "type": "emit",
+                      "name": "added_to_cart",
+                      "context": {
+                        "product": {
+                          "value": "pack"
+                        },
+                        "variant": {
+                          "state": "variant"
+                        }
+                      }
+                    },
+                    {
+                      "type": "setState",
+                      "key": "addedToast",
+                      "value": true
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "testTag": "add_to_cart",
+                  "label": "Add to cart",
+                  "icon": "add_shopping_cart",
+                  "visibleWhen": {
+                    "key": "selectedId",
+                    "equals": "throw"
+                  },
+                  "onTap": [
+                    {
+                      "type": "increment",
+                      "key": "qty_throw"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "cartCount"
+                    },
+                    {
+                      "type": "emit",
+                      "name": "added_to_cart",
+                      "context": {
+                        "product": {
+                          "value": "throw"
+                        },
+                        "variant": {
+                          "state": "variant"
+                        }
+                      }
+                    },
+                    {
+                      "type": "setState",
+                      "key": "addedToast",
+                      "value": true
+                    }
+                  ]
+                },
+                {
+                  "type": "snackbar",
+                  "testTag": "added_toast",
+                  "openWhen": {
+                    "key": "addedToast",
+                    "equals": true
+                  },
+                  "text": "Added to cart",
+                  "durationMs": 3000,
+                  "action": {
+                    "label": "View cart",
+                    "onTap": [
+                      {
+                        "type": "push",
+                        "stack": "nav",
+                        "screen": "cart"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "cart": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "cart_bar",
+            "title": "Cart",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "testTag": "cart_empty",
+            "visibleWhen": {
+              "key": "cartCount",
+              "lt": 1
+            },
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 8
+            },
+            "children": [
+              {
+                "type": "icon",
+                "name": "remove_shopping_cart",
+                "contentDescription": "Empty cart"
+              },
+              {
+                "type": "text",
+                "text": "Your cart is empty.",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              }
+            ]
+          },
+          {
+            "type": "scroll",
+            "visibleWhen": {
+              "key": "cartCount",
+              "gt": 0
+            },
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 8
+              },
+              "children": [
+                {
+                  "type": "column",
+                  "repeat": {
+                    "items": {
+                      "path": "/products"
+                    },
+                    "as": "item",
+                    "key": "id",
+                    "derive": {
+                      "priceText": {
+                        "of": {
+                          "item": "price"
+                        },
+                        "format": {
+                          "currency": {
+                            "code": "USD"
+                          }
+                        },
+                        "locale": "en-US"
+                      }
+                    }
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "testTag": "cart_line",
+                      "visibleWhen": {
+                        "key": "qty_{item.id}",
+                        "gt": 0
+                      },
+                      "style": {
+                        "spacing": 8,
+                        "alignment": "center",
+                        "padding": {
+                          "start": 0,
+                          "end": 0,
+                          "top": 4,
+                          "bottom": 4
+                        }
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "style": {
+                            "weight": 1
+                          },
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "{item.title}",
+                              "style": {
+                                "textStyle": "titleSmall"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{item.priceText} each",
+                              "style": {
+                                "textStyle": "bodySmall"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "iconButton",
+                          "testTag": "qty_minus",
+                          "icon": "remove",
+                          "variant": "outlined",
+                          "contentDescription": "One fewer",
+                          "onTap": [
+                            {
+                              "type": "decrement",
+                              "key": "qty_{item.id}"
+                            },
+                            {
+                              "type": "decrement",
+                              "key": "cartCount"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "testTag": "qty_value",
+                          "text": "{qty_{item.id}}",
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "iconButton",
+                          "testTag": "qty_plus",
+                          "icon": "add",
+                          "variant": "outlined",
+                          "contentDescription": "One more",
+                          "enabledWhen": {
+                            "key": "qty_{item.id}",
+                            "lt": 9
+                          },
+                          "onTap": [
+                            {
+                              "type": "increment",
+                              "key": "qty_{item.id}"
+                            },
+                            {
+                              "type": "increment",
+                              "key": "cartCount"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "text",
+                  "testTag": "cart_count",
+                  "text": "{cartCount} items",
+                  "style": {
+                    "textStyle": "titleMedium"
+                  }
+                },
+                {
+                  "type": "button",
+                  "testTag": "checkout_button",
+                  "label": "Check out",
+                  "onTap": [
+                    {
+                      "type": "push",
+                      "stack": "nav",
+                      "screen": "checkout"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "checkout": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "checkout_bar",
+            "title": "Checkout",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              },
+              "children": [
+                {
+                  "type": "textField",
+                  "testTag": "name_field",
+                  "stateKey": "name",
+                  "label": "Full name",
+                  "variant": "outlined",
+                  "checks": [
+                    {
+                      "message": "Enter your name",
+                      "required": true
+                    }
+                  ]
+                },
+                {
+                  "type": "textField",
+                  "testTag": "street_field",
+                  "stateKey": "street",
+                  "label": "Street address",
+                  "variant": "outlined",
+                  "checks": [
+                    {
+                      "message": "Enter your street address",
+                      "required": true
+                    },
+                    {
+                      "message": "Enter at least 5 characters",
+                      "minLength": 5
+                    }
+                  ]
+                },
+                {
+                  "type": "textField",
+                  "testTag": "postcode_field",
+                  "stateKey": "postcode",
+                  "label": "ZIP code",
+                  "variant": "outlined",
+                  "checks": [
+                    {
+                      "message": "Enter your ZIP code",
+                      "required": true
+                    },
+                    {
+                      "message": "Use 5 digits",
+                      "pattern": "\\d{5}"
+                    }
+                  ],
+                  "keyboardType": "number"
+                },
+                {
+                  "type": "text",
+                  "text": "Delivery day",
+                  "semantics": {
+                    "heading": true
+                  },
+                  "style": {
+                    "textStyle": "titleSmall"
+                  }
+                },
+                {
+                  "type": "datePicker",
+                  "testTag": "delivery_date",
+                  "stateKey": "deliveryDate",
+                  "checks": [
+                    {
+                      "message": "Pick a day",
+                      "required": true
+                    }
+                  ]
+                },
+                {
+                  "type": "radioGroup",
+                  "testTag": "delivery_slot",
+                  "stateKey": "slot",
+                  "options": [
+                    {
+                      "value": "morning",
+                      "label": "8 am to noon"
+                    },
+                    {
+                      "value": "afternoon",
+                      "label": "Noon to 5 pm"
+                    },
+                    {
+                      "value": "evening",
+                      "label": "5 pm to 9 pm"
+                    }
+                  ]
+                },
+                {
+                  "type": "button",
+                  "testTag": "pay_button",
+                  "label": "Pay",
+                  "icon": "lock",
+                  "onTap": [
+                    {
+                      "type": "emit",
+                      "name": "order_placed",
+                      "requireValid": ["name", "street", "postcode", "deliveryDate"],
+                      "context": {
+                        "items": {
+                          "state": "cartCount"
+                        },
+                        "slot": {
+                          "state": "slot"
+                        }
+                      }
+                    },
+                    {
+                      "type": "setState",
+                      "key": "orderStep",
+                      "value": 0
+                    },
+                    {
+                      "type": "startTimer",
+                      "id": "tracking",
+                      "afterMs": 2000,
+                      "everyMs": 2000,
+                      "maxRuns": 3,
+                      "actions": [
+                        {
+                          "type": "increment",
+                          "key": "orderStep"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "replace",
+                      "stack": "nav",
+                      "screen": "order"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "order": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "order_bar",
+            "title": "Order #1042",
+            "navigationIcon": {
+              "icon": "close",
+              "label": "Close",
+              "onTap": [
+                {
+                  "type": "popToRoot",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "testTag": "order_timeline",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "row",
+                "testTag": "order_step_0",
+                "style": {
+                  "spacing": 12,
+                  "alignment": "center",
+                  "alpha": 0.4
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "key": "orderStep",
+                      "gt": -1
+                    },
+                    "style": {
+                      "alpha": 1
+                    }
+                  }
+                ],
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "check_circle",
+                    "contentDescription": "Order placed"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Order placed",
+                    "style": {
+                      "textStyle": "bodyLarge"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "testTag": "order_step_1",
+                "style": {
+                  "spacing": 12,
+                  "alignment": "center",
+                  "alpha": 0.4
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "key": "orderStep",
+                      "gt": 0
+                    },
+                    "style": {
+                      "alpha": 1
+                    }
+                  }
+                ],
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "check_circle",
+                    "contentDescription": "Packed"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Packed",
+                    "style": {
+                      "textStyle": "bodyLarge"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "testTag": "order_step_2",
+                "style": {
+                  "spacing": 12,
+                  "alignment": "center",
+                  "alpha": 0.4
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "key": "orderStep",
+                      "gt": 1
+                    },
+                    "style": {
+                      "alpha": 1
+                    }
+                  }
+                ],
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "check_circle",
+                    "contentDescription": "Out for delivery"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Out for delivery",
+                    "style": {
+                      "textStyle": "bodyLarge"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "testTag": "order_step_3",
+                "style": {
+                  "spacing": 12,
+                  "alignment": "center",
+                  "alpha": 0.4
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "key": "orderStep",
+                      "gt": 2
+                    },
+                    "style": {
+                      "alpha": 1
+                    }
+                  }
+                ],
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "home",
+                    "contentDescription": "Delivered"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Delivered",
+                    "style": {
+                      "textStyle": "bodyLarge"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "testTag": "order_live",
+            "text": "Step {orderStep} of 3",
+            "semantics": {
+              "liveRegion": "polite"
+            },
+            "style": {
+              "textStyle": "labelMedium",
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

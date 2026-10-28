@@ -42,7 +42,8 @@ On Android this covers packages, clipboard, rotation, screen reader, keep-awake,
 raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`), transient
 opened URLs, and screen state via the next wakeAndUnlock. Settings-backed adapter
 keys (`fontScale`, `timeFormat` and accessibility display preferences) require a
-journal revert or fallback. A failed non-critical Android settings restore escalates
+journal revert or fallback; the Android port reverts them by writing back (or
+deleting) their raw settings rows when the journaled prior is readable. A failed non-critical Android settings restore escalates
 unless a single post-loop re-read of its namespace confirms the baseline value; any
 differing key forces fallback. Critical settings restore failures force fallback immediately.
 Preferences are skipped by replay and require fallback unless their JSON key

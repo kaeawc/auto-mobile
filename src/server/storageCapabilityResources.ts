@@ -181,7 +181,7 @@ function runnerIosStorageDiscovery(device: BootedDevice): IosStorageDiscoverer {
   return {
     discoverIosStorage: async (appId) =>
       parseIosStorageDiscovery(
-        await IOSCtrlProxyClient.getInstance(device).storageCapabilities(appId),
+        await IOSCtrlProxyClient.getInstance(device).getStorageCapabilitiesForIos(appId),
       ),
   };
 }

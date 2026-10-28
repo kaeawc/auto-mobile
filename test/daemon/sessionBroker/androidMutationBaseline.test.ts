@@ -8,6 +8,7 @@ import {
 import { diffDeviceBaseline } from "../../../src/daemon/sessionBroker/mutations/baseline";
 import { planDeviceMutationRevert } from "../../../src/daemon/sessionBroker/mutations/revertPlanner";
 import { readFileSync } from "node:fs";
+import { shellQuote } from "../../../src/utils/shellQuote";
 import { androidBaselineRig, androidPackageDump } from "./fixtures/androidMutationBaseline";
 
 function rig(users: readonly number[] = [0]) {
@@ -20,6 +21,10 @@ function rig(users: readonly number[] = [0]) {
   };
   return { adb, reply, port, context };
 }
+
+const DOWNLOAD_ENTRIES = `shell sh -c ${shellQuote(
+  "if [ -d '/sdcard/Download' ]; then find '/sdcard/Download' -mindepth 1 -maxdepth 1 -print; elif [ -e '/sdcard/Download' ]; then exit 1; fi",
+)}`;
 
 const observation = (snapshot: DeviceBaseline, kind: string, key: string) =>
   snapshot.observations.find((entry) => entry.kind === kind && entry.key === key)?.value;
@@ -384,6 +389,22 @@ describe("Android mutation baseline capture", () => {
     ]);
   });
 
+  test("records every direct Downloads entry so user_files namespaces can be proven new", async () => {
+    const { port, context, reply } = rig();
+    reply(
+      DOWNLOAD_ENTRIES,
+      "/sdcard/Download/z.txt\n/sdcard/Download/fixtures\n/sdcard/Download/.hidden",
+    );
+    expect(observation(await port.capture(context), "shared-file", "download-entries")).toEqual({
+      state: "present",
+      value: JSON.stringify([
+        "/sdcard/Download/.hidden",
+        "/sdcard/Download/fixtures",
+        "/sdcard/Download/z.txt",
+      ]),
+    });
+  });
+
   test.each([
     ["shell pm list users", "Users:\nUserInfo{0:Owner:c13} running\nError: denied"],
     ["shell pm list users", "Users:\nUserInfo{0:Owner:c13}\nUserInfo{0:Owner:c13}"],
@@ -396,6 +417,9 @@ describe("Android mutation baseline capture", () => {
     ["shell settings --user 0 list global", "key=1\nkey=2"],
     ["shell settings --user 0 list global", "--user=value"],
     ["shell find /sdcard/ -mindepth 1 -maxdepth 1 -print", "/sdcard/../data"],
+    [DOWNLOAD_ENTRIES, "/sdcard/Download/a/b"],
+    [DOWNLOAD_ENTRIES, "/sdcard/Downloads/a"],
+    [DOWNLOAD_ENTRIES, "/sdcard/Download/a\n/sdcard/Download/a"],
     ["shell dumpsys account", "Accounts: 0"],
     ["shell wm density", "unknown density"],
     ["shell wm size", "Physical size: 1080x1920\nOverride size: bogus"],

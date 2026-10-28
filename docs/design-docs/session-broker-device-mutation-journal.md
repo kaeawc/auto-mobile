@@ -81,8 +81,20 @@ Other non-revertible effects require erase. Non-fallback opaque rows and the app
 interaction breadcrumbs are exempt; non-revertible store preferences are covered
 only for apps absent from the baseline inventory, whose data sanitize removes.
 
-Production shared-file intents outside that app-container proof have JSON-array
-keys and require a journal revert;
+On Android, `putAppFile` app-container rows get the same proof: an app absent from
+the readable baseline inventory is uninstalled by cleaning with its data. Android
+`user_files` rows (writes, `namespace-reset` and the `indexMedia` `media` row) are
+covered when they target user 0 (an omitted userId resolves to the current user,
+so it counts only when the baseline lists user 0 alone) and the baseline's
+`shared-file:download-entries` inventory of direct `/sdcard/Download` entries lacks
+the namespace path. The session then cannot have overwritten or deleted baseline
+files there: the public-root sweep deletes every file under the namespace, each
+deletion media-rescanned, and cleaning then removes the namespace's file-free
+directory tree with `rmdir`, failing cleaning when anything else remains. A
+baseline without that inventory, another user, or a namespace present at baseline
+escalates.
+Production shared-file intents outside these proofs have JSON-array keys and
+require a journal revert;
 the public-root file sweep does not cover those intents. CtrlProxy keyboard rows
 (`keyboard:tool:keyboard` and `keyboard:profile`) are not restored by settings
 cleaning and require a revert. Power controls also require their verified journal

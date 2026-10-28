@@ -4,8 +4,12 @@ import { isDeepStrictEqual } from "node:util";
 import { parseAndroidRuntimePermissions } from "../../features/action/parseAndroidRuntimePermissions";
 import { shellQuote } from "../../utils/shellQuote";
 import { logger } from "../../utils/logger";
+import { appContainerFileAppId } from "./mutations/appContainerFileKey";
+import { baselineHoldsApp } from "./mutations/appInventory";
 import {
   ANDROID_BASELINE_FILE_ROOTS,
+  ANDROID_DOWNLOAD_ENTRIES_KEY,
+  ANDROID_USER_FILES_ROOT,
   captureAndroidUsers,
   isAndroidResetFile,
   observeSettings,
@@ -64,6 +68,119 @@ export function androidBaselineCleanCovers(
   );
 }
 
+function baselineDownloadEntries(baseline: DeviceBaseline): ReadonlySet<string> | undefined {
+  const observation = baseline.observations.find(
+    (entry) => entry.kind === "shared-file" && entry.key === ANDROID_DOWNLOAD_ENTRIES_KEY,
+  );
+  if (observation?.value.state !== "present" || typeof observation.value.value !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(observation.value.value);
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")
+      ? new Set(parsed)
+      : undefined;
+  } catch (error) {
+    // An unreadable inventory proves nothing, so the namespace stays uncovered.
+    logger.debug("Android baseline Downloads inventory is not JSON", error);
+    return undefined;
+  }
+}
+
+/** The baseline lists exactly user 0, so a `user_files` write without a userId landed there. */
+function baselineHasOnlyUserZero(baseline: DeviceBaseline): boolean {
+  const users = baseline.observations
+    .filter(
+      (entry) =>
+        entry.kind === "installed-app" &&
+        entry.key.startsWith("users:") &&
+        entry.value.state === "present",
+    )
+    .map((entry) => entry.key);
+  return users.length === 1 && users[0] === "users:0";
+}
+
+function parseUserFilesKey(
+  entry: Pick<DeviceMutationInput, "kind" | "key">,
+): { namespace: string; user: unknown } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(entry.key);
+  } catch (error) {
+    // Raw paths and legacy keys are not user_files scopes; other coverage rules handle them.
+    logger.debug("Android journal file key is not JSON; not a user_files scope", error);
+    return undefined;
+  }
+  const length = entry.kind === "media" ? 5 : entry.kind === "shared-file" ? 6 : -1;
+  return Array.isArray(parsed) &&
+    parsed.length === length &&
+    parsed[0] === "user_files" &&
+    parsed[1] === null &&
+    parsed[2] === null &&
+    typeof parsed[3] === "string" &&
+    (length === 5 || typeof parsed[5] === "string")
+    ? { namespace: parsed[3], user: parsed[4] }
+    : undefined;
+}
+
+/** The user-0 directory a namespace stages into, trimmed as staging does; undefined if unsafe. */
+function userFilesDirectory(raw: string): string | undefined {
+  const namespace = raw.trim();
+  const directory = `${ANDROID_USER_FILES_ROOT}/${namespace}`;
+  return namespace.length > 0 && !/[/\\]/.test(namespace) && isAndroidResetFile(directory)
+    ? directory
+    : undefined;
+}
+
+/**
+ * The `/sdcard/Download/<namespace>` directory of a `putAppFile` `user_files` row (`shared-file`
+ * write or namespace reset, or its `indexMedia` `media` row) that baseline cleaning provably
+ * restores, or undefined. Coverage needs user 0 (`"default"` resolves to the current user, so it
+ * counts only when the baseline lists user 0 alone) and a readable Downloads entry inventory that
+ * lacks the namespace path: the session could then neither overwrite nor delete a baseline file
+ * there, the file sweep deletes everything under it (each deletion is media-rescanned), and
+ * cleaning removes the then-empty namespace directory tree.
+ */
+export function androidUserFilesNamespaceCovered(
+  entry: Pick<DeviceMutationInput, "kind" | "key">,
+  baseline: DeviceBaseline | null | undefined,
+): string | undefined {
+  const scope = baseline ? parseUserFilesKey(entry) : undefined;
+  if (!baseline || !scope) {
+    return undefined;
+  }
+  const directory = userFilesDirectory(scope.namespace);
+  const entries = baselineDownloadEntries(baseline);
+  return (scope.user === 0 || (scope.user === "default" && baselineHasOnlyUserZero(baseline))) &&
+    directory !== undefined &&
+    entries !== undefined &&
+    !entries.has(directory) &&
+    !baseline.observations.some(
+      (observation) =>
+        observation.kind === "shared-file" && observation.key.startsWith(`${directory}/`),
+    )
+    ? directory
+    : undefined;
+}
+
+/**
+ * Journal file rows baseline cleaning restores without a journal revert: app-container writes
+ * into apps absent from the baseline inventory (cleaning uninstalls them with their data) and
+ * covered `user_files` namespaces.
+ */
+export function androidBaselineFileCovers(
+  entry: Pick<DeviceMutationInput, "kind" | "key">,
+  baseline: DeviceBaseline | null | undefined,
+): boolean {
+  if (!baseline || (entry.kind !== "shared-file" && entry.kind !== "media")) {
+    return false;
+  }
+  const appId = entry.kind === "shared-file" ? appContainerFileAppId(entry.key) : undefined;
+  return appId !== undefined
+    ? !baselineHoldsApp(baseline, appId)
+    : androidUserFilesNamespaceCovered(entry, baseline) !== undefined;
+}
+
 /**
  * Settings the session's own tools write under a journal row whose key is not a raw settings key
  * (rotation, TalkBack and keep-awake journal `device`). `androidBaselineCleanCovers` leaves these
@@ -110,12 +227,16 @@ export async function cleanAndroidBaseline(
   revert: (mutation: DeviceMutationInput) => Promise<void>,
   journalEntries: readonly DeviceMutationEntry[] = [],
 ): Promise<void> {
+  const namespaces = new Set(
+    journalEntries.flatMap((entry) => androidUserFilesNamespaceCovered(entry, baseline) ?? []),
+  );
   await new AndroidBaselineCleaner(
     baseline,
     context,
     command,
     revert,
     sessionCreatedSettingMatcher(journalEntries),
+    [...namespaces].sort(),
   ).clean();
 }
 
@@ -128,6 +249,7 @@ class AndroidBaselineCleaner {
     private readonly command: AndroidBaselineCommand,
     private readonly revert: (mutation: DeviceMutationInput) => Promise<void>,
     private readonly sessionCreated: (key: string) => boolean,
+    private readonly userFilesNamespaces: readonly string[],
   ) {
     this.prior = new Map(
       baseline.observations.map((observation) => [
@@ -151,6 +273,21 @@ class AndroidBaselineCleaner {
       }
     }
     await this.cleanFiles();
+    for (const directory of this.userFilesNamespaces) {
+      await this.removeNamespaceDirectory(directory);
+    }
+  }
+
+  /**
+   * The file sweep leaves the directories of a covered `user_files` namespace behind; the namespace
+   * path was absent from the baseline, so its now file-free tree is removed. `rmdir` refuses
+   * anything the sweep did not delete (symlinks, special files), failing cleaning closed.
+   */
+  private async removeNamespaceDirectory(directory: string): Promise<void> {
+    const path = shellQuote(directory);
+    const resolved = shellQuote(directory.slice("/sdcard".length));
+    const script = `root=$(readlink -f /sdcard) && [ -n "$root" ] && if [ -e ${path} ] || [ -L ${path} ]; then [ ! -L ${path} ] && [ -d ${path} ] && [ "$(readlink -f ${path})" = "$root"${resolved} ] && find ${path} -depth -type d -exec rmdir {} +; fi && [ ! -e ${path} ] && [ ! -L ${path} ]`;
+    await this.command(`shell sh -c ${shellQuote(script)}`);
   }
 
   private async readDisplay(): Promise<ReadonlyMap<string, MutationValue>> {

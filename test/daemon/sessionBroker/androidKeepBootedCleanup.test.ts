@@ -5,10 +5,14 @@ import { SETTINGS_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
 import { describe, expect, test } from "bun:test";
 import {
   androidBaselineCleanCovers,
+  androidUserFilesNamespaceCovered,
   cleanAndroidBaseline,
   sessionCreatedSettingMatcher,
 } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
-import type { DeviceMutationInput } from "../../../src/daemon/sessionBroker/mutations/types";
+import type {
+  DeviceBaseline,
+  DeviceMutationInput,
+} from "../../../src/daemon/sessionBroker/mutations/types";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
 import { shellQuote } from "../../../src/utils/shellQuote";
@@ -693,6 +697,184 @@ describe("Android unconditional keep-booted cleaning", () => {
     loseOwnership();
     await expect(reset()).rejects.toThrow("ownership lost");
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+});
+
+describe("Android putAppFile baseline coverage", () => {
+  const SWEEP = `shell sh -c ${shellQuote("if [ -d '/sdcard/Download' ]; then find '/sdcard/Download' -type f -print; elif [ -e '/sdcard/Download' ]; then exit 1; fi")}`;
+  const DOWNLOAD_ENTRIES = `shell sh -c ${shellQuote("if [ -d '/sdcard/Download' ]; then find '/sdcard/Download' -mindepth 1 -maxdepth 1 -print; elif [ -e '/sdcard/Download' ]; then exit 1; fi")}`;
+  const userFiles = (userId?: number) =>
+    deviceToolMutations(
+      "putAppFile",
+      {
+        target: { domain: "user_files", namespace: " fixtures ", reset: true, indexMedia: true },
+        files: [{ destinationPath: "docs/a.pdf" }],
+        ...(userId === undefined ? {} : { userId }),
+      },
+      "android",
+    );
+
+  async function fallbackRig(
+    users: readonly number[] = [0],
+    configureBaseline?: (reply: (command: string, stdout: string) => void) => void,
+  ) {
+    const fallback = { count: 0 };
+    const result = await rig(
+      users,
+      {
+        reset: async () => {
+          fallback.count++;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+      configureBaseline,
+    );
+    return { ...result, fallback };
+  }
+
+  async function journalRows(
+    journal: FakeDeviceMutationJournal,
+    rows: readonly { kind: string; key: string }[],
+  ) {
+    for (const row of rows) {
+      await journal.record(SCOPE, {
+        ...row,
+        priorValue: { state: "unobservable" },
+        toolName: "putAppFile",
+      });
+    }
+  }
+
+  test("user 0 rows in a namespace absent from the baseline are swept, including the directory tree", async () => {
+    const { adb, reply, journal, reset, fallback } = await fallbackRig();
+    const rows = userFiles();
+    expect(rows.map((row) => row.kind)).toEqual(["shared-file", "shared-file", "media"]);
+    await journalRows(journal, rows);
+    reply(SWEEP, "/sdcard/Download/fixtures/docs/a.pdf");
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(fallback.count).toBe(0);
+    const commands = adb.getExecutedCommands();
+    expect(commands.some((command) => command.includes("rm -f") && command.includes("a.pdf"))).toBe(
+      true,
+    );
+    const rmdir = commands.filter((command) => command.includes("rmdir"));
+    expect(rmdir).toHaveLength(1);
+    expect(rmdir[0]).toContain("/sdcard/Download/fixtures");
+    expect(commands.indexOf(rmdir[0]!)).toBeGreaterThan(
+      commands.findIndex((command) => command.includes("rm -f") && command.includes("a.pdf")),
+    );
+  });
+
+  test("explicit user 0 is covered on a multi-user baseline, other users are not", async () => {
+    const covered = await fallbackRig([0, 10]);
+    await journalRows(covered.journal, userFiles(0));
+    expect(await covered.reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+
+    for (const rows of [userFiles(10), userFiles()]) {
+      const { journal, reset, fallback } = await fallbackRig([0, 10]);
+      await journalRows(journal, rows);
+      expect(await reset()).toMatchObject({
+        outcome: "fallback:snapshot",
+        fallbackReason: expect.stringContaining("user_files"),
+      });
+      expect(fallback.count).toBe(1);
+    }
+  });
+
+  test("a namespace path present in the baseline Downloads escalates", async () => {
+    const { adb, journal, reset, fallback } = await fallbackRig([0], (reply) =>
+      reply(DOWNLOAD_ENTRIES, "/sdcard/Download/fixtures\n/sdcard/Download/other.txt"),
+    );
+    await journalRows(journal, userFiles());
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(fallback.count).toBe(1);
+    expect(adb.getExecutedCommands().some((command) => command.includes("rmdir"))).toBe(false);
+  });
+
+  test("a baseline without the Downloads entry inventory escalates", async () => {
+    const { journal, reset, fallback } = await fallbackRig();
+    const baseline = await journal.getBaseline(SCOPE);
+    if (!baseline) {
+      throw new Error("missing test baseline");
+    }
+    await journal.deleteResource(SESSION.resourceId);
+    await journal.captureBaseline(SCOPE, {
+      ...baseline,
+      observations: baseline.observations.filter((entry) => entry.key !== "download-entries"),
+    });
+    await journalRows(journal, userFiles(0));
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(fallback.count).toBe(1);
+  });
+
+  test("an unremovable namespace tree fails cleaning closed", async () => {
+    const { adb, journal, reset, fallback } = await fallbackRig();
+    await journalRows(journal, userFiles());
+    adb.setCommandResponse("rmdir", createExecResult("", "rmdir: Directory not empty"));
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(fallback.count).toBe(1);
+  });
+
+  test("namespace coverage rejects unsafe, mistyped or baseline-backed scopes", () => {
+    const baseline = {
+      completeKinds: [],
+      unobservable: [],
+      observations: [
+        { kind: "installed-app", key: "users:0", value: { state: "present", value: true } },
+        { kind: "shared-file", key: "download-entries", value: { state: "present", value: "[]" } },
+        {
+          kind: "shared-file",
+          key: "/sdcard/Download/kept/a.txt",
+          value: { state: "present", value: "hash" },
+        },
+      ],
+    } satisfies DeviceBaseline;
+    const key = (namespace: string, user: unknown = "default", path: string | null = "a") =>
+      JSON.stringify(["user_files", null, null, namespace, user, ...(path === null ? [] : [path])]);
+    expect(
+      androidUserFilesNamespaceCovered({ kind: "shared-file", key: key("ns") }, baseline),
+    ).toBe("/sdcard/Download/ns");
+    expect(
+      androidUserFilesNamespaceCovered({ kind: "media", key: key("ns", 0, null) }, baseline),
+    ).toBe("/sdcard/Download/ns");
+    for (const entry of [
+      { kind: "shared-file", key: key("kept") },
+      { kind: "shared-file", key: key("..") },
+      { kind: "shared-file", key: key("a/b") },
+      { kind: "shared-file", key: key("  ") },
+      { kind: "shared-file", key: key("ns", "0") },
+      { kind: "media", key: key("ns") },
+      { kind: "shared-file", key: key("ns", 0, null) },
+      { kind: "preference", key: key("ns") },
+      { kind: "shared-file", key: "/sdcard/Download/ns/a" },
+    ]) {
+      expect(androidUserFilesNamespaceCovered(entry, baseline)).toBeUndefined();
+    }
+    expect(androidUserFilesNamespaceCovered({ kind: "shared-file", key: key("ns") }, null)).toBe(
+      undefined,
+    );
+  });
+
+  test("app-container writes are covered only for apps absent from the baseline", async () => {
+    const write = (appId: string) =>
+      deviceToolMutations(
+        "putAppFile",
+        {
+          target: { domain: "app_containers", appId, container: "files" },
+          files: [{ destinationPath: "seed.json" }],
+        },
+        "android",
+      );
+    const covered = await fallbackRig();
+    await journalRows(covered.journal, write("com.example.session"));
+    expect(await covered.reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+
+    const held = await fallbackRig();
+    await journalRows(held.journal, write("com.example.probe"));
+    expect(await held.reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("com.example.probe"),
+    });
   });
 });
 

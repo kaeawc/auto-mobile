@@ -23,7 +23,11 @@ import {
 } from "./mutations/reset";
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
-import { androidBaselineCleanCovers, isAndroidCriticalSetting } from "./androidKeepBootedCleanup";
+import {
+  androidBaselineCleanCovers,
+  androidBaselineFileCovers,
+  isAndroidCriticalSetting,
+} from "./androidKeepBootedCleanup";
 import { parsePowerIntentKey, POSTURE_OPAQUE_PARTS } from "./mutations/deviceStateKeys";
 import { opaqueIntentKey } from "./mutations/types";
 import {
@@ -441,18 +445,41 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
         return `journaled ${uncovered.kind} (${uncovered.toolName}) cannot be baseline-cleaned`;
       }
     }
+    return (
+      (await this.unrevertibleReason(entries, port, mutationContext.scope)) ??
+      this.cleanWithDeadline(port, mutationContext, context, phases)
+    );
+  }
+
+  /** A journal row neither reverted in place nor restored by baseline cleaning, as a reason. */
+  private async unrevertibleReason(
+    entries: readonly DeviceMutationEntry[],
+    port: AndroidKeepBootedResetPort,
+    scope: DeviceMutationScope,
+  ): Promise<string | undefined> {
     // Non-fallback opaque rows are diagnostic breadcrumbs, not persistent-state claims.
-    const unrevertible = entries.find(
+    const unreverted = entries.filter(
       (entry) =>
         entry.kind !== "opaque" &&
         entry.kind !== "preference" &&
         !androidBaselineCleanCovers(entry) &&
         !port.canRevert(entry),
     );
-    if (unrevertible) {
-      return `journaled mutation ${unrevertible.kind}:${unrevertible.key} (${unrevertible.toolName}) cannot be journal-reverted`;
+    let fileBaseline: DeviceBaseline | null = null;
+    if (unreverted.some((entry) => entry.kind === "shared-file" || entry.kind === "media")) {
+      try {
+        fileBaseline = await this.dependencies.journal.getBaseline(scope);
+      } catch (error) {
+        logger.warn("Android file baseline is unreadable; baseline fallback required", error);
+        return "journaled files have an unreadable baseline";
+      }
     }
-    return this.cleanWithDeadline(port, mutationContext, context, phases);
+    const unrevertible = unreverted.find(
+      (entry) => !androidBaselineFileCovers(entry, fileBaseline),
+    );
+    return unrevertible
+      ? `journaled mutation ${unrevertible.kind}:${unrevertible.key} (${unrevertible.toolName}) cannot be journal-reverted`
+      : undefined;
   }
 
   private resetFailure(

@@ -87,7 +87,8 @@ enum PrototypeSizing {
     }
 
     /// The size the node takes. `proposed` is the room the parent offers per axis (nil: unbounded),
-    /// `content` measures the node's content given the largest size it may take per axis.
+    /// `content` measures the node's content given the largest size it may take per axis. A zero
+    /// proposal probes the authored minimum; a weighted axis still takes exactly its assigned share.
     static func resolve(
         _ rules: PrototypeSizeRules,
         proposed: (width: Double?, height: Double?),
@@ -95,11 +96,29 @@ enum PrototypeSizing {
     )
         -> Size
     {
+        var offered = (
+            width: proposed.width.flatMap { $0.isFinite ? $0 : nil },
+            height: proposed.height.flatMap { $0.isFinite ? $0 : nil }
+        )
+        if offered.width == 0, rules.weightedAxis != .horizontal {
+            offered.width = Axis.minimum(dimension: rules.width, min: rules.minWidth, max: rules.maxWidth)
+            if let ratio = rules.aspectRatio, ratio > 0, case .points? = rules.height {
+                let height = Axis.minimum(dimension: rules.height, min: rules.minHeight, max: rules.maxHeight)
+                offered.width = Swift.max(offered.width ?? 0, height * ratio)
+            }
+        }
+        if offered.height == 0, rules.weightedAxis != .vertical {
+            offered.height = Axis.minimum(dimension: rules.height, min: rules.minHeight, max: rules.maxHeight)
+            if let ratio = rules.aspectRatio, ratio > 0, case .points? = rules.width {
+                let width = Axis.minimum(dimension: rules.width, min: rules.minWidth, max: rules.maxWidth)
+                offered.height = Swift.max(offered.height ?? 0, width / ratio)
+            }
+        }
         let widthAxis = Axis(
             dimension: rules.width,
             min: rules.minWidth,
             max: rules.maxWidth,
-            proposed: proposed.width,
+            proposed: offered.width,
             weighted: rules.weightedAxis == .horizontal,
             fillsByDefault: rules.fillsByDefault
         )
@@ -107,20 +126,35 @@ enum PrototypeSizing {
             dimension: rules.height,
             min: rules.minHeight,
             max: rules.maxHeight,
-            proposed: proposed.height,
+            proposed: offered.height,
             weighted: rules.weightedAxis == .vertical,
             fillsByDefault: rules.fillsByDefault
         )
+        var resolved: Size
         if let ratio = rules.aspectRatio, ratio > 0,
            let fitted = aspectSize(ratio: ratio, width: widthAxis.constraint, height: heightAxis.constraint)
         {
-            return fitted
+            resolved = fitted
+        } else {
+            let measured = content(widthAxis.fixed ?? widthAxis.high, heightAxis.fixed ?? heightAxis.high)
+            resolved = (
+                widthAxis.fixed ?? widthAxis.clamp(measured.width),
+                heightAxis.fixed ?? heightAxis.clamp(measured.height)
+            )
         }
-        let measured = content(widthAxis.fixed ?? widthAxis.high, heightAxis.fixed ?? heightAxis.high)
-        return (
-            widthAxis.fixed ?? widthAxis.clamp(measured.width),
-            heightAxis.fixed ?? heightAxis.clamp(measured.height)
-        )
+        if proposed.width == .infinity || proposed.height == .infinity {
+            let probe = content(
+                proposed.width == .infinity ? .infinity : widthAxis.fixed ?? widthAxis.high,
+                proposed.height == .infinity ? .infinity : heightAxis.fixed ?? heightAxis.high
+            )
+            if proposed.width == .infinity, widthAxis.fixed == nil, probe.width == .infinity {
+                resolved.width = widthAxis.clamp(.infinity)
+            }
+            if proposed.height == .infinity, heightAxis.fixed == nil, probe.height == .infinity {
+                resolved.height = heightAxis.clamp(.infinity)
+            }
+        }
+        return resolved
     }
 
     /// One axis after the bounds: the range left by min/max inside the proposal, and the exact size
@@ -129,6 +163,15 @@ enum PrototypeSizing {
         let low: Double
         let high: Double?
         let fixed: Double?
+
+        static func minimum(dimension: Dimension?, min: Double?, max: Double?) -> Double {
+            let authored = Axis(
+                dimension: dimension, min: min, max: max, proposed: nil,
+                weighted: false, fillsByDefault: false
+            )
+            if case .points? = dimension { return authored.fixed ?? authored.low }
+            return authored.low
+        }
 
         init(
             dimension: Dimension?,
@@ -203,9 +246,8 @@ enum PrototypeSizing {
     }
 }
 
-/// How a `row`/`column` splits its main axis, as Compose's `Row`/`Column` do: unweighted children
-/// are measured first in order, each offered what the gaps and earlier siblings left; the space
-/// still free is then shared out by weight, exactly (never less than zero).
+/// Splits the main axis, reserving minima and measuring least-flexible row content first when
+/// minima are supplied. Columns and unbounded rows measure in order; weights take the remainder.
 enum PrototypeWeightedStack {
     /// The main-axis size of each child. `available` is nil on an unbounded axis, where a weight
     /// has no space to share and resolves to zero. `measureFixed` returns an unweighted child's size
@@ -214,18 +256,52 @@ enum PrototypeWeightedStack {
         available: Double?,
         spacing: Double,
         weights: [Double?],
+        minimums: [Double]? = nil,
+        priorities: [Double]? = nil,
+        leastFlexibleFirst: Bool = false,
         measureFixed: (_ index: Int, _ most: Double?) -> Double
     )
         -> [Double]
     {
+        if leastFlexibleFirst, let available, let minimums {
+            let fills = weights.map { ($0 ?? 0) > 0 }
+            let greedy = weights.indices.map {
+                !fills[$0] && measureFixed($0, .infinity) > measureFixed($0, nil)
+            }
+            var sizes = PrototypeRowSizing.widths(
+                available: available, spacing: spacing, minimums: minimums, fills: fills,
+                priorities: priorities ?? weights.map { _ in 0 }
+            ) { index, most in
+                if fills[index] { return most ?? 0 }
+                let offered = greedy[index] && (most == nil || most == .infinity) ? available : most
+                return measureFixed(index, offered)
+            }
+            let remaining = weights.indices.filter { fills[$0] }.reduce(0.0) { $0 + sizes[$1] }
+            let totalWeight = weights.compactMap { $0 }.filter { $0 > 0 }.reduce(0, +)
+            for index in weights.indices where fills[index] {
+                sizes[index] = remaining * (weights[index] ?? 0) / totalWeight
+            }
+            return sizes
+        }
         var sizes = [Double](repeating: 0, count: weights.count)
         var used = spacing * Double(Swift.max(weights.count - 1, 0))
         var totalWeight = 0.0
+        var reserved = weights.indices.reduce(0.0) {
+            $0 + ((weights[$1] ?? 0) > 0 ? 0 : (minimums?[$1] ?? 0))
+        }
         for (index, weight) in weights.enumerated() {
             if let weight, weight > 0 {
                 totalWeight += weight
             } else {
-                sizes[index] = measureFixed(index, available.map { Swift.max($0 - used, 0) })
+                reserved -= minimums?[index] ?? 0
+                let minimum = minimums?[index] ?? 0
+                let most = available.map { Swift.max($0 - used - reserved, minimum) }
+                let measured = measureFixed(index, most)
+                if minimums != nil, let most {
+                    sizes[index] = Swift.min(Swift.max(measured, minimum), most)
+                } else {
+                    sizes[index] = measured
+                }
                 used += sizes[index]
             }
         }
@@ -235,5 +311,59 @@ enum PrototypeWeightedStack {
             if let weight, weight > 0 { sizes[index] = weight * unit }
         }
         return sizes
+    }
+}
+
+/// Allocates rigid content before flexible content, then shares unused width among fills and greedy controls.
+/// Measurement order never changes placement order; minimums may overflow a bounded proposal.
+enum PrototypeRowSizing {
+    static func widths(
+        available: Double?,
+        spacing: Double,
+        minimums: [Double],
+        fills: [Bool],
+        priorities: [Double],
+        measure: (_ index: Int, _ most: Double?) -> Double
+    )
+        -> [Double]
+    {
+        let ideals = minimums.indices.map { measure($0, nil) }
+        guard let available else { return ideals }
+        let sharesRemainder = minimums.indices.map { fills[$0] || measure($0, .infinity) > ideals[$0] }
+        let order = minimums.indices.filter { !sharesRemainder[$0] }.sorted {
+            if priorities[$0] != priorities[$1] { return priorities[$0] > priorities[$1] }
+            let firstFlexibility = max(ideals[$0] - minimums[$0], 0)
+            let secondFlexibility = max(ideals[$1] - minimums[$1], 0)
+            return firstFlexibility == secondFlexibility ? $0 < $1 : firstFlexibility < secondFlexibility
+        }
+        var result = [Double](repeating: 0, count: minimums.count)
+        var reserved = minimums.reduce(0, +)
+        var used = spacing * Double(max(minimums.count - 1, 0))
+        for index in order {
+            reserved -= minimums[index]
+            let most = max(min(ideals[index], available - used - reserved), minimums[index])
+            result[index] = max(min(measure(index, most), most), minimums[index])
+            used += result[index]
+        }
+        var pending = minimums.indices.filter { sharesRemainder[$0] }
+        var remaining = max(available - used, pending.reduce(0.0) { $0 + minimums[$1] })
+        while !pending.isEmpty {
+            let share = remaining / Double(pending.count)
+            let minimumExceedsShare = pending.contains { minimums[$0] > share }
+            var settled: [Int] = []
+            for index in pending {
+                let offered = max(share, minimums[index])
+                result[index] = max(min(measure(index, offered), offered), minimums[index])
+                if minimums[index] > share || (!minimumExceedsShare && result[index] < share) {
+                    settled.append(index)
+                }
+            }
+            if settled.isEmpty { break }
+            for index in settled {
+                remaining -= result[index]
+            }
+            pending.removeAll { settled.contains($0) }
+        }
+        return result
     }
 }

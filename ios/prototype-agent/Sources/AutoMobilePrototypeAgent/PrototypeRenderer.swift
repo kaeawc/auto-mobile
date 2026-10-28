@@ -402,7 +402,7 @@
                 if hasWeightedChild {
                     weightedStack(axis: .horizontal)
                 } else {
-                    HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
+                    PrototypeRowLayout(spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
                         .animation(sizeAnimation, value: layoutSignature)
                 }
             case "column":
@@ -555,10 +555,12 @@
         /// A row or column whose children share the main axis by `weight` (Android's `Modifier.weight`):
         /// see `PrototypeWeightedStack`. It adds no arrangement spacers: a weight takes the free space.
         private func weightedStack(axis: PrototypeAxis) -> some View {
+            // Button priority applies to direct children only, not buttons wrapped in boxes.
             PrototypeWeightedStackLayout(axis: axis, spacing: style?.spacing ?? 0) {
                 ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
                     NodeView(node: entry.node, model: model, inStackSlot: true, stackAxis: axis)
                         .layoutValue(key: PrototypeWeightKey.self, value: weight(of: entry.node))
+                        .layoutPriority(axis == .horizontal && entry.node.type == "button" ? 1 : 0)
                 }
             }
             .animation(sizeAnimation, value: layoutSignature)
@@ -567,16 +569,31 @@
         /// Start/center/end come from the frame alignment; only the space* modes need spacers, so a
         /// wrap-sized row or column does not grow to fill its parent.
         @ViewBuilder
-        private func arranged(horizontal _: Bool) -> some View {
+        private func arranged(horizontal: Bool) -> some View {
             let nodes = node.drawnChildren(holds: model.holds, stacks: model.stacks)
             let mode = style?.arrangement ?? "start"
             let outer = mode == "spaceAround" || mode == "spaceEvenly"
-            if outer { Spacer(minLength: 0) }
+            if outer { Spacer(minLength: 0).layoutValue(key: PrototypeRowFillKey.self, value: true) }
             ForEach(Array(nodes.enumerated()), id: \.element.offset) { index, entry in
-                if index > 0, mode.hasPrefix("space") { Spacer(minLength: 0) }
-                NodeView(node: entry.node, model: model, inStackSlot: true)
+                if index > 0, mode.hasPrefix("space") {
+                    Spacer(minLength: 0).layoutValue(key: PrototypeRowFillKey.self, value: true)
+                }
+                if horizontal {
+                    NodeView(node: entry.node, model: model, inStackSlot: true)
+                        .layoutValue(key: PrototypeRowFillKey.self, value: fillsRow(entry.node))
+                        .layoutPriority(entry.node.type == "button" ? 1 : 0)
+                } else {
+                    NodeView(node: entry.node, model: model, inStackSlot: true)
+                }
             }
-            if outer { Spacer(minLength: 0) }
+            if outer { Spacer(minLength: 0).layoutValue(key: PrototypeRowFillKey.self, value: true) }
+        }
+
+        private func fillsRow(_ child: PrototypeNode) -> Bool {
+            let width = child.resolvedStyle(state: model.state)?.width
+            return width == .fill || (width == nil && (
+                child.type == "spacer" || (child.type == "divider" && child.orientation != "vertical")
+            ))
         }
 
         private var pagerPosition: PagerPosition? {

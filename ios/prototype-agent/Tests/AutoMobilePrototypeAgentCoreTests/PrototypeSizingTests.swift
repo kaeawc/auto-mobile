@@ -226,6 +226,399 @@ final class PrototypeSizingTests: XCTestCase {
 }
 
 extension PrototypeSizingTests {
+    func testOverfullRowKeepsEveryControlMinimumAndOverflowsAtTheEnd() {
+        let minimums = [Double](repeating: 44, count: 6)
+        let widths = PrototypeRowSizing.widths(
+            available: 200, spacing: 0, minimums: minimums,
+            fills: [Bool](repeating: false, count: 6), priorities: [Double](repeating: 0, count: 6)
+        ) { _, most in min(44, most ?? .infinity) }
+        XCTAssertEqual(widths, minimums)
+        var leading = 0.0
+        let targets = widths.map { width in
+            defer { leading += width }
+            return CGRect(x: leading, y: 0, width: width, height: 44)
+        }
+        XCTAssertEqual(targets.map(\.minX), [0, 44, 88, 132, 176, 220])
+        for index in 1 ..< targets.count {
+            XCTAssertFalse(targets[index - 1].intersects(targets[index]))
+        }
+        XCTAssertEqual(targets.last?.maxX, 264)
+    }
+
+    func testNestedControlRowReportsItsMinimumAndReservesItInWeightedCoverRow() {
+        func innerWidth(_ most: Double?) -> Double {
+            PrototypeRowSizing.widths(
+                available: most, spacing: 8, minimums: [44, 44],
+                fills: [false, false], priorities: [0, 0]
+            ) { _, offered in min(44, offered ?? .infinity) }.reduce(0, +) + 8
+        }
+        XCTAssertEqual(innerWidth(0), 96)
+        var textOffer: Double?
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 342, spacing: 12, weights: [nil, 1, nil], minimums: [20, 0, innerWidth(0)],
+            leastFlexibleFirst: true
+        ) { index, most in
+            if index == 0 {
+                textOffer = most
+                return min(286, most ?? .infinity)
+            }
+            return innerWidth(most)
+        }
+        XCTAssertEqual(textOffer, 222)
+        XCTAssertEqual(widths, [222, 0, 96])
+        XCTAssertEqual(widths.reduce(0, +) + 24, 342)
+    }
+
+    func testZeroWidthProbeReportsAuthoredWidthAndMinimum() throws {
+        for json in [
+            #"{"width":{"dp":40},"aspectRatio":1}"#,
+            #"{"width":{"dp":40},"maxHeight":80}"#,
+            #"{"minWidth":44}"#,
+        ] {
+            let control = try rules(json)
+            XCTAssertEqual(size(control, in: (0, nil)).width, control.minWidth ?? 40)
+        }
+        let byHeight = try size(rules(#"{"height":{"dp":20},"aspectRatio":2}"#), in: (0, nil))
+        XCTAssertEqual(byHeight.width, 40)
+        XCTAssertEqual(byHeight.height, 20)
+        let byWidth = try size(rules(#"{"width":{"dp":40},"aspectRatio":2}"#), in: (0, 0))
+        XCTAssertEqual(byWidth.width, 40)
+        XCTAssertEqual(byWidth.height, 20)
+        XCTAssertEqual(try size(rules(#"{"width":{"dp":80},"maxWidth":40}"#), in: (0, nil)).width, 40)
+        XCTAssertEqual(try size(rules(#"{"minWidth":44,"maxWidth":80}"#), in: (0, nil)).width, 44)
+    }
+
+    func testRowReservesSizedAvatarAndMinWidthBoxUsingRealSizingReports() throws {
+        for json in [#"{"width":{"dp":40},"aspectRatio":1}"#, #"{"minWidth":44}"#] {
+            let control = try rules(json)
+            let minimum = size(control, in: (0, nil), content: (0, 10)).width
+            let expected = control.minWidth ?? 40
+            let widths = PrototypeRowSizing.widths(
+                available: 100, spacing: 0, minimums: [10, minimum],
+                fills: [false, false], priorities: [0, 0]
+            ) { index, most in
+                index == 0 ? min(200, most ?? .infinity)
+                    : self.size(control, in: (most, nil), content: (0, 10)).width
+            }
+            XCTAssertEqual(widths, [100 - expected, expected])
+        }
+    }
+
+    func testWeightedCoverRowReservesControlsAndBoundsWrappedColumn() {
+        var offers: [Int: Double] = [:]
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 342, spacing: 12, weights: [nil, 1, nil, nil], minimums: [20, 0, 44, 44],
+            leastFlexibleFirst: true
+        ) { index, most in
+            offers[index] = most
+            return [286.0, 0, 44, 44][index]
+        }
+        XCTAssertEqual(offers[0], 218)
+        XCTAssertNil(offers[1])
+        XCTAssertEqual(offers[2], 44)
+        XCTAssertEqual(offers[3], 44)
+        XCTAssertEqual(widths, [218, 0, 44, 44])
+        XCTAssertEqual(widths.reduce(0, +) + 36, 342)
+    }
+
+    func testWeightedCoverRowAtWideWidthKeepsIdealColumnAndFillsSpacer() {
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 440, spacing: 12, weights: [nil, 1, nil, nil], minimums: [20, 0, 44, 44],
+            leastFlexibleFirst: true
+        ) { index, _ in [286, 0, 44, 44][index] }
+        XCTAssertEqual(widths, [286, 30, 44, 44])
+        XCTAssertEqual(widths.reduce(0, +) + 36, 440)
+    }
+
+    func testWeightedRowSharesLeftoversProportionallyBetweenTwoChildren() {
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 200, spacing: 4, weights: [nil, 1, 3, nil], minimums: [20, 0, 0, 40],
+            leastFlexibleFirst: true
+        ) { index, _ in [20, 0, 0, 40][index] }
+        XCTAssertEqual(widths, [20, 32, 96, 40])
+        XCTAssertEqual(widths.reduce(0, +) + 12, 200)
+    }
+
+    func testWeightedRowThatFitsKeepsItsContentWidths() {
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 342, spacing: 12, weights: [nil, 1, nil, nil], minimums: [10, 0, 44, 44],
+            leastFlexibleFirst: true
+        ) { index, _ in [136, 0, 44, 44][index] }
+        XCTAssertEqual(widths, [136, 82, 44, 44])
+    }
+
+    func testUnweightedCoverRowReservesControlsAndBoundsWrappedColumn() {
+        var offers: [Int: Double] = [:]
+        let widths = PrototypeRowSizing.widths(
+            available: 342, spacing: 12,
+            minimums: [20, 0, 44, 44], fills: [false, true, false, false], priorities: [0, 0, 0, 0]
+        ) { index, most in
+            offers[index] = most
+            return min([286.0, 0, 44, 44][index], most ?? .infinity)
+        }
+        XCTAssertEqual(offers[0], 218)
+        XCTAssertEqual(widths, [218, 0, 44, 44])
+        XCTAssertEqual(widths.reduce(0, +) + 36, 342)
+    }
+
+    func testEquallyFlexibleChildrenUseAuthoredOrderAfterIdealMeasurement() {
+        var offers: [Double?] = []
+        let widths = PrototypeRowSizing.widths(
+            available: 100, spacing: 0,
+            minimums: [0, 0, 0], fills: [false, false, false], priorities: [0, 0, 0]
+        ) { _, most in
+            if most?.isFinite == true { offers.append(most) }
+            return 70
+        }
+        XCTAssertEqual(offers, [70, 30, 0])
+        XCTAssertEqual(widths, [70, 30, 0])
+    }
+
+    func testUnweightedRowThatFitsKeepsItsContentWidths() {
+        let widths = PrototypeRowSizing.widths(
+            available: 342, spacing: 12,
+            minimums: [10, 44, 44], fills: [false, false, false], priorities: [0, 0, 0]
+        ) { index, _ in [136, 44, 44][index] }
+        XCTAssertEqual(widths, [136, 44, 44])
+    }
+
+    func testRowSpacersShareOnlyTheSpaceLeftAfterContent() {
+        let widths = PrototypeRowSizing.widths(
+            available: 200, spacing: 4,
+            minimums: [20, 0, 0, 40], fills: [false, true, true, false], priorities: [0, 0, 0, 0]
+        ) { index, most in
+            index == 1 || index == 2 ? (most ?? 0) : [20, 0, 0, 40][index]
+        }
+        XCTAssertEqual(widths, [20, 64, 64, 40])
+    }
+
+    func testLeastFlexibleLabelsKeepTheirIdealWidthsBeforeLongContent() {
+        for ideals in [[286.0, 40], [200, 30]] {
+            let widths = PrototypeRowSizing.widths(
+                available: 100, spacing: 4, minimums: [10, 10],
+                fills: [false, false], priorities: [0, 0]
+            ) { index, most in min(ideals[index], most ?? .infinity) }
+            XCTAssertEqual(widths, [96 - ideals[1], ideals[1]])
+        }
+    }
+
+    func testGreedyControlWithSmallIdealTakesRemainderBesideRigidLabel() {
+        for minimum in [0.0, 30, 80] {
+            let widths = PrototypeRowSizing.widths(
+                available: 340, spacing: 8, minimums: [minimum, 40],
+                fills: [false, false], priorities: [0, 0]
+            ) { index, most in
+                index == 0 ? max(most ?? 30, minimum) : 40
+            }
+            XCTAssertEqual(widths, [292, 40])
+        }
+    }
+
+    func testGreedyControlRetainsTrackMinimumInOverfullRow() {
+        let widths = PrototypeRowSizing.widths(
+            available: 60, spacing: 8, minimums: [80, 40],
+            fills: [false, false], priorities: [0, 0]
+        ) { index, most in index == 0 ? max(most ?? 30, 80) : 40 }
+        XCTAssertEqual(widths, [80, 40])
+    }
+
+    func testGreedyControlsShareRemainderWithoutAuthoredFill() {
+        let widths = PrototypeRowSizing.widths(
+            available: 340, spacing: 8, minimums: [30, 0, 40],
+            fills: [false, false, false], priorities: [0, 0, 0]
+        ) { index, most in index == 2 ? 40 : max(most ?? 30, index == 0 ? 30 : 0) }
+        XCTAssertEqual(widths, [142, 142, 40])
+    }
+
+    func testSizedGreedyContentPreservesInfiniteProbesAndIdealSizes() throws {
+        for json in [#"{"minWidth":120}"#, #"{"aspectRatio":2}"#, #"{"weight":1}"#] {
+            let bounds = try rules(json, weightedAxis: .horizontal)
+            let infinite = PrototypeSizing.resolve(bounds, proposed: (.infinity, nil)) { width, _ in
+                (width ?? 30, 10)
+            }
+            let ideal = PrototypeSizing.resolve(bounds, proposed: (nil, nil)) { width, _ in
+                (width ?? 30, 10)
+            }
+            XCTAssertEqual(infinite.width, .infinity, json)
+            XCTAssertEqual(ideal.width, bounds.minWidth ?? 30, json)
+        }
+        let capped = try PrototypeSizing.resolve(
+            rules(#"{"maxWidth":200}"#), proposed: (.infinity, nil)
+        ) { width, _ in (width ?? 30, 10) }
+        XCTAssertEqual(capped.width, 200)
+        let fixed = try PrototypeSizing.resolve(
+            rules(#"{"width":{"dp":80},"minWidth":40}"#), proposed: (.infinity, nil)
+        ) { width, _ in (width ?? 30, 10) }
+        XCTAssertEqual(fixed.width, 80)
+    }
+
+    func testSizedGreedyContentPreservesVerticalProbesAndBounds() throws {
+        for maximum in [nil, 90.0] {
+            var bounds = try rules(#"{"minHeight":40}"#)
+            bounds.maxHeight = maximum
+            let infinite = PrototypeSizing.resolve(bounds, proposed: (nil, .infinity)) { _, height in
+                (30, height ?? 10)
+            }
+            XCTAssertEqual(infinite.height, maximum ?? .infinity)
+            let ideal = PrototypeSizing.resolve(bounds, proposed: (nil, nil)) { _, height in
+                (30, height ?? 10)
+            }
+            XCTAssertEqual(ideal.height, maximum ?? 40)
+        }
+    }
+
+    func testSizedGreedyControlsShareWidthAndReturnCappedRemainders() throws {
+        for maximum in [nil, 120.0] {
+            var bounds = try rules(#"{"minWidth":80}"#)
+            bounds.maxWidth = maximum
+            let widths = PrototypeRowSizing.widths(
+                available: 340, spacing: 8, minimums: [80, 0, 40],
+                fills: [false, false, false], priorities: [0, 0, 0]
+            ) { index, most in
+                if index == 2 { return 40 }
+                if index == 1 { return most ?? 30 }
+                return PrototypeSizing.resolve(bounds, proposed: (most, nil)) { width, _ in
+                    (width ?? 30, 10)
+                }.width
+            }
+            XCTAssertEqual(widths, maximum == nil ? [142, 142, 40] : [120, 164, 40])
+        }
+    }
+
+    func testWeightedRowSizesUnweightedGreedyContentBeforeWeights() {
+        for available in [340.0, 60] {
+            let widths = PrototypeWeightedStack.mainSizes(
+                available: available, spacing: 4, weights: [nil, 1, 3, nil],
+                minimums: [80, 0, 0, 40], leastFlexibleFirst: true
+            ) { index, most in index == 0 ? max(most ?? 80, 80) : 40 }
+            XCTAssertEqual(widths, [max(available - 52, 80), 0, 0, 40])
+        }
+        let capped = PrototypeWeightedStack.mainSizes(
+            available: 340, spacing: 4, weights: [nil, 1, 3, nil], minimums: [80, 0, 0, 40],
+            leastFlexibleFirst: true
+        ) { index, most in index == 0 ? min(most ?? 80, 120) : 40 }
+        XCTAssertEqual(capped, [120, 42, 126, 40])
+        let ideal = PrototypeWeightedStack.mainSizes(
+            available: nil, spacing: 4, weights: [nil, 1, 3, nil]
+        ) { index, most in index == 0 ? (most ?? 80) : 40 }
+        XCTAssertEqual(ideal, [80, 0, 0, 40])
+    }
+
+    func testNestedRowAndWeightedStackSizingDistinguishesNilAndInfiniteRoom() {
+        for weighted in [false, true] {
+            func nestedWidth(_ most: Double?) -> Double {
+                let children: [Double]
+                if weighted {
+                    children = PrototypeWeightedStack.mainSizes(
+                        available: most, spacing: 8, weights: [1, nil], minimums: [0, 40],
+                        leastFlexibleFirst: true
+                    ) { _, _ in 40 }
+                } else {
+                    children = PrototypeRowSizing.widths(
+                        available: most, spacing: 8, minimums: [80, 40],
+                        fills: [false, false], priorities: [0, 0]
+                    ) { index, offered in index == 0 ? max(offered ?? 80, 80) : 40 }
+                }
+                return children.reduce(0, +) + 8
+            }
+            for available in [nil, Double.infinity, 340.0] {
+                let widths = PrototypeRowSizing.widths(
+                    available: available, spacing: 8, minimums: [24, nestedWidth(0)],
+                    fills: [false, false], priorities: [0, 0]
+                ) { index, most in index == 0 ? 24 : nestedWidth(most) }
+                let expected = available == nil ? nestedWidth(nil) : available == .infinity ? .infinity : 308
+                XCTAssertEqual(widths, [24, expected])
+            }
+        }
+    }
+
+    func testFillingDividersShareTheRemainderAroundAnIdealLabel() {
+        let widths = PrototypeRowSizing.widths(
+            available: 100, spacing: 4, minimums: [0, 5, 0],
+            fills: [true, false, true], priorities: [0, 0, 0]
+        ) { index, most in index == 1 ? min(20, most ?? 20) : (most ?? 0) }
+        XCTAssertEqual(widths, [36, 20, 36])
+    }
+
+    func testFillMinimumIsReservedEvenWhenContentOverflows() {
+        for available in [0.0, 50, 100] {
+            let widths = PrototypeRowSizing.widths(
+                available: available, spacing: 0, minimums: [10, 44, 44],
+                fills: [false, true, false], priorities: [0, 0, 0]
+            ) { index, most in
+                index == 1 ? max(most ?? 44, 44) : min([200.0, 44, 44][index], most ?? .infinity)
+            }
+            XCTAssertEqual(widths, [max(available - 88, 10), 44, 44])
+        }
+    }
+
+    func testCappedFillsHandBackUnusedWidthAndReportOnlyUsedWidth() {
+        let widths = PrototypeRowSizing.widths(
+            available: 300, spacing: 0, minimums: [0, 0],
+            fills: [true, true], priorities: [0, 0]
+        ) { index, most in index == 0 ? min(most ?? 40, 40) : (most ?? 0) }
+        XCTAssertEqual(widths, [40, 260])
+        let capped = PrototypeRowSizing.widths(
+            available: 300, spacing: 0, minimums: [0, 0],
+            fills: [true, true], priorities: [0, 0]
+        ) { index, most in min(most ?? 0, [40.0, 60][index]) }
+        XCTAssertEqual(capped, [40, 60])
+        XCTAssertEqual(capped.reduce(0, +), 100)
+    }
+
+    func testFillMinimumLargerThanEqualShareRebalancesOtherFills() {
+        let widths = PrototypeRowSizing.widths(
+            available: 100, spacing: 0, minimums: [80, 0],
+            fills: [true, true], priorities: [0, 0]
+        ) { index, most in max(most ?? 0, [80.0, 0][index]) }
+        XCTAssertEqual(widths, [80, 20])
+    }
+
+    func testFillMinimumLargerThanEqualShareRebalancesCappedFill() {
+        let widths = PrototypeRowSizing.widths(
+            available: 100, spacing: 0, minimums: [80, 0],
+            fills: [true, true], priorities: [0, 0]
+        ) { index, most in index == 0 ? max(most ?? 0, 80) : min(most ?? 0, 40) }
+        XCTAssertEqual(widths, [80, 20])
+    }
+
+    func testWeightedRowKeepsDirectButtonLabelAndShrinksLongSibling() {
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 100, spacing: 4, weights: [nil, 1, nil],
+            minimums: [10, 0, 10], priorities: [0, 0, 1], leastFlexibleFirst: true
+        ) { index, most in min([200.0, 0, 40][index], most ?? .infinity) }
+        XCTAssertEqual(widths, [52, 0, 40])
+    }
+
+    func testWeightedColumnPreservesAuthoredMinimumsWithoutAZeroShareJump() {
+        for available in [99.5, 100, 100.5] {
+            let heights = PrototypeWeightedStack.mainSizes(
+                available: available, spacing: 0, weights: [nil, nil, nil, 1],
+                minimums: [60, 60, 60, 0]
+            ) { _, most in min(60, most ?? 60) }
+            XCTAssertEqual(heights, [60, 60, 60, 0])
+        }
+    }
+
+    func testButtonPriorityKeepsItsLabelBeforeOtherContentShrinks() {
+        let widths = PrototypeRowSizing.widths(
+            available: 100, spacing: 4,
+            minimums: [10, 10], fills: [false, false], priorities: [0, 1]
+        ) { index, most in min([90.0, 40][index], most ?? .infinity) }
+        XCTAssertEqual(widths, [56, 40])
+    }
+
+    func testUnboundedRowKeepsIdealSizesIncludingFillingContent() {
+        let widths = PrototypeRowSizing.widths(
+            available: nil, spacing: 4,
+            minimums: [10, 0], fills: [false, true], priorities: [0, 0]
+        ) { index, most in
+            XCTAssertNil(most)
+            return [40, 20][index]
+        }
+        XCTAssertEqual(widths, [40, 20])
+    }
+
     func testContentCentresOnlyOnWrappedAxes() throws {
         func anchor(_ json: String, weighted: PrototypeAxis? = nil) throws -> [Double] {
             let style = try JSONDecoder().decode(Style.self, from: Data(json.utf8))

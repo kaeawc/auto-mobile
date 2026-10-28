@@ -15,18 +15,21 @@ import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { isToolResponseFailure } from "../../src/server/pipeline/afterToolCall";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { getStructuredField, getStructuredPayload } from "../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 /**
- * Pins the exact serialized CallTool result for the interaction tools whose handlers
- * build their envelope from a payload object (selectAllText, pinchOn, dragAndDrop, shake,
- * recentApps, homeScreen, clipboard, systemTray) as it leaves the server transport
- * (#11830). The real registered handlers run against fakes; the MCP boundary, the
- * client's outputSchema validation and the finalizer are production code. An envelope
- * change that alters a single wire byte fails here.
+ * Pins the exact serialized CallTool result for the schema'd interaction tools
+ * selectAllText, pinchOn, dragAndDrop, shake, recentApps, homeScreen, clipboard and
+ * systemTray as it leaves the server transport (#11830): the text part, the retained
+ * `structuredContent`, the hoisted `success`/`error`, and `isError` only on a failure.
+ * The real registered handlers run against fakes; the MCP boundary, the client's
+ * outputSchema validation and the finalizer are production code. An envelope change
+ * that alters a single wire byte, or a payload the declared outputSchema rejects, fails here.
  */
 const device: BootedDevice = { name: "fake", deviceId: "fake-11830", platform: "android" };
 
@@ -103,6 +106,7 @@ describe("interaction tools wire envelopes", () => {
     args: Record<string, unknown>,
   ): Promise<{ wire: string; failure: boolean }> {
     const tool = ToolRegistry.getRegisteredTool(name)!;
+    expect(tool.outputSchema).toBeDefined();
     let failure: boolean | undefined;
     const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
       const response = await tool.deviceAwareHandler!(device, args);
@@ -123,24 +127,34 @@ describe("interaction tools wire envelopes", () => {
     }
   }
 
-  /** The schemaless wire: the payload serialized once as the only text part, then `isError`. */
-  const textWire = (payload: Record<string, unknown>, tail: Record<string, unknown> = {}) =>
-    JSON.stringify({ content: [{ type: "text", text: JSON.stringify(payload) }], ...tail });
+  /**
+   * The structured wire: the payload serialized once as the text part, the same payload
+   * retained as `structuredContent`, then the envelope tail (`isError` on a failure and the
+   * hoisted `success`/`error`, in the order the transport emits them).
+   */
+  const structuredWire = (payload: Record<string, unknown>, outcome: "ok" | "failed" = "ok") =>
+    JSON.stringify({
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload,
+      ...(outcome === "failed" ? { isError: true } : {}),
+      success: payload.success,
+      ...("error" in payload ? { error: payload.error } : {}),
+    });
 
-  const failed = { isError: true };
+  const failed = "failed";
 
   test.each([
     [
       "success",
       { success: true },
       false,
-      textWire({ message: "Selected all text in focused input field", success: true }),
+      structuredWire({ message: "Selected all text in focused input field", success: true }),
     ],
     [
       "failure",
       { success: false, error: "No focused field" },
       true,
-      textWire(
+      structuredWire(
         {
           message: "Failed to select all text: No focused field",
           success: false,
@@ -155,12 +169,12 @@ describe("interaction tools wire envelopes", () => {
   });
 
   test.each([
-    ["success", pinched, false, textWire({ message: "Pinched out", ...pinched })],
+    ["success", pinched, false, structuredWire({ message: "Pinched out", ...pinched })],
     [
       "failure",
       { ...pinched, success: false, error: "scale must be positive" },
       true,
-      textWire(
+      structuredWire(
         {
           message: "scale must be positive",
           ...pinched,
@@ -179,12 +193,17 @@ describe("interaction tools wire envelopes", () => {
   });
 
   test.each([
-    ["success", dragged, false, textWire({ message: "Dragged element to target", ...dragged })],
+    [
+      "success",
+      dragged,
+      false,
+      structuredWire({ message: "Dragged element to target", ...dragged }),
+    ],
     [
       "failure",
       { success: false, duration: 0, distance: 0, error: "Source not found" },
       true,
-      textWire(
+      structuredWire(
         {
           message: "Failed to drag element to target: Source not found",
           success: false,
@@ -207,7 +226,7 @@ describe("interaction tools wire envelopes", () => {
       "success",
       { success: true, duration: 500, intensity: 50 },
       false,
-      textWire({
+      structuredWire({
         message: "Shook device for 500ms with intensity 50",
         success: true,
         duration: 500,
@@ -218,7 +237,7 @@ describe("interaction tools wire envelopes", () => {
       "failure",
       { success: false, duration: 500, intensity: 50, error: "physical device" },
       true,
-      textWire(
+      structuredWire(
         {
           message: "Failed to shake device: physical device",
           success: false,
@@ -242,13 +261,13 @@ describe("interaction tools wire envelopes", () => {
       "success",
       { success: true, method: "hardware" },
       false,
-      textWire({ message: "Opened recent apps", success: true, method: "hardware" }),
+      structuredWire({ message: "Opened recent apps", success: true, method: "hardware" }),
     ],
     [
       "failure",
       { success: false, method: "ios_swipe", error: "runner down" },
       true,
-      textWire(
+      structuredWire(
         {
           message: "Failed to open recent apps: runner down",
           success: false,
@@ -268,7 +287,7 @@ describe("interaction tools wire envelopes", () => {
       "success",
       { success: true, navigationMethod: "hardware" },
       false,
-      textWire({
+      structuredWire({
         message: "Pressed home button to return to the home screen",
         success: true,
         navigationMethod: "hardware",
@@ -278,7 +297,7 @@ describe("interaction tools wire envelopes", () => {
       "failure",
       { success: false, error: "Runner failed to press Home" },
       true,
-      textWire(
+      structuredWire(
         {
           message: "Pressed home button to return to the home screen",
           success: false,
@@ -301,7 +320,7 @@ describe("interaction tools wire envelopes", () => {
       "get",
       { success: true, action: "get", text: "hello", method: "a11y" },
       false,
-      textWire({
+      structuredWire({
         message: 'Retrieved clipboard content: "hello" (via a11y)',
         success: true,
         action: "get",
@@ -313,7 +332,7 @@ describe("interaction tools wire envelopes", () => {
       "failure",
       { success: false, action: "paste", error: "No focused field" },
       true,
-      textWire(
+      structuredWire(
         {
           message: "Failed to execute clipboard paste: No focused field",
           success: false,
@@ -386,10 +405,28 @@ describe("interaction tools wire envelopes", () => {
     try {
       expect(await callOnWire("systemTray", args)).toEqual({
         failure: isError,
-        wire: textWire(payload, isError ? failed : {}),
+        wire: structuredWire(payload, isError ? failed : "ok"),
       });
     } finally {
       execute.mockRestore();
     }
+  });
+
+  // The finalizer renders a carried observation; the client validates the rendered
+  // payload against the advertised schema and would reject the call on a mismatch.
+  test("recentApps keeps a rendered observation schema-valid on the wire", async () => {
+    recentAppsResult = {
+      success: true,
+      method: "hardware",
+      observation: loadAndroidHomeObserve().observe,
+    };
+    const { wire: sent, failure } = await callOnWire("recentApps", {});
+    const result = JSON.parse(sent) as {
+      content: Array<{ type: "text"; text: string }>;
+      structuredContent: Record<string, unknown>;
+    };
+    expect(failure).toBe(false);
+    expect(getStructuredField(result, "observation")).toBeDefined();
+    expect(JSON.parse(result.content[0].text)).toEqual(getStructuredPayload(result));
   });
 });

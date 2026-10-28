@@ -249,7 +249,12 @@ export function deviceToolMutations(
   args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] {
-  if (mutationCallIsRead(name, args, platform) || mutationCallNotJournaled(name, args)) {
+  if (
+    DEVICE_MUTATION_TOOL_COVERAGE[name]?.status === "notJournaled" ||
+    mutationCallIsRead(name, args, platform) ||
+    mutationCallNotJournaled(name, args)
+  ) {
+    // A notJournaled tool changes no device state a later session could observe (#14359).
     return [];
   }
   const named = namedToolMutations(name, args);

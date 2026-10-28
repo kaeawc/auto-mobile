@@ -27,9 +27,8 @@ export function appFallback(
 
 /**
  * App lifecycle tools (#14359).
- * - `terminateApp`, `crashApp`, `appLifecycle`, `performanceTrace`, `videoRecording` and
- *   `recordDeviceGestures` act on a process or leave only host-side artifacts (a device-side
- *   recording or trace file is removed after the pull), so they change no persistent device state.
+ * - Process-only and host-artifact tools (`terminateApp`, `performanceTrace`, ...) are
+ *   `notJournaled` in `DEVICE_MUTATION_TOOL_COVERAGE` and never reach this adapter.
  * - `launchApp` is `am start` / `simctl launch`, except `clearAppData`, which destroys app data
  *   nothing restores, so it records a `fallback:` intent.
  * - `measureStartup` with a compilation mode other than `asIs` runs `cmd package compile`, which
@@ -42,17 +41,6 @@ export function appFallback(
  *   (`withoutSessionCoveredFallbacks`). An uninstall that keeps data always retains its fallback:
  *   the package inventory cannot see removed packages whose data remains.
  */
-const PROCESS_ONLY_TOOLS: ReadonlySet<string> = new Set([
-  "terminateApp",
-  "crashApp",
-  "appLifecycle",
-  "performanceTrace",
-  "captureTrace",
-  "heapDump",
-  "videoRecording",
-  "recordDeviceGestures",
-]);
-
 function installMutations(args: Record<string, unknown>): ToolMutation[] {
   return [
     ...(typeof args.appId === "string"
@@ -83,8 +71,5 @@ export function lifecycleToolMutations(
   args: Record<string, unknown>,
   _platform?: Platform,
 ): ToolMutation[] | undefined {
-  if (PROCESS_ONLY_TOOLS.has(name)) {
-    return [];
-  }
   return Object.hasOwn(APP_TOOL_MUTATIONS, name) ? APP_TOOL_MUTATIONS[name](args) : undefined;
 }

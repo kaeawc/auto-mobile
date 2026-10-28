@@ -80,6 +80,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_hide_keyboard_v1",
       // Contract only; the fake identity provider runtime is owed (#14303).
       "prototype_platform_auth_v1",
+      // Contract only; the Keystore-backed secure storage runtime is owed (#14321).
+      "prototype_platform_secureStorage_v1",
     )
 
   @Test

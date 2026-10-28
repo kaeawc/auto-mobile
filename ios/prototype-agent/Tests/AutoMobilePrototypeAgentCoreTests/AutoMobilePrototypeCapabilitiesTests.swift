@@ -55,6 +55,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_hide_keyboard_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
+            // Contract only; the Keychain-backed secure storage runtime is owed (#14321).
+            "prototype_platform_secureStorage_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

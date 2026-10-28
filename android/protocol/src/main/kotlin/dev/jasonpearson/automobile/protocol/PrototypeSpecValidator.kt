@@ -222,6 +222,8 @@ object PrototypeSpecValidator {
         enforceBytes = false,
       )
       ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
+      // A secure key must keep holding a string after the write.
+      ?: PrototypeSecureStorageRules.blockError(JsonObject(value + ("state" to stored)))
       ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
 
   private val stateWriteActionTypes =

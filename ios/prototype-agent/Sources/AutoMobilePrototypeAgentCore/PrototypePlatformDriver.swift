@@ -27,6 +27,10 @@ final class PrototypePlatformDriver {
             subscriptions.append(Task { [weak self] in
                 for await event in stream {
                     guard !Task.isCancelled, let self else { break }
+                    if event.event == PlatformEvent.stateRefresh(name).event {
+                        onState?(registry.snapshot)
+                        continue
+                    }
                     guard event.event.hasPrefix(name + "."),
                           PrototypePlatformValidator.modules[name]?.events.contains(
                               String(event.event.dropFirst(name.count + 1))

@@ -2022,8 +2022,10 @@ debounce, and a flap that settles back on the last delivered state is not an eve
 Viewer registries run `NWPathMonitor` (no entitlement), started on the module's first read: `online` is a
 satisfied path with an interface, `transport` is the first of Wi-Fi, cellular and wired Ethernet the path
 uses (a VPN's utun reports `other`), `metered` is `isExpensive` and `constrained` is Low Data Mode. The
-first path after start is the baseline, not a change, and `/platform` refreshes when the debounced event
-fires. The offline simulation override is not built.
+first path after start is the baseline, not a change. Every path that changes the state refreshes
+`/platform` at once through a state-only refresh signal the driver applies without running a handler, so
+a prototype shown before the first path still sees it; only `connectivity.changed` waits for the
+debounce. The offline simulation override is not built.
 
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.

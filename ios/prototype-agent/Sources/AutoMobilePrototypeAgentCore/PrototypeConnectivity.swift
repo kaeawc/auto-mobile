@@ -47,9 +47,11 @@ protocol PrototypeConnectivitySource: AnyObject {
 }
 
 /// The `connectivity` module: state only, plus a trailing `connectivity.changed` once the path has
-/// been quiet for the contract's debounce. The first reading after start is the baseline, not a
-/// change, and a flap that settles back on the last delivered state is not an event. Like every
-/// registered module it lives as long as its registry; the monitor starts on the first read.
+/// been quiet for the contract's debounce. Every reading that changes the state refreshes
+/// `/platform` at once through a state-refresh signal; the first reading after start is the
+/// baseline, not a change, and a flap that settles back on the last delivered state is not an
+/// event. Like every registered module it lives as long as its registry; the monitor starts on the
+/// first read.
 @MainActor
 final class PrototypeConnectivityModule: PrototypePlatformModule {
     let name = "connectivity"
@@ -106,7 +108,10 @@ final class PrototypeConnectivityModule: PrototypePlatformModule {
     }
 
     private func receive(_ next: PrototypeConnectivityReading) {
+        let changed = next.state != reading.state
         reading = next
+        // `/platform` follows every reading at once; only the event waits for the debounce.
+        if changed { subscribers.values.forEach { $0.yield(.stateRefresh(name)) } }
         guard delivered != nil else {
             delivered = next.state
             return

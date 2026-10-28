@@ -3,13 +3,17 @@
  * frames from one socket, runs them through the coordinator and relays the connection's lifecycle
  * back on the same transport.
  */
+import type { CtrlSocket } from "../observe/shared/types";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { PrototypeChannelCoordinator } from "./PrototypeChannelCoordinator";
 import {
+  PROTOTYPE_CHANNEL_CLOSE_MESSAGE_TYPE,
   PROTOTYPE_CHANNEL_CLOSED_MESSAGE_TYPE,
   PROTOTYPE_CHANNEL_FRAME_MESSAGE_TYPE,
+  PROTOTYPE_CHANNEL_OPEN_MESSAGE_TYPE,
   PROTOTYPE_CHANNEL_OPENED_MESSAGE_TYPE,
+  PROTOTYPE_CHANNEL_SEND_MESSAGE_TYPE,
   prototypeChannelCloseMessageSchema,
   prototypeChannelOpenMessageSchema,
   prototypeChannelSendMessageSchema,
@@ -17,6 +21,57 @@ import {
 } from "./prototypeChannelProtocol";
 
 export type PrototypeChannelSender = (message: PrototypeChannelOutboundMessage) => void;
+
+/** Writes channel messages to the device socket; throws when it is not open (they are then moot). */
+export function webSocketChannelSender(
+  getWebSocket: () => Pick<CtrlSocket, "readyState" | "send"> | null,
+): PrototypeChannelSender {
+  return (message) => {
+    const ws = getWebSocket();
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket not connected");
+    }
+    ws.send(JSON.stringify(message));
+  };
+}
+
+/** The device-to-host frame types a client routes to a channel host. */
+export const PROTOTYPE_CHANNEL_DEVICE_FRAME_TYPES: ReadonlySet<string> = new Set([
+  PROTOTYPE_CHANNEL_OPEN_MESSAGE_TYPE,
+  PROTOTYPE_CHANNEL_SEND_MESSAGE_TYPE,
+  PROTOTYPE_CHANNEL_CLOSE_MESSAGE_TYPE,
+]);
+
+/**
+ * Routes one device frame to `host`; with no host attached an open is answered with a closed frame
+ * (so the device's state machine can fail the channel) and the other frames are dropped.
+ */
+export function routePrototypeChannelFrame(
+  host: PrototypeChannelHost | undefined,
+  frame: unknown,
+  send: PrototypeChannelSender,
+): void {
+  const type = (frame as { type?: unknown } | null)?.type;
+  if (host === undefined) {
+    if (type === PROTOTYPE_CHANNEL_OPEN_MESSAGE_TYPE) {
+      const connectionId = (frame as { connectionId?: unknown }).connectionId;
+      logger.warn("[PrototypeChannel] prototype_channel_open received but no host is attached");
+      reply(send, {
+        type: PROTOTYPE_CHANNEL_CLOSED_MESSAGE_TYPE,
+        connectionId: typeof connectionId === "string" ? connectionId : "",
+        error: { code: "network", message: "The host channel proxy is not available." },
+      });
+    }
+    return;
+  }
+  if (type === PROTOTYPE_CHANNEL_OPEN_MESSAGE_TYPE) {
+    host.handleOpen(frame, send);
+  } else if (type === PROTOTYPE_CHANNEL_SEND_MESSAGE_TYPE) {
+    host.handleSend(frame);
+  } else if (type === PROTOTYPE_CHANNEL_CLOSE_MESSAGE_TYPE) {
+    host.handleClose(frame);
+  }
+}
 
 /** What a platform client calls when a `prototype_channel_*` frame or a disconnect arrives. */
 export interface PrototypeChannelHost {
@@ -103,5 +158,27 @@ function reply(send: PrototypeChannelSender, message: PrototypeChannelOutboundMe
   } catch (error) {
     // The socket can close while a channel is open; the device is gone, so there is no one to tell.
     logger.warn(`[PrototypeChannel] could not relay ${message.type}: ${errorMessage(error)}`);
+  }
+}
+
+/** The channel host one device client holds: frames route to it and its socket's close ends it. */
+export class PrototypeChannelRelay {
+  private host: PrototypeChannelHost | undefined;
+
+  constructor(
+    private readonly getWebSocket: () => Pick<CtrlSocket, "readyState" | "send"> | null,
+  ) {}
+
+  attach(host: PrototypeChannelHost | undefined): void {
+    this.host = host;
+  }
+
+  /** Routes one `prototype_channel_open`, `_send` or `_close` frame; replies go to the same socket. */
+  handleFrame(frame: unknown): void {
+    routePrototypeChannelFrame(this.host, frame, webSocketChannelSender(this.getWebSocket));
+  }
+
+  handleDisconnect(): void {
+    this.host?.handleDisconnect();
   }
 }

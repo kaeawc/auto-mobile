@@ -1,3 +1,4 @@
+import type { PrototypeChannelHost } from "../prototypeChannelHost";
 import type { PrototypeRequestHost } from "../prototypeRequestHandler";
 import {
   type PrototypeAgentClient,
@@ -70,6 +71,9 @@ export class BufferedViewerClient implements PrototypeAgentClient {
   }
   attachRequestHost(host: PrototypeRequestHost | undefined): void {
     this.client.attachRequestHost?.(host);
+  }
+  attachChannelHost(host: PrototypeChannelHost | undefined): void {
+    this.client.attachChannelHost?.(host);
   }
   close(): void {
     this.client.close();

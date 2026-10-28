@@ -56,6 +56,7 @@ import {
   type PrototypePatchReply,
   type PrototypePatchRequest,
 } from "../../prototype/prototypePatchWire";
+import type { PrototypeChannelHost } from "../../prototype/prototypeChannelHost";
 import type { PrototypeRequestHost } from "../../prototype/prototypeRequestHandler";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type {
@@ -552,6 +553,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   }
   attachPrototypeRequestHost(host: PrototypeRequestHost | undefined): void {
     this.prototypes.attachRequestHost(host);
+  }
+  attachPrototypeChannelHost(host: PrototypeChannelHost | undefined): void {
+    this.prototypes.channels.attach(host);
   }
 
   async requestAddHighlight(

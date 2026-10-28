@@ -52,6 +52,7 @@ import {
 } from "../../features/prototype/prototypeAssetUploader";
 import { prototypeSpecForDevice } from "../../features/prototype/prototypeComponents";
 import * as requestWiring from "../../features/prototype/prototypeRequestWiring";
+import * as channelWiring from "../../features/prototype/prototypeChannelWiring";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import { readPrototypeSpecFile } from "../../features/prototype/prototypeSpecFile";
 import { requestedPrototypeWindowOptions } from "../../features/prototype/prototypeWindowOptions";
@@ -222,6 +223,7 @@ interface PrototypeTransportCache {
   android: WeakMap<PrototypeClient, AndroidPrototypeTransport>;
   ios: WeakMap<PrototypeAgentClient, IosPrototypeTransport>;
   requests?: requestWiring.PrototypeRequestCoordinator;
+  channels?: channelWiring.PrototypeChannelCoordinator;
 }
 
 /**
@@ -243,6 +245,7 @@ function prototypeTargets(
       transport = new AndroidPrototypeTransport(client);
       transports.android.set(client, transport);
       requestWiring.attachAndroidPrototypeRequests(client, device.deviceId, transports.requests);
+      channelWiring.attachAndroidPrototypeChannels(client, device.deviceId, transports.channels);
     }
     return { transport, android: transport };
   };
@@ -256,6 +259,7 @@ function prototypeTargets(
       transport = new IosPrototypeTransport(agent);
       transports.ios.set(agent, transport);
       requestWiring.attachIosPrototypeRequests(agent, device.deviceId, transports.requests);
+      channelWiring.attachIosPrototypeChannels(agent, device.deviceId, transports.channels);
     }
     return { transport, ios: transport };
   };
@@ -295,12 +299,16 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
     timer,
   });
   const requests = requestWiring.createPrototypeRequestCoordinator(timer, mocks);
+  const channels = channelWiring.createPrototypeChannelCoordinator(
+    timer,
+    dependencies.channelExecutor,
+  );
   const recorder = createTestSessionRecorder(dependencies, store);
   const events = new PrototypeEventCoordinator(
     timer,
     store,
     TelemetryRecorder.getInstance(),
-    requests,
+    channelWiring.combinedPrototypeCancellation(requests, channels),
     recorder,
   );
   const reverses = new PrototypeAdbReverseManager();
@@ -316,7 +324,7 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
     recorder,
     commits: new PrototypeCommitGenerations(),
     patchQueue: createPrototypePatchQueue(),
-    transports: { android: new WeakMap(), ios: new WeakMap(), requests },
+    transports: { android: new WeakMap(), ios: new WeakMap(), requests, channels },
     reverses,
     mocks,
     ensureLifecycle: cleanup.ensureSubscribed,
@@ -349,7 +357,8 @@ function prototypeHostFor(dependencies: PrototypeToolDependencies): PrototypeHos
     timer ||
     lifecycle ||
     dependencies.testSessionStore ||
-    dependencies.idGenerator
+    dependencies.idGenerator ||
+    dependencies.channelExecutor
   ) {
     return createPrototypeHost(dependencies);
   }

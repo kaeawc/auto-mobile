@@ -1,3 +1,7 @@
+import type {
+  PrototypeChannelHost,
+  PrototypeChannelSender,
+} from "../../../../src/features/prototype/prototypeChannelHost";
 import type { PrototypeSpec } from "../../../../src/features/prototype/prototypeSpec";
 import {
   CtrlProxyPrototypes,
@@ -1843,4 +1847,66 @@ test("enabled shader specs still require the advertised capability before dispat
     }),
   ).rejects.toThrow("prototype_custom_shaders_v1");
   expect(send).not.toHaveBeenCalled();
+});
+
+describe("host channel frames (#14268)", () => {
+  class ChannelHost implements PrototypeChannelHost {
+    readonly frames: [string, unknown][] = [];
+    disconnects = 0;
+    handleOpen(frame: unknown, send: PrototypeChannelSender): void {
+      this.frames.push(["open", frame]);
+      send({ type: "prototype_channel_opened", connectionId: "c1", protocol: "chat.v1" });
+    }
+    handleSend(frame: unknown): void {
+      this.frames.push(["send", frame]);
+    }
+    handleClose(frame: unknown): void {
+      this.frames.push(["close", frame]);
+    }
+    handleDisconnect(): void {
+      this.disconnects++;
+    }
+  }
+  const open = { type: "prototype_channel_open", connectionId: "c1", url: "wss://chat.test/x" };
+
+  test("a channel frame from the device reaches the attached host, which answers on the same socket", async () => {
+    const { client, socket, receive } = await harness();
+    const sent = spyOn(socket, "send").mockImplementation(() => {});
+    const host = new ChannelHost();
+    client.attachPrototypeChannelHost(host);
+    await receive(open);
+    await receive({ type: "prototype_channel_send", connectionId: "c1", data: "hi" });
+    await receive({ type: "prototype_channel_close", connectionId: "c1" });
+    expect(host.frames.map(([name]) => name)).toEqual(["open", "send", "close"]);
+    expect(sent.mock.calls.map(([data]) => JSON.parse(String(data)))).toEqual([
+      { type: "prototype_channel_opened", connectionId: "c1", protocol: "chat.v1" },
+    ]);
+  });
+
+  test("with no host attached an open is answered with a closed frame", async () => {
+    const { socket, receive } = await harness();
+    const sent = spyOn(socket, "send").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    await receive(open);
+    warn.mockRestore();
+    expect(sent.mock.calls.map(([data]) => JSON.parse(String(data)))).toEqual([
+      {
+        type: "prototype_channel_closed",
+        connectionId: "c1",
+        error: { code: "network", message: "The host channel proxy is not available." },
+      },
+    ]);
+  });
+
+  test("closing the client ends the channels the host holds, and a later attach replaces the host", async () => {
+    const { client, receive } = await harness();
+    const first = new ChannelHost();
+    const second = new ChannelHost();
+    client.attachPrototypeChannelHost(first);
+    client.attachPrototypeChannelHost(second);
+    await receive({ type: "prototype_channel_send", connectionId: "c1", data: "x" });
+    expect([first.frames.length, second.frames.length]).toEqual([0, 1]);
+    await client.close();
+    expect([first.disconnects, second.disconnects]).toEqual([0, 1]);
+  });
 });

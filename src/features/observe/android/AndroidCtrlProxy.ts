@@ -70,6 +70,7 @@ import type { AndroidCtrlProxyClient } from "./AndroidCtrlProxyClient";
 /** Concrete-client members that production callers reach through `getInstance()`. */
 export type AndroidCtrlProxyClientSurface = Pick<
   AndroidCtrlProxyClient,
+  | "attachPrototypeChannelHost"
   | "attachPrototypeRequestHost"
   | "bindSession"
   | "getPreferenceEntries"

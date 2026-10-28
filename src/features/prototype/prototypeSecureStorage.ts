@@ -90,11 +90,35 @@ export function prototypeSecureStorageEmitError(
  * text there.
  */
 function secureKeyFor(stateKey: string, secure: string[]): string | undefined {
-  const parts = stateKey.split(/\{[^}]*\}/);
-  const pattern = new RegExp(
-    `^${parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`,
+  const literals = stateKey.split(/\{[^}]*\}/);
+  return secure.find(
+    (entry) => entry.startsWith("state:") && templateMatches(literals, entry.slice(6)),
   );
-  return secure.find((entry) => entry.startsWith("state:") && pattern.test(entry.slice(6)));
+}
+
+/**
+ * Whether `key` fits the literal parts of a template whose gaps match any text. Linear: the first and
+ * last literals anchor the ends and each middle literal is found left to right, so no backtracking.
+ */
+function templateMatches(literals: string[], key: string): boolean {
+  const first = literals[0] ?? "";
+  if (literals.length === 1) {
+    return key === first;
+  }
+  const last = literals.at(-1) ?? "";
+  const end = key.length - last.length;
+  if (end < first.length || !key.startsWith(first) || !key.endsWith(last)) {
+    return false;
+  }
+  let at = first.length;
+  for (const part of literals.slice(1, -1)) {
+    const found = key.indexOf(part, at);
+    if (found < 0 || found + part.length > end) {
+      return false;
+    }
+    at = found + part.length;
+  }
+  return true;
 }
 
 function secureKeyError(entry: unknown, root: Raw, keys: string[]): string | undefined {

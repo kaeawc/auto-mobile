@@ -139,3 +139,26 @@ describe("prototypeStorageSchema secure fields", () => {
     ).toBe(false);
   });
 });
+
+describe("secure key template matching", () => {
+  const leak = (stateKey: string, secure: string[]) =>
+    prototypeSecureStorageEmitError(
+      { type: "emit", name: "save", context: { t: { state: stateKey } } },
+      "root.onTap[0]",
+      { storage: { version: 1, keys: [], secure } },
+    )?.message;
+
+  test("placeholders stand for any text, literals must appear in order and in place", () => {
+    expect(leak("a{x}c{y}e", ["state:abcde"])).toContain("state:abcde");
+    expect(leak("{x}", ["state:token"])).toContain("state:token");
+    expect(leak("ab{x}ba", ["state:aba"])).toBeUndefined();
+    expect(leak("a{x}c{y}e", ["state:abxde"])).toBeUndefined();
+    expect(leak("tok{x}", ["state:mytoken"])).toBeUndefined();
+  });
+
+  test("many placeholders against a long key stay linear", () => {
+    const started = performance.now();
+    expect(leak(`${"{row.id}".repeat(8)}z`, [`state:${"a".repeat(63)}b`])).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+});

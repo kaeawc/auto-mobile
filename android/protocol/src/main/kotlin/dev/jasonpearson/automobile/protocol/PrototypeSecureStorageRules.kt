@@ -72,11 +72,29 @@ internal object PrototypeSecureStorageRules {
    * any text there.
    */
   private fun secureKeyFor(stateKey: String, secure: List<String>): String? {
-    val pattern =
-      Regex(stateKey.split(Regex("\\{[^}]*\\}")).joinToString(".*") { Regex.escape(it) })
+    val literals = stateKey.split(Regex("\\{[^}]*\\}"))
     return secure.firstOrNull {
-      it.startsWith("state:") && pattern.matches(it.removePrefix("state:"))
+      it.startsWith("state:") && templateMatches(literals, it.removePrefix("state:"))
     }
+  }
+
+  /**
+   * Whether [key] fits the literal parts of a template whose gaps match any text. Linear: the first
+   * and last literals anchor the ends and each middle literal is found left to right.
+   */
+  private fun templateMatches(literals: List<String>, key: String): Boolean {
+    val first = literals.first()
+    if (literals.size == 1) return key == first
+    val last = literals.last()
+    val end = key.length - last.length
+    if (end < first.length || !key.startsWith(first) || !key.endsWith(last)) return false
+    var at = first.length
+    for (part in literals.subList(1, literals.size - 1)) {
+      val found = key.indexOf(part, at)
+      if (found < 0 || found + part.length > end) return false
+      at = found + part.length
+    }
+    return true
   }
 
   private fun keyError(entry: String?, root: JsonObject, keys: List<String>): String? {

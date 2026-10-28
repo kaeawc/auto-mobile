@@ -69,14 +69,39 @@ enum PrototypeSecureStorageRules {
         let literals = stateKey
             .replacingOccurrences(of: #"\{[^}]*\}"#, with: "\u{0}", options: .regularExpression)
             .components(separatedBy: "\u{0}")
-        let pattern = "^" + literals.map(NSRegularExpression.escapedPattern(for:)).joined(separator: ".*") + "$"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         return secure.first { entry in
-            guard entry.hasPrefix("state:") else { return false }
-            let key = String(entry.dropFirst("state:".count))
-            return regex.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)) != nil
+            entry.hasPrefix("state:") && templateMatches(literals, key: String(entry.dropFirst("state:".count)))
         }
     }
+
+    /// Whether `key` fits the literal parts of a template whose gaps match any text. Linear: the first and
+    /// last literals anchor the ends and each middle literal is found left to right.
+    private static func templateMatches(_ literals: [String], key: String) -> Bool {
+        let first = literals.first ?? ""
+        guard literals.count > 1 else { return key == first }
+        let last = literals.last ?? ""
+        let keyChars = Array(key.unicodeScalars)
+        let end = keyChars.count - last.unicodeScalars.count
+        guard end >= first.unicodeScalars.count, key.hasPrefix(first), key.hasSuffix(last) else { return false }
+        var at = first.unicodeScalars.count
+        for part in literals.dropFirst().dropLast() {
+            let partChars = Array(part.unicodeScalars)
+            guard let found = firstIndex(of: partChars, in: keyChars, from: at),
+                  found + partChars.count <= end else { return false }
+            at = found + partChars.count
+        }
+        return true
+    }
+
+    private static func firstIndex(of part: [Unicode.Scalar], in key: [Unicode.Scalar], from start: Int) -> Int? {
+        guard !part.isEmpty else { return start <= key.count ? start : nil }
+        guard key.count >= part.count, start <= key.count - part.count else { return nil }
+        for index in start ... (key.count - part.count) where Array(key[index ..< index + part.count]) == part {
+            return index
+        }
+        return nil
+    }
+
 
     private static func keyError(_ entry: String?, state: [String: JSONValue], keys: [String]) -> String? {
         guard let entry, entry.hasPrefix("state:") else { return "Secure storage keys are state:<key>" }

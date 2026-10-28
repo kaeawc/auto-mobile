@@ -137,7 +137,7 @@ export const MEDIA_ENV = {
     name: "AUTOMOBILE_EMULATOR_AUDIO",
     kind: "string",
     default: "audio on",
-    doc: "Exact false adds -no-audio to emulator launches; other values keep audio.",
+    doc: "Exact false adds -no-audio to emulator launches, disabling emulator audio; other values keep audio.",
   },
   NAV_RETENTION_SCREENSHOT_TTL_MS: {
     name: "AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS",

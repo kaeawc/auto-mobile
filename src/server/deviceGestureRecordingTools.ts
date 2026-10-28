@@ -4,7 +4,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { addSessionUuidToSchema } from "../utils/schemaHelpers";
+import { addSessionUuidToSchema, resourceLinkField } from "../utils/schemaHelpers";
 import {
   startDeviceGestureRecording,
   getStoppedDeviceGestureRecording,
@@ -77,6 +77,7 @@ const exportPlanSchema = addSessionUuidToSchema(
     .object({
       recordingId: z.string().optional().describe("Recording ID"),
       planName: z.string().optional().describe("Plan name"),
+      resourceLink: resourceLinkField(),
     })
     .strict(),
 );

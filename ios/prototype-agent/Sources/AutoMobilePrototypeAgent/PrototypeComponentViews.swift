@@ -1016,11 +1016,10 @@
         }
     }
 
-    // MARK: Dialog, snackbar
+    // MARK: Dialogs, snackbars, menus, drawers, tooltips and bottom sheets
 
-    /// Open dialogs and snackbars, drawn above the whole author tree inside the prototype window, in
-    /// tree order. A dialog's scrim covers the window, intercepts every touch and closes it on tap; a
-    /// snackbar takes touches only on itself.
+    /// Open dialogs, snackbars, menus, drawers, tooltips and bottom sheets above the author tree in tree order.
+    /// Dialog scrims intercept window touches and close on tap; snackbars take touches only on themselves.
     @MainActor
     struct PrototypeModalLayer: View {
         @Environment(\.prototypePalette) private var palette
@@ -1047,6 +1046,9 @@
                         }
                     } else if node.type == "menu" {
                         PrototypeMenuOverlay(node: node, model: model)
+                            .reportFrame(key: "modal.\(index)", model: model)
+                    } else if node.type == "bottomSheet" {
+                        NodeView(node: node, model: model, presentedAsModal: true)
                             .reportFrame(key: "modal.\(index)", model: model)
                     } else if node.type == "dialog" {
                         ZStack {

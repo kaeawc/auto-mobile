@@ -6,7 +6,7 @@ import Foundation
 // so the renderer and the `simulate_tap` test hook share one implementation.
 
 /// Node types drawn above the whole author tree while their `openWhen` holds, never inline.
-let prototypeModalTypes: Set<String> = ["dialog", "snackbar", "menu", "tooltip", "drawer"]
+let prototypeModalTypes: Set<String> = ["dialog", "snackbar", "menu", "tooltip", "drawer", "bottomSheet"]
 
 extension PrototypeNode {
     /// Focus does not change expansion; only the authored boolean state does.
@@ -57,7 +57,7 @@ extension PrototypeNode {
     {
         if let visibleWhen, !visibleWhen.holds(state) { return [] }
         let modal = prototypeModalTypes.contains(type)
-        if modal || type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
+        if modal, !(openWhen?.holds(state) ?? false) { return [] }
         let nested = currentChildEntries(
             path: "root", pages: pages, stacks: stacks, state: state, clampPagerPage: false
         ).map(\.node)
@@ -106,7 +106,7 @@ extension PrototypeNode {
         -> PrototypeTapTarget?
     {
         if let visibleWhen, !visibleWhen.holds(state) { return nil }
-        if prototypeModalTypes.contains(type) || type == "bottomSheet",
+        if prototypeModalTypes.contains(type),
            !(openWhen?.holds(state) ?? false) { return nil }
         if identifier == wanted { return .node(self) }
         if type == "drawer" || (type == "tooltip" && spotlight != nil),

@@ -174,8 +174,7 @@ struct PrototypeAnchoredNode {
 }
 
 /// Roles that render their children inline through `NodeView`; other roles never draw children, so
-/// an anchored node below them is not listed (as Android's `PROTOTYPE_INLINE_CONTAINER_ROLES`, plus
-/// iOS's inline `bottomSheet`, which Android shows as a modal).
+/// an anchored node below them is not listed (as Android's `PROTOTYPE_INLINE_CONTAINER_ROLES`).
 private let prototypeInlineContainerTypes: Set<String> = [
     "box",
     "row",
@@ -187,7 +186,6 @@ private let prototypeInlineContainerTypes: Set<String> = [
     "card",
     "pager",
     "stack",
-    "bottomSheet",
     "searchBar",
 ]
 
@@ -227,7 +225,7 @@ extension PrototypeNode {
     /// The anchored nodes below this node that the renderer draws in a window-level layer above the
     /// author tree (#10803), in tree order. Drawn inside their parents they would take a slot there
     /// and be clipped to it. A node is listed when every ancestor below this node is shown: visible,
-    /// on its pager's current page, an open `bottomSheet`, and not inside a modal (modals list their
+    /// on its pager's current page, and not inside a modal (including `bottomSheet`; modals list their
     /// own through `layeredAnchors(in:)`). The anchored node's own `visibleWhen` is left to the
     /// renderer. This node itself is never listed: a window root keeps its own anchored placement.
     ///
@@ -270,7 +268,6 @@ extension PrototypeNode {
             shown = false
         }
         guard prototypeInlineContainerTypes.contains(type) else { return [] }
-        if type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
         if type == "searchBar", !searchBarActive(state: state) { return [] }
         let entries = currentChildEntries(path: path, pages: pages, stacks: stacks, state: state)
         return PrototypeNode.layeredAnchors(

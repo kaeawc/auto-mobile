@@ -120,14 +120,10 @@ extension PrototypeMotion {
 }
 
 extension PrototypeNode {
-    /// Whether the node takes a slot in its parent's stack: not hidden by `visibleWhen`, not drawn
-    /// elsewhere (an anchored node is drawn by the anchor layer, a dialog or snackbar by the modal
-    /// layer) and not a closed `bottomSheet`. A stack puts its spacing around every child it is
-    /// given, even an empty one, so a parent leaves these out (#10912).
+    /// Hidden, anchored and modal nodes take no stack slot; even an empty slot adds spacing (#10912).
     func drawsInPlace(holds: (Condition) -> Bool) -> Bool {
         if let visibleWhen, !holds(visibleWhen) { return false }
         if anchor != nil || prototypeModalTypes.contains(type) { return false }
-        if type == "bottomSheet", !(openWhen.map(holds) ?? false) { return false }
         return true
     }
 

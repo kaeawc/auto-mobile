@@ -28,6 +28,16 @@ struct PrototypeBarScrollState: Equatable {
 }
 
 enum PrototypeBarScroll {
+    static func showsNavigationLabel(behavior: String?, fraction: Double) -> Bool {
+        behavior != "minimize" || fraction <= 0
+    }
+
+    static func navigationSizing(showsLabel: Bool)
+        -> (itemMinHeight: CGFloat, containerMinHeight: CGFloat, topPadding: CGFloat, bottomPadding: CGFloat)
+    {
+        showsLabel ? (64, 80, 12, 4) : (56, 56, 0, 0)
+    }
+
     static func validate(_ root: JSONValue) throws {
         try screen(root, path: "root")
     }

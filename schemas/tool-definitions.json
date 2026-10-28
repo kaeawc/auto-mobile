@@ -7819,6 +7819,74 @@
       },
       "required": ["artifactPath"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "artifactPath": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "packageName": {
+          "type": "string"
+        },
+        "upgrade": {
+          "type": "boolean"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "signingGuard": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "matched"
+                },
+                "matchedSha256": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": ["status", "matchedSha256"],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "no-existing-package"
+                }
+              },
+              "required": ["status"],
+              "additionalProperties": {}
+            }
+          ]
+        },
+        "installRoute": {
+          "type": "string",
+          "enum": ["split-apks", "apk-set", "bundle"]
+        }
+      },
+      "required": ["message", "success"],
+      "additionalProperties": {}
     }
   },
   {
@@ -32476,6 +32544,46 @@
       },
       "required": ["appId", "confirm"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["ios", "android"]
+        },
+        "requestedAppId": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["app", "all-apps"]
+        },
+        "exceededRequestedScope": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "deviceId",
+        "platform",
+        "requestedAppId",
+        "scope",
+        "exceededRequestedScope",
+        "message"
+      ],
+      "additionalProperties": {}
     }
   },
   {
@@ -35784,6 +35892,123 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["grant", "revoke", "reset"]
+        },
+        "changedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepId": {
+                "type": "string"
+              },
+              "success": {
+                "type": "boolean"
+              },
+              "changedCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "failedCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "skipped": {
+                "type": "boolean"
+              },
+              "result": {},
+              "error": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "warning": {
+                "type": "string"
+              }
+            },
+            "required": ["stepId", "success", "changedCount", "failedCount"],
+            "additionalProperties": {}
+          }
+        },
+        "error": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "audio_input_unavailable"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "appId",
+        "deviceId",
+        "platform",
+        "action",
+        "changedCount",
+        "failedCount",
+        "operations"
+      ],
+      "additionalProperties": {}
     }
   },
   {
@@ -47362,6 +47587,52 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "packageName": {
+          "type": "string"
+        },
+        "keepData": {
+          "type": "boolean"
+        },
+        "wasInstalled": {
+          "type": "boolean"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "signingGuard": {
+          "type": "object",
+          "properties": {
+            "matchedSha256": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["matchedSha256"],
+          "additionalProperties": {}
+        },
+        "removalVerification": {
+          "type": "string",
+          "enum": ["absent", "installed", "unknown"]
+        }
+      },
+      "required": ["message", "success", "packageName", "keepData"],
+      "additionalProperties": {}
     }
   },
   {

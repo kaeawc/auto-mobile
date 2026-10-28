@@ -2018,8 +2018,12 @@ that the network carries, so a VPN reports `vpn` over its underlying transport, 
 `other`. `metered` is the absence of `NET_CAPABILITY_NOT_METERED`. `constrained` is Data Saver on
 (`getRestrictBackgroundStatus` not `DISABLED`) on a metered network, because Data Saver restricts only
 metered networks. State updates at once; the event fires once the state has been quiet for the
-debounce, and a flap that settles back on the last delivered state is not an event. The iOS runtime and
-the offline simulation override are not built.
+debounce, and a flap that settles back on the last delivered state is not an event. On iOS the agent and
+Viewer registries run `NWPathMonitor` (no entitlement), started on the module's first read: `online` is a
+satisfied path with an interface, `transport` is the first of Wi-Fi, cellular and wired Ethernet the path
+uses (a VPN's utun reports `other`), `metered` is `isExpensive` and `constrained` is Low Data Mode. The
+first path after start is the baseline, not a change, and `/platform` refreshes when the debounced event
+fires. The offline simulation override is not built.
 
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.

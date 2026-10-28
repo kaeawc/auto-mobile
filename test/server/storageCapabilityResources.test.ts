@@ -7,6 +7,7 @@ import {
   registerStorageCapabilityResources,
   resolveDeviceType,
   resolveStorageCapabilityContext,
+  runnerIosStorageDiscovery,
 } from "../../src/server/storageCapabilityResources";
 import { registerStorageResources } from "../../src/server/storageResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -688,5 +689,39 @@ describe("storageCapabilityResources", () => {
       const body = JSON.parse(content.text ?? "{}");
       expect(body.appId).toBe("100%");
     });
+  });
+});
+
+describe("runnerIosStorageDiscovery (#5161)", () => {
+  test("asks the runner for the app's payload and parses its Keychain and store states", async () => {
+    const appIds: string[] = [];
+    const discovery = runnerIosStorageDiscovery({
+      getStorageCapabilitiesForIos: async (appId) => {
+        appIds.push(appId);
+        return {
+          readOnly: true,
+          mutationAuthorized: false,
+          registeredAppGroupSuites: [],
+          coreDataStores: [],
+          unavailableStores: [],
+          keychain: {
+            schemaVersion: 1,
+            capability: "storage.keychain",
+            inspection: "unavailable",
+            deletion: "disabled",
+            reason: "DISABLED",
+            deletionScopes: [],
+          },
+          stores: [],
+        };
+      },
+    });
+
+    const result = await discovery.discoverIosStorage("com.example.app");
+
+    expect(appIds).toEqual(["com.example.app"]);
+    expect(result.keychain.deletion).toBe("disabled");
+    expect(result.keychain.reason).toBe("DISABLED");
+    expect(result.stores).toEqual([]);
   });
 });

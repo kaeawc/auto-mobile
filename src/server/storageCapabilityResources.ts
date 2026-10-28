@@ -10,7 +10,7 @@ import {
 } from "./sharedStorageReadService";
 import type { Platform } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
+import type { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
 import {
   parseIosStorageDiscovery,
   unavailableIosStorageDiscovery,
@@ -176,13 +176,16 @@ async function resolveKeystoreDiscovery(
   }
 }
 
+/** The iOS runner call that returns the SDK's storage capability payload. */
+export type IosStorageCapabilitiesSource = Pick<IOSCtrlProxyClient, "getStorageCapabilitiesForIos">;
+
 /** Reads the SDK's storage capability payload through the device's iOS runner. */
-function runnerIosStorageDiscovery(device: BootedDevice): IosStorageDiscoverer {
+export function runnerIosStorageDiscovery(
+  runner: IosStorageCapabilitiesSource,
+): IosStorageDiscoverer {
   return {
     discoverIosStorage: async (appId) =>
-      parseIosStorageDiscovery(
-        await IOSCtrlProxyClient.getInstance(device).getStorageCapabilitiesForIos(appId),
-      ),
+      parseIosStorageDiscovery(await runner.getStorageCapabilitiesForIos(appId)),
   };
 }
 
@@ -191,10 +194,11 @@ async function resolveIosStorageDiscovery(
   appId: string,
   dependencies: StorageCapabilityDependencies,
 ): Promise<IosStorageDiscovery> {
+  if (!dependencies.createIosStorageDiscovery) {
+    return unavailableIosStorageDiscovery();
+  }
   try {
-    const discovery =
-      dependencies.createIosStorageDiscovery?.(device) ?? runnerIosStorageDiscovery(device);
-    return await discovery.discoverIosStorage(appId);
+    return await dependencies.createIosStorageDiscovery(device).discoverIosStorage(appId);
   } catch (error) {
     logger.warn("[StorageCapabilityResources] iOS storage discovery unavailable", error);
     return unavailableIosStorageDiscovery();

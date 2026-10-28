@@ -88,6 +88,8 @@ describe("PrototypeMockBackendRegistry", () => {
     ["boolean id", { collections: { a: [{ id: true }] } }, /every item needs an id/],
     ["missing id", { collections: { a: [{ name: "x" }] } }, /every item needs an id/],
     ["empty id", { collections: { a: [{ id: "" }] } }, /every item needs an id/],
+    ["dot id", { collections: { a: [{ id: "." }] } }, /every item needs an id/],
+    ["dot-dot id", { collections: { a: [{ id: ".." }] } }, /every item needs an id/],
     ["null id", { collections: { a: [{ id: null }] } }, /every item needs an id/],
     [
       "deep item",

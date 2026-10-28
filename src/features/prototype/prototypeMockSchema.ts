@@ -45,9 +45,16 @@ function depthOf(value: unknown): number {
   return 0;
 }
 
-/** An id a cursor can name: a non-empty string or a finite number. */
+/**
+ * An id a request path and a cursor can both name: a non-empty string or a finite number. `.` and
+ * `..` are refused because URL normalization turns them into path navigation, so the item would
+ * exist but could never be addressed.
+ */
 export function isMockItemId(id: unknown): id is string | number {
-  return (typeof id === "string" && id !== "") || (typeof id === "number" && Number.isFinite(id));
+  return (
+    (typeof id === "string" && id !== "" && id !== "." && id !== "..") ||
+    (typeof id === "number" && Number.isFinite(id))
+  );
 }
 
 const itemSchema = z
@@ -55,7 +62,7 @@ const itemSchema = z
   .refine((item) => depthOf(item) <= MAX_DEPTH, `items may nest at most ${MAX_DEPTH} levels`)
   .refine(
     (item) => isMockItemId(item.id),
-    "every item needs an id: a non-empty string or a number",
+    "every item needs an id: a number or a non-empty string other than . and ..",
   );
 
 const collectionSchema = z

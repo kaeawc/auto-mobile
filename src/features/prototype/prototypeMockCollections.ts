@@ -177,7 +177,7 @@ function answerWholeCollection(
     return error(400, "Expected a JSON object body");
   }
   if (created.id !== undefined && !isMockItemId(created.id)) {
-    return error(400, "id must be a non-empty string or a number");
+    return error(400, "id must be a number or a non-empty string other than . and ..");
   }
   const item = created.id === undefined ? { ...created, id: deps.ids.next() } : created;
   if (items.some((existing) => String(existing.id) === String(item.id))) {

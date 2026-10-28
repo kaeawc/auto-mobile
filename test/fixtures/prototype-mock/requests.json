@@ -572,7 +572,7 @@
             "id": null
           },
           "expect": {
-            "error": "id must be a non-empty string or a number"
+            "error": "id must be a number or a non-empty string other than . and .."
           }
         },
         {
@@ -583,7 +583,7 @@
             "id": true
           },
           "expect": {
-            "error": "id must be a non-empty string or a number"
+            "error": "id must be a number or a non-empty string other than . and .."
           }
         },
         {
@@ -594,7 +594,29 @@
             "id": ""
           },
           "expect": {
-            "error": "id must be a non-empty string or a number"
+            "error": "id must be a number or a non-empty string other than . and .."
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 400,
+          "body": {
+            "id": ".."
+          },
+          "expect": {
+            "error": "id must be a number or a non-empty string other than . and .."
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/todos",
+          "status": 400,
+          "body": {
+            "id": "."
+          },
+          "expect": {
+            "error": "id must be a number or a non-empty string other than . and .."
           }
         },
         {

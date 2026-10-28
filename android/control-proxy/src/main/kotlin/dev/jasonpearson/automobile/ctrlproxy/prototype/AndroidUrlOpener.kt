@@ -4,9 +4,9 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import androidx.core.net.toUri
 
 // Android `links.open` (#14238). The plan is pure and tested with a fake gateway; the system
 // gateway is the only code that touches PackageManager or starts an activity.
@@ -87,7 +87,7 @@ internal object CustomTabs {
 
 /** The overlay is not an activity, so every intent starts a new task. */
 internal fun linkIntent(url: String, plan: LinkPlan): Intent =
-  Intent(plan.action.intentAction, Uri.parse(url)).apply {
+  Intent(plan.action.intentAction, url.toUri()).apply {
     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     if (plan.customTab) {
       // A null session binder is what CustomTabsIntent sends without a bound service.

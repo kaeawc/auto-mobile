@@ -63,7 +63,8 @@ export function runningAvdAdvertisementDirs(host: AdvertisementHost): string[] {
   return [...new Set(roots.map((root) => join(root, "avd", "running")))];
 }
 
-function defaultRunningAvdAdvertisementDirs(): string[] {
+/** The advertisement directories for this process's host. */
+export function defaultRunningAvdAdvertisementDirs(): string[] {
   return runningAvdAdvertisementDirs({
     platform: process.platform,
     homeDir: homedir(),

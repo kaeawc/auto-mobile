@@ -10,6 +10,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import {
   PROTOVIEWER_CLEANUP_TIMEOUT_MS,
   ProtoViewerEntryPointMissingError,
+  ProtoViewerForegroundError,
   ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "./protoViewerDevice";
@@ -158,7 +159,7 @@ export class IosProtoViewer implements ProtoViewerDevice {
     }
   }
 
-  /** Best effort: a failed launch still lets openurl try, which then reports its own failure. */
+  /** Require foreground launch: openurl can succeed while an unanswered Open-in alert blocks delivery. */
   private async foreground(timeoutMs: number, signal?: AbortSignal): Promise<void> {
     try {
       await this.deps.simctl.launch(this.deps.deviceId, timeoutMs, signal);
@@ -166,9 +167,7 @@ export class IosProtoViewer implements ProtoViewerDevice {
       if (signal?.aborted) {
         throw error;
       }
-      logger.warn(
-        `[protoviewer] could not bring ProtoViewer to the foreground; an "Open in" alert may appear: ${errorMessage(error)}`,
-      );
+      throw new ProtoViewerForegroundError({ cause: error });
     }
   }
 

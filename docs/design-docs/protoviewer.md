@@ -384,6 +384,9 @@ The shared request-policy and storage work is tracked in #13622.
   cannot see the pushed file), nothing was imported and the host keeps the CtrlProxy save path
   with a logged warning instead of failing the call.
 - iOS simulators use the host filesystem and `simctl openurl`, without a new socket or broadcast.
+  The host first brings ProtoViewer to the foreground with `simctl launch`; if launch fails,
+  it raises `ProtoViewerForegroundError` without opening the URL or polling for a result, since
+  `openurl` can succeed while an unanswered "Open in ProtoViewer?" alert blocks delivery.
   The host resolves the app's own data container and creates
   `Library/Application Support/ProtoViewer/mcp/inbox/` and `results/` (same host uid as the app);
   the app also creates them idempotently on start and never purges this inbox at launch.

@@ -68,6 +68,9 @@ internal object PrototypePlatformRules {
     PrototypeAuthRules.blockError(root)?.let {
       return it
     }
+    PrototypeLocationRules.blockError(root)?.let {
+      return it
+    }
     requiresError(root)?.let {
       return it
     }

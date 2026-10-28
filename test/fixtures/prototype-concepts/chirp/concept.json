@@ -1,0 +1,18 @@
+{
+  "issue": 14218,
+  "name": "Chirp",
+  "capabilities": [
+    "prototype_checks_v1",
+    "prototype_data_actions_v1",
+    "prototype_data_model_v1",
+    "prototype_emit_context_v1",
+    "prototype_format_v1",
+    "prototype_lazy_list_v1",
+    "prototype_linkify_v1",
+    "prototype_loading_states_v1",
+    "prototype_semantics_v1",
+    "prototype_stack_v1",
+    "prototype_string_conditions_v1",
+    "prototype_text_field_options_v1"
+  ]
+}

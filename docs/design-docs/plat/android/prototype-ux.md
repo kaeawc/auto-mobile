@@ -2061,6 +2061,14 @@ with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usag
 plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
 system-UI call per prototype at a time). No production runtime advertises either module yet.
 
+**Fake sign-in (#14303).** The `auth` module (`prototype_platform_auth_v1`) has two calls. `auth.signIn` takes
+an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated sign-in" sheet and writes
+`{userId, name, email}` into `into`; it is `sensitive`, and a back-out is the typed error `cancelled`.
+`auth.signOut` takes no arguments. The `auth.sessionExpired` event and the read-only keys
+`/platform/auth/signedIn` (boolean) and `/platform/auth/userId` complete the module. No argument or key carries
+a password, secret or session token: the runtime keeps the token in the Keystore or Keychain and never exposes
+it. The root `auth` accounts block is not in the contract yet, and no production runtime advertises the module.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

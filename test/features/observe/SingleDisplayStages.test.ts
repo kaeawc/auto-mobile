@@ -1,4 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { createExecResult } from "../../../src/utils/execResult";
+import {
+  AdbScreenRoundReader,
+  type ScreenRoundReader,
+} from "../../../src/features/wear/screenRound";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse, getStructuredPayload } from "../../../src/utils/toolUtils";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
@@ -114,7 +122,11 @@ describe("SingleDisplayEnrichStage", () => {
   function stage(
     deferred: WeakMap<ObserveResult, number>,
     audits: { count: number },
-    options: { device?: BootedDevice; round?: boolean } = {},
+    options: {
+      device?: BootedDevice;
+      round?: boolean;
+      screenRound?: ScreenRoundReader;
+    } = {},
   ) {
     const auditor = {
       run: async () => {
@@ -145,7 +157,7 @@ describe("SingleDisplayEnrichStage", () => {
       predictiveUIState: () => unused("predictiveUIState"),
       safeAreaAuditor: () => new SafeAreaAuditor(),
       elementsBuilder: () => new ObserveElementsBuilder(),
-      screenRound: () => ({ isScreenRound: async () => options.round }),
+      screenRound: () => options.screenRound ?? { isScreenRound: async () => options.round },
       deferredBackStackDisplays: () => deferred,
       stampScreenSizeUnits: () => undefined,
       processRecomposition: async () => undefined,
@@ -192,12 +204,52 @@ describe("SingleDisplayEnrichStage", () => {
     expect(onWatch.result.isScreenRound).toBe(true);
 
     const onPhone = fakeRun();
-    await stage(new WeakMap(), { count: 0 }, { round: true }).enrichSingleDisplay(onPhone);
+    await stage(
+      new WeakMap(),
+      { count: 0 },
+      { screenRound: { isScreenRound: async () => unused("phone screenRound") } },
+    ).enrichSingleDisplay(onPhone);
     expect(onPhone.result.isScreenRound).toBeUndefined();
 
     const unreadable = fakeRun();
     await stage(new WeakMap(), { count: 0 }, { device: watch }).enrichSingleDisplay(unreadable);
     expect(unreadable.result.isScreenRound).toBeUndefined();
+  });
+
+  test("a watch reports captured roundness through the served response", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell dumpsys display",
+      createExecResult(
+        readFileSync(
+          new URL("../../fixtures/wear-os/dumpsys-display-captured-round.txt", import.meta.url),
+          "utf8",
+        ),
+        "",
+      ),
+    );
+    const run = fakeRun({ observerMode: true });
+    expect(android.formFactor).toBeUndefined();
+    await stage(
+      new WeakMap(),
+      { count: 0 },
+      { device: { ...android, formFactor: "watch" }, screenRound: new AdbScreenRoundReader(adb) },
+    ).enrichSingleDisplay(run);
+    expect(run.result.isScreenRound).toBe(true);
+    expect(adb.getExecutedCommands()).toContain("shell dumpsys display");
+    for (const args of [{}, { project: "full" }, { raw: true }]) {
+      const response = finalizeToolResponse(createStructuredToolResponse(run.result), {
+        name: "observe",
+        args,
+      });
+      expect(getStructuredPayload<ObserveResult>(response)?.isScreenRound).toBe(true);
+      expect(response.content).toContainEqual(
+        expect.objectContaining({
+          type: "text",
+          text: expect.stringContaining('"isScreenRound":true'),
+        }),
+      );
+    }
   });
 
   test("an ordinary read runs the performance, accessibility and state audits", async () => {

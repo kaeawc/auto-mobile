@@ -1,0 +1,1 @@
+DisplayInfo{"Built-in Screen", displayId 0, displayGroupId 0, FLAG_SECURE, FLAG_SUPPORTS_PROTECTED_BUFFERS, FLAG_ROUND, FLAG_TRUSTED, FLAG_ALLOWS_CONTENT_MODE_SWITCH, real 384 x 384, largest app 384 x 384, smallest app 384 x 384, appVsyncOff 1000000, presDeadline 16666666, mode 1, renderFrameRate 60.000004, ...}

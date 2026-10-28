@@ -1,0 +1,84 @@
+{
+  "spec": {
+    "id": "a4",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "session": {}
+    },
+    "state": {
+      "signInStatus": "",
+      "expired": false
+    },
+    "requires": {
+      "platform": ["auth"]
+    },
+    "platform": {
+      "on": {
+        "auth.sessionExpired": [
+          {
+            "type": "setState",
+            "key": "expired",
+            "value": true
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Signed in as {platform:/auth/userId}",
+          "visibleWhen": {
+            "platform": "/auth/signedIn",
+            "equals": true
+          }
+        },
+        {
+          "type": "button",
+          "label": "Sign in",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "auth.signIn",
+              "args": {
+                "style": {
+                  "value": "chooser"
+                }
+              },
+              "into": "/data/session",
+              "statusKey": "signInStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "expired",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Sign out",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "auth.signOut",
+              "args": {
+                "userId": {
+                  "value": "u1"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2].onTap[0].args.userId"
+}

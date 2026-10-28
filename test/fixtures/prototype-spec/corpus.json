@@ -149,6 +149,7 @@
     "pager-indicator-dots.json",
     "pager-options.json",
     "pager-state-key-indicator.json",
+    "platform-auth.json",
     "platform-biometric.json",
     "platform-calendar.json",
     "platform-call.json",
@@ -1013,6 +1014,12 @@
     "placement-offset-x-over-max.json",
     "placement-offset-y-below-min.json",
     "platform-argument-value.json",
+    "platform-auth-password-arg.json",
+    "platform-auth-sign-out-arg.json",
+    "platform-auth-style-unknown.json",
+    "platform-auth-token-key.json",
+    "platform-auth-undeclared-module.json",
+    "platform-auth-unknown-event.json",
     "platform-biometric-credential-not-boolean.json",
     "platform-biometric-missing-title.json",
     "platform-biometric-subtitle-too-long.json",
@@ -1654,6 +1661,7 @@
     "strict-gate-prototype_pager_options_v1.json",
     "strict-gate-prototype_pager_state_key_v1.json",
     "strict-gate-prototype_platform_audio_v1.json",
+    "strict-gate-prototype_platform_auth_v1.json",
     "strict-gate-prototype_platform_battery_v1.json",
     "strict-gate-prototype_platform_biometric_v1.json",
     "strict-gate-prototype_platform_calendar_v1.json",
@@ -2847,6 +2855,11 @@
     "platform-camera-capture.json": [
       "prototype_data_model_v1",
       "prototype_platform_camera_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-auth.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_auth_v1",
       "prototype_platform_v1"
     ]
   }

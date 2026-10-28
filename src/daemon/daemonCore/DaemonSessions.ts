@@ -135,6 +135,7 @@ export class DaemonSessions {
         new StoreDeviceClaimMirror({
           platform,
           store: claimStore,
+          whenOpen: async () => (await this.host.bindingRegistry())?.deviceClaims(),
           registryFileExists: bindingRegistryFileExists,
           openRegistry: () => this.host.startBackgroundRegistryUpgrade(),
           timer: this.host.services.timer(),

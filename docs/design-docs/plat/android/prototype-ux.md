@@ -2140,6 +2140,17 @@ only `unavailable` keeps the `disabled` reason. If the metadata cannot fit besid
 back. The root subscription block is not in the contract yet, and no production runtime advertises the
 module.
 
+**BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
+of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
+padded), `uint8`, `uint16le`, `int16le`, `uint32le`, `float32le`, and the decode-only SIG decoders
+`gatt.battery_level` (0x2A19, 0-100) and `gatt.heart_rate_measurement` (0x2A37:
+`{heartRate, sensorContact: "unsupported" | "notDetected" | "detected", energyExpended?, rrIntervalsMs?}`,
+RR intervals rounded to whole milliseconds). Values are at most 512 bytes, the ATT attribute limit. Failures
+are typed: `length` (wrong byte count or over the limit), `range` (a number out of range, a non-whole
+integer, a non-finite float, a battery level over 100), `format` (invalid UTF-8, hex or base64, or a value
+of the wrong JSON type), `decodeOnly` and `unknown`. The TypeScript reference and its Kotlin and Swift twins
+replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and runtimes are not built.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

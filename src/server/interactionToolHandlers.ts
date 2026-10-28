@@ -25,7 +25,6 @@ import {
   type KeyboardProfileCatalog,
 } from "../features/action/keyboardProfiles";
 import {
-  createJSONToolResponse,
   createStructuredToolResponse,
   throwIfAborted,
   withIsErrorOnFailure,
@@ -721,7 +720,7 @@ export const systemTrayHandler = async (
   signal?: AbortSignal,
 ) => {
   const { payload, isError } = await new SystemTray(device, progress, signal).execute(args);
-  const response = createJSONToolResponse(payload);
+  const response = createStructuredToolResponse(payload);
   return isError ? { ...response, isError: true as const } : response;
 };
 
@@ -883,7 +882,7 @@ export const createShakeHandler =
         { progress, signal },
       );
 
-      const response = createJSONToolResponse({
+      const response = createStructuredToolResponse({
         message: result.success
           ? `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`
           : `Failed to shake device: ${result.error ?? "unknown error"}`,
@@ -972,7 +971,7 @@ export const createRecentAppsHandler =
       const recentApps = (deps.recentAppsFactory ?? defaultRecentAppsFactory)(device);
       const result = await recentApps.execute({ progress, signal });
 
-      const response = createJSONToolResponse({
+      const response = createStructuredToolResponse({
         message: formatRecentAppsMessage(result),
         observation: result.observation,
         ...result,
@@ -994,7 +993,7 @@ export const homeScreenHandler = async (
     const homeScreen = new HomeScreen(device);
     const result = await homeScreen.execute({ progress, signal });
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: "Pressed home button to return to the home screen",
       observation: result.observation,
       ...result,
@@ -1024,7 +1023,7 @@ export const createClipboardHandler =
         message += ` (via ${result.method})`;
       }
 
-      const response = createJSONToolResponse({
+      const response = createStructuredToolResponse({
         message,
         ...result,
       });

@@ -546,9 +546,12 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     path: string,
     owner: { pid: number; ownerToken: string },
   ): Promise<"claimed" | "refused"> {
-    if ((await this.tableClaimOwner(deviceId)) === undefined) {
+    const foreignOwnerPid = await this.tableClaimOwner(deviceId);
+    if (foreignOwnerPid === undefined) {
       return "claimed";
     }
+    // The table may have changed since refresh; recovery's rollback must name its live owner.
+    this.owners.set(deviceId, foreignOwnerPid);
     try {
       this.source.release(path, owner);
     } catch (error) {

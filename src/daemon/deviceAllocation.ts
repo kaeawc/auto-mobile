@@ -508,7 +508,7 @@ export class DeviceAllocation {
       return;
     }
     logger.warn(
-      `[DevicePool] Another AutoMobile process claims ${deviceId}; rolling back recovery of session ${sessionId}`,
+      `[DevicePool] Another AutoMobile process (PID ${ownership.foreignOwnerPid(deviceId)}) claims ${deviceId}; rolling back recovery of session ${sessionId}`,
     );
     await this.port.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
     // Rollback cleared the local holder, so the fresh explicit-bind refusal can name the winner.

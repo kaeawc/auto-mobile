@@ -265,6 +265,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_links_v1: openUrlCall,
   prototype_platform_contacts_v1: contactsCall,
   prototype_platform_calendar_v1: calendarCall,
+  prototype_platform_sensors_v1: statusRead("sensors", "proximityNear", true),
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

@@ -21893,6 +21893,68 @@
       },
       "events": {},
       "state": {}
+    },
+    "sensors": {
+      "capability": "prototype_platform_sensors_v1",
+      "calls": {},
+      "events": {
+        "shake": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "pitchDeg": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": -180,
+            "max": 180
+          }
+        },
+        "rollDeg": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": -180,
+            "max": 180
+          }
+        },
+        "headingDeg": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 359
+          }
+        },
+        "steps": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 9007199254740991
+          }
+        },
+        "proximityNear": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "lightLux": {
+          "platforms": ["android"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 1000000
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

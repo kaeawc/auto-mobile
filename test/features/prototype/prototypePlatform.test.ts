@@ -693,3 +693,31 @@ describe("links module contract", () => {
     }
   });
 });
+
+describe("sensors module contract", () => {
+  const sensors = PROTOTYPE_PLATFORM_MODULES.sensors;
+
+  test("sensors has no calls and one shake event", () => {
+    expect(sensors.calls).toEqual({});
+    expect(sensors.events).toEqual({ shake: { sensitive: false } });
+  });
+
+  test("continuous readings are flat whole-number keys and light is Android only", () => {
+    const state = sensors.state ?? {};
+    expect(Object.keys(state)).toEqual([
+      "pitchDeg",
+      "rollDeg",
+      "headingDeg",
+      "steps",
+      "proximityNear",
+      "lightLux",
+    ]);
+    for (const name of ["pitchDeg", "rollDeg", "headingDeg", "steps", "lightLux"]) {
+      expect(state[name].value.integer).toBe(true);
+    }
+    expect(state.headingDeg.value.max).toBe(359);
+    expect(state.proximityNear.value.kind).toBe("boolean");
+    expect(state.lightLux.platforms).toEqual(["android"]);
+    expect(state.steps.platforms).toEqual(["android", "ios"]);
+  });
+});

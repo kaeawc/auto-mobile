@@ -2046,6 +2046,15 @@ spec cannot name a component or an arbitrary handler. The validator does not yet
 cannot honour (`tel:` in `inApp`) or a URL that begins with a placeholder; the runtime reports those. The
 module has no events or `/platform` state. No production runtime advertises it yet.
 
+**Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
+event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
+exactly one `/<module>/<key>`: `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),
+`steps` (counted since the subscription started), `proximityNear` (boolean) and `lightLux` (whole lux, Android
+only; iOS has no public ambient-light API). A sensor the device lacks leaves its key absent, so it compares as
+missing. The root `sensors` subscription block (which sensors to listen to and their `rateHz`), the `motion`
+permission for `steps` and the shake-detector reference are not in the contract yet, and no production runtime
+advertises the module.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

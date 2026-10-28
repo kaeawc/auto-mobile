@@ -2044,7 +2044,19 @@ with `url` (required, at most 2048 characters) and `mode` (optional: `external`,
 `content:`, `javascript:`, `data:` and any custom scheme fail validation in all three validators, so a
 spec cannot name a component or an arbitrary handler. The validator does not yet reject a mode that a scheme
 cannot honour (`tel:` in `inApp`) or a URL that begins with a placeholder; the runtime reports those. The
-module has no events or `/platform` state. No production runtime advertises it yet.
+module has no events or `/platform` state.
+
+CtrlProxy registers the Android `links` runtime and advertises the capability; the embedded renderer
+leaves the module to its host app. An omitted `mode` is `auto`. `tel:` starts `ACTION_DIAL` (never
+`ACTION_CALL`, so no call is placed and no `CALL_PHONE` is needed), `mailto:` and `sms:` start
+`ACTION_SENDTO` (a composer; nothing is sent), and every other scheme starts `ACTION_VIEW`, always with
+`FLAG_ACTIVITY_NEW_TASK` because the overlay is not an activity. Only `http` and `https` can open in a
+Custom Tab; the runtime writes the Custom Tabs session extra itself, so CtrlProxy needs no
+`androidx.browser` dependency. `inApp` with no Custom Tabs service (AOSP images without Chrome) opens
+externally and reports `outcome: "fallback"`; `auto` makes the same choice and reports `opened`. Success
+writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, `mode` is how the URL
+actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
+fails with `unavailable`.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

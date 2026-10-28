@@ -27,6 +27,7 @@ import {
   captureAndroidMutationBaseline,
   isAndroidResetFile,
 } from "./androidMutationBaseline";
+import { settingsBackedRawMutations } from "./androidSettingsBackedRevert";
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationEntry, DeviceMutationInput } from "./mutations/types";
@@ -57,6 +58,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       this.displayOverrideCommands(mutation) ??
       this.nightModeCommands(mutation) ??
       this.screenStateCommands(mutation) ??
+      this.settingsBackedCommands(mutation) ??
       deviceStateSettingCommands(mutation),
     clock: (mutation) =>
       this.timezoneCommands(mutation) ??
@@ -424,6 +426,16 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           : `shell settings --user ${setting[2] ?? "0"} put ${setting[1]} ${setting[3]} ${shellQuote(prior as string)}`,
       },
     ];
+  }
+
+  /** fontScale, timeFormat and accessibility display rows restore their raw settings rows. */
+  private settingsBackedCommands(mutation: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const raw = settingsBackedRawMutations(mutation);
+    if (!raw) {
+      return null;
+    }
+    const commands = raw.map((row) => this.settingCommands(row));
+    return commands.every((command) => command !== null) ? commands.flat() : null;
   }
 
   private connectivityCommands({

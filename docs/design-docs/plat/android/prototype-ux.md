@@ -2083,6 +2083,13 @@ writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, 
 actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
 fails with `unavailable`.
 
+On iOS the agent and Viewer registries run `links.open` with `UIApplication.open` for external opens
+(its completion decides `opened` or `unavailable`; `canOpenURL` is not used, since it would need
+`LSApplicationQueriesSchemes`) and `SFSafariViewController`, presented over the foreground key window's top
+view controller, for `inApp` and `auto` web URLs. When nothing can present, `inApp` opens externally and
+reports `fallback`. The result has no `handler`. The Simulator has no Phone or Mail app, so `tel:` and
+`mailto:` report `unavailable` there.
+
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.
 `mediaLibrary` (`prototype_platform_mediaLibrary_v1`) has `mediaLibrary.pick` with `media` (required:

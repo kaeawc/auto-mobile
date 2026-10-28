@@ -1,0 +1,40 @@
+{
+  "id": "hide-keyboard-free-form-maps",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "button",
+        "label": "Open",
+        "onTap": [
+          {
+            "type": "push",
+            "stack": "nav",
+            "screen": "detail",
+            "params": {
+              "type": "hideKeyboard"
+            }
+          }
+        ]
+      },
+      "detail": {
+        "type": "text",
+        "text": "{route.type}"
+      }
+    },
+    "routes": {
+      "detail": {
+        "params": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -399,7 +399,7 @@ internal object PrototypeStrictPolicy {
       if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
         when {
-          scansValuesOnly(key, field, type) -> (child as? JsonObject)?.values?.forEach { scan(it) }
+          scansValuesOnly(key, field) -> (child as? JsonObject)?.values?.forEach { scan(it) }
           skipsScan(key, type) -> Unit
           key == "repeat" -> repeatFeatures(child)
           else -> {
@@ -602,7 +602,9 @@ private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (Strin
   if (type in nodeTypes && PrototypeGlassRules.needsNamespace(fields)) need("platform_namespace")
 }
 
-// A form body and a request's header and query maps have free-form names, so only their values
-// can be typed objects.
-private fun scansValuesOnly(key: String, field: String, type: String): Boolean =
-  (key == "form" && field == "body") || (type == "request" && key in listOf("headers", "query"))
+// A form body and every headers, query, params or args map have free-form names, so only their
+// values can be typed objects. The contract declares each field with these names as a record.
+private val freeFormMaps = setOf("headers", "query", "params", "args")
+
+private fun scansValuesOnly(key: String, field: String): Boolean =
+  (key == "form" && field == "body") || key in freeFormMaps

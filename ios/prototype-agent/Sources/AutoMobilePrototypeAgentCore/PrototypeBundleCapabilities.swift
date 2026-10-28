@@ -213,8 +213,8 @@ enum PrototypeBundleCapabilities {
             "data",
             "value"
         ].contains(key) {
-            // Header and query names are free-form strings, so the map itself is never a typed object.
-            if type == "request", ["headers", "query"].contains(key) {
+            // These maps have free-form names, so only their values can be typed objects.
+            if PrototypeStrictCapabilities.freeFormMaps.contains(key) {
                 for entry in (child.objectFields ?? [:]).values {
                     scanSlots(entry, names: &names)
                 }

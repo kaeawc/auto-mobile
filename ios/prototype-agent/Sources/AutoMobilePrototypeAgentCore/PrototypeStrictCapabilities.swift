@@ -3,6 +3,9 @@ import Foundation
 /// Capability computation over authored vocabulary, including hidden and empty-template nodes.
 /// Data, literal values and emit payloads are opaque and cannot introduce capabilities.
 enum PrototypeStrictCapabilities {
+    /// Fields whose names are free-form: the contract declares every field with these names as a record.
+    static let freeFormMaps: Set<String> = ["headers", "query", "params", "args"]
+
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
         var result = Set<String>()
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
@@ -160,8 +163,8 @@ enum PrototypeStrictCapabilities {
                     }
                     continue
                 }
-                // Header and query names are free-form strings, so the map itself is never a typed object.
-                if type == "request", ["headers", "query"].contains(key) {
+                // These maps have free-form names, so only their values can be typed objects.
+                if PrototypeStrictCapabilities.freeFormMaps.contains(key) {
                     for entry in (child.objectFields ?? [:]).values {
                         scan(entry)
                     }

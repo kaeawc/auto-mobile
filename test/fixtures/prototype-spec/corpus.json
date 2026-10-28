@@ -94,6 +94,8 @@
     "glass-shared-repeat-template.json",
     "grid-adaptive-min-width.json",
     "grid-fixed-columns-span.json",
+    "hide-keyboard-channel-headers.json",
+    "hide-keyboard-free-form-maps.json",
     "hide-keyboard-request-query.json",
     "hide-keyboard.json",
     "icon-effects-integer-spellings.json",
@@ -2911,6 +2913,11 @@
       "prototype_platform_v1"
     ],
     "hide-keyboard.json": ["prototype_hide_keyboard_v1"],
-    "hide-keyboard-request-query.json": ["prototype_data_model_v1", "prototype_network_v1"]
+    "hide-keyboard-request-query.json": ["prototype_data_model_v1", "prototype_network_v1"],
+    "hide-keyboard-channel-headers.json": [
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "hide-keyboard-free-form-maps.json": ["prototype_routes_v1", "prototype_stack_v1"]
   }
 }

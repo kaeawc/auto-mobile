@@ -1,0 +1,24 @@
+{
+  "id": "hide-keyboard-channel-headers",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["realtime"]
+  },
+  "channels": {
+    "chat": {
+      "kind": "websocket",
+      "url": "wss://chat.example.com/rooms/lobby",
+      "headers": {
+        "type": "hideKeyboard"
+      }
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Chat"
+  }
+}

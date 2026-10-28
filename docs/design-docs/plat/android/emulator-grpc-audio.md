@@ -10,10 +10,10 @@ emulator. This is the Android mechanism behind `injectAudioInput` and `captureAu
 The emulator's `EmulatorController` service exposes two RPCs that move PCM through the
 emulator's own audio forwarder:
 
-| RPC | Shape | Direction |
-| --- | --- | --- |
-| `injectAudio(stream AudioPacket) returns (Empty)` | client stream | host to guest microphone |
-| `streamAudio(AudioFormat) returns (stream AudioPacket)` | server stream | guest output to host |
+| RPC                                                     | Shape         | Direction                |
+| ------------------------------------------------------- | ------------- | ------------------------ |
+| `injectAudio(stream AudioPacket) returns (Empty)`       | client stream | host to guest microphone |
+| `streamAudio(AudioFormat) returns (stream AudioPacket)` | server stream | guest output to host     |
 
 Each emulator has its own gRPC port, so two emulators cannot hear each other's audio. Nothing
 touches a host audio stack, so this works the same on a laptop, a Linux CI host with no
@@ -79,13 +79,13 @@ is only worth building if some supported environment cannot reach the gRPC port.
 
 ## Errors
 
-| Emulator outcome | Code | Meaning |
-| --- | --- | --- |
-| `FAILED_PRECONDITION` on `injectAudio` | `audio_injection_busy` | Another injection holds this emulator's microphone. Stop it first. |
+| Emulator outcome                                                             | Code                          | Meaning                                                             |
+| ---------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------- |
+| `FAILED_PRECONDITION` on `injectAudio`                                       | `audio_injection_busy`        | Another injection holds this emulator's microphone. Stop it first.  |
 | `UNIMPLEMENTED` or `UNAVAILABLE` (incl. connection refused) on `injectAudio` | `audio_injection_unsupported` | No usable gRPC audio endpoint: old build, gRPC off, or `-no-audio`. |
-| `UNIMPLEMENTED` or `UNAVAILABLE` on `streamAudio` with no audio received | `audio_capture_unsupported` | Same, for capture. |
-| Any other non-OK status | `audio_grpc_failed` | Carries the gRPC code and message. |
-| JWK never loaded | actionable error | Restart the emulator or launch it with `-grpc-use-token`. |
+| `UNIMPLEMENTED` or `UNAVAILABLE` on `streamAudio` with no audio received     | `audio_capture_unsupported`   | Same, for capture.                                                  |
+| Any other non-OK status                                                      | `audio_grpc_failed`           | Carries the gRPC code and message.                                  |
+| JWK never loaded                                                             | actionable error              | Restart the emulator or launch it with `-grpc-use-token`.           |
 
 A client-cancelled call (`CANCELLED`) is the normal end of `stop()` and of capture, not a failure.
 

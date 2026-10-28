@@ -497,14 +497,22 @@
                                       "testTag": "heart_burst",
                                       "name": "favorite",
                                       "variant": "filled",
-                                      "contentDescription": "Liked",
-                                      "visibleWhen": {
-                                        "key": "liked_p1",
-                                        "equals": true
-                                      },
+                                      "contentDescription": "Double tap to like",
                                       "style": {
-                                        "color": "error"
+                                        "color": "error",
+                                        "alpha": 0
                                       },
+                                      "styleWhen": [
+                                        {
+                                          "when": {
+                                            "key": "liked_p1",
+                                            "equals": true
+                                          },
+                                          "style": {
+                                            "alpha": 1
+                                          }
+                                        }
+                                      ],
                                       "keyframes": {
                                         "trigger": {
                                           "key": "burst_p1"
@@ -811,14 +819,22 @@
                                       "testTag": "heart_burst",
                                       "name": "favorite",
                                       "variant": "filled",
-                                      "contentDescription": "Liked",
-                                      "visibleWhen": {
-                                        "key": "liked_p2",
-                                        "equals": true
-                                      },
+                                      "contentDescription": "Double tap to like",
                                       "style": {
-                                        "color": "error"
+                                        "color": "error",
+                                        "alpha": 0
                                       },
+                                      "styleWhen": [
+                                        {
+                                          "when": {
+                                            "key": "liked_p2",
+                                            "equals": true
+                                          },
+                                          "style": {
+                                            "alpha": 1
+                                          }
+                                        }
+                                      ],
                                       "keyframes": {
                                         "trigger": {
                                           "key": "burst_p2"
@@ -1092,14 +1108,22 @@
                                       "testTag": "heart_burst",
                                       "name": "favorite",
                                       "variant": "filled",
-                                      "contentDescription": "Liked",
-                                      "visibleWhen": {
-                                        "key": "liked_p3",
-                                        "equals": true
-                                      },
+                                      "contentDescription": "Double tap to like",
                                       "style": {
-                                        "color": "error"
+                                        "color": "error",
+                                        "alpha": 0
                                       },
+                                      "styleWhen": [
+                                        {
+                                          "when": {
+                                            "key": "liked_p3",
+                                            "equals": true
+                                          },
+                                          "style": {
+                                            "alpha": 1
+                                          }
+                                        }
+                                      ],
                                       "keyframes": {
                                         "trigger": {
                                           "key": "burst_p3"

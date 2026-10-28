@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   parseIosStorageDiscovery,
   unavailableIosStorageDiscovery,
+  type KeychainCapabilityState,
+  type StoreState,
 } from "../../../src/features/storage/iosStorageDiscovery";
 
 // Shape the SDK's storage_capabilities payload carries (#5161).
@@ -19,9 +21,9 @@ const enabledKeychain = {
       accessGroup: "TEAMID.fixture",
     },
   ],
-};
+} satisfies KeychainCapabilityState;
 
-const stores = [
+const stores: StoreState[] = [
   {
     kind: "user_defaults_suite",
     identifier: "group.fixture",

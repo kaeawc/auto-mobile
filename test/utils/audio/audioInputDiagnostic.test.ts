@@ -4,6 +4,7 @@ import path from "node:path";
 import type { BootedDevice } from "../../../src/models";
 import { AUDIO_INPUT_UNAVAILABLE } from "../../../src/models/AudioInputDiagnostic";
 import {
+  AVD_CONFIG_READ_TIMEOUT_MS,
   audioInputDiagnosticFromCapabilities,
   createAudioInputDiagnosticResolver,
 } from "../../../src/utils/audio/audioInputDiagnostic";
@@ -16,6 +17,7 @@ import {
 import { buildAndroidAvdCapabilityInventory } from "../../../src/utils/virtualDeviceCapabilities";
 import { parseAvdConfig } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const MIC: RawAudioDevice = {
   name: "MacBook Pro Microphone",
@@ -181,6 +183,14 @@ describe("audio_input_unavailable diagnostic", () => {
         },
       };
       expect(await createAudioInputDiagnosticResolver(unprobed, throwing)(bare)).toBeUndefined();
+    });
+
+    test("a stalled AVD config read times out as unknown instead of holding the caller", async () => {
+      const timer = new FakeTimer();
+      const stalled = { readConfig: () => new Promise<null>(() => {}) };
+      const pending = createAudioInputDiagnosticResolver(unprobed, stalled, timer)(bare);
+      await timer.advanceTimeAsync(AVD_CONFIG_READ_TIMEOUT_MS);
+      expect(await pending).toBeUndefined();
     });
   });
 });

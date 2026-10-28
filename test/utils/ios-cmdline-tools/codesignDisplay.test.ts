@@ -15,7 +15,7 @@ describe("parseCodesignDisplay (#14099)", () => {
       authorities: [],
       signingIdentity: null,
       adHoc: true,
-      cdHash: "3f9a1c0e7b52d4a8e6f01b2c3d4e5f60718293a4",
+      cdHash: "12ea874d0000bc74673a1bb4cc6a3ef5a52807f3",
       signedTime: null,
     });
   });

@@ -603,6 +603,15 @@
               "label": "Back",
               "onTap": [
                 {
+                  "type": "cancelTimer",
+                  "id": "recorder"
+                },
+                {
+                  "type": "setState",
+                  "key": "recording",
+                  "value": false
+                },
+                {
                   "type": "pop",
                   "stack": "nav"
                 }

@@ -1,0 +1,90 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "here": {}
+    },
+    "state": {
+      "locStatus": "",
+      "located": false,
+      "fixes": 0
+    },
+    "requires": {
+      "platform": ["location"],
+      "permissions": [
+        {
+          "name": "location",
+          "purpose": "Show rides near you"
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "location.updated": [
+          {
+            "type": "increment",
+            "key": "fixes"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Fixes {fixes}",
+          "visibleWhen": {
+            "platform": "/location/servicesEnabled",
+            "equals": true
+          }
+        },
+        {
+          "type": "button",
+          "label": "Find me",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "location.request",
+              "args": {
+                "accuracy": {
+                  "value": "precise"
+                },
+                "maxAgeMs": {
+                  "value": 60000
+                }
+              },
+              "timeoutMs": 10000,
+              "into": "/data/here",
+              "statusKey": "locStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "located",
+                  "value": true
+                }
+              ],
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "located",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_data_model_v1, prototype_platform_location_v1"
+}

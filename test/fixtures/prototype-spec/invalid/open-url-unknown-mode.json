@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "u10",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["links"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "links.open",
+          "args": {
+            "url": {
+              "value": "https://example.com"
+            },
+            "mode": {
+              "value": "popup"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.mode.value"
+}

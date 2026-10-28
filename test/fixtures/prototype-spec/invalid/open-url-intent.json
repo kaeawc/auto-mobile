@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "u1",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["links"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "links.open",
+          "args": {
+            "url": {
+              "value": "intent://scan/#Intent;scheme=zxing;end"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.url.value"
+}

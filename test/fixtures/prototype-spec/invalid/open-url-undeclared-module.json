@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "u12",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["haptics"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "links.open",
+          "args": {
+            "url": {
+              "value": "https://example.com"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].call"
+}

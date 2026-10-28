@@ -1,0 +1,106 @@
+{
+  "id": "open-url-schemes",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["links"]
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "button",
+        "label": "tel:+15551234567",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "tel:+15551234567"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "mailto:ada@example.test?subject=Hi%20there",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "mailto:ada@example.test?subject=Hi%20there"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "sms:+15551234567",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "sms:+15551234567"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "geo:37.78,-122.41",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "geo:37.78,-122.41"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "maps://?q=coffee",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "maps://?q=coffee"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "http://example.com",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "links.open",
+            "args": {
+              "url": {
+                "value": "http://example.com"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1902,6 +1902,13 @@
                 "type": "textField",
                 "testTag": "dm_composer",
                 "stateKey": "dmDraft",
+                "checks": [
+                  {
+                    "message": "Type a message first",
+                    "required": true
+                  }
+                ],
+                "validateOn": "submit",
                 "placeholder": "Message",
                 "imeAction": "send",
                 "style": {
@@ -1918,6 +1925,7 @@
                   {
                     "type": "emit",
                     "name": "dm_sent",
+                    "requireValid": ["dmDraft"],
                     "context": {
                       "to": {
                         "state": "dmName"
@@ -1954,6 +1962,7 @@
                   {
                     "type": "emit",
                     "name": "dm_sent",
+                    "requireValid": ["dmDraft"],
                     "context": {
                       "to": {
                         "state": "dmName"

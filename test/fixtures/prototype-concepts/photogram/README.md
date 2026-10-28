@@ -25,7 +25,7 @@ placeholders and everything is literal `data`.
 - `prototype_text_field_actions_v1`: the DM composer's send key.
 - `prototype_text_field_options_v1`: the caption field's label, lines and 2,200-character counter.
 - `prototype_string_conditions_v1`: the DM send button follows the draft length.
-- `prototype_checks_v1`: `enabledWhen` on the DM send button.
+- `prototype_checks_v1`: `enabledWhen` on the DM send button, and a required check on the DM composer that `dm_sent`'s `requireValid` uses so the keyboard's send key cannot send an empty draft.
 - `prototype_semantics_v1`: story headings.
 - `prototype_emit_context_v1`: `comments_opened`, `share_requested`, `dm_sent` and `post_shared` carry their values.
 

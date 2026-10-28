@@ -622,6 +622,29 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_commerce_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["commerce"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "commerce.purchase",
+                args: { productId: { value: "coins_100" } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_calendar_v1: {
     minimalSpec: {
       ...base,

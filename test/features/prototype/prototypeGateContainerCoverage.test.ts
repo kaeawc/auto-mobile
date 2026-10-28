@@ -57,6 +57,10 @@ const locationCall = {
   ...label,
   onTap: [{ type: "platform", call: "location.request", args: {} }],
 };
+const commerceCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "commerce.restore", args: {} }],
+};
 const openUrlCall = {
   ...label,
   onTap: [
@@ -284,6 +288,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_location_v1: locationCall,
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_calendar_v1: calendarCall,
+  prototype_platform_commerce_v1: commerceCall,
   prototype_platform_auth_v1: authCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,

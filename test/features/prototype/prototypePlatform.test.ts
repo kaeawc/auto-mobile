@@ -777,3 +777,24 @@ describe("location module contract", () => {
     expect(location.state?.servicesEnabled.value.kind).toBe("boolean");
   });
 });
+
+describe("commerce module contract", () => {
+  const commerce = PROTOTYPE_PLATFORM_MODULES.commerce;
+
+  test("commerce.purchase takes only a product identifier and commerce.restore takes nothing", () => {
+    expect(Object.keys(commerce.calls)).toEqual(["purchase", "restore"]);
+    const productId = commerce.calls.purchase.args.productId;
+    expect(Object.keys(commerce.calls.purchase.args)).toEqual(["productId"]);
+    expect(productId.optional).toBe(false);
+    expect(productId.value.pattern).toBe("stateKey");
+    expect(commerce.calls.restore.args).toEqual({});
+    for (const call of Object.values(commerce.calls)) {
+      expect(call.permissions).toEqual([]);
+    }
+  });
+
+  test("entitlements and the last transaction are read-only state with one change event", () => {
+    expect(commerce.events).toEqual({ entitlementsChanged: { sensitive: false } });
+    expect(Object.keys(commerce.state ?? {})).toEqual(["entitlements", "lastTransaction"]);
+  });
+});

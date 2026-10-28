@@ -1,11 +1,9 @@
 export {
   encodeFrameHeader,
-  type DecodedFrame,
   type DecodedAudio,
   type DecodedEncodedVideo,
   type MalformedFrameError,
 } from "./frameProtocol";
-export { type FrameQueueMetrics } from "./LatestFrameQueue";
 export {
   IosScreenCaptureHelper,
   parseCaptureIdleMarker,
@@ -19,7 +17,6 @@ export {
   type EncodeSettings,
   type EncodeBitratePolicy,
   type IosScreenCaptureHelperOptions,
-  type FrameDeliveryScheduler,
   type NativeFrameMetrics,
   type IosScreenCaptureReadiness,
   type IosScreenCaptureReadinessPhase,

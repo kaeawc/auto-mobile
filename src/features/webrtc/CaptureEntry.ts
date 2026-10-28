@@ -542,7 +542,7 @@ export class CaptureEntry implements CaptureHandleEntry {
         this.fanout((options) => options.onDroppedFrames?.(drops)),
       ),
       onFrameMetrics:
-        // Always produce metrics (LatestFrameQueue.metrics() is O(1)) so a late joiner on any
+        // Always produce metrics (the native metrics snapshot is O(1)) so a late joiner on any
         // platform can share this capture instead of forcing a second one (#10711).
         live((metrics: H264CaptureSourceMetrics) => {
           this.frameMetrics = metrics;

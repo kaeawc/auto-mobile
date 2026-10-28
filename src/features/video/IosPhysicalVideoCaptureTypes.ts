@@ -2,7 +2,7 @@ import { type ProcessTracker } from "../../utils/ChildProcessTracker";
 import { type Timer } from "../../utils/SystemTimer";
 import { type FfmpegClient, type FfmpegProcess } from "../../utils/media/FfmpegClient";
 import { type IosScreenCaptureHelperOptions } from "../screen-stream/IosScreenCaptureHelper";
-import type { DecodedFrame } from "../screen-stream/frameProtocol";
+import type { DecodedEncodedVideo } from "../screen-stream/frameProtocol";
 import { type VideoCaptureConfig } from "./VideoRecorderService";
 
 /**
@@ -33,12 +33,12 @@ export interface ScreenCaptureHelperEnsurer {
 
 /**
  * The slice of {@link IosScreenCaptureHelper} this backend drives. Narrow on
- * purpose: a fake only has to emit frames and exit.
+ * purpose: a fake only has to emit encoded records and exit.
  */
 export interface PhysicalIosCaptureHelper {
   start(): void | Promise<void>;
   stop(): Promise<unknown>;
-  on(event: "frame", listener: (frame: DecodedFrame) => void): unknown;
+  on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): unknown;
   on(event: "stderr", listener: (line: string) => void): unknown;
   on(
     event: "exit",
@@ -61,7 +61,7 @@ export interface IosPhysicalVideoCaptureBackendOptions {
   /** Injectable so file-size reporting stays device- and disk-free in tests. */
   fileSize?: (filePath: string) => Promise<number | undefined>;
   encoderFinalizeTimeoutMs?: number;
-  /** Clock seam for trailing-stall padding; capture timestamps use another timebase. */
+  /** Clock seam for the reported end time of a recording. */
   now?: () => number;
   /** Timer seam for the bounded drain wait at stop. */
   timer?: Timer;
@@ -82,31 +82,8 @@ export interface IosPhysicalBackendHandle {
 export interface CaptureState {
   encoder?: FfmpegProcess;
   encoderTracker?: ProcessTracker;
-  /** Frame geometry locked from the first frame; later mismatches are dropped. */
-  geometry?: { width: number; height: number };
-  /** Encoder chosen up front so the first frame can spawn ffmpeg synchronously. */
-  encoderName: string;
-  /** Capture timestamp the next admitted frame must reach, for fps pacing. */
-  nextFrameDueMs?: number;
-  /** Frames discarded purely to hold the declared cadence (not a fault). */
-  framesPacedOut: number;
-  /** Repeated frames written to keep a capture gap at its real duration. */
-  framesGapFilled: number;
-  /** Last payload written, repeated across gap slots that precede a new frame. */
-  lastPayload?: Buffer;
-  /** Wall-clock time of the last write, for trailing-stall padding. */
-  lastWriteAtMs?: number;
-  /** Bytes in one packed frame; the unit for the encoder-buffer budget. */
-  frameBytes?: number;
-  /**
-   * Writes still owed to the encoder, in order. Repeats share one payload
-   * reference and carry a count, so a long gap costs a counter rather than N
-   * copies of a multi-megabyte buffer.
-   */
-  pendingWrites: { payload: Buffer; count: number }[];
-  /** Gap slots left unpadded, so the output is shorter than wall clock. */
-  framesGapTruncated: number;
   framesWritten: number;
+  /** Records discarded because they preceded the first keyframe. */
   framesDropped: number;
   helperStderr: string[];
   helperExit?: { code: number | null; signal: NodeJS.Signals | null };

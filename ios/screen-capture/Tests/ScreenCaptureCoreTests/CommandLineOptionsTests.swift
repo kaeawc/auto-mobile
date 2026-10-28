@@ -13,22 +13,40 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testParsesAudioForSimulatorCapture() throws {
         let options = try CommandLineOptions.parse([
-            "screen-capture-helper", "--simulator-window", "42", "--audio",
+            "screen-capture-helper", "--simulator-window", "42", "--audio", "--encode", "h264",
         ])
 
-        XCTAssertEqual(options.mode, .captureSimulator(windowID: 42, fps: 5, audio: true, encode: nil))
+        XCTAssertEqual(
+            options.mode,
+            .captureSimulator(windowID: 42, fps: 5, audio: true, encode: .init(bitrate: .videoToolboxDefault))
+        )
     }
 
     func testDefaultsToCaptureWithoutDeviceID() throws {
-        let opts = try CommandLineOptions.parse(["screen-capture-helper"])
-        XCTAssertEqual(opts.mode, .capture(deviceID: nil, encode: nil))
+        let opts = try CommandLineOptions.parse(["screen-capture-helper", "--encode", "h264"])
+        XCTAssertEqual(opts.mode, .capture(deviceID: nil, encode: .init(bitrate: .videoToolboxDefault)))
+    }
+
+    func testCaptureWithoutEncodeIsRejectedBecauseRawStreamingWasRemoved() {
+        for arguments in [
+            ["screen-capture-helper"],
+            ["screen-capture-helper", "--device-id", "ABC123"],
+            ["screen-capture-helper", "--simulator-window", "7"],
+        ] {
+            XCTAssertThrowsError(try CommandLineOptions.parse(arguments)) { error in
+                XCTAssertEqual(
+                    error as? CommandLineOptions.ParseError,
+                    .conflictingFlags("capture requires --encode h264")
+                )
+            }
+        }
     }
 
     func testParsesDeviceID() throws {
         let opts = try CommandLineOptions.parse([
-            "screen-capture-helper", "--device-id", "ABC123",
+            "screen-capture-helper", "--device-id", "ABC123", "--encode", "h264",
         ])
-        XCTAssertEqual(opts.mode, .capture(deviceID: "ABC123", encode: nil))
+        XCTAssertEqual(opts.mode, .capture(deviceID: "ABC123", encode: .init(bitrate: .videoToolboxDefault)))
     }
 
     func testParsesListDevices() throws {
@@ -76,7 +94,7 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testParsesSimulatorWindowWithDefaultFPS() throws {
         let opts = try CommandLineOptions.parse([
-            "screen-capture-helper", "--simulator-window", "98765",
+            "screen-capture-helper", "--simulator-window", "98765", "--encode", "h264",
         ])
         XCTAssertEqual(
             opts.mode,
@@ -84,7 +102,7 @@ final class CommandLineOptionsTests: XCTestCase {
                 windowID: 98765,
                 fps: CommandLineOptions.defaultSimulatorFPS,
                 audio: false,
-                encode: nil
+                encode: .init(bitrate: .videoToolboxDefault)
             )
         )
     }
@@ -94,8 +112,12 @@ final class CommandLineOptionsTests: XCTestCase {
             "screen-capture-helper",
             "--simulator-window", "1",
             "--simulator-fps", "30",
+            "--encode", "h264",
         ])
-        XCTAssertEqual(opts.mode, .captureSimulator(windowID: 1, fps: 30, audio: false, encode: nil))
+        XCTAssertEqual(
+            opts.mode,
+            .captureSimulator(windowID: 1, fps: 30, audio: false, encode: .init(bitrate: .videoToolboxDefault))
+        )
     }
 
     func testRejectsSimulatorFPSBelowRange() {

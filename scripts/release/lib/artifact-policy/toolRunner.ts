@@ -24,7 +24,10 @@ export class ExecFileToolRunner implements ToolRunner {
         (error, stdout, stderr) => {
           if (error) {
             reject(
-              new Error(`${command} ${args.join(" ")} failed: ${stderr.trim() || error.message}`),
+              Object.assign(
+                new Error(`${command} ${args.join(" ")} failed: ${stderr.trim() || error.message}`),
+                { code: error.code },
+              ),
             );
             return;
           }

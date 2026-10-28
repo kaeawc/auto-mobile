@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "platform-connectivity-unknown-key",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["connectivity"]
+    },
+    "root": {
+      "type": "text",
+      "text": "{platform:/connectivity/ssid}"
+    }
+  },
+  "expectedPath": "root.text"
+}

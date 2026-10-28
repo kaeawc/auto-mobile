@@ -21683,6 +21683,43 @@
           }
         }
       }
+    },
+    "connectivity": {
+      "capability": "prototype_platform_connectivity_v1",
+      "calls": {},
+      "events": {
+        "changed": {
+          "sensitive": false,
+          "debounceMs": 500
+        }
+      },
+      "state": {
+        "online": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "transport": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["wifi", "cellular", "ethernet", "vpn", "other", "none"]
+          }
+        },
+        "metered": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "constrained": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

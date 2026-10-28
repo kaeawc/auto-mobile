@@ -426,7 +426,7 @@ export class DaemonBroker {
     try {
       // The device allocation claims are released after this stage, when the table is gone: this
       // daemon's rows leave with its registry so a clean stop strands none (#11811 b).
-      await (await registry)?.deviceClaims().releaseOwnedBy(process.pid);
+      await this.host.deviceClaimMirrors().releaseOwnedClaims((await registry)?.deviceClaims());
     } catch (error) {
       logger.warn(
         `[Daemon] Withdrawing this daemon's device claims failed: ${errorMessage(error)}`,

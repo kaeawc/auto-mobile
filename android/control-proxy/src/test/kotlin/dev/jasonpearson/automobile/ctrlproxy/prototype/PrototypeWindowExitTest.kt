@@ -42,6 +42,7 @@ class PrototypeWindowExitTest {
         RuntimeEnvironment.getApplication(),
         manager,
         sdkInt = 30,
+        firstRenderWaiter = PrototypeFirstRenderWaiter { _, _ -> true },
         mainThread = main,
         settleTimer = timer,
         backScope = scope.backgroundScope,

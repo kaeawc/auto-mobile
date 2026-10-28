@@ -1,13 +1,21 @@
 import { makePool } from "../helpers/makePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/models/deviceAcquisitionRefusals";
-import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
-import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
+import {
+  DeviceOwnedByOtherDaemonError,
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+} from "../../src/models/deviceAcquisitionRefusals";
+import {
+  ForwardLeaseForeignDeviceOwnership,
+  type DeviceOwnershipFileSource,
+  type ForeignDeviceOwnership,
+} from "../../src/daemon/foreignDeviceOwnership";
+import { StoreDeviceClaimMirror, type DeviceClaim } from "../../src/daemon/deviceClaims";
+import { FakeDeviceClaims } from "../fakes/FakeDeviceClaims";
+import type { LockContent } from "../../src/utils/fileLock";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
-import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -90,7 +98,7 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
     }
   });
 
-  const restartedDaemonA = async (ownership: ForeignDeviceOwnership) => {
+  const restartedDaemonA = async (ownership: ForeignDeviceOwnership, initiallyEmpty = false) => {
     const timer = new FakeTimer();
     const persisted = persistedRow();
     const releaseReasons: string[] = [];
@@ -103,6 +111,9 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
         claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
         async getSession() {
           return persisted;
+        },
+        async listRecoverableSessions() {
+          return [persisted];
         },
         async upsertActiveSession(session) {
           upserts.push(session.sessionUuid);
@@ -126,8 +137,8 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
       deviceManager: devices,
       foreignDeviceOwnership: ownership,
     });
-    await pool.initializeWithDevices([device]);
-    return { sessions, pool, persisted, releaseReasons };
+    await pool.initializeWithDevices(initiallyEmpty ? [] : [device]);
+    return { sessions, pool, persisted, releaseReasons, devices, upserts };
   };
 
   const resume = async (a: Awaited<ReturnType<typeof restartedDaemonA>>) =>
@@ -136,60 +147,129 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
       (error: unknown) => error,
     );
 
-  test("a live foreign claim terminalizes the recovered session with device_owned_by_other_daemon", async () => {
+  test("a live foreign claim refuses recovery with device_owned_by_other_daemon and leaves it unassigned", async () => {
     const store = new SharedClaimStore();
     store.claims.set(DEVICE_ID, DAEMON_B_PID);
     const a = await restartedDaemonA(store.forDaemon(DAEMON_A_PID));
 
     const refusal = await resume(a);
 
+    expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
     expect(refusal).toMatchObject({
-      name: "SessionRecoveryIdentityLossError",
       code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
       deviceId: DEVICE_ID,
       ownerPid: DAEMON_B_PID,
-      reason: "owned-by-other-daemon",
     });
     expect(a.pool.getDevice(DEVICE_ID)?.sessionId ?? null).toBeNull();
     expect(a.sessions.getSession(SESSION)).toBeNull();
     expect(a.persisted.release_reason).toBe("identity-recovery-owned-by-other-daemon");
+    expect(a.upserts).toEqual([]);
     expect(store.claims.get(DEVICE_ID)).toBe(DAEMON_B_PID);
+  });
 
-    const shaped = JSON.parse(
-      shapeToolCallError(refusal, { toolName: "observe", source: "MCP" }).content[0].text,
-    );
-    // The session is terminal: the caller gets the standard terminal refusal, never the wait-class
-    // acquisition code (#11391).
-    expect(shaped.error).toMatchObject({
-      code: "session_ownership_lost",
-      sessionUuid: SESSION,
-      reason: "identity-recovery-owned-by-other-daemon",
-      recoveryReason: "owned-by-other-daemon",
-      deviceId: DEVICE_ID,
-      ownerPid: DAEMON_B_PID,
-      retryable: false,
-      nextAction: "acquire_new_session",
-    });
+  test.each([false, true])(
+    "startup rehydration leaves the live foreign owner's file and row untouched (empty pool: %s)",
+    async (initiallyEmpty) => {
+      const files = new Map<string, LockContent>();
+      const foreignFile = { pid: DAEMON_B_PID, token: "b-token" };
+      files.set(`/b/${DEVICE_ID}`, foreignFile);
+      const source: DeviceOwnershipFileSource = {
+        leasePath: () => undefined,
+        claimPath: (id) => `/a/${id}`,
+        legacyClaimPath: () => undefined,
+        read: (path) => files.get(path),
+        isProcessRunning: (pid) => pid === DAEMON_B_PID || pid === DAEMON_A_PID,
+        tryAcquire: (path, owner) => {
+          if (files.has(path)) {
+            return false;
+          }
+          files.set(path, { pid: owner.pid, token: owner.ownerToken });
+          return true;
+        },
+        takeOver: () => false,
+        release: (path, owner) => {
+          const held = files.get(path);
+          if (held?.pid === owner.pid && held.token === owner.ownerToken) {
+            files.delete(path);
+          }
+        },
+      };
+      const store = new FakeDeviceClaims();
+      const foreignRow: DeviceClaim = {
+        platform: "android",
+        deviceId: DEVICE_ID,
+        kind: "allocation",
+        pid: DAEMON_B_PID,
+        ownerToken: foreignFile.token,
+        claimedAtMs: 1,
+        updatedAtMs: 1,
+      };
+      await store.upsert(foreignRow);
+      const upserted: DeviceClaim[] = [];
+      const storeUpsert = store.upsert.bind(store);
+      store.upsert = (claim) => {
+        upserted.push(claim);
+        return storeUpsert(claim);
+      };
+      const timer = new FakeTimer();
+      const ownership = new ForwardLeaseForeignDeviceOwnership(
+        DAEMON_A_PID,
+        source,
+        { query: async () => ({ kind: "unsupported", detail: "fake" }) },
+        () => undefined,
+        timer,
+      );
+      const mirror = new StoreDeviceClaimMirror({
+        platform: "android",
+        store: () => store,
+        timer,
+        generationOf: () => undefined,
+      });
+      ownership.attachClaimMirror(mirror);
+      const a = await restartedDaemonA(ownership, initiallyEmpty);
 
-    // The resuming client's next call hits the terminal session: it must be told to acquire a new
-    // session (not retry the UUID), naming the terminal reason and the owning daemon (#11098).
-    const terminal = await resume(a);
-    expect(terminal).toBeInstanceOf(TerminalSessionError);
-    const { release } = terminal as TerminalSessionError;
-    expect(
-      sessionOwnershipLostPayload({
-        message: (terminal as Error).message,
-        sessionUuid: SESSION,
-        reason: release.releaseReason,
-        release,
-      }).error,
-    ).toMatchObject({
-      code: "session_ownership_lost",
-      reason: "identity-recovery-owned-by-other-daemon",
-      retryable: false,
-      nextAction: "acquire_new_session",
-      ownerPid: DAEMON_B_PID,
-    });
+      const refusals: unknown[] = [];
+      const assign = a.pool.assignDeviceToSession.bind(a.pool);
+      a.pool.assignDeviceToSession = (...args) =>
+        assign(...args).then(undefined, (error: unknown) => {
+          refusals.push(error);
+          throw error;
+        });
+      const summary = await a.sessions.rehydratePersistedSessions(a.pool);
+      await mirror.idle();
+
+      expect(summary.rehydrated).toEqual([]);
+      expect(refusals[0]).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect(refusals[0]).toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+        ownerPid: DAEMON_B_PID,
+      });
+      expect(summary.terminalized).toEqual([
+        { sessionUuid: SESSION, reason: "identity-recovery-owned-by-other-daemon" },
+      ]);
+      expect(a.sessions.getSession(SESSION)).toBeNull();
+      expect(a.upserts).toEqual([]);
+      expect(upserted).toEqual([]);
+      expect(await store.get("android", DEVICE_ID)).toEqual(foreignRow);
+      expect([...files]).toEqual([[`/b/${DEVICE_ID}`, foreignFile]]);
+      mirror.dispose();
+    },
+  );
+
+  test("a foreign owner appearing during discovery is checked before recovery binds", async () => {
+    const store = new SharedClaimStore();
+    const a = await restartedDaemonA(store.forDaemon(DAEMON_A_PID), true);
+    const discover = a.devices.getBootedDevicesDetailed.bind(a.devices);
+    a.devices.getBootedDevicesDetailed = async (platform) => {
+      store.claims.set(DEVICE_ID, DAEMON_B_PID);
+      return discover(platform);
+    };
+
+    expect(await resume(a)).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+    expect(a.pool.getDevice(DEVICE_ID)?.sessionId).toBeNull();
+    expect(a.sessions.getSession(SESSION)).toBeNull();
+    expect(a.upserts).toEqual([]);
+    expect(store.claims.get(DEVICE_ID)).toBe(DAEMON_B_PID);
   });
 
   test("a claim lost after assignment rolls the recovery back and terminalizes the session", async () => {
@@ -209,9 +289,10 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
 
     const refusal = await resume(a);
 
+    expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
     expect(refusal).toMatchObject({
       code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
-      reason: "owned-by-other-daemon",
+      ownerPid: DAEMON_B_PID,
     });
     expect(a.pool.getDevice(DEVICE_ID)?.sessionId ?? null).toBeNull();
     expect(a.sessions.getSession(SESSION)).toBeNull();
@@ -219,14 +300,20 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
     expect(store.claims.get(DEVICE_ID)).toBe(DAEMON_B_PID);
   });
 
-  test("an unclaimed recovery target is rebound and claimed", async () => {
-    const store = new SharedClaimStore();
-    const a = await restartedDaemonA(store.forDaemon(DAEMON_A_PID));
+  test.each([undefined, DAEMON_A_PID])(
+    "a free or locally owned recovery target is rebound and claimed (owner: %s)",
+    async (owner) => {
+      const store = new SharedClaimStore();
+      if (owner !== undefined) {
+        store.claims.set(DEVICE_ID, owner);
+      }
+      const a = await restartedDaemonA(store.forDaemon(DAEMON_A_PID));
 
-    expect(await resume(a)).toBeUndefined();
+      expect(await resume(a)).toBeUndefined();
 
-    expect(a.pool.getDevice(DEVICE_ID)?.sessionId).toBe(SESSION);
-    expect(store.claims.get(DEVICE_ID)).toBe(DAEMON_A_PID);
-    a.pool.releaseDeviceClaimsForShutdown();
-  });
+      expect(a.pool.getDevice(DEVICE_ID)?.sessionId).toBe(SESSION);
+      expect(store.claims.get(DEVICE_ID)).toBe(DAEMON_A_PID);
+      a.pool.releaseDeviceClaimsForShutdown();
+    },
+  );
 });

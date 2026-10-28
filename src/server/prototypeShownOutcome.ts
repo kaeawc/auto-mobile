@@ -33,6 +33,9 @@ export function shownSpecOutcome(outcome: {
   if (outcome.action !== "show") {
     return {};
   }
+  if (outcome.result.errorCode === "render_failed") {
+    return { refusal: "typed" };
+  }
   if (outcome.success && outcome.id) {
     // A device that restores stored `/data` does not report the restored values, so a show with
     // persisted data keys is left untracked rather than mirrored with stale authored values.

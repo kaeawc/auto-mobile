@@ -557,6 +557,19 @@
                             "value": "ringing"
                           },
                           {
+                            "type": "cancelTimer",
+                            "id": "answer"
+                          },
+                          {
+                            "type": "cancelTimer",
+                            "id": "callClock"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "callSeconds",
+                            "value": 0
+                          },
+                          {
                             "type": "push",
                             "stack": "nav",
                             "screen": "call"
@@ -650,6 +663,19 @@
                     "type": "setState",
                     "key": "callState",
                     "value": "ringing"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "answer"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "callClock"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "callSeconds",
+                    "value": 0
                   },
                   {
                     "type": "push",

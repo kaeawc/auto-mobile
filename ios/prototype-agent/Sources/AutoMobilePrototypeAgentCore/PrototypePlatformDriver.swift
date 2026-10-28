@@ -92,6 +92,11 @@ final class PrototypePlatformDriver {
             do { try PrototypePlatformValidator.check(value, rule.rule, path: name) }
             catch { return .failure(.invalidArgs, "Invalid argument: \(name)") }
         }
+        if call.call == "links.open",
+           let error = PrototypeLinks.argumentsError(call.args, path: "args", resolved: true)
+        {
+            return .failure(.invalidArgs, error.message)
+        }
         return nil
     }
 

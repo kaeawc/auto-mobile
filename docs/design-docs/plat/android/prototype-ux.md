@@ -2042,9 +2042,11 @@ with `url` (required, at most 2048 characters) and `mode` (optional: `external`,
 `openUrl` contract pattern is an allowlist: the URL must start with a lowercase `http`, `https`, `mailto`,
 `tel`, `sms`, `geo` or `maps` scheme and contain no whitespace or control characters. `intent:`, `file:`,
 `content:`, `javascript:`, `data:` and any custom scheme fail validation in all three validators, so a
-spec cannot name a component or an arbitrary handler. The validator does not yet reject a mode that a scheme
-cannot honour (`tel:` in `inApp`) or a URL that begins with a placeholder; the runtime reports those. The
-module has no events or `/platform` state. No production runtime advertises it yet.
+spec cannot name a component or an arbitrary handler, and a URL that begins with a placeholder has no literal
+scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
+`SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
+`mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
+resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

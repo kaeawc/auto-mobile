@@ -17,6 +17,7 @@ import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
 import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
 import { orchestrationToolMutations } from "./deviceMutationOrchestrationAdapters";
 import {
+  deviceConditionSkewsClock,
   deviceStateToolMutations,
   devicePowerMutations,
   deviceStateFallbackMutations,
@@ -108,7 +109,10 @@ function deviceStateMutations(args: Record<string, unknown>, platform?: Platform
     ["screenLock", "device-setting"],
   ];
   const mutations = entries
-    .filter(([field]) => args[field] !== undefined)
+    .filter(
+      ([field]) =>
+        args[field] !== undefined || (field === "clock" && deviceConditionSkewsClock(args)),
+    )
     .map(([field, kind]) => {
       const value = args[field];
       const key =

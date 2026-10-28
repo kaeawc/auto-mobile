@@ -47286,6 +47286,27 @@
                     }
                   ],
                   "description": "Clear an installed app's data with `pm clear` ({ package }). One-shot: it kills the app's process and cannot be undone, so there is nothing to reset. 'unset' is a no-op."
+                },
+                "clockSkew": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "offsetSeconds": {
+                          "type": "integer",
+                          "minimum": -315360000,
+                          "maximum": 315360000
+                        }
+                      },
+                      "required": ["offsetSeconds"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Set the device clock offsetSeconds ahead of (positive) or behind (negative) real time ({ offsetSeconds }), 3 seconds to 10 years either way, with automatic time off. Reset restores real time and the original automatic-time setting and verifies them. Rootable Android emulators only (needs adb root, which restarts adbd). Shares the device clock with setDeviceState.clock: a reset from either restores real time. Or unset."
                 }
               },
               "additionalProperties": false,

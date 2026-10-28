@@ -320,6 +320,8 @@ data class PrototypeSpec(
   val platform: PrototypePlatformHandlers? = null,
   /** Validated channel declarations; no transport is installed by the contract slice. */
   val channels: Map<String, PrototypeChannel>? = null,
+  /** The fake identity provider's accounts (#14303); validated, not yet used by a runtime. */
+  val auth: JsonObject? = null,
   val strings: JsonObject? = null,
 )
 

@@ -9041,6 +9041,12 @@
         "hasDefault": true
       },
       {
+        "name": "auth",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "strings",
         "type": "json",
         "nullable": true,

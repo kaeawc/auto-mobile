@@ -1,5 +1,6 @@
 import { buildAdaptiveSchema, adaptiveChildren, type AdaptiveSlots } from "./prototypeAdaptive";
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
+import { prototypeAuthSchema } from "./prototypeAuthSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
@@ -908,6 +909,7 @@ const specSchema = z
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
     channels: prototypeChannelsSchema(() => actionSchema).optional(),
+    auth: prototypeAuthSchema().optional(),
     derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })

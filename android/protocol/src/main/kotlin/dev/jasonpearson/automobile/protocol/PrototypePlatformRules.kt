@@ -65,12 +65,17 @@ internal object PrototypePlatformRules {
     PrototypeChannels.error(root)?.let {
       return it
     }
+    PrototypeAuthRules.blockError(root)?.let {
+      return it
+    }
     requiresError(root)?.let {
       return it
     }
     for (use in uses(root, context)) {
       (useError(use, declared)
-          ?: (if (use is Use.Call) PrototypeChannels.callError(use.action, use.path, root)
+          ?: (if (use is Use.Call)
+            PrototypeChannels.callError(use.action, use.path, root)
+              ?: PrototypeAuthRules.callError(use.action, use.path, root)
           else null))
         ?.let {
           return it

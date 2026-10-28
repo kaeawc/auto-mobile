@@ -226,3 +226,21 @@ describe("DaemonClient tool cancellation", () => {
     await client.close();
   });
 });
+
+test("readResource keeps Apps metadata in the daemon request params", async () => {
+  const { client, socket, respond } = setup();
+  const _meta = {
+    "io.modelcontextprotocol/clientCapabilities": {
+      extensions: { "io.modelcontextprotocol/ui": {} },
+    },
+  };
+  const result = client.readResource("ui://automobile/observe", { _meta });
+  const [request] = socket.getWrittenMessages(daemonRequestFrameSchema);
+  try {
+    expect(request.params).toEqual({ uri: "ui://automobile/observe", _meta });
+    respond(request.id);
+    await result;
+  } finally {
+    await client.close();
+  }
+});

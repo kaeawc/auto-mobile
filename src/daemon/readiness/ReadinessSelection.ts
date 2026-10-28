@@ -103,6 +103,16 @@ interface ReadinessSelectionDependencies {
   clearExplicitDevicePin(deviceId: string): void;
   readonly admissionGate: DeviceAdmissionGate;
 }
+/** Describe only the candidate platforms; selection and I/O stay with the caller. */
+function ambiguousReadinessMessage(candidates: readonly BootedDevice[]): string {
+  const platforms = new Set(candidates.map((device) => device.platform));
+  const leading =
+    platforms.size > 1
+      ? "Both Android and iOS devices are connected."
+      : `Multiple ${platforms.has("android") ? "Android" : "iOS"} devices are connected.`;
+  return `${leading} For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.`;
+}
+
 /** Selects and verifies readiness targets without owning boot or runner setup. */
 export class ReadinessSelection {
   constructor(private readonly dependencies: ReadinessSelectionDependencies) {}
@@ -473,10 +483,7 @@ export class ReadinessSelection {
   ): Promise<BootedDevice> {
     const candidates = scan.devices.filter((device) => device.platform === platform);
     if (candidates.length > 1) {
-      throw new AmbiguousDeviceTargetError(
-        `Multiple ${platform} devices connected. Specify deviceId or select a device for this connection.`,
-        candidates,
-      );
+      throw new AmbiguousDeviceTargetError(ambiguousReadinessMessage(candidates), candidates);
     }
     if (options?.intent !== "read") {
       return await this.dependencies.findOrStartDevice(platform, options);
@@ -815,7 +822,7 @@ export class ReadinessSelection {
     }
     // #15020: typed, so a client branches on the code and reads the candidates it may choose from.
     throw new AmbiguousDeviceTargetError(
-      "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
+      ambiguousReadinessMessage([...androidDevices, ...iosDevices]),
       [...androidDevices, ...iosDevices],
     );
   }

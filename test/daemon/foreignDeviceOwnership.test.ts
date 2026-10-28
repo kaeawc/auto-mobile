@@ -38,6 +38,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceClaims } from "../fakes/FakeDeviceClaims";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { StoreDeviceClaimMirror, type DeviceClaim } from "../../src/daemon/deviceClaims";
+import { ConnectionOwnership } from "../../src/daemon/connectionOwnership";
 import { createExecResult } from "../../src/utils/execResult";
 
 const SELF_PID = 100;
@@ -1021,7 +1022,39 @@ describe("reading the host-wide claims table (#11811 c)", () => {
     d.files.alive.add(7);
     d.files.files.set(d.files.claimPath(DEVICE), { pid: 7, token: "file-token" });
     await d.store.upsert(d.row());
+    const read = spyOn(d.store, "get");
     expect(await d.ownerOf()).toBe(7);
+    expect(read).not.toHaveBeenCalled();
+    d.files.files.clear();
+    expect(await d.ownerOf()).toBe(FOREIGN_PID);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  test("releaseDeviceClaim and mirror reconciliation cannot delete a replacement owner's row", async () => {
+    const d = readingDaemon();
+    const claims = new ConnectionOwnership({
+      foreignOwnershipFor: () => d.ownership,
+      getDevice: () => ({ platform: "android", sessionId: "self-session" }),
+    });
+    expect(await claims.publishDeviceClaim(DEVICE)).toBe(true);
+    await d.mirror.idle();
+    const foreignFile = { pid: FOREIGN_PID, token: "replacement-token" };
+    d.files.files.set(d.files.claimPath(DEVICE), foreignFile);
+    const previous = await d.store.get("android", DEVICE);
+    const foreignRow = d.row({
+      ownerToken: foreignFile.token,
+      updatedAtMs: previous!.updatedAtMs + 1,
+    });
+    await d.store.upsert(foreignRow);
+
+    claims.releaseDeviceClaim(DEVICE);
+    await d.mirror.idle();
+    d.mirror.reconcile(d.store);
+    await d.mirror.idle();
+
+    expect(d.files.files.get(d.files.claimPath(DEVICE))).toEqual(foreignFile);
+    expect(await d.store.get("android", DEVICE)).toEqual(foreignRow);
+    d.mirror.dispose();
   });
 
   test("an owner a file names is not asked a second time through the table", async () => {
@@ -1089,6 +1122,7 @@ describe("reading the host-wide claims table (#11811 c)", () => {
     const d = readingDaemon();
     await d.store.upsert(d.row());
     expect(await d.ownership.claim(DEVICE)).toBe(false);
+    expect(d.ownership.foreignOwnerPid(DEVICE)).toBe(FOREIGN_PID);
     expect(d.files.files.has(d.files.claimPath(DEVICE))).toBe(false);
     await d.mirror.idle();
     expect((await d.store.get("android", DEVICE))?.pid).toBe(FOREIGN_PID);

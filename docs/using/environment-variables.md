@@ -590,8 +590,6 @@ or holding a launch slot (#15291). Retry the observe shortly.
 | `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`, `AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER`           | Local screen-capture helper executable; filesystem path.                                                        | released helper                        |
 | `AUTOMOBILE_NETWORK_FILTER_APP_PATH`                                                      | Local signed Network Filter `.app` for `auto-mobile --ios-network-filter install`.                              | release download                       |
 | `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`                                                       | Apple Team ID the Network Filter app and its provider must both be signed by.                                   | shared Developer ID team required      |
-| `AUTOMOBILE_IOS_WEBRTC_FFMPEG`, `AUTO_MOBILE_IOS_WEBRTC_FFMPEG`                           | `ffmpeg` executable path or name for iOS WebRTC.                                                                | `ffmpeg` on PATH                       |
-| `AUTOMOBILE_IOS_WEBRTC_FORCE_RAW`, `AUTO_MOBILE_IOS_WEBRTC_FORCE_RAW`                     | Force raw iOS capture instead of native H.264; `1`/`true` enables.                                              | off                                    |
 | `AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS`                                              | How long to wait to find the simulator window for capture; positive integer milliseconds.                       | `2000` ms                              |
 
 </div>

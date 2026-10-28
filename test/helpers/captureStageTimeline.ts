@@ -221,7 +221,7 @@ export interface KeyframeRecoverySample {
  * Recovery is a *new* keyframe (`keyFramesDecoded` advanced — the reader decoded
  * a fresh SPS/PPS + IDR, AC1) that rode out on a *delivered* frame
  * (`framesDecoded` advanced). Requiring both is the delivery-shortfall tolerance
- * (AC2): `IosH264Source.requestKeyFrame` restarts the encoder, but under a
+ * (AC2): `IosH264Source.requestKeyFrame` signals the helper encoder, but under a
  * static Simulator screen its IDR only reaches the viewer on the next delivered
  * frame — so the recovery point is defined on that delivered frame, never on a
  * fixed wall clock. A reader whose counters reset (reconnect) reads as

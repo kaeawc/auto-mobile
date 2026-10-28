@@ -1,3 +1,6 @@
+import { CLIENT_CAPABILITIES_META_KEY } from "@modelcontextprotocol/server";
+import type { RequestCapabilitySource } from "../daemon/tasks/mcpTasksExtension";
+import { isRecord } from "./pipeline/isRecord";
 import { MCP_APP_MIME_TYPE } from "./observeAppResource";
 
 /** The MCP Apps extension id a client lists under `capabilities.extensions` (spec 2026-01-26). */
@@ -19,4 +22,30 @@ export function clientAdvertisesMcpApps(capabilities: unknown): boolean {
   }
   const mimeTypes = (entry as { mimeTypes?: unknown }).mimeTypes;
   return !Array.isArray(mimeTypes) || mimeTypes.includes(MCP_APP_MIME_TYPE);
+}
+
+/** Only the advertised UI extension crosses the stdio proxy boundary. */
+export function mcpAppsRequestMeta(capabilities: unknown): Record<string, unknown> | undefined {
+  if (
+    !clientAdvertisesMcpApps(capabilities) ||
+    !isRecord(capabilities) ||
+    !isRecord(capabilities.extensions)
+  ) {
+    return undefined;
+  }
+  return {
+    [CLIENT_CAPABILITIES_META_KEY]: {
+      extensions: { [MCP_APPS_EXTENSION_ID]: capabilities.extensions[MCP_APPS_EXTENSION_ID] },
+    },
+  };
+}
+
+/** Undefined means no request declaration: retain the connection's Apps decision. */
+export function requestAdvertisesMcpApps(source: RequestCapabilitySource): boolean | undefined {
+  for (const container of [source.envelope, source.meta]) {
+    if (isRecord(container) && Object.hasOwn(container, CLIENT_CAPABILITIES_META_KEY)) {
+      return clientAdvertisesMcpApps(container[CLIENT_CAPABILITIES_META_KEY]);
+    }
+  }
+  return undefined;
 }

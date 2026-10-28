@@ -1,0 +1,53 @@
+{
+  "description": "Heading folds into 0..359; a change inside the 100 ms window waits for the next sample past it.",
+  "key": "headingDeg",
+  "rateHz": 10,
+  "samples": [
+    {
+      "timestampMs": 0,
+      "value": 359.6
+    },
+    {
+      "timestampMs": 50,
+      "value": 10
+    },
+    {
+      "timestampMs": 100,
+      "value": 10.4
+    },
+    {
+      "timestampMs": 150,
+      "value": 10.2
+    },
+    {
+      "timestampMs": 260,
+      "value": 11.5
+    },
+    {
+      "timestampMs": 300,
+      "value": -0.4
+    },
+    {
+      "timestampMs": 400,
+      "value": -1
+    }
+  ],
+  "expectedWrites": [
+    {
+      "timestampMs": 0,
+      "value": 0
+    },
+    {
+      "timestampMs": 100,
+      "value": 10
+    },
+    {
+      "timestampMs": 260,
+      "value": 12
+    },
+    {
+      "timestampMs": 400,
+      "value": 359
+    }
+  ]
+}

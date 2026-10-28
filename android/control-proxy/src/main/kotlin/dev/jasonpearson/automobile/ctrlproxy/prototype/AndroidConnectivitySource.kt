@@ -62,6 +62,11 @@ internal class AndroidConnectivitySource(private val context: Context) :
     started = true
     try {
       tracker.onDataSaver(dataSaverOn())
+      // Seed the current network before registering, so the callback's first delivery of the same
+      // network is not a transition and does not fire connectivity.changed at startup.
+      manager.activeNetwork?.let(manager::getNetworkCapabilities)?.let {
+        tracker.onNetwork(reading(it))
+      }
       manager.registerDefaultNetworkCallback(callback)
       networkRegistered = true
       ContextCompat.registerReceiver(

@@ -1,0 +1,1458 @@
+{
+  "id": "shoebox-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "derive": {
+    "takenText": {
+      "of": {
+        "state": "selectedTakenAt"
+      },
+      "format": {
+        "date": {
+          "style": "long"
+        }
+      },
+      "locale": "en-US",
+      "timeZone": "UTC"
+    }
+  },
+  "state": {
+    "access": "limited",
+    "selectMode": false,
+    "selectedCount": 0,
+    "selectedId": "",
+    "selectedPlace": "",
+    "selectedTime": "",
+    "selectedTakenAt": "",
+    "albumSheetOpen": false,
+    "backupProgress": 0,
+    "refreshing": false,
+    "sel_p1": false,
+    "sel_p2": false,
+    "sel_p3": false,
+    "sel_p4": false,
+    "sel_p5": false,
+    "sel_p6": false,
+    "sel_p7": false,
+    "sel_p8": false,
+    "sel_p9": false
+  },
+  "data": {
+    "days": [
+      {
+        "date": "2026-10-12",
+        "label": "Mon, Oct 12",
+        "photos": [
+          {
+            "id": "p1",
+            "time": "09:14",
+            "place": "Harbour walk",
+            "takenAt": "2026-10-12T09:14:00Z"
+          },
+          {
+            "id": "p2",
+            "time": "09:16",
+            "place": "Harbour walk",
+            "takenAt": "2026-10-12T09:16:00Z"
+          },
+          {
+            "id": "p3",
+            "time": "13:02",
+            "place": "Lunch",
+            "takenAt": "2026-10-12T13:02:00Z"
+          },
+          {
+            "id": "p4",
+            "time": "18:40",
+            "place": "Sunset",
+            "takenAt": "2026-10-12T18:40:00Z"
+          }
+        ]
+      },
+      {
+        "date": "2026-10-11",
+        "label": "Sun, Oct 11",
+        "photos": [
+          {
+            "id": "p5",
+            "time": "10:05",
+            "place": "Market",
+            "takenAt": "2026-10-11T10:05:00Z"
+          },
+          {
+            "id": "p6",
+            "time": "10:21",
+            "place": "Market",
+            "takenAt": "2026-10-11T10:21:00Z"
+          },
+          {
+            "id": "p7",
+            "time": "16:48",
+            "place": "Park",
+            "takenAt": "2026-10-11T16:48:00Z"
+          }
+        ]
+      },
+      {
+        "date": "2026-10-09",
+        "label": "Fri, Oct 9",
+        "photos": [
+          {
+            "id": "p8",
+            "time": "08:30",
+            "place": "Commute",
+            "takenAt": "2026-10-09T08:30:00Z"
+          },
+          {
+            "id": "p9",
+            "time": "20:12",
+            "place": "Dinner",
+            "takenAt": "2026-10-09T20:12:00Z"
+          }
+        ]
+      }
+    ],
+    "albums": [
+      {
+        "id": "a1",
+        "name": "Weekend",
+        "count": 7
+      },
+      {
+        "id": "a2",
+        "name": "Food",
+        "count": 2
+      },
+      {
+        "id": "a3",
+        "name": "Favourites",
+        "count": 4
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "tabs",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "photos_bar",
+                    "title": "Shoebox",
+                    "visibleWhen": {
+                      "key": "selectMode",
+                      "equals": false
+                    },
+                    "actions": [
+                      {
+                        "icon": "check_box",
+                        "label": "Select",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "selectMode",
+                            "value": true
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "topAppBar",
+                    "testTag": "select_bar",
+                    "title": "{selectedCount} selected",
+                    "visibleWhen": {
+                      "key": "selectMode",
+                      "equals": true
+                    },
+                    "navigationIcon": {
+                      "icon": "close",
+                      "label": "Cancel selection",
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "selectMode",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p1",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p2",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p3",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p4",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p5",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p6",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p7",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p8",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p9",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedCount",
+                          "value": 0
+                        }
+                      ]
+                    },
+                    "actions": [
+                      {
+                        "icon": "library_add",
+                        "label": "Add to album",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "albumSheetOpen",
+                            "value": true
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "card",
+                    "testTag": "limited_banner",
+                    "variant": "filled",
+                    "visibleWhen": {
+                      "key": "access",
+                      "equals": "limited"
+                    },
+                    "style": {
+                      "padding": {
+                        "start": 16,
+                        "end": 16,
+                        "top": 8,
+                        "bottom": 8
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "column",
+                        "style": {
+                          "padding": {
+                            "start": 16,
+                            "end": 16,
+                            "top": 16,
+                            "bottom": 16
+                          },
+                          "spacing": 8
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Shoebox can see only the photos you picked.",
+                            "style": {
+                              "textStyle": "bodyMedium"
+                            }
+                          },
+                          {
+                            "type": "button",
+                            "testTag": "allow_all_button",
+                            "label": "Allow access to all photos",
+                            "variant": "tonal",
+                            "onTap": [
+                              {
+                                "type": "setState",
+                                "key": "access",
+                                "value": "full"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "column",
+                    "testTag": "denied_state",
+                    "visibleWhen": {
+                      "key": "access",
+                      "equals": "denied"
+                    },
+                    "style": {
+                      "weight": 1,
+                      "padding": {
+                        "start": 16,
+                        "end": 16,
+                        "top": 16,
+                        "bottom": 16
+                      },
+                      "spacing": 12,
+                      "alignment": "center",
+                      "arrangement": "center"
+                    },
+                    "children": [
+                      {
+                        "type": "icon",
+                        "name": "no_photography",
+                        "contentDescription": "No access"
+                      },
+                      {
+                        "type": "text",
+                        "text": "Shoebox needs access to your photos to show them here.",
+                        "style": {
+                          "textStyle": "bodyLarge",
+                          "textAlign": "center"
+                        }
+                      },
+                      {
+                        "type": "button",
+                        "testTag": "grant_access_button",
+                        "label": "Give access",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "access",
+                            "value": "full"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "scroll",
+                    "id": "photos_scroll",
+                    "testTag": "photos_scroll",
+                    "visibleWhen": {
+                      "key": "access",
+                      "notEquals": "denied"
+                    },
+                    "style": {
+                      "weight": 1
+                    },
+                    "refresh": {
+                      "stateKey": "refreshing",
+                      "onRefresh": [
+                        {
+                          "type": "setState",
+                          "key": "refreshing",
+                          "value": false
+                        }
+                      ]
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 16
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "style": {
+                            "spacing": 8
+                          },
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "{data:/days/0/label}",
+                              "semantics": {
+                                "heading": true
+                              },
+                              "style": {
+                                "textStyle": "titleSmall"
+                              }
+                            },
+                            {
+                              "type": "grid",
+                              "testTag": "photo_grid",
+                              "columns": 3,
+                              "style": {
+                                "spacing": 4
+                              },
+                              "repeat": {
+                                "items": {
+                                  "path": "/days/0/photos"
+                                },
+                                "as": "photo",
+                                "key": "id"
+                              },
+                              "children": [
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_tile",
+                                  "contentDescription": "Open photo",
+                                  "visibleWhen": {
+                                    "key": "selectMode",
+                                    "equals": false
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "surfaceVariant",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedId",
+                                      "value": "{photo.id}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedPlace",
+                                      "value": "{photo.place}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedTime",
+                                      "value": "{photo.time}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedTakenAt",
+                                      "value": "{photo.takenAt}"
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "viewer"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "image",
+                                      "variant": "outlined",
+                                      "contentDescription": "Photo"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onSurfaceVariant"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_select",
+                                  "contentDescription": "Select photo",
+                                  "visibleWhen": {
+                                    "all": [
+                                      {
+                                        "key": "selectMode",
+                                        "equals": true
+                                      },
+                                      {
+                                        "key": "sel_{photo.id}",
+                                        "equals": false
+                                      }
+                                    ]
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "surfaceVariant",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "sel_{photo.id}"
+                                    },
+                                    {
+                                      "type": "increment",
+                                      "key": "selectedCount"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "image",
+                                      "variant": "outlined",
+                                      "contentDescription": "Photo"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onSurfaceVariant"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_selected",
+                                  "contentDescription": "Deselect photo",
+                                  "semantics": {
+                                    "traits": ["selected"]
+                                  },
+                                  "visibleWhen": {
+                                    "all": [
+                                      {
+                                        "key": "selectMode",
+                                        "equals": true
+                                      },
+                                      {
+                                        "key": "sel_{photo.id}",
+                                        "equals": true
+                                      }
+                                    ]
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "primaryContainer",
+                                    "cornerRadius": "small",
+                                    "alignment": "center",
+                                    "border": {
+                                      "width": 3,
+                                      "color": "primary"
+                                    }
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "sel_{photo.id}"
+                                    },
+                                    {
+                                      "type": "decrement",
+                                      "key": "selectedCount"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "check_circle",
+                                      "variant": "filled",
+                                      "contentDescription": "Selected",
+                                      "style": {
+                                        "color": "primary"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onPrimaryContainer"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "column",
+                          "style": {
+                            "spacing": 8
+                          },
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "{data:/days/1/label}",
+                              "semantics": {
+                                "heading": true
+                              },
+                              "style": {
+                                "textStyle": "titleSmall"
+                              }
+                            },
+                            {
+                              "type": "grid",
+                              "testTag": "photo_grid",
+                              "columns": 3,
+                              "style": {
+                                "spacing": 4
+                              },
+                              "repeat": {
+                                "items": {
+                                  "path": "/days/1/photos"
+                                },
+                                "as": "photo",
+                                "key": "id"
+                              },
+                              "children": [
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_tile",
+                                  "contentDescription": "Open photo",
+                                  "visibleWhen": {
+                                    "key": "selectMode",
+                                    "equals": false
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "surfaceVariant",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedId",
+                                      "value": "{photo.id}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedPlace",
+                                      "value": "{photo.place}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedTime",
+                                      "value": "{photo.time}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedTakenAt",
+                                      "value": "{photo.takenAt}"
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "viewer"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "image",
+                                      "variant": "outlined",
+                                      "contentDescription": "Photo"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onSurfaceVariant"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_select",
+                                  "contentDescription": "Select photo",
+                                  "visibleWhen": {
+                                    "all": [
+                                      {
+                                        "key": "selectMode",
+                                        "equals": true
+                                      },
+                                      {
+                                        "key": "sel_{photo.id}",
+                                        "equals": false
+                                      }
+                                    ]
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "surfaceVariant",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "sel_{photo.id}"
+                                    },
+                                    {
+                                      "type": "increment",
+                                      "key": "selectedCount"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "image",
+                                      "variant": "outlined",
+                                      "contentDescription": "Photo"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onSurfaceVariant"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_selected",
+                                  "contentDescription": "Deselect photo",
+                                  "semantics": {
+                                    "traits": ["selected"]
+                                  },
+                                  "visibleWhen": {
+                                    "all": [
+                                      {
+                                        "key": "selectMode",
+                                        "equals": true
+                                      },
+                                      {
+                                        "key": "sel_{photo.id}",
+                                        "equals": true
+                                      }
+                                    ]
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "primaryContainer",
+                                    "cornerRadius": "small",
+                                    "alignment": "center",
+                                    "border": {
+                                      "width": 3,
+                                      "color": "primary"
+                                    }
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "sel_{photo.id}"
+                                    },
+                                    {
+                                      "type": "decrement",
+                                      "key": "selectedCount"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "check_circle",
+                                      "variant": "filled",
+                                      "contentDescription": "Selected",
+                                      "style": {
+                                        "color": "primary"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onPrimaryContainer"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "column",
+                          "style": {
+                            "spacing": 8
+                          },
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "{data:/days/2/label}",
+                              "semantics": {
+                                "heading": true
+                              },
+                              "style": {
+                                "textStyle": "titleSmall"
+                              }
+                            },
+                            {
+                              "type": "grid",
+                              "testTag": "photo_grid",
+                              "columns": 3,
+                              "style": {
+                                "spacing": 4
+                              },
+                              "repeat": {
+                                "items": {
+                                  "path": "/days/2/photos"
+                                },
+                                "as": "photo",
+                                "key": "id"
+                              },
+                              "children": [
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_tile",
+                                  "contentDescription": "Open photo",
+                                  "visibleWhen": {
+                                    "key": "selectMode",
+                                    "equals": false
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "surfaceVariant",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedId",
+                                      "value": "{photo.id}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedPlace",
+                                      "value": "{photo.place}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedTime",
+                                      "value": "{photo.time}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "selectedTakenAt",
+                                      "value": "{photo.takenAt}"
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "viewer"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "image",
+                                      "variant": "outlined",
+                                      "contentDescription": "Photo"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onSurfaceVariant"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_select",
+                                  "contentDescription": "Select photo",
+                                  "visibleWhen": {
+                                    "all": [
+                                      {
+                                        "key": "selectMode",
+                                        "equals": true
+                                      },
+                                      {
+                                        "key": "sel_{photo.id}",
+                                        "equals": false
+                                      }
+                                    ]
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "surfaceVariant",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "sel_{photo.id}"
+                                    },
+                                    {
+                                      "type": "increment",
+                                      "key": "selectedCount"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "image",
+                                      "variant": "outlined",
+                                      "contentDescription": "Photo"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onSurfaceVariant"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "column",
+                                  "testTag": "photo_selected",
+                                  "contentDescription": "Deselect photo",
+                                  "semantics": {
+                                    "traits": ["selected"]
+                                  },
+                                  "visibleWhen": {
+                                    "all": [
+                                      {
+                                        "key": "selectMode",
+                                        "equals": true
+                                      },
+                                      {
+                                        "key": "sel_{photo.id}",
+                                        "equals": true
+                                      }
+                                    ]
+                                  },
+                                  "style": {
+                                    "aspectRatio": 1,
+                                    "background": "primaryContainer",
+                                    "cornerRadius": "small",
+                                    "alignment": "center",
+                                    "border": {
+                                      "width": 3,
+                                      "color": "primary"
+                                    }
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "sel_{photo.id}"
+                                    },
+                                    {
+                                      "type": "decrement",
+                                      "key": "selectedCount"
+                                    }
+                                  ],
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "check_circle",
+                                      "variant": "filled",
+                                      "contentDescription": "Selected",
+                                      "style": {
+                                        "color": "primary"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{photo.time}",
+                                      "style": {
+                                        "textStyle": "labelSmall",
+                                        "color": "onPrimaryContainer"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "albums_bar",
+                    "title": "Albums"
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "albums_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "grid",
+                      "columns": 2,
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 12
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/albums"
+                        },
+                        "as": "album",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "card",
+                          "testTag": "album_card",
+                          "variant": "outlined",
+                          "onTap": [
+                            {
+                              "type": "emit",
+                              "name": "album_opened",
+                              "context": {
+                                "album": {
+                                  "item": "id"
+                                }
+                              }
+                            }
+                          ],
+                          "children": [
+                            {
+                              "type": "column",
+                              "style": {
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 16,
+                                  "bottom": 16
+                                },
+                                "spacing": 4
+                              },
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "name": "photo_album",
+                                  "variant": "outlined",
+                                  "contentDescription": "Album"
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{album.name}",
+                                  "style": {
+                                    "textStyle": "titleMedium"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{album.count} photos",
+                                  "style": {
+                                    "textStyle": "bodySmall"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "backup_bar",
+                    "title": "Backup"
+                  },
+                  {
+                    "type": "column",
+                    "style": {
+                      "padding": {
+                        "start": 16,
+                        "end": 16,
+                        "top": 16,
+                        "bottom": 16
+                      },
+                      "spacing": 16
+                    },
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "{backupProgress}% backed up",
+                        "testTag": "backup_label",
+                        "semantics": {
+                          "liveRegion": "polite"
+                        },
+                        "style": {
+                          "textStyle": "titleMedium"
+                        }
+                      },
+                      {
+                        "type": "progress",
+                        "testTag": "backup_progress",
+                        "variant": "linear",
+                        "stateKey": "backupProgress",
+                        "max": 100
+                      },
+                      {
+                        "type": "text",
+                        "testTag": "backup_done",
+                        "text": "Backup complete",
+                        "visibleWhen": {
+                          "key": "backupProgress",
+                          "equals": 100
+                        },
+                        "style": {
+                          "textStyle": "bodyMedium",
+                          "color": "primary"
+                        }
+                      },
+                      {
+                        "type": "row",
+                        "style": {
+                          "spacing": 8
+                        },
+                        "children": [
+                          {
+                            "type": "button",
+                            "testTag": "backup_start",
+                            "label": "Back up now",
+                            "icon": "cloud_upload",
+                            "onTap": [
+                              {
+                                "type": "setState",
+                                "key": "backupProgress",
+                                "value": 0
+                              },
+                              {
+                                "type": "startTimer",
+                                "id": "backup",
+                                "afterMs": 500,
+                                "everyMs": 500,
+                                "maxRuns": 10,
+                                "actions": [
+                                  {
+                                    "type": "increment",
+                                    "key": "backupProgress",
+                                    "by": 10
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "type": "button",
+                            "testTag": "backup_pause",
+                            "label": "Pause",
+                            "variant": "outlined",
+                            "onTap": [
+                              {
+                                "type": "cancelTimer",
+                                "id": "backup"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "divider"
+                      },
+                      {
+                        "type": "text",
+                        "text": "Library access",
+                        "semantics": {
+                          "heading": true
+                        },
+                        "style": {
+                          "textStyle": "titleSmall"
+                        }
+                      },
+                      {
+                        "type": "segmentedButton",
+                        "testTag": "access_picker",
+                        "stateKey": "access",
+                        "options": [
+                          {
+                            "value": "full",
+                            "label": "All"
+                          },
+                          {
+                            "value": "limited",
+                            "label": "Limited"
+                          },
+                          {
+                            "value": "denied",
+                            "label": "None"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "tabs",
+            "items": [
+              {
+                "label": "Photos",
+                "icon": "photo"
+              },
+              {
+                "label": "Albums",
+                "icon": "photo_album"
+              },
+              {
+                "label": "Backup",
+                "icon": "cloud_upload"
+              }
+            ]
+          },
+          {
+            "type": "bottomSheet",
+            "testTag": "album_sheet",
+            "openWhen": {
+              "key": "albumSheetOpen",
+              "equals": true
+            },
+            "detents": ["half"],
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 8
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "text": "Add {selectedCount} to album",
+                  "semantics": {
+                    "heading": true
+                  },
+                  "style": {
+                    "textStyle": "titleMedium"
+                  }
+                },
+                {
+                  "type": "column",
+                  "repeat": {
+                    "items": {
+                      "path": "/albums"
+                    },
+                    "as": "album",
+                    "key": "id"
+                  },
+                  "children": [
+                    {
+                      "type": "listItem",
+                      "testTag": "album_choice",
+                      "headline": "{album.name}",
+                      "leadingIcon": "photo_album",
+                      "onTap": [
+                        {
+                          "type": "emit",
+                          "name": "added_to_album",
+                          "context": {
+                            "album": {
+                              "item": "id"
+                            },
+                            "count": {
+                              "state": "selectedCount"
+                            }
+                          }
+                        },
+                        {
+                          "type": "setState",
+                          "key": "albumSheetOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectMode",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p1",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p2",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p3",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p4",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p5",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p6",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p7",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p8",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "sel_p9",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "selectedCount",
+                          "value": 0
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "viewer": {
+        "type": "column",
+        "style": {
+          "background": "inverseSurface"
+        },
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "viewer_bar",
+            "title": "{selectedPlace}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            },
+            "actions": [
+              {
+                "icon": "share",
+                "label": "Share",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "share_requested",
+                    "context": {
+                      "photo": {
+                        "state": "selectedId"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "column",
+            "testTag": "viewer_photo",
+            "style": {
+              "weight": 1,
+              "alignment": "center",
+              "arrangement": "center",
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "icon",
+                "name": "image",
+                "variant": "outlined",
+                "contentDescription": "Photo",
+                "style": {
+                  "color": "inverseOnSurface"
+                }
+              },
+              {
+                "type": "text",
+                "testTag": "viewer_taken",
+                "text": "{derived:takenText}",
+                "style": {
+                  "textStyle": "bodyLarge",
+                  "color": "inverseOnSurface"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

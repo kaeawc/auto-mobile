@@ -25,4 +25,13 @@ export class DeviceClaimMirrorHub {
   async idle(): Promise<void> {
     await Promise.all(this.mirrors.map((mirror) => mirror.idle()));
   }
+
+  async releaseOwnedClaims(store: DeviceClaims | undefined): Promise<void> {
+    if (!store) {
+      return;
+    }
+    for (const mirror of this.mirrors) {
+      await mirror.releaseOwnedClaims(store);
+    }
+  }
 }

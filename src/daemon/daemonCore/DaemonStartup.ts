@@ -41,7 +41,6 @@ import { startTelemetryPushSocketServer } from "../telemetryPushSocketServer";
 import { startWebRtcStreamSocketServer } from "../webrtcStreamSocketServer";
 import { startVideoStreamSocketServer } from "../videoStreamSocketServer";
 import { getDaemonSocketPathsByName } from "../socketPaths";
-import { BackgroundBindingRegistryUpgrade } from "../sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import { prepareBindingRegistryForStartup } from "../sessionBroker/registry/legacySlotDeviceRetirement";
 import { createDaemonTerminalReleaseJournal } from "../terminalReleaseJournal";
 import { IosCtrlProxyBuilder } from "../../ctrlProxy/IosCtrlProxyBuilder";
@@ -132,8 +131,6 @@ export interface DaemonStartupHost extends Pick<
     | "shutdownInProgress"
     | "recorderDeviceIncarnationListener"
     | "setRecorderDeviceIncarnationListener"
-    | "backgroundRegistryUpgrade"
-    | "setBackgroundRegistryUpgrade"
   >;
   startHost: () => DaemonStartHost;
   setStartHost: (value: DaemonStartHost) => void;
@@ -159,6 +156,7 @@ export interface DaemonStartupHost extends Pick<
   subscribeToolCallEndActivity: DaemonSessions["subscribeToolCallEndActivity"];
   initializeDatabase: DaemonStartup["initializeDatabase"];
   openBindingRegistry: DaemonBroker["openBindingRegistry"];
+  startBackgroundRegistryUpgrade: DaemonBroker["startBackgroundRegistryUpgrade"];
   initializeDevicePoolWithTimeout: DaemonStartup["initializeDevicePoolWithTimeout"];
   reownRehydratedManagedExecutions: DaemonBroker["reownRehydratedManagedExecutions"];
   installSessionBroker: DaemonBroker["installSessionBroker"];
@@ -453,6 +451,14 @@ export class DaemonStartup {
           registryExists: bindingRegistryFileExists(),
           open: () => this.host.openBindingRegistry(),
         });
+      } else if (bindingRegistryFileExists()) {
+        void this.host.openBindingRegistry(undefined, { quiet: true }).catch((error: unknown) => {
+          // Pending schemas retry after bind; claim files decide until the registry can be read.
+          logger.warn(
+            `[Daemon] Recovery registry open deferred; will retry after socket bind: ${errorMessage(error)}`,
+            error,
+          );
+        });
       }
 
       this.host.services.sessionManager().assertDaemonCollaboratorsAttached();
@@ -511,13 +517,7 @@ export class DaemonStartup {
     }
     logger.info("Unix socket server started");
     if (!this.host.lifecycle.sessionBrokerConfigPath() && bindingRegistryFileExists()) {
-      this.host.lifecycle.backgroundRegistryUpgrade() ??
-        this.host.lifecycle.setBackgroundRegistryUpgrade(
-          new BackgroundBindingRegistryUpgrade((signal) => this.host.openBindingRegistry(signal), {
-            timer: this.host.services.timer(),
-          }),
-        );
-      this.host.lifecycle.backgroundRegistryUpgrade()!.start();
+      this.host.startBackgroundRegistryUpgrade();
     }
   }
 

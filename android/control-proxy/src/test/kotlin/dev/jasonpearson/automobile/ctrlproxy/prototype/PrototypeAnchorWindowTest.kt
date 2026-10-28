@@ -33,6 +33,7 @@ class PrototypeAnchorWindowTest {
         manager,
         isViewAttached = manager::isViewAttached,
         sdkInt = 30,
+        firstRenderWaiter = PrototypeFirstRenderWaiter { _, _ -> true },
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),
         densityProvider = { 2.625f },

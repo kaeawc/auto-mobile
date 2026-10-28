@@ -38,6 +38,21 @@ class AndroidConnectivitySourceTest {
   }
 
   @Test
+  fun `the first state read already holds the current network, so the first callback is no change`() {
+    val capabilities = ShadowNetworkCapabilities.newInstance()
+    shadowOf(capabilities).addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+    shadowOf(capabilities).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    shadowOf(manager).setNetworkCapabilities(manager.activeNetwork, capabilities)
+    val source = AndroidConnectivitySource(context)
+    val first = source.state.value
+    assertEquals(JsonPrimitive(true), first["online"])
+    assertEquals(JsonPrimitive("cellular"), first["transport"])
+    shadowOf(manager).networkCallbacks.forEach { it.onAvailable(manager.activeNetwork!!) }
+    assertEquals(first, source.state.value)
+    source.close()
+  }
+
+  @Test
   fun `callbacks register on the first state read and close unregisters them`() {
     val source = AndroidConnectivitySource(context)
     assertTrue(shadowOf(manager).networkCallbacks.isEmpty())

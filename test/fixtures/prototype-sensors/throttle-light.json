@@ -1,0 +1,45 @@
+{
+  "description": "Lux rounds to whole units and never goes below zero; the interval at 2 Hz is 500 ms; an unchanged value is never rewritten.",
+  "key": "lightLux",
+  "rateHz": 2,
+  "samples": [
+    {
+      "timestampMs": 0,
+      "value": 3.4
+    },
+    {
+      "timestampMs": 200,
+      "value": 50
+    },
+    {
+      "timestampMs": 600,
+      "value": 50.2
+    },
+    {
+      "timestampMs": 900,
+      "value": -5
+    },
+    {
+      "timestampMs": 1100,
+      "value": 0.4
+    },
+    {
+      "timestampMs": 2000,
+      "value": 0.2
+    }
+  ],
+  "expectedWrites": [
+    {
+      "timestampMs": 0,
+      "value": 3
+    },
+    {
+      "timestampMs": 600,
+      "value": 50
+    },
+    {
+      "timestampMs": 1100,
+      "value": 0
+    }
+  ]
+}

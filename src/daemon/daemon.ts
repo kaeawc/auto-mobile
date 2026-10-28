@@ -16,7 +16,6 @@ import { type HealthFailureKind } from "./daemonHealthCheck";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { DevicePool } from "./devicePool";
 import { createForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import { type SqliteBindingRegistry } from "./sessionBroker/registry/sqliteBindingRegistry";
 import { ENV, readEnvRaw } from "../config/env";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import { DEFAULT_DAEMON_PORT } from "./wire/constants";
@@ -598,7 +597,7 @@ export class Daemon {
       /** Replaces start-sequence steps with doubles on this instance. */
       overrideStartSteps: (steps: {
         startThroughSocketBind?: () => Promise<void>;
-        openBindingRegistry?: (signal?: AbortSignal) => Promise<SqliteBindingRegistry>;
+        openBindingRegistry?: DaemonBroker["openBindingRegistry"];
         setupShutdownHandlers?: () => void;
       }): void => {
         this.startThroughSocketBind = steps.startThroughSocketBind ?? this.startThroughSocketBind;
@@ -667,6 +666,7 @@ export class Daemon {
       identity,
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
       bindingRegistry: () => daemon.runtime.bindingRegistry,
       deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,
@@ -736,6 +736,7 @@ export class Daemon {
       reownRehydratedManagedExecutions: (...args) =>
         this.broker.reownRehydratedManagedExecutions(...args),
       installSessionBroker: (...args) => this.broker.installSessionBroker(...args),
+      startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
       initializeIosServices: (...args) => this.initializeIosServices(...args),
       restoreIncumbentOwnerRecord: (...args) => this.identity.restoreIncumbentOwnerRecord(...args),
       republishIdentity: (...args) => this.identity.republishIdentity(...args),

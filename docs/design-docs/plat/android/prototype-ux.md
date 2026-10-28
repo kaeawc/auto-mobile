@@ -2011,7 +2011,9 @@ Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery 
 
 CtrlProxy registers the Android runtime and advertises the capability; the embedded renderer leaves the
 module to its host app. It reads the default network with `registerDefaultNetworkCallback`, registered on
-the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
+the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. The
+state is seeded from the active network before the callback registers, so the callback's first delivery
+is not a transition and a prototype does not see `connectivity.changed` just for starting. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
 `online: false` with `transport: "wifi"`. With no default network the state is offline on `none` with
 `metered` and `constrained` false. `transport` takes the first of `vpn`, `wifi`, `cellular`, `ethernet`
 that the network carries, so a VPN reports `vpn` over its underlying transport, and anything else is
@@ -2066,7 +2068,27 @@ spec cannot name a component or an arbitrary handler, and a URL that begins with
 scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
 `SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
 `mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
-resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
+resolve. The module has no events or `/platform` state.
+
+CtrlProxy registers the Android `links` runtime and advertises the capability; the embedded renderer
+leaves the module to its host app. An omitted `mode` is `auto`. `tel:` starts `ACTION_DIAL` (never
+`ACTION_CALL`, so no call is placed and no `CALL_PHONE` is needed), `mailto:` and `sms:` start
+`ACTION_SENDTO` (a composer; nothing is sent), and every other scheme starts `ACTION_VIEW`, always with
+`FLAG_ACTIVITY_NEW_TASK` because the overlay is not an activity. Only `http` and `https` can open in a
+Custom Tab. The Custom Tab intent targets one Custom Tabs browser, the default browser when it provides
+them and otherwise the first that does, so an App Link app cannot take the URL. The runtime writes the
+Custom Tabs session extra itself, so CtrlProxy needs no `androidx.browser` dependency. `inApp` with no Custom Tabs service (AOSP images without Chrome) opens
+externally and reports `outcome: "fallback"`; `auto` makes the same choice and reports `opened`. Success
+writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, `mode` is how the URL
+actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
+fails with `unavailable`.
+
+On iOS the agent and Viewer registries run `links.open` with `UIApplication.open` for external opens
+(its completion decides `opened` or `unavailable`; `canOpenURL` is not used, since it would need
+`LSApplicationQueriesSchemes`) and `SFSafariViewController`, presented over the foreground key window's top
+view controller, for `inApp` and `auto` web URLs. When nothing can present, `inApp` opens externally and
+reports `fallback`. The result has no `handler`. The Simulator has no Phone or Mail app, so `tel:` and
+`mailto:` report `unavailable` there.
 
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.
@@ -2087,7 +2109,12 @@ an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated si
 `auth.signOut` takes no arguments. The `auth.sessionExpired` event and the read-only keys
 `/platform/auth/signedIn` (boolean) and `/platform/auth/userId` complete the module. No argument or key carries
 a password, secret or session token: the runtime keeps the token in the Keystore or Keychain and never exposes
-it. The root `auth` accounts block is not in the contract yet, and no production runtime advertises the module.
+it. The accounts come from a root `auth` block, which needs `auth` in `requires.platform`:
+`{provider: "fake", accounts, sessionTtlSeconds?}`. `accounts` holds 1 to 8 entries of `{id, name, email,
+avatar?}` with unique ids. Each email must use a reserved domain (`example.test`, `example.com` or any
+`.invalid`), so a fake account can never match a real one. No field holds a password, secret or client id.
+`sessionTtlSeconds` runs from 60 to 2592000. An `auth.signIn` or `auth.signOut` call without the block fails
+validation. No production runtime advertises the module yet.
 
 **Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
 `location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole
@@ -2106,6 +2133,17 @@ optional fields the platform reported. `<into>__meta` then gets `{durationMs, ap
 only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the fix is rolled
 back. The root subscription block is not in the contract yet, and no production runtime advertises the
 module.
+
+**BLE value codecs (#14266).** The `ble` module's `decode` and `encode` arguments name one of a closed list
+of codecs, with no expressions: `utf8`, `hex` (lowercase out, either case in), `base64` (standard alphabet,
+padded), `uint8`, `uint16le`, `int16le`, `uint32le`, `float32le`, and the decode-only SIG decoders
+`gatt.battery_level` (0x2A19, 0-100) and `gatt.heart_rate_measurement` (0x2A37:
+`{heartRate, sensorContact: "unsupported" | "notDetected" | "detected", energyExpended?, rrIntervalsMs?}`,
+RR intervals rounded to whole milliseconds). Values are at most 512 bytes, the ATT attribute limit. Failures
+are typed: `length` (wrong byte count or over the limit), `range` (a number out of range, a non-whole
+integer, a non-finite float, a battery level over 100), `format` (invalid UTF-8, hex or base64, or a value
+of the wrong JSON type), `decodeOnly` and `unknown`. The TypeScript reference and its Kotlin and Swift twins
+replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and runtimes are not built.
 
 **Sandbox commerce (#14314).** The `commerce` module (`prototype_platform_commerce_v1`) has two calls.
 `commerce.purchase` takes a required `productId` (an identifier of at most 64 characters) and writes
@@ -3196,6 +3234,14 @@ the exact byte boundary (whitespace included) and the emit payload boundary. Fix
 pinned to LF for Windows; no binary assets are included. The worked examples above are committed as
 `doc-example-N.json` fixtures and `test/parity/prototypeSpec.test.ts` asserts they match this page. The page
 is registered under How it Works in `mkdocs.yml` and linked from the design index.
+
+Reference concept slices live in `test/fixtures/prototype-concepts/<concept>/`: `today.json` (a
+whole concept app written only with capabilities Android and iOS both advertise, with literal `data`
+in place of a mock backend), `concept.json` (`{issue, name, capabilities}`, the gate capabilities the
+three strict policies must derive) and a `README.md` listing every required capability and each
+workaround or dead end with its spec path. The TypeScript, Kotlin and Swift suites load every concept
+directory; TypeScript also requires a `testTag` on every interactive node, a spec `id` of
+`<concept>-today` and zero static accessibility lint findings.
 
 ## Flow and grid contract (not device-verified)
 

@@ -2971,7 +2971,8 @@ wrapper, so links stay detectable. Stack screen and component names are never tr
 fields. Each show states the
 option afresh.
 
-The on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
+Every starter template passes this lint with zero findings, pinned by the template gallery test. The
+on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
 implemented yet.
 
 ## Rejection paths and deterministic first error

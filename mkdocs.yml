@@ -136,6 +136,7 @@ nav:
       - "Agent benchmarks": using/agent-benchmarks.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Android Automotive OS": using/android-automotive.md
+      - "Wear OS": using/wear-os.md
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md

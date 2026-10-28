@@ -67,6 +67,9 @@ class AutoMobilePrototypeCapabilitiesTest {
       // Contract only; the system picker runtimes are owed (#14318).
       "prototype_platform_contacts_v1",
       "prototype_platform_calendar_v1",
+      // Contract only; the system media picker and camera runtimes are owed (#14197).
+      "prototype_platform_mediaLibrary_v1",
+      "prototype_platform_camera_v1",
       // Contract only; the motion and sensor runtimes are owed (#14327).
       "prototype_platform_sensors_v1",
     )

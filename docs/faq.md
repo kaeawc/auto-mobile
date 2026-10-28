@@ -13,6 +13,9 @@ support uses the Android SDK and `adb`; iOS simulator support requires macOS
 and Xcode. The installer checks the available host tooling and reports missing
 requirements.
 
+Android Automotive OS and Wear OS emulators can be driven too, with limits: see
+[Android Automotive OS](using/android-automotive.md) and [Wear OS](using/wear-os.md).
+
 ## How do I see or start a device?
 
 MCP clients can acquire a device with `getAndroid` or `getApple`; use

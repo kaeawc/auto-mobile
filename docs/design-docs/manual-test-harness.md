@@ -355,7 +355,9 @@ makes a device allowed: the batch ledger must also bind it.
 Broker teardown order: `broker1 down`, `broker1 report`, stop the private daemon,
 then stop the batch's caffeinate by its recorded PID. For separate plain batches use
 `shutdown-devices` before daemon stop. Broker-held rows must be released through the
-broker; no force bypass.
+broker; no force bypass. `broker1 down` does not evict idle pooled devices (pooling
+requires reuse enabled). They stay running, and `shutdown-devices` refuses them as
+broker-held; never signal them. No harness drain exists yet (#15653).
 
 ## Persistent stdio-proxy sessions
 
@@ -399,7 +401,9 @@ bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role a-ph
   native absence before continuing. `up` captures native info best-effort within 5 s
   after readiness; `info` saves the native descriptor to `info.json` and feeds the ledger.
 - `close --client NAME` closes MCP/stdin and waits up to 240 s for a released receipt
-  of a granted session. A refused or failed attempt (e.g. `daemon_unavailable`,
+  of a granted session. `up` refuses while a client driver is alive. Release does not
+  end the driver; run `close --client NAME` first, then retry `up`.
+  A refused or failed attempt (e.g. `daemon_unavailable`,
   abandoned request) has no receipt: `close` returns at once with exit 0 and
   `release.outcome: "failed"` in `closed.json` (`receiptMissing: true` when the daemon
   holds no receipt or is unreachable). It then joins the driver's exit (5 s), including

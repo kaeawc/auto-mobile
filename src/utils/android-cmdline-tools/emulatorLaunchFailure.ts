@@ -121,7 +121,9 @@ export function detectDisplayError(output: string): {
       message: "Emulator could not connect to a display (Qt 'xcb' platform plugin failed to load)",
       suggestion:
         "Run the emulator headless by setting AUTOMOBILE_EMULATOR_HEADLESS=true " +
-        "(adds -no-window -no-audio), or start an X server / export DISPLAY before launching.",
+        "(adds -no-window; audio stays on), or start an X server / export DISPLAY before launching. " +
+        "Do not add -no-audio (AUTOMOBILE_EMULATOR_AUDIO=false) when tests record or play audio: " +
+        "it disables emulator audio, so audio tests cannot pass.",
     };
   }
 

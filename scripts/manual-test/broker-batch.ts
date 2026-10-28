@@ -184,8 +184,11 @@ async function runUp(
   const { plan, permits } = expectationPlan(command, deps);
   for (const name of readBrokerClients(deps.batchDir, deps.fs)) {
     const path = join(deps.batchDir, "sessions", name, "driver.pid");
-    if (deps.fs.exists(path) && deps.isPidAlive(Number(deps.fs.readFile(path)))) {
-      throw new Error("A batch client driver is still alive; run down before up.");
+    const pid = deps.fs.exists(path) ? Number(deps.fs.readFile(path)) : undefined;
+    if (pid !== undefined && deps.isPidAlive(pid)) {
+      throw new Error(
+        `Batch client ${name} still has a live driver (pid ${pid}). Release does not end the driver; run "${deps.batchDir}/bin/proxy1 close --client ${name}" first, then retry up.`,
+      );
     }
   }
   if (
@@ -372,9 +375,21 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
     }
   }
   const unresolved = grants.filter((row) => !ledger.releaseComplete(row));
-  for (const device of ledger.devices().filter((row) => ledger.hasEvent(row, "pooled"))) {
+  const pooled = ledger.devices().filter((row) => ledger.hasEvent(row, "pooled"));
+  for (const device of pooled) {
     deps.log(
-      `Pooled ${device.client} on ${device.device!.name}: clean idle device retained by the broker pool.`,
+      `Pooled ${device.client} on ${device.device!.name} (device ID ${device.device!.deviceId}): clean idle device retained by the broker pool. No harness command evicts idle pooled devices yet (product path pending, #15653); do not signal the device; shutdown-devices refuses it as broker-held until the product evicts it.`,
+    );
+  }
+  if (pooled.length) {
+    writeEvidence(
+      "pool-retained.json",
+      pooled.map(({ client, device }) => ({
+        client,
+        deviceId: device!.deviceId,
+        name: device!.name,
+      })),
+      deps,
     );
   }
   deps.log(

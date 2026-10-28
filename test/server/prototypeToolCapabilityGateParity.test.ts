@@ -532,6 +532,44 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_mediaLibrary_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["mediaLibrary"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "mediaLibrary.pick", args: { media: { value: "images" } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_camera_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["camera"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "camera.capture", args: { media: { value: "image" } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_contacts_v1: {
     minimalSpec: {
       ...base,

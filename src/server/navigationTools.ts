@@ -14,12 +14,20 @@ import {
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { throwIfAborted, createJSONToolResponse } from "../utils/toolUtils";
+import {
+  throwIfAborted,
+  createJSONToolResponse,
+  createStructuredToolResponse,
+} from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
+import {
+  getNavigationGraphResultSchema,
+  navigateToResultSchema,
+} from "./navigationToolOutputSchemas";
 
 // Schema definitions
 // #6712: `.strict()` on each of these — the advertised schemas already said
@@ -158,7 +166,7 @@ export function createNavigateToHandler({
       throwIfAborted(signal);
 
       if (result.success) {
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           message: result.message || `Navigated to ${args.targetScreen}`,
           ...result,
         });
@@ -166,7 +174,7 @@ export function createNavigateToHandler({
         // A failed navigation must not read as a completed one: mark the MCP
         // envelope `isError`, exactly as tapOn/sendKeys do (#6200, #6251).
         return {
-          ...createJSONToolResponse({
+          ...createStructuredToolResponse({
             error: result.error || "Navigation failed",
             ...result,
           }),
@@ -211,7 +219,7 @@ export function registerNavigationTools({
       const stats = await manager.getStatsForApp(appId);
       const graph = await manager.exportGraphForApp(appId);
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `Navigation graph for app: ${appId || "none"}`,
         requestedAppId,
         observedAppId,
@@ -245,7 +253,12 @@ export function registerNavigationTools({
     "Navigate to screen using navigation graph",
     navigateToSchema,
     createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
-    { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      embeddedSdkOnly: true,
+      outputSchema: navigateToResultSchema,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -254,7 +267,12 @@ export function registerNavigationTools({
     getNavigationGraphSchema,
     getNavigationGraphHandler,
     // Reads only; read-only access never requires a session (#10965).
-    { defaultEnabled: false, embeddedSdkOnly: true, deviceReadOnly: true },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      deviceReadOnly: true,
+      outputSchema: getNavigationGraphResultSchema,
+    },
   );
 
   // Explore handler

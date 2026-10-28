@@ -131,4 +131,12 @@ export interface FinalizeToolResponseContext {
    * received. Reads are unaffected. Defaults to `true`.
    */
   delivered?: boolean;
+  /**
+   * A plain `register()` tool's response (#13942). Only the hard-ceiling spill and
+   * the `resourceLink` opt-in apply, each with its resource_link block. Observation
+   * rendering, action-metadata compaction, `extras` stripping and the "always"
+   * artifact mode belong to the device pipeline and are skipped, so a normal-sized
+   * plain response leaves finalization unchanged.
+   */
+  plainTool?: boolean;
 }

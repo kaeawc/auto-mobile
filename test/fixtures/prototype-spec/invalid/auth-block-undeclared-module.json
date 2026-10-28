@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "b1",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "session": {}
+    },
+    "state": {
+      "signInStatus": "",
+      "expired": false
+    },
+    "requires": {
+      "platform": ["battery"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Signed in as {platform:/auth/userId}",
+          "visibleWhen": {
+            "key": "expired",
+            "equals": true
+          }
+        }
+      ]
+    },
+    "auth": {
+      "provider": "fake",
+      "accounts": [
+        {
+          "id": "u1",
+          "name": "Ada Lovelace",
+          "email": "ada@example.test",
+          "avatar": "ada"
+        },
+        {
+          "id": "u2",
+          "name": "Grace Hopper",
+          "email": "grace@example.com"
+        }
+      ],
+      "sessionTtlSeconds": 3600
+    }
+  },
+  "expectedPath": "auth",
+  "expectedMessage": "The auth block requires auth in requires.platform"
+}

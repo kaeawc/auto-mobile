@@ -4,8 +4,13 @@ import { registerAppTools } from "../../src/server/appTools";
 import {
   getAppPermissionsResultSchema,
   inspectPackageSigningResultSchema,
+  installAppResultSchema,
   listAppsResultSchema,
+  resetKeychainResultSchema,
+  setAppPermissionsResultSchema,
+  uninstallAppResultSchema,
 } from "../../src/server/appToolOutputSchemas";
+import { advertisedOutputSchema, jsonSchemaObjects } from "../helpers/advertisedOutputSchemas";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import type { PackageSigningInspection } from "../../src/models/PackageSigningInspection";
@@ -47,8 +52,98 @@ describe("app tool output schemas", () => {
     ["listApps", listAppsResultSchema],
     ["getAppPermissions", getAppPermissionsResultSchema],
     ["inspectPackageSigning", inspectPackageSigningResultSchema],
+    ["installApp", installAppResultSchema],
+    ["uninstallApp", uninstallAppResultSchema],
+    ["setAppPermissions", setAppPermissionsResultSchema],
+    ["resetKeychain", resetKeychainResultSchema],
   ])("%s declares its outputSchema", (name, schema) => {
     expect(ToolRegistry.getTool(name)?.outputSchema).toBe(schema);
+  });
+
+  // A schema instance shared across fields is advertised as a `$ref` Ajv cannot resolve.
+  test.each([
+    ["installApp", installAppResultSchema],
+    ["uninstallApp", uninstallAppResultSchema],
+    ["setAppPermissions", setAppPermissionsResultSchema],
+    ["resetKeychain", resetKeychainResultSchema],
+  ])("%s advertises its outputSchema without a $ref", (_name, schema) => {
+    const refs = jsonSchemaObjects(advertisedOutputSchema(schema, "ref")).filter(
+      (node) => "$ref" in node,
+    );
+    expect(refs).toEqual([]);
+  });
+
+  const permissionChange = {
+    appId: "com.example.app",
+    deviceId: "emulator-5554",
+    platform: "android",
+    action: "grant",
+    operations: [{ stepId: "grant-camera", success: true, changedCount: 1, failedCount: 0 }],
+  };
+  test.each([
+    [
+      "success with a diagnostic",
+      {
+        ...permissionChange,
+        message: "Applied 1 app permission change(s) for com.example.app",
+        success: true,
+        changedCount: 1,
+        failedCount: 0,
+        diagnostics: [
+          { code: "audio_input_unavailable", message: "no audio input", retryable: false },
+        ],
+      },
+      true,
+    ],
+    [
+      "failure",
+      {
+        ...permissionChange,
+        message: "denied",
+        success: false,
+        changedCount: 0,
+        failedCount: 1,
+        error: "denied",
+      },
+      true,
+    ],
+    ["payload without its counts", { ...permissionChange, message: "m", success: true }, false],
+  ])("setAppPermissions schema on a %s payload", (_label, payload, accepted) => {
+    expect(setAppPermissionsResultSchema.safeParse(payload).success).toBe(accepted);
+  });
+
+  test("install, uninstall and resetKeychain accept only returned (successful) payloads", () => {
+    const installed = {
+      message: "Installed app from /tmp/app.apk",
+      success: true,
+      packageName: "com.example.app",
+      signingGuard: { status: "matched", matchedSha256: ["ab"] },
+      installRoute: "bundle",
+    };
+    expect(installAppResultSchema.safeParse(installed).success).toBe(true);
+    expect(installAppResultSchema.safeParse({ ...installed, success: false }).success).toBe(false);
+    const uninstalled = {
+      message: "Uninstalled app com.example.app",
+      success: true,
+      packageName: "com.example.app",
+      keepData: false,
+      removalVerification: "absent",
+    };
+    expect(uninstallAppResultSchema.safeParse(uninstalled).success).toBe(true);
+    expect(
+      uninstallAppResultSchema.safeParse({ ...uninstalled, keepData: undefined }).success,
+    ).toBe(false);
+    const reset = {
+      success: true,
+      deviceId: "sim-1",
+      platform: "ios",
+      requestedAppId: "com.example.app",
+      scope: "all-apps",
+      exceededRequestedScope: true,
+      message: "Reset",
+    };
+    expect(resetKeychainResultSchema.safeParse(reset).success).toBe(true);
+    expect(resetKeychainResultSchema.safeParse({ ...reset, scope: "device" }).success).toBe(false);
   });
 
   test("listApps accepts a filtered listing and rejects a payload without its message", () => {

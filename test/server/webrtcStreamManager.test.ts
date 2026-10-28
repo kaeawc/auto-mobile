@@ -1102,18 +1102,6 @@ describe("webrtcStreamManager", () => {
         highWaterMarkBytes: 3,
         lastOutputWriteDurationMs: 4,
       },
-      helper: null,
-      encoder: {
-        captureTimestampMs: 5,
-        frameAgeMs: null,
-        queueDepth: 0,
-        droppedFrames: 6,
-        bytesQueued: 0,
-        highWaterMarkBytes: 7,
-        maxFrameBytes: 8,
-        outputWriteDurationMs: 9,
-        outputWriteHighWaterDurationMs: 10,
-      },
     };
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),

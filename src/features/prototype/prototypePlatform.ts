@@ -437,23 +437,37 @@ function readError(
   if (!declared.has(name)) {
     return notDeclared(use.path, name);
   }
+  return stateKnown(name, use.pointer, { channels, players })
+    ? undefined
+    : { path: use.path, message: `Unknown platform state ${use.pointer}` };
+}
+
+/**
+ * Whether a declared module's read names one of its state keys: realtime keys sit under a
+ * declared channel and media keys under a declared player; a module without a table reads anything.
+ */
+function stateKnown(
+  name: string,
+  pointer: string,
+  { channels, players }: Pick<PlatformContext, "channels" | "players">,
+): boolean {
   const state = module(name)?.state;
-  const tokens = use.pointer
+  const tokens = pointer
     .slice(1)
     .split("/")
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
-  const unknown = { path: use.path, message: `Unknown platform state ${use.pointer}` };
   if (name === "media") {
-    return prototypeMediaReadValid(tokens, players, state ?? {}) ? undefined : unknown;
+    return prototypeMediaReadValid(tokens, players, state ?? {});
   }
-  if (name === "realtime" && (tokens.length !== 3 || !Object.hasOwn(channels, tokens[1]))) {
-    return unknown;
+  if (name === "realtime") {
+    return (
+      tokens.length === 3 &&
+      Object.hasOwn(channels, tokens[1]) &&
+      (!state || Object.hasOwn(state, tokens[2]))
+    );
   }
-  const key =
-    name === "realtime" && tokens.length === 3
-      ? tokens[2]
-      : prototypePlatformPointerKey(use.pointer);
-  return state && (key === undefined || !Object.hasOwn(state, key)) ? unknown : undefined;
+  const key = prototypePlatformPointerKey(pointer);
+  return !state || (key !== undefined && Object.hasOwn(state, key));
 }
 
 /** Check portable comparisons against the union of platform-native state rules. */
@@ -539,18 +553,9 @@ export function prototypeReservedTestTagError(
       };
 }
 
-/**
- * The first platform-vocabulary error in a structurally valid spec: `requires`, then handlers,
- * calls, reads and `{event}` bindings in scan order, then reserved emit names among `actions`.
- */
-export function prototypePlatformError(
-  spec: unknown,
-  actions: readonly { value: Raw; path: string }[],
-  check: PrototypePlatformValueCheck,
-): PrototypePlatformError | undefined {
-  const root = record(spec) ?? {};
+function platformContext(root: Raw): PlatformContext {
   const requires = record(root.requires) ?? {};
-  const context = {
+  return {
     channels: record(root.channels) ?? {},
     players: prototypeMediaPlayers(root),
     declared: strings(requires.platform),
@@ -561,6 +566,19 @@ export function prototypePlatformError(
     ),
     background: strings(requires.background),
   };
+}
+
+/**
+ * The first platform-vocabulary error in a structurally valid spec: `requires`, then handlers,
+ * calls, reads and `{event}` bindings in scan order, then reserved emit names among `actions`.
+ */
+export function prototypePlatformError(
+  spec: unknown,
+  actions: readonly { value: Raw; path: string }[],
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  const root = record(spec) ?? {};
+  const context = platformContext(root);
   const error = rootBlockError(root);
   if (error) {
     return error;

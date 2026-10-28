@@ -9,6 +9,9 @@ enum PrototypeStrictCapabilities {
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
         var result = Set<String>()
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
+        if PrototypeContractValidator.locatedActionTypes(.object(spec)).contains("hideKeyboard") {
+            need("hide_keyboard")
+        }
         if includeAgentGates {
             if spec["theme"] != nil { need("theme_modes") }
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
@@ -80,7 +83,6 @@ enum PrototypeStrictCapabilities {
                 "adaptive": "adaptive",
                 "select": "menus",
                 "scrollTo": "chat_scroll",
-                "hideKeyboard": "hide_keyboard",
             ]
             if ["topAppBar", "bottomNav", "tabBar"].contains(type),
                fields["onScroll"] != nil || fields["scroll"] != nil { need("bar_scroll") }

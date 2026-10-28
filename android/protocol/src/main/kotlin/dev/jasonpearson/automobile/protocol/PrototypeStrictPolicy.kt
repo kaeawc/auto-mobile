@@ -254,6 +254,7 @@ internal object PrototypeStrictPolicy {
     (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
     (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
+    if ("hideKeyboard" in locatedActionTypes(spec)) scanner.result.add("prototype_hide_keyboard_v1")
     return scanner.result
   }
 
@@ -272,7 +273,6 @@ internal object PrototypeStrictPolicy {
       "drawer" to "drawer",
       "select" to "menus",
       "scrollTo" to "chat_scroll",
-      "hideKeyboard" to "hide_keyboard",
       "request" to "network",
       "startTimer" to "timers",
       "cancelTimer" to "timers",
@@ -608,3 +608,17 @@ private val freeFormMaps = setOf("headers", "query", "params", "args")
 
 private fun scansValuesOnly(key: String, field: String): Boolean =
   (key == "form" && field == "body") || key in freeFormMaps
+
+// Only the contract's action slots hold actions. Arbitrary JSON, such as a channel route's
+// equality literal, may carry the same type string, so this gate reads located actions only.
+private fun locatedActionTypes(spec: JsonObject): Set<String> {
+  val context = PrototypeStateChecks.Context().apply { root = spec }
+  PrototypeStructuralWalk.walk(
+    spec,
+    PrototypeSpecContract.definitions.getValue("spec").jsonObject,
+    "",
+    context,
+    0,
+  )
+  return context.actions.mapNotNullTo(HashSet()) { it.value.text("type") }
+}

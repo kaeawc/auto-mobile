@@ -87,6 +87,16 @@ struct PrototypeContractValidator {
         return try (value, inspect(value))
     }
 
+    /// Types of the actions in the contract's action slots. Arbitrary JSON, such as a channel route's
+    /// equality literal, may carry the same type string, so a gate that must not over-match reads these.
+    static func locatedActionTypes(_ spec: JSONValue) -> Set<String> {
+        guard let contract, let rule = contract.definitions["spec"] else { return [] }
+        var validator = Self(definitions: contract.definitions, limits: contract.limits)
+        // A spec the walk rejects fails validation anyway; the actions located before that still count.
+        _ = try? validator.walk(spec, rule: rule, path: "", depth: 0)
+        return Set(validator.actions.compactMap { $0.value["type"]?.stringValue })
+    }
+
     static func inspect(_ value: JSONValue) throws -> PrototypeContractValidator {
         guard let contract, let spec = contract.definitions["spec"] else {
             throw invalid("$", "Embedded structural contract is unavailable")

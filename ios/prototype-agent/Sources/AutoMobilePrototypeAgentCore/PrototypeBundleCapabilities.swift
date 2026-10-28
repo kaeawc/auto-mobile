@@ -9,6 +9,7 @@ enum PrototypeBundleCapabilities {
         var names = Set<String>()
         if spec["motion"] == .string("expressive") { names.insert(PrototypeMotionV3.capability) }
         func need(_ feature: String) { names.insert("prototype_\(feature)_v1") }
+        if PrototypeContractValidator.locatedActionTypes(value).contains("hideKeyboard") { need("hide_keyboard") }
         for key in ["window", "theme"] {
             if let block = spec[key]?.objectFields,
                block["ios"] != nil || block["android"] != nil { need("platform_namespace") }
@@ -176,7 +177,6 @@ enum PrototypeBundleCapabilities {
         if type == "emit", fields["context"] != nil { names.insert("prototype_emit_context_v1") }
         if type == "requireValid" { names.insert("prototype_checks_v1") }
         if type == "scrollTo" { names.insert("prototype_chat_scroll_v1") }
-        if type == "hideKeyboard" { names.insert("prototype_hide_keyboard_v1") }
         if ["push", "replace"].contains(type ?? ""), fields["transition"] != nil {
             names.insert("prototype_stack_transitions_v1")
         }

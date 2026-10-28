@@ -267,6 +267,12 @@ export type AppPermissionsFactory = (device: BootedDevice) => AppPermissionsLike
 const defaultAppPermissionsFactory: AppPermissionsFactory = (device) => new AppPermissions(device);
 
 function describeSetPermissionsSuccess(appId: string, result: SetAppPermissionsResult): string {
+  const applied = describeAppliedPermissions(appId, result);
+  const diagnostics = result.diagnostics?.map((diagnostic) => diagnostic.message) ?? [];
+  return diagnostics.length > 0 ? `${applied}. Warning: ${diagnostics.join(" ")}` : applied;
+}
+
+function describeAppliedPermissions(appId: string, result: SetAppPermissionsResult): string {
   if (result.warnings?.length) {
     return `Applied ${result.changedCount} verified app permission change(s) for ${appId}; not verified: ${result.warnings.join("; ")}`;
   }

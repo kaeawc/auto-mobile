@@ -2042,9 +2042,11 @@ with `url` (required, at most 2048 characters) and `mode` (optional: `external`,
 `openUrl` contract pattern is an allowlist: the URL must start with a lowercase `http`, `https`, `mailto`,
 `tel`, `sms`, `geo` or `maps` scheme and contain no whitespace or control characters. `intent:`, `file:`,
 `content:`, `javascript:`, `data:` and any custom scheme fail validation in all three validators, so a
-spec cannot name a component or an arbitrary handler. The validator does not yet reject a mode that a scheme
-cannot honour (`tel:` in `inApp`) or a URL that begins with a placeholder; the runtime reports those. The
-module has no events or `/platform` state. No production runtime advertises it yet.
+spec cannot name a component or an arbitrary handler, and a URL that begins with a placeholder has no literal
+scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
+`SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
+`mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
+resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
 
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.
@@ -2969,7 +2971,8 @@ wrapper, so links stay detectable. Stack screen and component names are never tr
 fields. Each show states the
 option afresh.
 
-The on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
+Every starter template passes this lint with zero findings, pinned by the template gallery test. The
+on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
 implemented yet.
 
 ## Rejection paths and deterministic first error

@@ -15245,6 +15245,28 @@
         "insets": {
           "$ref": "#/$defs/__schema12"
         },
+        "diagnostics": {
+          "description": "Device-level environment conditions. audio_input_unavailable: recordings on this device will contain no audio because the host or emulator has no audio input; do not retry.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "audio_input_unavailable"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": ["code", "message", "retryable"],
+            "additionalProperties": false
+          }
+        },
         "layoutWarnings": {
           "type": "object",
           "properties": {

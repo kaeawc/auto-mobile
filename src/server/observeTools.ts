@@ -86,6 +86,7 @@ import {
   recordObservationBackStack,
   screenForObserve,
   type ObserveResponse,
+  withDeviceDiagnostics,
   type ObserveToolDependencies,
 } from "./observeResponse";
 
@@ -443,7 +444,11 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
-      const served = layerScopedObserveResult(result, args.layer, device.platform, !waitOutcome);
+      const served = withDeviceDiagnostics(
+        layerScopedObserveResult(result, args.layer, device.platform, !waitOutcome),
+        device,
+        dependencies.audioInputDiagnostic,
+      );
 
       if (waitOutcome) {
         return await createObserveWaitResponse(served, waitOutcome, args.includeScreenshotImage, {

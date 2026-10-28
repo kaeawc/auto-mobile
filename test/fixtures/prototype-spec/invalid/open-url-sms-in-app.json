@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "open-url-sms-in-app",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["links"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "links.open",
+          "args": {
+            "url": {
+              "value": "sms:+15551234567"
+            },
+            "mode": {
+              "value": "inApp"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.mode.value"
+}

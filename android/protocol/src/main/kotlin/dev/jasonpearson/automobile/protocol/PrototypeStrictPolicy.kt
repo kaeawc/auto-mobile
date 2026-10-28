@@ -402,6 +402,11 @@ internal object PrototypeStrictPolicy {
           (child as? JsonObject)?.values?.forEach { scan(it) }
           continue
         }
+        // Header and query names are free-form strings, so the map itself is never a typed object.
+        if (type == "request" && key in listOf("headers", "query")) {
+          (child as? JsonObject)?.values?.forEach { scan(it) }
+          continue
+        }
         if (skipsScan(key, type)) continue
         if (key == "repeat") {
           repeatFeatures(child)

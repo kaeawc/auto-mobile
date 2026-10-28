@@ -94,6 +94,7 @@
     "glass-shared-repeat-template.json",
     "grid-adaptive-min-width.json",
     "grid-fixed-columns-span.json",
+    "hide-keyboard-request-query.json",
     "hide-keyboard.json",
     "icon-effects-integer-spellings.json",
     "icon-effects-repeat.json",
@@ -2909,6 +2910,7 @@
       "prototype_platform_auth_v1",
       "prototype_platform_v1"
     ],
-    "hide-keyboard.json": ["prototype_hide_keyboard_v1"]
+    "hide-keyboard.json": ["prototype_hide_keyboard_v1"],
+    "hide-keyboard-request-query.json": ["prototype_data_model_v1", "prototype_network_v1"]
   }
 }

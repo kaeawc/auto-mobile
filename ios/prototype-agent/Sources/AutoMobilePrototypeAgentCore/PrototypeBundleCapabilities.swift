@@ -213,6 +213,13 @@ enum PrototypeBundleCapabilities {
             "data",
             "value"
         ].contains(key) {
+            // Header and query names are free-form strings, so the map itself is never a typed object.
+            if type == "request", ["headers", "query"].contains(key) {
+                for entry in (child.objectFields ?? [:]).values {
+                    scanSlots(entry, names: &names)
+                }
+                continue
+            }
             if ["checks", "validateOn", "enabledWhen", "valid", "requireValid"]
                 .contains(key) { names.insert("prototype_checks_v1") }
             if ["empty", "shimmer"].contains(key) { names.insert("prototype_loading_states_v1") }

@@ -160,6 +160,13 @@ enum PrototypeStrictCapabilities {
                     }
                     continue
                 }
+                // Header and query names are free-form strings, so the map itself is never a typed object.
+                if type == "request", ["headers", "query"].contains(key) {
+                    for entry in (child.objectFields ?? [:]).values {
+                        scan(entry)
+                    }
+                    continue
+                }
                 if key == "strings" { continue }
                 if key == "payload" ||
                     (key == "value" && !["setData", "appendData", "prependData", "upsertData"].contains(type))

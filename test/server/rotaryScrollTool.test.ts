@@ -43,7 +43,7 @@ const scrolled: RotaryScrollResult = {
   attempts: [
     {
       method: "input_rotaryencoder",
-      command: "shell input rotaryencoder scroll 2",
+      command: "shell input rotaryencoder scroll --axis SCROLL,-2",
       outcome: "scrolled",
     },
   ],
@@ -58,7 +58,7 @@ describe("rotaryScroll tool", () => {
       attempts: [
         {
           method: "input_rotaryencoder",
-          command: "shell input rotaryencoder scroll 3",
+          command: "shell input rotaryencoder scroll --axis SCROLL,-3",
           outcome: "failed",
           error: "Error",
         },

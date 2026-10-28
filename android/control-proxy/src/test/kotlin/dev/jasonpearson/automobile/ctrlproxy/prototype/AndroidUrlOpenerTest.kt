@@ -13,18 +13,21 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class AndroidUrlOpenerTest {
-  /** Models PackageManager resolution: handlers by intent action and scheme, plus Custom Tabs. */
+  /**
+   * Models PackageManager resolution: the default handler per intent action and scheme, a Custom
+   * Tabs browser, and a handler that vanishes. An intent targeted at a package resolves to it.
+   */
   private class FakeGateway(
-    var customTabs: Boolean = true,
+    var customTabs: String? = "com.android.chrome",
     val handlers: MutableMap<Pair<String, String>, String> = mutableMapOf(),
     var vanishOnStart: Boolean = false,
   ) : LinkGateway {
     val started = mutableListOf<Intent>()
 
-    override fun customTabsAvailable() = customTabs
+    override fun customTabsPackage() = customTabs
 
     override fun handler(intent: Intent): String? =
-      handlers[intent.action.orEmpty() to intent.data?.scheme.orEmpty()]
+      intent.`package` ?: handlers[intent.action.orEmpty() to intent.data?.scheme.orEmpty()]
 
     override fun start(intent: Intent) {
       if (vanishOnStart) throw ActivityNotFoundException("gone")
@@ -32,7 +35,7 @@ class AndroidUrlOpenerTest {
     }
   }
 
-  private fun browserGateway(customTabs: Boolean = true) =
+  private fun browserGateway(customTabs: String? = "com.android.chrome") =
     FakeGateway(
       customTabs,
       mutableMapOf(
@@ -75,8 +78,24 @@ class AndroidUrlOpenerTest {
   }
 
   @Test
+  fun `inApp targets the Custom Tabs browser even when an App Link app owns the URL`() {
+    val gateway = browserGateway()
+    gateway.handlers[Intent.ACTION_VIEW to "https"] = "com.google.android.youtube"
+    val result = AndroidUrlOpener(gateway).open("https://youtube.com/watch?v=1", LinkMode.IN_APP)
+    assertEquals(LinkOpenResult.Opened(LinkMode.IN_APP, false, "com.android.chrome"), result)
+    assertEquals("com.android.chrome", gateway.started.single().`package`)
+  }
+
+  @Test
+  fun `external opens are not targeted at a package`() {
+    val gateway = browserGateway()
+    AndroidUrlOpener(gateway).open("https://example.com", LinkMode.EXTERNAL)
+    assertEquals(null, gateway.started.single().`package`)
+  }
+
+  @Test
   fun `inApp without a Custom Tabs provider falls back to external and says so`() {
-    val gateway = browserGateway(customTabs = false)
+    val gateway = browserGateway(customTabs = null)
     val result = AndroidUrlOpener(gateway).open("https://example.com", LinkMode.IN_APP)
     assertEquals(LinkOpenResult.Opened(LinkMode.EXTERNAL, true, "com.android.chrome"), result)
     assertFalse(gateway.started.single().hasExtra(CustomTabs.EXTRA_SESSION))
@@ -90,7 +109,7 @@ class AndroidUrlOpenerTest {
     )
     assertEquals(
       LinkOpenResult.Opened(LinkMode.EXTERNAL, false, "com.android.chrome"),
-      AndroidUrlOpener(browserGateway(customTabs = false)).open("http://a.test", LinkMode.AUTO),
+      AndroidUrlOpener(browserGateway(customTabs = null)).open("http://a.test", LinkMode.AUTO),
     )
   }
 

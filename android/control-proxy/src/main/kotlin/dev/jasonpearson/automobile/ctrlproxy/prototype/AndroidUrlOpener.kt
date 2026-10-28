@@ -20,10 +20,14 @@ internal enum class LinkAction(val intentAction: String) {
   SENDTO(Intent.ACTION_SENDTO),
 }
 
-/** How one URL is opened: [customTab] adds the Custom Tabs session extra to a VIEW intent. */
+/**
+ * How one URL is opened. A non-null [customTabPackage] targets that Custom Tabs browser and adds
+ * the session extra, so an App Link app or a browser without Custom Tabs cannot take the URL
+ * instead.
+ */
 internal data class LinkPlan(
   val action: LinkAction,
-  val customTab: Boolean,
+  val customTabPackage: String?,
   val mode: LinkMode,
   val fallback: Boolean,
 )
@@ -33,7 +37,7 @@ internal data class LinkPlan(
  * without a Custom Tabs provider (AOSP images without Chrome) opens externally and reports a
  * fallback; `auto` makes the same choice silently.
  */
-internal fun linkPlan(url: String, mode: LinkMode, customTabsAvailable: Boolean): LinkPlan {
+internal fun linkPlan(url: String, mode: LinkMode, customTabsPackage: String?): LinkPlan {
   val scheme = url.substringBefore(':')
   val action =
     when (scheme) {
@@ -43,14 +47,15 @@ internal fun linkPlan(url: String, mode: LinkMode, customTabsAvailable: Boolean)
       else -> LinkAction.VIEW
     }
   val web = scheme == "http" || scheme == "https"
-  if (!web || mode == LinkMode.EXTERNAL) return LinkPlan(action, false, LinkMode.EXTERNAL, false)
-  return if (customTabsAvailable) LinkPlan(action, true, LinkMode.IN_APP, false)
-  else LinkPlan(action, false, LinkMode.EXTERNAL, fallback = mode == LinkMode.IN_APP)
+  if (!web || mode == LinkMode.EXTERNAL) return LinkPlan(action, null, LinkMode.EXTERNAL, false)
+  return if (customTabsPackage != null) LinkPlan(action, customTabsPackage, LinkMode.IN_APP, false)
+  else LinkPlan(action, null, LinkMode.EXTERNAL, fallback = mode == LinkMode.IN_APP)
 }
 
 /** The framework calls [AndroidUrlOpener] makes, behind a seam so tests need no device. */
 internal interface LinkGateway {
-  fun customTabsAvailable(): Boolean
+  /** The browser to open Custom Tabs in: the default browser if it has them, else the first. */
+  fun customTabsPackage(): String?
 
   /** The package that would handle the intent, or null when none does. */
   fun handler(intent: Intent): String?
@@ -61,7 +66,7 @@ internal interface LinkGateway {
 
 internal class AndroidUrlOpener(private val gateway: LinkGateway) : UrlOpener {
   override fun open(url: String, mode: LinkMode): LinkOpenResult {
-    val plan = linkPlan(url, mode, gateway.customTabsAvailable())
+    val plan = linkPlan(url, mode, gateway.customTabsPackage())
     val intent = linkIntent(url, plan)
     val handler = gateway.handler(intent) ?: return LinkOpenResult.Unavailable
     return try {
@@ -89,7 +94,8 @@ internal object CustomTabs {
 internal fun linkIntent(url: String, plan: LinkPlan): Intent =
   Intent(plan.action.intentAction, url.toUri()).apply {
     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    if (plan.customTab) {
+    plan.customTabPackage?.let {
+      setPackage(it)
       // A null session binder is what CustomTabsIntent sends without a bound service.
       putExtras(Bundle().apply { putBinder(CustomTabs.EXTRA_SESSION, null) })
     }
@@ -99,8 +105,17 @@ internal class SystemLinkGateway(private val context: Context) : LinkGateway {
   // The overlay registers modules before its context is attached; resolve the manager on use.
   private val packages: PackageManager by lazy { context.packageManager }
 
-  override fun customTabsAvailable(): Boolean =
-    packages.queryIntentServices(Intent(CustomTabs.SERVICE_ACTION), 0).isNotEmpty()
+  // The same choice CustomTabsClient.getPackageName makes with no preferred list.
+  override fun customTabsPackage(): String? {
+    val providers =
+      packages.queryIntentServices(Intent(CustomTabs.SERVICE_ACTION), 0).mapNotNull {
+        it.serviceInfo?.packageName
+      }
+    val browser =
+      Intent(Intent.ACTION_VIEW, "http://".toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
+    val default = packages.resolveActivity(browser, 0)?.activityInfo?.packageName
+    return default?.takeIf { it in providers } ?: providers.firstOrNull()
+  }
 
   override fun handler(intent: Intent): String? =
     packages.resolveActivity(intent, 0)?.activityInfo?.packageName

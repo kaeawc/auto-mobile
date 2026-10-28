@@ -236,6 +236,7 @@ test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-me
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
 test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
+test/server/interactionTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake action factories, spied HomeScreen/SystemTray execute
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
 test/server/mcpSessionAutolockRouting.integration.test.ts | safe | FakeDeviceUtils pool, FakeDeviceSessionPersistence L170/L186

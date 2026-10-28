@@ -175,6 +175,8 @@
         var inStackSlot = false
         /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
         var stackAxis: PrototypeAxis?
+        /// An unweighted row offers each child only the width earlier siblings left.
+        var constrainsWidth = false
         @Environment(\.prototypeSharedNamespace) private var sharedNamespace
         @Environment(\.prototypeGlassNamespace) private var glassNamespace
         @FocusState private var controlFocused: Bool
@@ -402,8 +404,10 @@
                 if hasWeightedChild {
                     weightedStack(axis: .horizontal)
                 } else {
-                    HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
-                        .animation(sizeAnimation, value: layoutSignature)
+                    PrototypeRowLayout(spacing: style?.spacing ?? 0) {
+                        arranged(horizontal: true)
+                    }
+                    .animation(sizeAnimation, value: layoutSignature)
                 }
             case "column":
                 if hasWeightedChild {
@@ -564,16 +568,25 @@
         /// Start/center/end come from the frame alignment; only the space* modes need spacers, so a
         /// wrap-sized row or column does not grow to fill its parent.
         @ViewBuilder
-        private func arranged(horizontal _: Bool) -> some View {
+        private func arranged(horizontal: Bool) -> some View {
             let nodes = node.drawnChildren(holds: model.holds, stacks: model.stacks)
             let mode = style?.arrangement ?? "start"
             let outer = mode == "spaceAround" || mode == "spaceEvenly"
-            if outer { Spacer(minLength: 0) }
+            if outer { Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1) }
             ForEach(Array(nodes.enumerated()), id: \.element.offset) { index, entry in
-                if index > 0, mode.hasPrefix("space") { Spacer(minLength: 0) }
-                NodeView(node: entry.node, model: model, inStackSlot: true)
+                if index > 0, mode.hasPrefix("space") {
+                    Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1)
+                }
+                NodeView(node: entry.node, model: model, inStackSlot: true, constrainsWidth: horizontal)
+                    .layoutValue(
+                        key: PrototypeWeightKey.self,
+                        value: horizontal ? PrototypeSizeRules(
+                            style: entry.node.resolvedStyle(state: model.state),
+                            fillsByDefault: entry.node.type == "spacer"
+                        ).unweightedRowWeight : nil
+                    )
             }
-            if outer { Spacer(minLength: 0) }
+            if outer { Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1) }
         }
 
         private var pagerPosition: PagerPosition? {
@@ -974,7 +987,8 @@
                         style: style,
                         coverSize: coverSize.map { (Double($0.width), Double($0.height)) },
                         weightedAxis: stackAxis,
-                        fillsByDefault: node.type == "spacer"
+                        fillsByDefault: node.type == "spacer",
+                        constrainsWidth: constrainsWidth
                     ),
                     alignment: contentAlignment,
                     animation: styleAnimation

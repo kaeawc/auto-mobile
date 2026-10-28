@@ -46,7 +46,29 @@ struct PrototypeWeightKey: LayoutValueKey {
     static let defaultValue: Double? = nil
 }
 
-/// A `row` or `column` with at least one weighted child, laid out by `PrototypeWeightedStack`.
+/// An unweighted row uses the same remaining-width measurement as a weighted stack. Its native
+/// arrangement spacers must expand horizontally only, as they did under `HStack`.
+struct PrototypeRowLayout: Layout {
+    let spacing: Double
+
+    static var layoutProperties: LayoutProperties {
+        var properties = LayoutProperties()
+        properties.stackOrientation = .horizontal
+        return properties
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        PrototypeWeightedStackLayout(axis: .horizontal, spacing: spacing, measuresFlexibleSlots: true)
+            .sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        PrototypeWeightedStackLayout(axis: .horizontal, spacing: spacing, measuresFlexibleSlots: true)
+            .placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
+    }
+}
+
+/// A `row` or `column`, laid out by `PrototypeWeightedStack`.
 /// Children are centred across a row and leading-aligned down a column, as in the plain stacks.
 /// SwiftUI mirrors a custom `Layout`'s placements under right-to-left on its own (proved by
 /// `PrototypeSizingLayoutTests`), so a row reverses and a column's leading edge flips with no
@@ -55,6 +77,7 @@ struct PrototypeWeightKey: LayoutValueKey {
 struct PrototypeWeightedStackLayout: Layout {
     let axis: PrototypeAxis
     let spacing: Double
+    var measuresFlexibleSlots = false
 
     private struct Frames {
         var main: [Double]
@@ -79,7 +102,8 @@ struct PrototypeWeightedStackLayout: Layout {
         let main = PrototypeWeightedStack.mainSizes(
             available: limits.main,
             spacing: spacing,
-            weights: weights
+            weights: weights,
+            measuresFlexibleSlots: measuresFlexibleSlots
         ) { index, most in
             let size = subviews[index].sizeThatFits(offer(main: most, cross: limits.cross))
             return Double(isHorizontal() ? size.width : size.height)
@@ -90,8 +114,10 @@ struct PrototypeWeightedStackLayout: Layout {
         }
         let gaps = spacing * Double(max(subviews.count - 1, 0))
         let sum = main.reduce(0, +) + gaps
-        // A weight fills what is left, so a bounded stack with one takes the whole axis.
-        let total = weights.contains { ($0 ?? 0) > 0 } ? max(sum, limits.main ?? sum) : sum
+        // Authored weights fill the axis. Flexible spacer slots can cap below their shares,
+        // leaving a wrap-sized row smaller than the proposal.
+        let fills = !measuresFlexibleSlots && weights.contains { ($0 ?? 0) > 0 }
+        let total = fills ? max(sum, limits.main ?? sum) : sum
         return Frames(main: main, cross: cross, mainTotal: total)
     }
 

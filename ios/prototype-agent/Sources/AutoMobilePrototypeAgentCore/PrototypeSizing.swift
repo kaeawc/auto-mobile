@@ -27,14 +27,18 @@ struct PrototypeSizeRules: Equatable {
     var weightedAxis: PrototypeAxis?
     /// A `spacer` fills an axis it has no size on.
     var fillsByDefault = false
+    /// Unweighted row children must accept the remaining width, including authored fixed sizes.
+    var constrainsWidth = false
 
     init(
         style: Style?,
         coverSize: (width: Double, height: Double)? = nil,
         weightedAxis: PrototypeAxis? = nil,
-        fillsByDefault: Bool = false
+        fillsByDefault: Bool = false,
+        constrainsWidth: Bool = false
     ) {
         self.fillsByDefault = fillsByDefault
+        self.constrainsWidth = constrainsWidth
         if let coverSize {
             // A cover anchor sizes the node to the anchor bounds: authored sizes would only wrap or
             // clamp it (as on Android).
@@ -54,8 +58,18 @@ struct PrototypeSizeRules: Equatable {
 
     /// Whether the plain `frame` path cannot express this size.
     var needsResolvedLayout: Bool {
-        weightedAxis != nil || aspectRatio != nil
+        constrainsWidth || weightedAxis != nil || aspectRatio != nil
             || minWidth != nil || maxWidth != nil || minHeight != nil || maxHeight != nil
+    }
+
+    /// An unsized or filling spacer in an unweighted row shares the free space after content,
+    /// like the flexible slots inserted for `space*` arrangements. Fixed/wrap spacers stay content.
+    var unweightedRowWeight: Double? {
+        guard fillsByDefault else { return nil }
+        switch width {
+        case nil, .fill?: return 1
+        default: return nil
+        }
     }
 }
 
@@ -209,15 +223,21 @@ enum PrototypeSizing {
 enum PrototypeWeightedStack {
     /// The main-axis size of each child. `available` is nil on an unbounded axis, where a weight
     /// has no space to share and resolves to zero. `measureFixed` returns an unweighted child's size
-    /// given the most it may take.
+    /// given the most it may take. With `measuresFlexibleSlots`, weights identify an unweighted row's
+    /// spacer slots instead: measure their shares too, respecting caps and redistributing unused
+    /// space. On an unbounded axis these spacers keep their ideal sizes.
     static func mainSizes(
         available: Double?,
         spacing: Double,
         weights: [Double?],
+        measuresFlexibleSlots: Bool = false,
         measureFixed: (_ index: Int, _ most: Double?) -> Double
     )
         -> [Double]
     {
+        if measuresFlexibleSlots, available == nil {
+            return weights.indices.map { measureFixed($0, nil) }
+        }
         var sizes = [Double](repeating: 0, count: weights.count)
         var used = spacing * Double(Swift.max(weights.count - 1, 0))
         var totalWeight = 0.0
@@ -233,6 +253,25 @@ enum PrototypeWeightedStack {
         let unit = Swift.max((available ?? 0) - used, 0) / totalWeight
         for (index, weight) in weights.enumerated() {
             if let weight, weight > 0 { sizes[index] = weight * unit }
+        }
+        guard measuresFlexibleSlots else { return sizes }
+        var pending = weights.indices.filter { (weights[$0] ?? 0) > 0 }
+        while !pending.isEmpty {
+            let count = pending.count
+            pending = pending.filter { index in
+                let measured = Swift.min(Swift.max(measureFixed(index, sizes[index]), 0), sizes[index])
+                guard measured < sizes[index] else { return true }
+                sizes[index] = measured
+                used += measured
+                return false
+            }
+            // Every pass settles at least one capped slot, or all remaining slots fill their shares.
+            guard pending.count < count, !pending.isEmpty else { break }
+            let remainingWeight = pending.reduce(0) { $0 + (weights[$1] ?? 0) }
+            let unit = Swift.max((available ?? 0) - used, 0) / remainingWeight
+            for index in pending {
+                sizes[index] = (weights[index] ?? 0) * unit
+            }
         }
         return sizes
     }

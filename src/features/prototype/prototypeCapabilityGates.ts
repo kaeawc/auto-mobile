@@ -12,7 +12,10 @@ import {
 } from "./prototypeContentTransition";
 import { prototypeRouteFields, PROTOTYPE_ROUTES_CAPABILITY } from "./prototypeRoutes";
 import { prototypeWindowMotionFields } from "./prototypeWindowMotion";
-import { prototypeWindowControlFields } from "./prototypeWindowControls";
+import {
+  prototypeHideKeyboardFields,
+  prototypeWindowControlFields,
+} from "./prototypeWindowControls";
 import { PROTOTYPE_WINDOW_MOTION_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { prototypeEffectFields, prototypeEffectsUnsupportedMessage } from "./prototypeEffects";
 import { record } from "./prototypeTemplate";
@@ -72,6 +75,7 @@ import {
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_BACKDROP_CAPABILITY,
   PROTOTYPE_WINDOW_CONTROLS_CAPABILITY,
+  PROTOTYPE_HIDE_KEYBOARD_CAPABILITY,
   PROTOTYPE_LOADING_STATES_CAPABILITY,
   PROTOTYPE_STRING_CONDITIONS_CAPABILITY,
   PROTOTYPE_MEDIA_ITEMS_CAPABILITY,
@@ -439,6 +443,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypeWindowControlFields,
     unsupportedMessage: (fields) =>
       `The connected device does not advertise prototype_platform_window_controls_v1, required by ${fields.join(", ")}. Nothing was shown. Update the agent or remove these fields.`,
+  },
+  {
+    capability: PROTOTYPE_HIDE_KEYBOARD_CAPABILITY,
+    fields: prototypeHideKeyboardFields,
+    unsupportedMessage: (fields) =>
+      `The connected device does not advertise prototype_hide_keyboard_v1, required by ${fields.join(", ")}. Nothing was shown. Update the agent or remove these actions.`,
   },
   {
     capability: PROTOTYPE_WINDOW_MOTION_CAPABILITY,

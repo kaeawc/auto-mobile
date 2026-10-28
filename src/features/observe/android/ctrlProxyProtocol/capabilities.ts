@@ -120,6 +120,11 @@ export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
  */
 export const PROTOTYPE_WINDOW_CONTROLS_CAPABILITY = "prototype_platform_window_controls_v1";
 /**
+ * The `hideKeyboard` action (#14320): dismisses the soft keyboard and clears text focus in the
+ * prototype's own window. Not a platform module, so it needs no `requires.platform` entry.
+ */
+export const PROTOTYPE_HIDE_KEYBOARD_CAPABILITY = "prototype_hide_keyboard_v1";
+/**
  * Spec-language gate (#14192): an `image` `asset` (or tab item `image`) of the form
  * `{data: "/pointer"}` resolving to a device media item id. Not a platform module, so it needs no
  * `requires.platform` entry.

@@ -109,6 +109,7 @@ internal object PrototypeBundleCapabilities {
         if (PrototypeStackPatternRules.required(action)) caps.add("prototype_stack_patterns_v1")
       }
       "scrollTo" -> caps.add("prototype_chat_scroll_v1")
+      "hideKeyboard" -> caps.add("prototype_hide_keyboard_v1")
       "emit" -> if ("context" in action) caps.add("prototype_emit_context_v1")
     }
   }

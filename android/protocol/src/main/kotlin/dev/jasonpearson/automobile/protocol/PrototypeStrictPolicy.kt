@@ -254,6 +254,7 @@ internal object PrototypeStrictPolicy {
     (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
     (spec["platform"] as? JsonObject)?.get("on")?.let { scanner.scan(it) }
+    if ("hideKeyboard" in locatedActionTypes(spec)) scanner.result.add("prototype_hide_keyboard_v1")
     return scanner.result
   }
 
@@ -397,21 +398,19 @@ internal object PrototypeStrictPolicy {
       val type = fields.text("type") ?: ""
       if (PrototypeStackPatternRules.required(fields)) need("stack_patterns")
       for ((key, child) in fields) {
-        if (key == "form" && field == "body") {
-          (child as? JsonObject)?.values?.forEach { scan(it) }
-          continue
+        when {
+          scansValuesOnly(key, field) -> (child as? JsonObject)?.values?.forEach { scan(it) }
+          skipsScan(key, type) -> Unit
+          key == "repeat" -> repeatFeatures(child)
+          else -> {
+            if (key == "transition" && type in setOf("stack", "push", "replace")) {
+              need("stack_transitions")
+            } else {
+              fieldFeatures(key, child, field)
+            }
+            descend(key, child, routeAlias)
+          }
         }
-        if (skipsScan(key, type)) continue
-        if (key == "repeat") {
-          repeatFeatures(child)
-          continue
-        }
-        if (key == "transition" && type in setOf("stack", "push", "replace")) {
-          need("stack_transitions")
-        } else {
-          fieldFeatures(key, child, field)
-        }
-        descend(key, child, routeAlias)
       }
     }
 
@@ -601,4 +600,26 @@ private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (Strin
   val nodeTypes =
     PrototypeSpecContract.definitions.getValue("node").jsonObject.getValue("variants").jsonObject
   if (type in nodeTypes && PrototypeGlassRules.needsNamespace(fields)) need("platform_namespace")
+}
+
+// A form body and every headers, query, params or args map have free-form names, so only their
+// values can be typed objects. The contract declares each field with these names as a record.
+private val freeFormMaps = setOf("headers", "query", "params", "args")
+
+private fun scansValuesOnly(key: String, field: String): Boolean =
+  (key == "form" && field == "body") || key in freeFormMaps
+
+// Only the contract's action slots hold actions. Arbitrary JSON, such as a channel route's
+// equality literal, may carry the same type string, so this gate reads located actions only.
+private fun locatedActionTypes(spec: JsonObject): Set<String> {
+  val context = PrototypeStateChecks.Context().apply { root = spec }
+  PrototypeStructuralWalk.walk(
+    spec,
+    PrototypeSpecContract.definitions.getValue("spec").jsonObject,
+    "",
+    context,
+    0,
+  )
+  PrototypeSpecInput.excludeAccessoryReferences(context)
+  return context.actions.mapNotNullTo(HashSet()) { it.value.text("type") }
 }

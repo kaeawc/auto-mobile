@@ -179,6 +179,10 @@ data class PrototypeIncrementAction(
 
 @SerialName("dismiss") @Serializable data object PrototypeDismissAction : PrototypeAction()
 
+@SerialName("hideKeyboard")
+@Serializable
+data object PrototypeHideKeyboardAction : PrototypeAction()
+
 @SerialName("decrement")
 @Serializable
 data class PrototypeDecrementAction(

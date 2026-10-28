@@ -292,7 +292,7 @@ A spec reaches a platform feature through a module. Declare every module it uses
 - **Read.** \`/platform/<module>/<key>\` is device-owned, read-only JSON: \`{platform:/device/os}\` in text, \`{platform: "/device/widthClass", equals: "expanded"}\` as a condition, \`{platform: pointer}\` as a value. It is not patchable or stored and is not part of the \`/data\` revision log.
 - **Names.** Authored emit names cannot start with \`prototype_\`.
 
-Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists exactly what a spec can use:
+Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists every module, call, event and key a spec may name; a device can run only the modules whose capabilities it advertises:
 `;
 
 export const GUIDE_PLATFORM_EXAMPLE = `Example: copy a link on tap and re-show a hint when the window changes size.

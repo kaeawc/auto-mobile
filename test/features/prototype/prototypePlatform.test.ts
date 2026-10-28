@@ -833,5 +833,7 @@ describe("sensors module contract", () => {
     expect(state.proximityNear.value.kind).toBe("boolean");
     expect(state.lightLux.platforms).toEqual(["android"]);
     expect(state.steps.platforms).toEqual(["android", "ios"]);
+    expect(state.headingDeg.platforms).toEqual(["android", "ios"]);
+    expect(state.proximityNear.platforms).toEqual(["android", "ios"]);
   });
 });

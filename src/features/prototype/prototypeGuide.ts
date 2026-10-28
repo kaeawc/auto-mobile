@@ -260,6 +260,7 @@ export function renderPlatformModules(
         const needs = [
           ...call.permissions.map((permission) => `permission ${permission}`),
           ...call.background.map((mode) => `background ${mode}`),
+          ...(call.capability ? [`capability \`${call.capability}\``] : []),
         ];
         return `\`${name}.${op}\`(${args.join(", ")})${needs.length > 0 ? ` needs ${needs.join(", ")}` : ""}`;
       });

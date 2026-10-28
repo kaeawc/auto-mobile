@@ -1,0 +1,99 @@
+{
+  "spec": {
+    "id": "k",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "photo": {},
+        "clip": {}
+      }
+    },
+    "state": {
+      "camStatus": ""
+    },
+    "requires": {
+      "platform": ["camera"],
+      "permissions": [
+        {
+          "name": "camera",
+          "purpose": "Take a photo for your story"
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "camera.statusChanged": [
+          {
+            "type": "emit",
+            "name": "camera_status"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{platform:/camera/status} {platform:/camera/recordingMs}"
+        },
+        {
+          "type": "button",
+          "label": "Shoot",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "camera.takePhoto",
+              "args": {
+                "preview": {
+                  "value": "vf"
+                }
+              },
+              "into": "/data/draft/photo",
+              "statusKey": "camStatus"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Record",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "camera.startRecording",
+              "args": {
+                "preview": {
+                  "value": "vf"
+                },
+                "maxDurationMs": {
+                  "value": 0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Stop",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "camera.stopRecording",
+              "args": {
+                "preview": {
+                  "value": "vf"
+                }
+              },
+              "into": "/data/draft/clip"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2].onTap[0].args.maxDurationMs.value"
+}

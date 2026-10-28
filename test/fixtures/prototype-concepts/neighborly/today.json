@@ -732,6 +732,13 @@
                         "type": "textField",
                         "testTag": "composer",
                         "stateKey": "draft",
+                        "checks": [
+                          {
+                            "message": "Type a message first",
+                            "required": true
+                          }
+                        ],
+                        "validateOn": "submit",
                         "placeholder": "Message Theo",
                         "imeAction": "send",
                         "style": {
@@ -748,6 +755,7 @@
                           {
                             "type": "emit",
                             "name": "message_sent",
+                            "requireValid": ["draft"],
                             "context": {
                               "text": {
                                 "state": "draft"
@@ -812,6 +820,7 @@
                           {
                             "type": "emit",
                             "name": "message_sent",
+                            "requireValid": ["draft"],
                             "context": {
                               "text": {
                                 "state": "draft"

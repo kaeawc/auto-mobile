@@ -22,7 +22,7 @@ standing in for the backend and the other person.
 - `prototype_timers_v1`: the typing indicator and reply.
 - `prototype_text_field_actions_v1`: the composer's send key.
 - `prototype_string_conditions_v1`: the reaction line and send button follow text length.
-- `prototype_checks_v1`: `enabledWhen` on the send button.
+- `prototype_checks_v1`: `enabledWhen` on the send button, and a required check on the composer that `message_sent`'s `requireValid` uses so the keyboard's send key cannot send an empty draft.
 - `prototype_semantics_v1`: headings and live regions for typing and the reply.
 - `prototype_emit_context_v1`: `group_joined`, `group_left`, `link_opened` and `message_sent` carry their values.
 

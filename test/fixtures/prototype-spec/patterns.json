@@ -241,5 +241,33 @@
       "image/p\u00f1g",
       "image/png/extra"
     ]
+  },
+  "openUrl": {
+    "accepted": [
+      "https://example.com/a?b=1",
+      "http://example.com",
+      "mailto:ada@example.test?subject=Hi%20there",
+      "tel:+15551234567",
+      "sms:+15551234567",
+      "geo:37.78,-122.41",
+      "maps://?q=coffee",
+      "https://example.com/{id}"
+    ],
+    "rejected": [
+      "intent://scan/#Intent;scheme=zxing;end",
+      "file:///etc/passwd",
+      "content://com.android.contacts/contacts",
+      "javascript:alert(1)",
+      "data:text/html,hello",
+      "myapp://open",
+      "HTTPS://example.com",
+      "example.com",
+      "https://example.com/a b",
+      "https://example.com/\u0000",
+      "https://example.com/\u0085",
+      "https://example.com/\n",
+      "https:",
+      ""
+    ]
   }
 }

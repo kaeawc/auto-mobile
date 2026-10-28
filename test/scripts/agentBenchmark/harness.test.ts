@@ -737,6 +737,20 @@ describe("agent benchmark harness", () => {
     expect(env.PATH).toBeUndefined();
   });
 
+  test("the instructions arm turns on the server's instructions block in the MCP config", async () => {
+    const plain = setup(PASSING);
+    await runSuite(loadedSuite(), plain.options, plain.deps);
+    const armA = JSON.parse(plain.fs.readFile(artifact("mcp-config.json"))).mcpServers[
+      "auto-mobile"
+    ].env;
+    expect(armA.AUTOMOBILE_SERVER_INSTRUCTIONS).toBeUndefined();
+
+    const { fs, deps, options } = setup(PASSING);
+    await runSuite(loadedSuite(), { ...options, serverInstructions: true }, deps);
+    const armB = JSON.parse(fs.readFile(artifact("mcp-config.json"))).mcpServers["auto-mobile"].env;
+    expect(armB.AUTOMOBILE_SERVER_INSTRUCTIONS).toBe("1");
+  });
+
   test("runs of one suite in the same second get separate directories", async () => {
     const first = setup(PASSING);
     const second = setup(PASSING);

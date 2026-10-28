@@ -65,6 +65,16 @@ export function privateServerEnv(paths: ServerPaths): Record<string, string> {
   };
 }
 
+/** Per-run server switches the harness writes into the MCP config, set from CLI flags. */
+export interface ServerSwitches {
+  /** Arm B of the instructions A/B: the server returns its `instructions` block. */
+  instructions?: boolean;
+}
+
+function serverSwitchEnv(switches: ServerSwitches): Record<string, string> {
+  return switches.instructions === true ? { AUTOMOBILE_SERVER_INSTRUCTIONS: "1" } : {};
+}
+
 function isAutoMobileVariable(key: string): boolean {
   return key.startsWith("AUTOMOBILE_") || key.startsWith("AUTO_MOBILE_");
 }
@@ -328,6 +338,7 @@ export function mcpServerEnv(
   paths: ServerPaths,
   platform: NodeJS.Platform = process.platform,
   cwd: string = process.cwd(),
+  switches: ServerSwitches = {},
 ): Record<string, string> {
   const shared = Object.fromEntries(
     MCP_PASSTHROUGH_VARIABLES.flatMap((key) => {
@@ -335,7 +346,11 @@ export function mcpServerEnv(
       return value === undefined ? [] : [[key, value]];
     }),
   );
-  return { ...absolutizeInheritedPaths(shared, cwd, platform), ...privateServerEnv(paths) };
+  return {
+    ...absolutizeInheritedPaths(shared, cwd, platform),
+    ...privateServerEnv(paths),
+    ...serverSwitchEnv(switches),
+  };
 }
 
 export function buildMcpConfig(
@@ -343,6 +358,7 @@ export function buildMcpConfig(
   inherited: Record<string, string | undefined> = {},
   platform: NodeJS.Platform = process.platform,
   cwd: string = process.cwd(),
+  switches: ServerSwitches = {},
 ): Record<string, unknown> {
   return {
     mcpServers: {
@@ -350,7 +366,7 @@ export function buildMcpConfig(
         type: "stdio",
         command: paths.runtime,
         args: [paths.serverEntry],
-        env: mcpServerEnv(inherited, paths, platform, cwd),
+        env: mcpServerEnv(inherited, paths, platform, cwd, switches),
       },
     },
   };

@@ -195,7 +195,7 @@ export interface DriveResult {
 }
 
 /** Extract `{payload, errorText}` from an MCP tool envelope. */
-function readEnvelope(envelope: unknown): {
+export function readEnvelope(envelope: unknown): {
   payload?: Record<string, unknown>;
   errorText?: string;
 } {
@@ -390,7 +390,7 @@ export function parseDriveArgs(argv: string[], readPlan: (path: string) => strin
   return options;
 }
 
-async function createSdkClient(serverPath: string, timeoutMs: number): Promise<DriveClient> {
+export async function createSdkClient(serverPath: string, timeoutMs: number): Promise<DriveClient> {
   const client = new Client({ name: "mcp-drive", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -419,7 +419,7 @@ async function createSdkClient(serverPath: string, timeoutMs: number): Promise<D
   };
 }
 
-function defaultServerPath(): string {
+export function defaultServerPath(): string {
   return resolve(fileURLToPath(new URL("../dist/src/index.js", import.meta.url)));
 }
 

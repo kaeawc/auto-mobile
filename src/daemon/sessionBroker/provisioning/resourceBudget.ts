@@ -1,7 +1,11 @@
 import type { BindingInventory } from "./reconciler";
 import { isProductBrokerDevice, LEGACY_DEVICE_NAME_PREFIX } from "../persistedIdentity";
 import { deviceStableId } from "../registry/deviceIdentity";
-import type { DeviceInfo } from "../../../models/index";
+import {
+  type AndroidOrIosPlatform,
+  type DeviceInfo,
+  isAndroidOrIosPlatform,
+} from "../../../models/index";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -322,13 +326,24 @@ function orphanHolding(device: DeviceInfo): ResourceCharge["orphanState"] | null
     : null;
 }
 
+/** An inventory device on a platform bindings can manage. */
+type BindingInventoryDevice = DeviceInfo & { platform: AndroidOrIosPlatform };
+
+function isBindingInventoryDevice(device: DeviceInfo): device is BindingInventoryDevice {
+  return isAndroidOrIosPlatform(device.platform);
+}
+
 /** Unbound broker-named images with no registry or journal commitment, in inventory order. */
-function orphanCandidates(input: LedgerInput, committed: ReadonlySet<string>): DeviceInfo[] {
+function orphanCandidates(
+  input: LedgerInput,
+  committed: ReadonlySet<string>,
+): BindingInventoryDevice[] {
   const seen = new Set(committed);
-  const candidates: DeviceInfo[] = [];
+  const candidates: BindingInventoryDevice[] = [];
   for (const device of input.inventory ?? []) {
     const stableId = deviceStableId(device);
-    if (!stableId || !isProductBrokerDevice(device.name)) {
+    // The broker creates only Android and iOS devices, so a watch is never its orphan.
+    if (!isBindingInventoryDevice(device) || !stableId || !isProductBrokerDevice(device.name)) {
       continue;
     }
     const key = resourceKey(device.platform, stableId);
@@ -372,7 +387,7 @@ function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<
 }
 
 /** Orphan candidates whose running state the inventory listing could not establish. */
-function powerUnknownOrphans(input: LedgerInput): DeviceInfo[] {
+function powerUnknownOrphans(input: LedgerInput): BindingInventoryDevice[] {
   return orphanCandidates(input, commitmentCharges(input).seen).filter(
     (device) => device.isRunning !== true && device.isRunningStateKnown === false,
   );
@@ -413,7 +428,7 @@ type PowerProbes = Map<string, Promise<boolean>>;
 
 async function probeRunningOnce(
   inventory: BindingInventory,
-  device: DeviceInfo,
+  device: BindingInventoryDevice,
   signal: AbortSignal | undefined,
   probes: PowerProbes,
 ): Promise<boolean> {
@@ -442,7 +457,7 @@ async function settlePowerUnknown(
   probes: PowerProbes,
 ): Promise<DeviceInfo[]> {
   const unknown = powerUnknownOrphans(ledger);
-  const running = new Set(
+  const running = new Set<DeviceInfo>(
     (
       await Promise.all(
         unknown.map(async (device) =>

@@ -117,6 +117,7 @@ not_in_nav: |
   /decisions/prototype-mock-backend.md
   /decisions/prototype-request-retrofit.md
   /decisions/types-bun-test-typecheck.md
+  /decisions/watchos-platform.md
 
 nav:
   - "Overview": index.md

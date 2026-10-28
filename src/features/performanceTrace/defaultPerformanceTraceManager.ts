@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { ENV, readEnvTrimmed } from "../../config/env";
-import type { BootedDevice, Platform } from "../../models";
+import type { AndroidOrIosPlatform, BootedDevice } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -60,7 +61,7 @@ export function traceProcessorLocator(
 
 export function createDefaultPerformanceTraceManager(): PerformanceTraceManager {
   const host = new DefaultHostCommandExecutor();
-  const recorders: Record<Platform, PerformanceTraceRecorder> = {
+  const recorders: Record<AndroidOrIosPlatform, PerformanceTraceRecorder> = {
     android: new PerfettoRecorder({
       adbFor: (device) => defaultAdbClientFactory.create(device),
       traceProcessor: traceProcessorLocator(host),
@@ -69,7 +70,8 @@ export function createDefaultPerformanceTraceManager(): PerformanceTraceManager 
     ios: new XctraceRecorder({ host, resolvePid: resolveIosAppPid, timer: defaultTimer }),
   };
   return new PerformanceTraceManager({
-    recorderFor: (platform) => recorders[platform],
+    recorderFor: (platform) =>
+      recorders[requireAndroidOrIosPlatform(platform, "Performance tracing")],
     artifactDir: async () => {
       const dir = getTempDir(TEMP_SUBDIRS.PERFORMANCE_TRACES);
       await mkdir(dir, { recursive: true });

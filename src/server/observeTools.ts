@@ -19,7 +19,7 @@ import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import { BootedDevice, ObserveResult } from "../models";
+import { BootedDevice, ObserveResult, requireAndroidOrIosPlatform } from "../models";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
@@ -362,10 +362,8 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     // platform) can be skipped entirely when the caller omitted it. Re-validate
     // against the resolved `device.platform`, before the try/catch below so the
     // actionable message isn't re-wrapped as a generic execution failure.
-    const { deviceRead, aggregate, timeoutMs, screenshotMode, encoding } = prepareObserveOptions(
-      device.platform,
-      args,
-    );
+    const { platform, deviceRead, aggregate, timeoutMs, screenshotMode, encoding } =
+      prepareObserveOptions(device.platform, args);
     try {
       const observeScreen = screenForObserve(device, args, dependencies);
       const screenshotOptions = await observeScreenshotOptions(
@@ -445,7 +443,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       const served = await withDeviceDiagnostics(
-        layerScopedObserveResult(result, args.layer, device.platform, !waitOutcome),
+        layerScopedObserveResult(result, args.layer, platform, !waitOutcome),
         device,
         dependencies.audioInputDiagnostic,
       );
@@ -490,7 +488,8 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       if (args.layer === "prototype" && cachedResult.viewHierarchy) {
         scopeHierarchyForSelector(cachedResult.viewHierarchy, args.layer);
       }
-      const scoped = scopeObserveResultToLayer(cachedResult, args.layer, device.platform);
+      const platform = requireAndroidOrIosPlatform(device.platform, "identifyInteractions");
+      const scoped = scopeObserveResultToLayer(cachedResult, args.layer, platform);
 
       const analyzer = new IdentifyInteractions();
       const result = analyzer.analyze(scoped, args, currentScreen, navigationEdges);

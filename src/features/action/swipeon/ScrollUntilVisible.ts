@@ -21,6 +21,8 @@ import {
   SwipeOnResult,
   SwipeResult,
   ViewHierarchyResult,
+  type AndroidOrIosPlatform,
+  requireAndroidOrIosPlatform,
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -170,6 +172,11 @@ export class ScrollUntilVisible {
 
   constructor(private readonly deps: ScrollUntilVisibleDependencies) {
     this.resolver = deps.resolver ?? new ElementResolver();
+  }
+
+  /** swipeOn drives only Android and iOS; a watch is rejected before any platform-specific step. */
+  private swipePlatform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.deps.device.platform, "swipeOn");
   }
 
   /**
@@ -785,7 +792,7 @@ export class ScrollUntilVisible {
     observation: ObserveResult;
     includeSystemInsets?: boolean;
   }): Element {
-    const insetOptions = { observation, platform: this.deps.device.platform, includeSystemInsets };
+    const insetOptions = { observation, platform: this.swipePlatform(), includeSystemInsets };
     const screenSize = swipeScreenSize(insetOptions) || { width: 1080, height: 1920 };
     return {
       bounds: getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions)),
@@ -993,7 +1000,7 @@ export class ScrollUntilVisible {
   ): Element["bounds"] {
     return insetSwipeBounds({
       observation,
-      platform: this.deps.device.platform,
+      platform: this.swipePlatform(),
       includeSystemInsets: options.includeSystemInsets,
       bounds: containerElement.bounds,
     });
@@ -1012,7 +1019,7 @@ export class ScrollUntilVisible {
       viewHierarchy,
       containerElement,
       observeResult,
-      platform: this.deps.device.platform,
+      platform: this.swipePlatform(),
     });
   }
 }

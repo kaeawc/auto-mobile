@@ -3,7 +3,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import type { BootedDevice, DeviceSnapshotConfig, DeviceSnapshotManifest } from "../../src/models";
-import { ActionableError } from "../../src/models";
+import { ActionableError, requireAndroidOrIosPlatform } from "../../src/models";
 import {
   captureDeviceSnapshot,
   getDeviceSnapshotConfig,
@@ -38,11 +38,11 @@ import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
 
-const TEST_DEVICE: BootedDevice = {
+const TEST_DEVICE = {
   deviceId: "test-device",
   name: "Test Device",
   platform: "android",
-};
+} satisfies BootedDevice;
 
 describe("deviceSnapshotManager", () => {
   let fakeTimer: FakeTimer;
@@ -689,7 +689,7 @@ describe("deviceSnapshotManager", () => {
               timestamp,
               deviceId: device.deviceId,
               deviceName: device.name,
-              platform: device.platform,
+              platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
               snapshotType: "adb",
               includeAppData: false,
               includeSettings: true,
@@ -723,7 +723,7 @@ describe("deviceSnapshotManager", () => {
               timestamp,
               deviceId: device.deviceId,
               deviceName: device.name,
-              platform: device.platform,
+              platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
               snapshotType: "adb",
               includeAppData: false,
               includeSettings: true,

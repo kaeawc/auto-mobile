@@ -39,7 +39,11 @@ export class FakeDeviceReadiness implements Pick<
   private accessibilityServiceFailure: boolean = false;
   private windowVerificationFailure: boolean = false;
   private simulateDisconnection: boolean = false;
-  private failedPlatformScans: Record<Platform, boolean> = { android: false, ios: false };
+  private failedPlatformScans: Record<Platform, boolean> = {
+    android: false,
+    ios: false,
+    watchos: false,
+  };
 
   // Call tracking for assertions
   private ensureDeviceReadyCalls: number = 0;
@@ -356,9 +360,11 @@ export class FakeDeviceReadiness implements Pick<
     this.detectConnectedPlatformsCalls++;
     this.detectConnectedPlatformsSignals.push(signal);
     signal?.throwIfAborted();
-    const scanned = {
+    // Like the real scan, watch inventory is never scanned.
+    const scanned: Record<Platform, boolean> = {
       android: !this.failedPlatformScans.android,
       ios: !this.failedPlatformScans.ios,
+      watchos: false,
     };
     if (this.simulateDisconnection) {
       return { devices: [], scanned };

@@ -137,7 +137,7 @@ export async function listBootedDevicesForReadWithStatus(
 ): Promise<BootedResourceReadListing> {
   try {
     let status: Omit<BootedResourceReadListing, "devices"> = {
-      scanned: { android: false, ios: false },
+      scanned: { android: false, ios: false, watchos: false },
     };
     const rawDevices = await discoverForResource(
       platform,
@@ -147,6 +147,8 @@ export async function listBootedDevicesForReadWithStatus(
           scanned: {
             android: discovery.succeededPlatforms.has("android"),
             ios: discovery.succeededPlatforms.has("ios"),
+            // Watch inventory is not scanned yet, so a watch is never treated as freshly listed.
+            watchos: false,
           },
           discoveryErrors: discovery.discoveryErrors,
         };
@@ -160,7 +162,7 @@ export async function listBootedDevicesForReadWithStatus(
     const failure: DeviceDiscoveryError = { code: "failed", message: errorMessage(error) };
     return {
       devices: [],
-      scanned: { android: false, ios: false },
+      scanned: { android: false, ios: false, watchos: false },
       discoveryErrors:
         platform === "either" ? { android: failure, ios: failure } : { [platform]: failure },
     };

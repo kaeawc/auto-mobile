@@ -1,5 +1,5 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
-import { ActionableError } from "../models";
+import { ActionableError, requireAndroidOrIosPlatform } from "../models";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -538,6 +538,8 @@ export class DeviceBootService {
     preferRunning?: boolean,
     exactTarget?: boolean,
   ): Promise<DeviceBootResult> {
+    // Watch boot is not implemented yet (#14908); refuse before the iOS path can claim it.
+    const platform = requireAndroidOrIosPlatform(image.platform, "Starting a device");
     // A cached `isRunning: false` overlay can go stale: an externally started
     // same-name AVD (or several) may already be live. android always
     // re-discovers with a fresh cache-bypassing sweep before trusting the
@@ -555,7 +557,7 @@ export class DeviceBootService {
       );
     }
     const booted = await this.execution.discoverBootedDevices(
-      image.platform,
+      platform,
       context,
       "resolving the running device image",
       image.platform === "android",

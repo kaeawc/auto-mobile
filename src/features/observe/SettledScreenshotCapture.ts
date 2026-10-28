@@ -1,6 +1,7 @@
 import { ActionableError } from "../../models/ActionableError";
 import { StrictSettledScreenshotCaptureError } from "./StrictSettledScreenshotCaptureError";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
@@ -122,15 +123,19 @@ export class SettledScreenshotCapture {
       }
       observation.screenshotImageSize = { width: imageSize.width, height: imageSize.height };
       const hierarchy: Partial<ViewHierarchyResult> = observation.viewHierarchy ?? {};
+      const platform = requireAndroidOrIosPlatform(
+        this.device.platform,
+        "Deriving the screenshot raster scale",
+      );
       const scale = snapshotRasterGeometry(
         imageSize,
         {
-          platform: this.device.platform,
+          platform,
           screenSize: observation.screenSize,
           rotation: hierarchy.rotation ?? observation.rotation,
           nativeScale: hierarchy.nativeScale,
           rasterOrientation:
-            this.device.platform === "ios" &&
+            platform === "ios" &&
             !(
               (this.device.displays?.panels.length ?? 0) > 1 &&
               imageSize.width > imageSize.height ===

@@ -23,6 +23,7 @@ import {
   ObserveResult,
   TapAnyElementOptions,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { type ScreenSizeForOffscreenCheckOptions } from "../utility/ElementGeometry";
@@ -388,7 +389,7 @@ export class TapAnyAndroidTapper {
     const options = fenceOptions.selectionOptions;
     if (options && isStrictlyScoped(options, "any-container")) {
       const capture = identifyObservedHierarchy(
-        this.deps.device.platform,
+        requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
         probe.hierarchy,
         "cached-ok",
         this.deps.timer,
@@ -449,7 +450,7 @@ export class TapAnyAndroidTapper {
       signal,
     );
     const capture = identifyObservedHierarchy(
-      this.deps.device.platform,
+      requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
       hierarchy,
       "fresh",
       this.deps.timer,

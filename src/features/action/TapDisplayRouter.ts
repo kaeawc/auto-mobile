@@ -7,6 +7,7 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
+import { requireAndroidOrIosPlatform } from "../../models/Platform";
 import { isFocusEditableElement } from "../utility/ElementResolver";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { type DisplayTransitionReader } from "../observe/DisplayTransition";
@@ -185,7 +186,11 @@ export class TapDisplayRouter {
       throw new TapTargetUnavailableError("Element not found on selected display", "not-found");
     }
     const selectedElement = this.host.buildSelectedElementMetadata(selection);
-    const resolvedLayer = resolvedElementLayer(hierarchy, element, this.host.device().platform);
+    const resolvedLayer = resolvedElementLayer(
+      hierarchy,
+      element,
+      requireAndroidOrIosPlatform(this.host.device().platform, "tapOn"),
+    );
     if (options.action === "focus") {
       if (!isFocusEditableElement(element)) {
         return {

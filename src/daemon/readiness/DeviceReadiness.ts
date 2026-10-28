@@ -33,8 +33,10 @@ import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import type { IosCtrlProxy } from "../../features/observe/ios/IOSCtrlProxyClient";
 import {
   ActionableError,
+  type AndroidOrIosPlatform,
   BootedDevice,
   DeviceInfo,
+  isAndroidOrIosPlatform,
   Platform,
   SomePlatform,
   toActionableError,
@@ -204,10 +206,17 @@ export class DeviceReadiness implements DeviceReadinessContract {
         ),
       resumeAfterDeviceStart: (platform, deviceId) =>
         ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, deviceId),
-      resumeReadBootClient: (platform, deviceId) =>
-        ({ android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient })[
-          platform
-        ].resumeAfterDeviceStart(deviceId),
+      resumeReadBootClient: (platform, deviceId) => {
+        // A watch has no CtrlProxy client to resume.
+        if (!isAndroidOrIosPlatform(platform)) {
+          return;
+        }
+        const clients: Record<
+          AndroidOrIosPlatform,
+          typeof AndroidCtrlProxyClient | typeof IOSCtrlProxyClient
+        > = { android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient };
+        clients[platform].resumeAfterDeviceStart(deviceId);
+      },
       adbFactory: this.adbFactory,
       checkedAndroidOwnership: this.checkedAndroidOwnership,
       findOrStartDevice: (...args) => this.findOrStartDevice(...args),

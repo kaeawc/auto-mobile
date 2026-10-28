@@ -1,5 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
-import type { BootedDevice } from "../models";
+import { type BootedDevice, isAndroidOrIosPlatform, type Platform } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { LEGACY_PROVENANCE_SENTINEL } from "../features/navigation/NavigationGraphManager";
@@ -179,10 +179,16 @@ export class NavigationGraphStreamBridge {
 }
 
 export function logSkippedObservationStreamDevice(
-  platform: "android" | "ios",
+  platform: Platform,
   deviceId: string,
   action: string,
 ): void {
+  if (!isAndroidOrIosPlatform(platform)) {
+    logger.info(
+      `[Daemon] Skipping observation-stream ${action} for ${platform} device ${deviceId}: watchOS devices have no observation stream`,
+    );
+    return;
+  }
   const optInEnv =
     platform === "android"
       ? ENV.ANDROID_OBSERVATION_STREAM_DEVICES.name

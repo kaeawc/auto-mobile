@@ -1,9 +1,10 @@
 import { isAppearanceSyncEnabled } from "../utils/appearance/appearanceSyncPolicy";
 import { ENV, readEnvRaw } from "../config/env";
+import type { Platform } from "../models/Platform";
 
 export { isAppearanceSyncEnabled } from "../utils/appearance/appearanceSyncPolicy";
 
-export type PassiveWorkPlatform = "android" | "ios";
+export type PassiveWorkPlatform = Platform;
 export type PassiveWorkKind = "appearance-sync" | "startup-warmup" | "observation-stream";
 
 export interface PassiveWorkSettings {
@@ -47,6 +48,10 @@ export class PassiveWorkPolicy {
   ) {}
 
   allows(platform: PassiveWorkPlatform, kind: PassiveWorkKind, deviceId: string): boolean {
+    if (platform === "watchos") {
+      // No passive work (warmup, appearance sync, observation stream) runs on a watch.
+      return false;
+    }
     if (platform === "android") {
       if (kind === "appearance-sync" && !this.settings.appearanceSyncEnabled) {
         return false;

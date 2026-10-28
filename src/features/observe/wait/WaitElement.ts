@@ -6,7 +6,7 @@ import {
   isScopedWaitResolutionError,
   waitResolutionFailure,
 } from "../ConditionPredicates";
-import { BootedDevice, Element, ViewHierarchyResult } from "../../../models";
+import type { AndroidOrIosPlatform, Element, ViewHierarchyResult } from "../../../models";
 import { isMissingContainerError, type MatchMode } from "../../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import {
@@ -66,7 +66,7 @@ interface WaitForElementOptions extends ScreenSizeForOffscreenCheckOptions {
 
 function resolveWaitForElementOptions(
   options: boolean | WaitForElementOptions,
-  context: { hierarchy: ViewHierarchyResult; platform?: BootedDevice["platform"] },
+  context: { hierarchy: ViewHierarchyResult; platform?: AndroidOrIosPlatform },
 ): { negative: boolean; screenSize: ScreenSize | undefined } {
   const resolved = typeof options === "boolean" ? { negative: options } : options;
   return {
@@ -195,7 +195,7 @@ export const findWaitForElement = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform?: BootedDevice["platform"],
+  platform?: AndroidOrIosPlatform,
   modes = new Map<string, MatchMode>(),
   options: boolean | WaitForElementOptions = false,
 ): Element | null => {

@@ -77,12 +77,12 @@ export interface ObserveToolDependencies {
  * The served observe result with the device's environment conditions. A copy, so a cached
  * observation reused by later action tools never carries them; unchanged when there are none.
  */
-export function withDeviceDiagnostics(
+export async function withDeviceDiagnostics(
   result: ObserveResult,
   device: BootedDevice,
   resolve: AudioInputDiagnosticResolver = defaultAudioInputDiagnostic,
-): ObserveResult {
-  const diagnostic = resolve(device);
+): Promise<ObserveResult> {
+  const diagnostic = await resolve(device);
   return diagnostic ? { ...result, diagnostics: [diagnostic] } : result;
 }
 

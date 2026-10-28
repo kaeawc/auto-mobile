@@ -5,6 +5,7 @@ import { SessionToolBinding } from "../../../../src/server/SessionToolBinding";
 import { createToolCallExecutor } from "../../../../src/server/pipeline/ingress/executeToolCall";
 import { createSetActiveDeviceHandler } from "../../../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../../../src/server/toolRegistry";
+import { SELECTS_ACTIVE_DEVICE } from "../../../../src/server/toolRegistryTypes";
 import { FakeDeviceReadiness } from "../../../fakes/FakeDeviceReadiness";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { isolateToolRegistry, withTemporaryTool } from "../../../helpers/withTemporaryTool";
@@ -34,7 +35,7 @@ test("stateless ingress carries each server's header binding key to the device p
             receivedIds.push(Reflect.get(args, "__mcpSessionId"));
             return handler(args);
           },
-          { defaultEnabled: true },
+          { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
         );
       },
       async () => {

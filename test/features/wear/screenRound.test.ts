@@ -5,11 +5,15 @@ import { AdbScreenRoundReader, parseScreenRound } from "../../../src/features/we
 import type { AdbCommandRunner } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
-// Hand-reconstructed fixtures; see the header of each file.
+// Fixtures include hand-reconstructed records and a captured Wear OS display record.
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, "../../fixtures/wear-os", name), "utf8");
 
 describe("parseScreenRound", () => {
+  test("recognizes the captured Wear OS displayId 0 record", () => {
+    expect(parseScreenRound(fixture("dumpsys-display-captured-round.txt"))).toBe(true);
+  });
+
   test("is true when the default display carries FLAG_ROUND", () => {
     expect(parseScreenRound(fixture("dumpsys-display-round.txt"))).toBe(true);
   });

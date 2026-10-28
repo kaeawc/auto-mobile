@@ -9,6 +9,7 @@ import XCTest
 final class CtrlProxyUITests: XCTestCase {
     private var service: CtrlProxy?
     private let commandFailureCoordinator = CommandFailureCoordinator()
+    private lazy var protoViewerAlertLocator = ElementLocator(perf: PerfProvider())
 
     override func setUpWithError() throws {
         continueAfterFailure = true
@@ -47,7 +48,10 @@ final class CtrlProxyUITests: XCTestCase {
         print("========================================")
 
         service = CtrlProxy(port: port, coordinator: commandFailureCoordinator)
-        defer { service?.stop() }
+        defer {
+            Self.answerProtoViewerConfirmation(protoViewerAlertLocator, cleaningUp: true)
+            service?.stop()
+        }
 
         if let bundleId = bundleId {
             try service?.start(bundleId: bundleId)
@@ -58,9 +62,7 @@ final class CtrlProxyUITests: XCTestCase {
         // Keep the test alive using XCTWaiter instead of RunLoop spinning. The expectation is
         // intentionally never fulfilled; .timedOut is the expected result for a normal timed
         // shutdown. The process is killed externally by the MCP stop() path before timeout.
-        let keepAlive = expectation(description: "CtrlProxy iOS keep-alive")
-        let result = XCTWaiter().wait(for: [keepAlive], timeout: getTimeout() ?? 86400)
-        XCTAssertEqual(result, .timedOut, "Expected service to run until timeout")
+        keepServiceAlive(timeout: getTimeout() ?? 86400)
     }
 
     /// Verifies the service can start.
@@ -82,12 +84,33 @@ final class CtrlProxyUITests: XCTestCase {
         }
 
         service = CtrlProxy(port: getPort())
-        defer { service?.stop() }
+        defer {
+            Self.answerProtoViewerConfirmation(protoViewerAlertLocator, cleaningUp: true)
+            service?.stop()
+        }
         try service?.start(bundleId: bundleId)
 
+        keepServiceAlive(timeout: getTimeout() ?? 300)
+    }
+
+    private func keepServiceAlive(timeout: TimeInterval) {
+        let locator = protoViewerAlertLocator
+        let alertTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            // Scheduled on the main run loop by this main-actor method.
+            MainActor.assumeIsolated { Self.answerProtoViewerConfirmation(locator) }
+        }
+        defer { alertTimer.invalidate() }
         let keepAlive = expectation(description: "CtrlProxy iOS keep-alive")
-        let result = XCTWaiter().wait(for: [keepAlive], timeout: getTimeout() ?? 300)
+        let result = XCTWaiter().wait(for: [keepAlive], timeout: timeout)
         XCTAssertEqual(result, .timedOut, "Expected service to run until timeout")
+    }
+
+    private static func answerProtoViewerConfirmation(_ locator: ElementLocator, cleaningUp: Bool = false) {
+        do {
+            try locator.answerProtoViewerConfirmation(cleaningUp: cleaningUp)
+        } catch {
+            print("[CtrlProxy] ProtoViewer confirmation snapshot/tap failed (cleanup=\(cleaningUp)): \(error)")
+        }
     }
 
     // MARK: - Configuration Helpers

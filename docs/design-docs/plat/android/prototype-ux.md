@@ -3037,9 +3037,32 @@ wrapper, so links stay detectable. Stack screen and component names are never tr
 fields. Each show states the
 option afresh.
 
-Every starter template passes this lint with zero findings, pinned by the template gallery test. The
-on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
-implemented yet.
+Every starter template passes this lint with zero findings, pinned by the template gallery test.
+`test/fixtures/prototype-a11y/` holds one fixture per rule beside a clean spec.
+
+### On-device audit and RTL (#14126)
+
+The `audit` tool's `WcagAudit` reads the accessibility tree the Compose renderer projects, so it
+sees prototype nodes through that projection, not the spec:
+
+- A text field's `label` is a child text node with no class, drawn inside the `EditText`. The audit
+  counts a classless text node as a label candidate, so a labelled field is not reported.
+- A tappable container with no children keeps its node kind as `content-desc` ("box"), and an icon
+  button reads as its icon name. These are selector handles (see `prototypeContentDescription`), so
+  `WcagAudit` cannot tell an authored label from the fallback: it reports neither a missing label
+  on such a node nor a missing `contentDescription` on an icon button. The `unlabeled-control` lint
+  is the check for them.
+- An untagged or non-tappable `image` or `icon` is not interactive, so `WcagAudit` does not report a
+  missing description; the `unlabeled-image` lint does.
+- Compose enforces a 48dp minimum interactive size, so a tappable node authored smaller still
+  measures 48dp on the device and `WcagAudit` reports no small target. Only `small-touch-target`
+  sees the authored size.
+- Low contrast and an unlabeled `EditText` are reported on device as in a native app.
+
+Under `changeLocalization` with `textDirection: "rtl"` for the host app, an Android `row` of
+weighted and unweighted children lays out right to left. On iOS the audit is the XCUITest
+`accessibilityAudit`, which could not target an injected prototype app, and the RTL change did not
+take effect on a simulator, so neither is verified.
 
 ## Rejection paths and deterministic first error
 

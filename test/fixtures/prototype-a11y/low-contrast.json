@@ -1,0 +1,97 @@
+{
+  "id": "a11y-low-contrast",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "mode": "light"
+  },
+  "root": {
+    "type": "column",
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "background": "#FFFFFF",
+      "padding": {
+        "start": 16,
+        "end": 16,
+        "top": 16,
+        "bottom": 16
+      }
+    },
+    "children": [
+      {
+        "type": "text",
+        "testTag": "title",
+        "text": "Accessibility fixtures"
+      },
+      {
+        "type": "box",
+        "children": [],
+        "testTag": "unlabeled_tap",
+        "onTap": [
+          {
+            "type": "setState",
+            "key": "x",
+            "value": 1
+          }
+        ],
+        "style": {
+          "width": {
+            "dp": 120
+          },
+          "height": {
+            "dp": 60
+          },
+          "background": "#2255CC"
+        },
+        "contentDescription": "Open details"
+      },
+      {
+        "type": "iconButton",
+        "testTag": "unlabeled_icon",
+        "icon": "search",
+        "contentDescription": "Search"
+      },
+      {
+        "type": "icon",
+        "testTag": "unlabeled_image",
+        "contentDescription": "Team photo",
+        "name": "favorite"
+      },
+      {
+        "type": "textField",
+        "testTag": "unlabeled_field",
+        "stateKey": "name",
+        "label": "Name"
+      },
+      {
+        "type": "text",
+        "testTag": "low_contrast",
+        "text": "Pale grey on white",
+        "style": {
+          "color": "#CCCCCC"
+        }
+      },
+      {
+        "type": "button",
+        "testTag": "small_target",
+        "style": {
+          "width": {
+            "dp": 56
+          },
+          "height": {
+            "dp": 56
+          }
+        },
+        "label": "Tiny"
+      }
+    ]
+  },
+  "state": {
+    "x": 0,
+    "name": ""
+  }
+}

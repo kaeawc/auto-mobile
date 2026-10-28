@@ -440,6 +440,28 @@ describe("WcagAudit", function () {
       expect(await formInputViolations(elements)).toHaveLength(0);
     });
 
+    it("does NOT flag a Compose text field labelled by a classless text node inside it (#14126)", async function () {
+      // Captured from a shown prototype: the label is a child accessibility node with text
+      // and no class, drawn inside the EditText's bounds.
+      const elements: Element[] = [
+        {
+          class: "android.widget.EditText",
+          "resource-id": "name_field",
+          bounds: { left: 42, top: 452, right: 777, bottom: 599 },
+        },
+        { text: "Name", bounds: { left: 84, top: 494, right: 201, bottom: 557 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(0);
+    });
+
+    it("still flags a Compose text field whose only text sits far outside it (#14126)", async function () {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
+        { text: "Unrelated", bounds: { left: 0, top: 2000, right: 100, bottom: 2060 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
     it("flags an EditText whose only TextView is far away on both axes", async function () {
       const elements: Element[] = [
         { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },

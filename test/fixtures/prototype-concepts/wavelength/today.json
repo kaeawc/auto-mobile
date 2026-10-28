@@ -1,0 +1,1960 @@
+{
+  "id": "wavelength-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "storage": {
+    "version": 1,
+    "keys": [
+      "state:nowId",
+      "state:nowTitle",
+      "state:nowShow",
+      "state:nowMinutes",
+      "state:positionSec"
+    ]
+  },
+  "state": {
+    "query": "",
+    "showId": "",
+    "nowId": "",
+    "nowTitle": "",
+    "nowShow": "",
+    "nowMinutes": 0,
+    "positionSec": 0,
+    "playing": false,
+    "speed": "x1",
+    "sleepLabel": "",
+    "dl_o3": 0,
+    "dl_o2": 0,
+    "dl_g2": 0,
+    "dl_g1": 0,
+    "dl_f1": 0
+  },
+  "data": {
+    "shows": [
+      {
+        "id": "orbit",
+        "title": "Low Orbit",
+        "host": "Ada & Mo",
+        "blurb": "Space news, explained over coffee.",
+        "episodes": [
+          {
+            "id": "o3",
+            "title": "Moon dust and you",
+            "minutes": 45,
+            "publishedAt": "2026-10-25T08:00:00Z",
+            "show": "Low Orbit"
+          },
+          {
+            "id": "o2",
+            "title": "Building a cubesat",
+            "minutes": 38,
+            "publishedAt": "2026-10-18T08:00:00Z",
+            "show": "Low Orbit"
+          }
+        ]
+      },
+      {
+        "id": "garden",
+        "title": "Root & Branch",
+        "host": "Priya",
+        "blurb": "Small gardens, big harvests.",
+        "episodes": [
+          {
+            "id": "g2",
+            "title": "Winter greens",
+            "minutes": 27,
+            "publishedAt": "2026-10-26T06:00:00Z",
+            "show": "Root & Branch"
+          },
+          {
+            "id": "g1",
+            "title": "Compost basics",
+            "minutes": 31,
+            "publishedAt": "2026-10-12T06:00:00Z",
+            "show": "Root & Branch"
+          }
+        ]
+      },
+      {
+        "id": "frames",
+        "title": "Frame Rate",
+        "host": "Jun",
+        "blurb": "Games and the people who make them.",
+        "episodes": [
+          {
+            "id": "f1",
+            "title": "Tiny teams, big worlds",
+            "minutes": 52,
+            "publishedAt": "2026-10-20T17:00:00Z",
+            "show": "Frame Rate"
+          }
+        ]
+      }
+    ],
+    "latest": [
+      {
+        "id": "g2",
+        "title": "Winter greens",
+        "minutes": 27,
+        "publishedAt": "2026-10-26T06:00:00Z",
+        "show": "Root & Branch"
+      },
+      {
+        "id": "o3",
+        "title": "Moon dust and you",
+        "minutes": 45,
+        "publishedAt": "2026-10-25T08:00:00Z",
+        "show": "Low Orbit"
+      },
+      {
+        "id": "f1",
+        "title": "Tiny teams, big worlds",
+        "minutes": 52,
+        "publishedAt": "2026-10-20T17:00:00Z",
+        "show": "Frame Rate"
+      },
+      {
+        "id": "o2",
+        "title": "Building a cubesat",
+        "minutes": 38,
+        "publishedAt": "2026-10-18T08:00:00Z",
+        "show": "Low Orbit"
+      },
+      {
+        "id": "g1",
+        "title": "Compost basics",
+        "minutes": 31,
+        "publishedAt": "2026-10-12T06:00:00Z",
+        "show": "Root & Branch"
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "tabs",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "library_bar",
+                    "title": "Wavelength"
+                  },
+                  {
+                    "type": "searchBar",
+                    "testTag": "search_bar",
+                    "stateKey": "query",
+                    "placeholder": "Search podcasts",
+                    "leadingIcon": "search",
+                    "onSubmit": [
+                      {
+                        "type": "emit",
+                        "name": "search_submitted",
+                        "context": {
+                          "query": {
+                            "state": "query"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "library_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 16
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Your shows",
+                          "semantics": {
+                            "heading": true
+                          },
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "grid",
+                          "columns": 2,
+                          "style": {
+                            "spacing": 12
+                          },
+                          "repeat": {
+                            "items": {
+                              "path": "/shows"
+                            },
+                            "as": "show",
+                            "key": "id"
+                          },
+                          "children": [
+                            {
+                              "type": "card",
+                              "testTag": "show_card",
+                              "variant": "filled",
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "showId",
+                                  "value": "{show.id}"
+                                },
+                                {
+                                  "type": "push",
+                                  "stack": "nav",
+                                  "screen": "show"
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "type": "column",
+                                  "style": {
+                                    "padding": {
+                                      "start": 12,
+                                      "end": 12,
+                                      "top": 12,
+                                      "bottom": 12
+                                    },
+                                    "spacing": 4
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "podcasts",
+                                      "contentDescription": "Show artwork"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{show.title}",
+                                      "style": {
+                                        "textStyle": "titleSmall"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{show.host}",
+                                      "style": {
+                                        "textStyle": "bodySmall"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "text": "Latest episodes",
+                          "semantics": {
+                            "heading": true
+                          },
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "column",
+                          "repeat": {
+                            "items": {
+                              "path": "/latest"
+                            },
+                            "as": "ep",
+                            "key": "id",
+                            "derive": {
+                              "ago": {
+                                "of": {
+                                  "item": "publishedAt"
+                                },
+                                "format": {
+                                  "relative": {
+                                    "style": "long"
+                                  }
+                                },
+                                "locale": "en-US"
+                              }
+                            }
+                          },
+                          "children": [
+                            {
+                              "type": "listItem",
+                              "testTag": "latest_row",
+                              "headline": "{ep.title}",
+                              "supporting": "{ep.minutes} min · {ep.ago}",
+                              "leadingIcon": "podcasts",
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "nowId",
+                                  "value": "{ep.id}"
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "nowTitle",
+                                  "value": "{ep.title}"
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "nowShow",
+                                  "value": "{ep.show}"
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "nowMinutes",
+                                  "value": "{ep.minutes}"
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "positionSec",
+                                  "value": 0
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "playing",
+                                  "value": true
+                                },
+                                {
+                                  "type": "setState",
+                                  "key": "speed",
+                                  "value": "x1"
+                                },
+                                {
+                                  "type": "startTimer",
+                                  "id": "playback",
+                                  "afterMs": 1000,
+                                  "everyMs": 1000,
+                                  "actions": [
+                                    {
+                                      "type": "increment",
+                                      "key": "positionSec"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "emit",
+                                  "name": "episode_played",
+                                  "context": {
+                                    "episode": {
+                                      "item": "id"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "downloads_bar",
+                    "title": "Downloads"
+                  },
+                  {
+                    "type": "scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 8
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/latest"
+                        },
+                        "as": "ep",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "row",
+                          "testTag": "download_row",
+                          "style": {
+                            "spacing": 8,
+                            "alignment": "center"
+                          },
+                          "children": [
+                            {
+                              "type": "column",
+                              "style": {
+                                "weight": 1,
+                                "spacing": 4
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "text": "{ep.title}",
+                                  "style": {
+                                    "textStyle": "titleSmall"
+                                  }
+                                },
+                                {
+                                  "type": "progress",
+                                  "testTag": "download_progress",
+                                  "variant": "linear",
+                                  "stateKey": "dl_{ep.id}",
+                                  "max": 100
+                                }
+                              ]
+                            },
+                            {
+                              "type": "iconButton",
+                              "testTag": "download_button",
+                              "icon": "download",
+                              "contentDescription": "Download",
+                              "enabledWhen": {
+                                "key": "dl_{ep.id}",
+                                "lt": 100
+                              },
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "dl_{ep.id}",
+                                  "value": 0
+                                },
+                                {
+                                  "type": "startTimer",
+                                  "id": "download",
+                                  "afterMs": 300,
+                                  "everyMs": 300,
+                                  "maxRuns": 10,
+                                  "actions": [
+                                    {
+                                      "type": "increment",
+                                      "key": "dl_{ep.id}",
+                                      "by": 10
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "testTag": "mini_player",
+            "contentDescription": "Open player",
+            "visibleWhen": {
+              "key": "nowTitle",
+              "lengthGt": 0
+            },
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 8,
+                "top": 8,
+                "bottom": 8
+              },
+              "spacing": 8,
+              "alignment": "center",
+              "background": "surfaceContainerHigh"
+            },
+            "onTap": [
+              {
+                "type": "push",
+                "stack": "nav",
+                "screen": "player"
+              }
+            ],
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "{nowTitle}",
+                    "style": {
+                      "textStyle": "titleSmall",
+                      "maxLines": 1,
+                      "overflow": "ellipsis"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "{nowShow}",
+                    "style": {
+                      "textStyle": "bodySmall"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_pause",
+                "icon": "pause",
+                "contentDescription": "Pause",
+                "visibleWhen": {
+                  "key": "playing",
+                  "equals": true
+                },
+                "onTap": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x1"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 1000,
+                    "everyMs": 1000,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x15"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 667,
+                    "everyMs": 667,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x2"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 500,
+                    "everyMs": 500,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "End of episode",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": true
+                    },
+                    {
+                      "key": "positionSec",
+                      "gt": 3599
+                    }
+                  ]
+                },
+                "onAppear": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ],
+                "style": {
+                  "textStyle": "labelSmall"
+                }
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "tabs",
+            "items": [
+              {
+                "label": "Library",
+                "icon": "podcasts"
+              },
+              {
+                "label": "Downloads",
+                "icon": "download"
+              }
+            ]
+          }
+        ]
+      },
+      "show": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "show_bar",
+            "title": "Show",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                }
+              },
+              "children": [
+                {
+                  "type": "column",
+                  "testTag": "show_orbit",
+                  "visibleWhen": {
+                    "key": "showId",
+                    "equals": "orbit"
+                  },
+                  "style": {
+                    "spacing": 8
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/0/title}",
+                      "semantics": {
+                        "heading": true
+                      },
+                      "style": {
+                        "textStyle": "headlineSmall"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/0/host}",
+                      "style": {
+                        "textStyle": "labelLarge"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/0/blurb}",
+                      "style": {
+                        "textStyle": "bodyMedium"
+                      }
+                    },
+                    {
+                      "type": "column",
+                      "repeat": {
+                        "items": {
+                          "path": "/shows/0/episodes"
+                        },
+                        "as": "ep",
+                        "key": "id",
+                        "derive": {
+                          "ago": {
+                            "of": {
+                              "item": "publishedAt"
+                            },
+                            "format": {
+                              "relative": {
+                                "style": "long"
+                              }
+                            },
+                            "locale": "en-US"
+                          }
+                        }
+                      },
+                      "children": [
+                        {
+                          "type": "listItem",
+                          "testTag": "episode_row",
+                          "headline": "{ep.title}",
+                          "supporting": "{ep.minutes} min · {ep.ago}",
+                          "leadingIcon": "podcasts",
+                          "onTap": [
+                            {
+                              "type": "setState",
+                              "key": "nowId",
+                              "value": "{ep.id}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowTitle",
+                              "value": "{ep.title}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowShow",
+                              "value": "{ep.show}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowMinutes",
+                              "value": "{ep.minutes}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "positionSec",
+                              "value": 0
+                            },
+                            {
+                              "type": "setState",
+                              "key": "playing",
+                              "value": true
+                            },
+                            {
+                              "type": "setState",
+                              "key": "speed",
+                              "value": "x1"
+                            },
+                            {
+                              "type": "startTimer",
+                              "id": "playback",
+                              "afterMs": 1000,
+                              "everyMs": 1000,
+                              "actions": [
+                                {
+                                  "type": "increment",
+                                  "key": "positionSec"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "emit",
+                              "name": "episode_played",
+                              "context": {
+                                "episode": {
+                                  "item": "id"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "show_garden",
+                  "visibleWhen": {
+                    "key": "showId",
+                    "equals": "garden"
+                  },
+                  "style": {
+                    "spacing": 8
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/1/title}",
+                      "semantics": {
+                        "heading": true
+                      },
+                      "style": {
+                        "textStyle": "headlineSmall"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/1/host}",
+                      "style": {
+                        "textStyle": "labelLarge"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/1/blurb}",
+                      "style": {
+                        "textStyle": "bodyMedium"
+                      }
+                    },
+                    {
+                      "type": "column",
+                      "repeat": {
+                        "items": {
+                          "path": "/shows/1/episodes"
+                        },
+                        "as": "ep",
+                        "key": "id",
+                        "derive": {
+                          "ago": {
+                            "of": {
+                              "item": "publishedAt"
+                            },
+                            "format": {
+                              "relative": {
+                                "style": "long"
+                              }
+                            },
+                            "locale": "en-US"
+                          }
+                        }
+                      },
+                      "children": [
+                        {
+                          "type": "listItem",
+                          "testTag": "episode_row",
+                          "headline": "{ep.title}",
+                          "supporting": "{ep.minutes} min · {ep.ago}",
+                          "leadingIcon": "podcasts",
+                          "onTap": [
+                            {
+                              "type": "setState",
+                              "key": "nowId",
+                              "value": "{ep.id}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowTitle",
+                              "value": "{ep.title}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowShow",
+                              "value": "{ep.show}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowMinutes",
+                              "value": "{ep.minutes}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "positionSec",
+                              "value": 0
+                            },
+                            {
+                              "type": "setState",
+                              "key": "playing",
+                              "value": true
+                            },
+                            {
+                              "type": "setState",
+                              "key": "speed",
+                              "value": "x1"
+                            },
+                            {
+                              "type": "startTimer",
+                              "id": "playback",
+                              "afterMs": 1000,
+                              "everyMs": 1000,
+                              "actions": [
+                                {
+                                  "type": "increment",
+                                  "key": "positionSec"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "emit",
+                              "name": "episode_played",
+                              "context": {
+                                "episode": {
+                                  "item": "id"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "show_frames",
+                  "visibleWhen": {
+                    "key": "showId",
+                    "equals": "frames"
+                  },
+                  "style": {
+                    "spacing": 8
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/2/title}",
+                      "semantics": {
+                        "heading": true
+                      },
+                      "style": {
+                        "textStyle": "headlineSmall"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/2/host}",
+                      "style": {
+                        "textStyle": "labelLarge"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "{data:/shows/2/blurb}",
+                      "style": {
+                        "textStyle": "bodyMedium"
+                      }
+                    },
+                    {
+                      "type": "column",
+                      "repeat": {
+                        "items": {
+                          "path": "/shows/2/episodes"
+                        },
+                        "as": "ep",
+                        "key": "id",
+                        "derive": {
+                          "ago": {
+                            "of": {
+                              "item": "publishedAt"
+                            },
+                            "format": {
+                              "relative": {
+                                "style": "long"
+                              }
+                            },
+                            "locale": "en-US"
+                          }
+                        }
+                      },
+                      "children": [
+                        {
+                          "type": "listItem",
+                          "testTag": "episode_row",
+                          "headline": "{ep.title}",
+                          "supporting": "{ep.minutes} min · {ep.ago}",
+                          "leadingIcon": "podcasts",
+                          "onTap": [
+                            {
+                              "type": "setState",
+                              "key": "nowId",
+                              "value": "{ep.id}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowTitle",
+                              "value": "{ep.title}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowShow",
+                              "value": "{ep.show}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "nowMinutes",
+                              "value": "{ep.minutes}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "positionSec",
+                              "value": 0
+                            },
+                            {
+                              "type": "setState",
+                              "key": "playing",
+                              "value": true
+                            },
+                            {
+                              "type": "setState",
+                              "key": "speed",
+                              "value": "x1"
+                            },
+                            {
+                              "type": "startTimer",
+                              "id": "playback",
+                              "afterMs": 1000,
+                              "everyMs": 1000,
+                              "actions": [
+                                {
+                                  "type": "increment",
+                                  "key": "positionSec"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "emit",
+                              "name": "episode_played",
+                              "context": {
+                                "episode": {
+                                  "item": "id"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "row",
+            "testTag": "mini_player",
+            "contentDescription": "Open player",
+            "visibleWhen": {
+              "key": "nowTitle",
+              "lengthGt": 0
+            },
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 8,
+                "top": 8,
+                "bottom": 8
+              },
+              "spacing": 8,
+              "alignment": "center",
+              "background": "surfaceContainerHigh"
+            },
+            "onTap": [
+              {
+                "type": "push",
+                "stack": "nav",
+                "screen": "player"
+              }
+            ],
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "{nowTitle}",
+                    "style": {
+                      "textStyle": "titleSmall",
+                      "maxLines": 1,
+                      "overflow": "ellipsis"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "{nowShow}",
+                    "style": {
+                      "textStyle": "bodySmall"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_pause",
+                "icon": "pause",
+                "contentDescription": "Pause",
+                "visibleWhen": {
+                  "key": "playing",
+                  "equals": true
+                },
+                "onTap": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x1"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 1000,
+                    "everyMs": 1000,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x15"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 667,
+                    "everyMs": 667,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "mini_play",
+                "icon": "play_arrow",
+                "contentDescription": "Play",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": false
+                    },
+                    {
+                      "key": "speed",
+                      "equals": "x2"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": true
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "playback",
+                    "afterMs": 500,
+                    "everyMs": 500,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "End of episode",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": true
+                    },
+                    {
+                      "key": "positionSec",
+                      "gt": 3599
+                    }
+                  ]
+                },
+                "onAppear": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ],
+                "style": {
+                  "textStyle": "labelSmall"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "player": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "player_bar",
+            "title": "Now playing",
+            "navigationIcon": {
+              "icon": "expand_more",
+              "label": "Close player",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 16,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "box",
+                "style": {
+                  "width": {
+                    "dp": 200
+                  },
+                  "height": {
+                    "dp": 200
+                  },
+                  "background": "primaryContainer",
+                  "cornerRadius": "large",
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "podcasts",
+                    "contentDescription": "Artwork",
+                    "style": {
+                      "color": "onPrimaryContainer"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "testTag": "player_title",
+                "text": "{nowTitle}",
+                "semantics": {
+                  "heading": true
+                },
+                "style": {
+                  "textStyle": "titleLarge",
+                  "textAlign": "center"
+                }
+              },
+              {
+                "type": "text",
+                "text": "{nowShow}",
+                "style": {
+                  "textStyle": "bodyMedium"
+                }
+              },
+              {
+                "type": "slider",
+                "testTag": "scrubber",
+                "stateKey": "positionSec",
+                "label": "Position",
+                "min": 0,
+                "max": 3600,
+                "step": 1
+              },
+              {
+                "type": "text",
+                "text": "End of episode",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "playing",
+                      "equals": true
+                    },
+                    {
+                      "key": "positionSec",
+                      "gt": 3599
+                    }
+                  ]
+                },
+                "onAppear": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "playback"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "playing",
+                    "value": false
+                  }
+                ],
+                "style": {
+                  "textStyle": "labelSmall"
+                }
+              },
+              {
+                "type": "text",
+                "testTag": "position_label",
+                "text": "{positionSec} s of {nowMinutes} min",
+                "style": {
+                  "textStyle": "labelMedium"
+                }
+              },
+              {
+                "type": "row",
+                "style": {
+                  "spacing": 16,
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "iconButton",
+                    "testTag": "skip_back",
+                    "icon": "fast_rewind",
+                    "contentDescription": "Back 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "gt": 14
+                    },
+                    "onTap": [
+                      {
+                        "type": "decrement",
+                        "key": "positionSec",
+                        "by": 15
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "skip_back",
+                    "icon": "fast_rewind",
+                    "contentDescription": "Back 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "lt": 15
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "positionSec",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "player_pause",
+                    "icon": "pause",
+                    "variant": "filled",
+                    "contentDescription": "Pause",
+                    "visibleWhen": {
+                      "key": "playing",
+                      "equals": true
+                    },
+                    "onTap": [
+                      {
+                        "type": "cancelTimer",
+                        "id": "playback"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": false
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "player_play",
+                    "icon": "play_arrow",
+                    "variant": "filled",
+                    "contentDescription": "Play",
+                    "visibleWhen": {
+                      "all": [
+                        {
+                          "key": "playing",
+                          "equals": false
+                        },
+                        {
+                          "key": "speed",
+                          "equals": "x1"
+                        }
+                      ]
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 1000,
+                        "everyMs": 1000,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "player_play",
+                    "icon": "play_arrow",
+                    "variant": "filled",
+                    "contentDescription": "Play",
+                    "visibleWhen": {
+                      "all": [
+                        {
+                          "key": "playing",
+                          "equals": false
+                        },
+                        {
+                          "key": "speed",
+                          "equals": "x15"
+                        }
+                      ]
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 667,
+                        "everyMs": 667,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "player_play",
+                    "icon": "play_arrow",
+                    "variant": "filled",
+                    "contentDescription": "Play",
+                    "visibleWhen": {
+                      "all": [
+                        {
+                          "key": "playing",
+                          "equals": false
+                        },
+                        {
+                          "key": "speed",
+                          "equals": "x2"
+                        }
+                      ]
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 500,
+                        "everyMs": 500,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "skip_forward",
+                    "icon": "fast_forward",
+                    "contentDescription": "Forward 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "lt": 3586
+                    },
+                    "onTap": [
+                      {
+                        "type": "increment",
+                        "key": "positionSec",
+                        "by": 15
+                      }
+                    ]
+                  },
+                  {
+                    "type": "iconButton",
+                    "testTag": "skip_forward",
+                    "icon": "fast_forward",
+                    "contentDescription": "Forward 15 seconds",
+                    "visibleWhen": {
+                      "key": "positionSec",
+                      "gt": 3585
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "positionSec",
+                        "value": 3600
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "style": {
+                  "spacing": 8
+                },
+                "children": [
+                  {
+                    "type": "chip",
+                    "testTag": "speed_x1",
+                    "label": "1x",
+                    "variant": "assist",
+                    "styleWhen": [
+                      {
+                        "when": {
+                          "key": "speed",
+                          "equals": "x1"
+                        },
+                        "style": {
+                          "background": "secondaryContainer"
+                        }
+                      }
+                    ],
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "speed",
+                        "value": "x1"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 1000,
+                        "everyMs": 1000,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "chip",
+                    "testTag": "speed_x15",
+                    "label": "1.5x",
+                    "variant": "assist",
+                    "styleWhen": [
+                      {
+                        "when": {
+                          "key": "speed",
+                          "equals": "x15"
+                        },
+                        "style": {
+                          "background": "secondaryContainer"
+                        }
+                      }
+                    ],
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "speed",
+                        "value": "x15"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 667,
+                        "everyMs": 667,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "chip",
+                    "testTag": "speed_x2",
+                    "label": "2x",
+                    "variant": "assist",
+                    "styleWhen": [
+                      {
+                        "when": {
+                          "key": "speed",
+                          "equals": "x2"
+                        },
+                        "style": {
+                          "background": "secondaryContainer"
+                        }
+                      }
+                    ],
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "speed",
+                        "value": "x2"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "playing",
+                        "value": true
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "playback",
+                        "afterMs": 500,
+                        "everyMs": 500,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "positionSec"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "Sleep timer",
+                "semantics": {
+                  "heading": true
+                },
+                "style": {
+                  "textStyle": "titleSmall"
+                }
+              },
+              {
+                "type": "row",
+                "style": {
+                  "spacing": 4
+                },
+                "children": [
+                  {
+                    "type": "button",
+                    "testTag": "sleep_15",
+                    "label": "15 min",
+                    "variant": "text",
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "sleepLabel",
+                        "value": "15 min"
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "sleep",
+                        "afterMs": 900000,
+                        "actions": [
+                          {
+                            "type": "cancelTimer",
+                            "id": "playback"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "playing",
+                            "value": false
+                          },
+                          {
+                            "type": "setState",
+                            "key": "sleepLabel",
+                            "value": ""
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "button",
+                    "testTag": "sleep_30",
+                    "label": "30 min",
+                    "variant": "text",
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "sleepLabel",
+                        "value": "30 min"
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "sleep",
+                        "afterMs": 1800000,
+                        "actions": [
+                          {
+                            "type": "cancelTimer",
+                            "id": "playback"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "playing",
+                            "value": false
+                          },
+                          {
+                            "type": "setState",
+                            "key": "sleepLabel",
+                            "value": ""
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "button",
+                    "testTag": "sleep_60",
+                    "label": "1 hour",
+                    "variant": "text",
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "sleepLabel",
+                        "value": "1 hour"
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "sleep",
+                        "afterMs": 3600000,
+                        "actions": [
+                          {
+                            "type": "cancelTimer",
+                            "id": "playback"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "playing",
+                            "value": false
+                          },
+                          {
+                            "type": "setState",
+                            "key": "sleepLabel",
+                            "value": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "testTag": "sleep_label",
+                "visibleWhen": {
+                  "key": "sleepLabel",
+                  "lengthGt": 0
+                },
+                "text": "Stops in {sleepLabel}",
+                "style": {
+                  "textStyle": "bodySmall"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

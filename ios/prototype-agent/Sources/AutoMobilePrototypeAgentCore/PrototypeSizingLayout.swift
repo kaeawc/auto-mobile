@@ -1,7 +1,110 @@
 import SwiftUI
 
+/// Marks authored fills, spacer nodes, unsized horizontal dividers and arrangement spacers sharing row width.
+struct PrototypeRowFillKey: LayoutValueKey {
+    static let defaultValue = false
+}
+
+/// Measures row content least-flexible first and places it in authored order, retaining minima.
+/// Cached measurements preserve ideal fill widths through bounded scroll-content wrappers.
+struct PrototypeRowLayout: Layout {
+    let spacing: Double
+
+    struct Frames {
+        let widths: [Double]
+        let height: Double
+        let width: Double
+    }
+
+    struct Measurement {
+        let proposal: ProposedViewSize
+        let frames: Frames
+    }
+
+    struct Cache {
+        var measurements: [Measurement] = []
+    }
+
+    func makeCache(subviews _: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews _: Subviews) { cache = Cache() }
+
+    private func frames(for proposal: ProposedViewSize, subviews: Subviews) -> Frames {
+        let available = proposal.width.flatMap { $0.isFinite ? Double($0) : nil }
+        let fills = subviews.map { $0[PrototypeRowFillKey.self] }
+        let minimums = subviews.indices.map { index in
+            available == nil ? 0 : Double(subviews[index].sizeThatFits(
+                ProposedViewSize(width: 0, height: proposal.height)
+            ).width)
+        }
+        let widths = PrototypeRowSizing.widths(
+            available: available,
+            spacing: spacing,
+            minimums: minimums,
+            fills: fills,
+            priorities: subviews.map(\.priority)
+        ) { index, most in
+            Double(subviews[index].sizeThatFits(
+                ProposedViewSize(width: most.map { CGFloat($0) }, height: proposal.height)
+            ).width)
+        }
+        let heights = subviews.indices.map { index in
+            Double(subviews[index].sizeThatFits(
+                ProposedViewSize(width: widths[index], height: proposal.height)
+            ).height)
+        }
+        return Frames(
+            widths: widths,
+            height: heights.max() ?? 0,
+            width: widths.reduce(0, +) + spacing * Double(Swift.max(subviews.count - 1, 0))
+        )
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let result: Frames
+        if let measured = cache.measurements.last(where: { $0.proposal == proposal }) {
+            result = measured.frames
+        } else {
+            result = frames(for: proposal, subviews: subviews)
+            cache.measurements.append(Measurement(proposal: proposal, frames: result))
+            if cache.measurements.count > 4 { cache.measurements.removeFirst() }
+        }
+        let greedy = proposal.width == .infinity && subviews.contains {
+            $0[PrototypeRowFillKey.self]
+                || $0.sizeThatFits(ProposedViewSize(width: .infinity, height: proposal.height)).width
+                > $0.sizeThatFits(ProposedViewSize(width: nil, height: proposal.height)).width
+        }
+        return CGSize(width: greedy ? .infinity : result.width, height: result.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let unbounded = proposal.width == nil || proposal.width?.isFinite == false
+        let result: Frames
+        if let measured = cache.measurements.last(where: {
+            $0.proposal.height == proposal.height
+                && ($0.frames.width == bounds.width || (unbounded && $0.proposal == proposal))
+        }) {
+            result = measured.frames
+        } else {
+            result = frames(
+                for: ProposedViewSize(width: unbounded ? nil : bounds.width, height: proposal.height),
+                subviews: subviews
+            )
+        }
+        var leading = bounds.minX
+        for index in subviews.indices {
+            subviews[index].place(
+                at: CGPoint(x: leading, y: bounds.midY),
+                anchor: .leading,
+                proposal: ProposedViewSize(width: result.widths[index], height: proposal.height)
+            )
+            leading += result.widths[index] + spacing
+        }
+    }
+}
+
 extension CGFloat {
-    /// SwiftUI proposes `.infinity` for "as large as you like"; the sizing model uses nil.
+    /// SwiftUI proposes `.infinity` for "as large as you like"; bounded stack allocation uses nil.
     fileprivate var finiteOrNil: Double? { isFinite ? Double(self) : nil }
 }
 
@@ -20,7 +123,9 @@ struct PrototypeSizedLayout: Layout {
     let alignment: Alignment
 
     func sizeThatFits(proposal offered: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
-        let size = PrototypeSizing.resolve(rules, proposed: offered.bounds) { maxWidth, maxHeight in
+        let size = PrototypeSizing.resolve(
+            rules, proposed: (offered.width.map { Double($0) }, offered.height.map { Double($0) })
+        ) { maxWidth, maxHeight in
             let measured = subviews.first?.sizeThatFits(proposal(width: maxWidth, height: maxHeight)) ?? .zero
             return (Double(measured.width), Double(measured.height))
         }
@@ -76,10 +181,18 @@ struct PrototypeWeightedStackLayout: Layout {
     private func frames(for offered: ProposedViewSize, subviews: Subviews) -> Frames {
         let limits = split(offered)
         let weights = subviews.map { $0[PrototypeWeightKey.self] }
+        let minimums = limits.main != nil ? subviews.indices.map { index in
+            (weights[index] ?? 0) > 0 ? 0 : Double(subviews[index].sizeThatFits(
+                offer(main: 0, cross: limits.cross)
+            )[keyPath: isHorizontal() ? \CGSize.width : \CGSize.height])
+        } : nil
         let main = PrototypeWeightedStack.mainSizes(
             available: limits.main,
             spacing: spacing,
-            weights: weights
+            weights: weights,
+            minimums: minimums,
+            priorities: isHorizontal() ? subviews.map(\.priority) : nil,
+            leastFlexibleFirst: isHorizontal()
         ) { index, most in
             let size = subviews[index].sizeThatFits(offer(main: most, cross: limits.cross))
             return Double(isHorizontal() ? size.width : size.height)
@@ -98,9 +211,17 @@ struct PrototypeWeightedStackLayout: Layout {
     func sizeThatFits(proposal offered: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
         let result = frames(for: offered, subviews: subviews)
         let cross = result.cross.max() ?? 0
+        let mainProposal = isHorizontal() ? offered.width : offered.height
+        let greedy = mainProposal == .infinity && subviews.contains {
+            if ($0[PrototypeWeightKey.self] ?? 0) > 0 { return true }
+            let size = $0.sizeThatFits(offer(main: .infinity, cross: split(offered).cross))
+            let ideal = $0.sizeThatFits(offer(main: nil, cross: split(offered).cross))
+            return (isHorizontal() ? size.width : size.height) > (isHorizontal() ? ideal.width : ideal.height)
+        }
+        let main = greedy ? Double.infinity : result.mainTotal
         return isHorizontal()
-            ? CGSize(width: result.mainTotal, height: cross)
-            : CGSize(width: cross, height: result.mainTotal)
+            ? CGSize(width: main, height: cross)
+            : CGSize(width: cross, height: main)
     }
 
     func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {

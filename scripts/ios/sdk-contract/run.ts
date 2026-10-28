@@ -8,9 +8,11 @@
  */
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { DaemonManager } from "../../../src/daemon/manager";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import {
   decodeSdkEventBatches,
   type SdkEventBatchWire,
@@ -249,20 +251,41 @@ async function runScenario(
   if (parsed.manifest.status === "failed") {
     return manifestFindings;
   }
-  const client = new DaemonManager().createClient();
-  await client.connect();
+  const client = await connectMcpClient();
   try {
     const caseFindings = await judgeNetworkSlice(parsed.manifest, {
       deviceId,
       sessionUuid,
       ctrlProxyPort,
       sinceMs: launchedAt - CLOCK_SKEW_MS,
-      readResource: (uri) => client.readResource(uri),
+      readResource: (uri) => client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS }),
     });
     return [...manifestFindings, ...caseFindings];
   } finally {
     await client.close();
   }
+}
+
+/**
+ * Reads MCP resources the way an MCP client does: the official client over stdio to this
+ * checkout's built server (as scripts/mcp-drive.ts does), which forwards to the running
+ * daemon. A direct daemon-socket client run from source would fail the daemon's build
+ * handshake, because its build identity is the script, not dist/src/index.js.
+ */
+async function connectMcpClient(): Promise<Client> {
+  const client = new Client({ name: "ios-sdk-contract", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [resolve(fileURLToPath(new URL("../../../dist/src/index.js", import.meta.url)))],
+    stderr: "inherit",
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    ),
+  });
+  await client.connect(transport);
+  return client;
 }
 
 function fixtureFailure(message: string): ContractFinding {

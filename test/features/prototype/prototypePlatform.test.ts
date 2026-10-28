@@ -565,3 +565,23 @@ describe("device status module contract", () => {
     expect(PROTOTYPE_PLATFORM_MODULES.audio.state?.ringer.platforms).toEqual(["android"]);
   });
 });
+
+describe("biometric module contract", () => {
+  const biometric = PROTOTYPE_PLATFORM_MODULES.biometric;
+
+  test("authenticate takes a bounded title, subtitle and an optional credential fallback", () => {
+    const args = biometric.calls.authenticate.args;
+    expect(Object.keys(args)).toEqual(["title", "subtitle", "allowDeviceCredential"]);
+    expect(args.title.optional).toBe(false);
+    expect(args.title.value.max).toBe(64);
+    expect(args.subtitle.value.max).toBe(128);
+    expect(args.allowDeviceCredential.optional).toBe(true);
+  });
+
+  test("a rejected attempt is an event, and the module has no state or permission", () => {
+    expect(Object.keys(biometric.events)).toEqual(["attemptFailed"]);
+    expect(biometric.state).toEqual({});
+    expect(biometric.calls.authenticate.permissions).toEqual([]);
+    expect(biometric.calls.authenticate.sensitive).toBe(false);
+  });
+});

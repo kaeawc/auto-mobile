@@ -2013,6 +2013,14 @@ production runtime advertises it yet.
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
 
+**Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
+`biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
+`allowDeviceCredential` (optional boolean), and one event, `biometric.attemptFailed`, for a rejected
+attempt while the prompt stays up. It has no `/platform` state and needs no declared permission. The
+call proves presence only and returns no biometric data. Failures use the typed codes: `cancelled`, and
+`unavailable` for a locked-out, unenrolled or hardware-less device. No production runtime advertises the
+module yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

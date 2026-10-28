@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "id": "b2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "authStatus": "",
+      "unlocked": false,
+      "failures": 0
+    },
+    "requires": {
+      "platform": ["biometric"]
+    },
+    "platform": {
+      "on": {
+        "biometric.attemptFailed": [
+          {
+            "type": "increment",
+            "key": "failures"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Failed attempts {failures}"
+        },
+        {
+          "type": "button",
+          "label": "Unlock",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "biometric.authenticate",
+              "args": {
+                "title": {
+                  "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                }
+              },
+              "statusKey": "authStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "unlocked",
+                  "value": true
+                }
+              ],
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "unlocked",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].args.title.value"
+}

@@ -58,6 +58,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audio_v1",
       // Contract only; the connectivity runtimes are owed (#14273).
       "prototype_platform_connectivity_v1",
+      // Contract only; the biometric prompt runtime is owed (#14328).
+      "prototype_platform_biometric_v1",
     )
 
   @Test

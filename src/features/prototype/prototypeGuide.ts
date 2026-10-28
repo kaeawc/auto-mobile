@@ -27,6 +27,8 @@ import {
 } from "./prototypeGuideProse";
 import {
   GUIDE_DEVICE_LOOPBACK,
+  GUIDE_PLATFORM,
+  GUIDE_PLATFORM_EXAMPLE,
   GUIDE_STRINGS_SEMANTICS,
   GUIDE_TEST_SESSIONS,
   GUIDE_TIMERS,
@@ -34,6 +36,7 @@ import {
 } from "./prototypeGuideProseMore";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
+import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 
 /** Resource URIs served by the prototype authoring guide. */
 export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
@@ -240,6 +243,38 @@ export function searchIcons(query: string): { total: number; names: string[] } {
   return { total: matches.length, names: matches.slice(0, ICON_LOOKUP_LIMIT) };
 }
 
+/** Name and contract rule of one call argument; `?` marks an optional one. */
+function describeArgument(name: string, argument: { optional: boolean; value: Rule }): string {
+  return `${name}${argument.optional ? "?" : ""}: ${describeRule(argument.value)}`;
+}
+
+/** One line per module, generated from the contract's `platformModules` table. */
+export function renderPlatformModules(
+  modules: Record<string, PrototypePlatformModule> = PROTOTYPE_PLATFORM_MODULES,
+): string {
+  const rows = Object.entries(modules)
+    .filter(([, module]) => module.placeholder !== true)
+    .map(([name, module]) => {
+      const calls = Object.entries(module.calls).map(([op, call]) => {
+        const args = Object.entries(call.args).map(([arg, rule]) => describeArgument(arg, rule));
+        const needs = [
+          ...call.permissions.map((permission) => `permission ${permission}`),
+          ...call.background.map((mode) => `background ${mode}`),
+        ];
+        return `\`${name}.${op}\`(${args.join(", ")})${needs.length > 0 ? ` needs ${needs.join(", ")}` : ""}`;
+      });
+      const events = Object.keys(module.events).map((event) => `\`${name}.${event}\``);
+      const state = Object.keys(module.state ?? {}).map((key) => `\`/${name}/${key}\``);
+      const capabilities = [module.capability, module.deviceCapability].filter(Boolean);
+      return `| \`${name}\` | ${code(capabilities as string[])} | ${calls.join("<br>") || "-"} | ${events.join(", ") || "-"} | ${state.join(", ") || "-"} |`;
+    });
+  return [
+    "| Module | Capabilities | Calls | Events | `/platform` state |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+  ].join("\n");
+}
+
 function renderPlatformDifferences(): string {
   return [
     "## Platform differences",
@@ -289,6 +324,7 @@ export function renderPrototypeGuide(): string {
     renderIcons(),
     renderPlatformDifferences(),
     renderNativeCode(),
+    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}`,
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

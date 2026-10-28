@@ -193,6 +193,7 @@ test/features/observe/android/storageChangedWireToDb.integration.test.ts | safe 
 test/features/observe/cache/FileSystemObserveCacheStore.integration.test.ts | safe | cache store rooted in mkdtemp tmpdir L32
 test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts | safe | FakeWebSocket/FakeSocket; fake sock path never bound L43
 test/features/observe/ios/ctrlProxyWireParity.integration.test.ts | safe | read-only scan of repo sources L21/L28
+test/features/prototype/PrototypeChannelExecutor.integration.test.ts | safe | ws server and Bun.serve on 127.0.0.1 port 0; loopback only
 test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.serve on 127.0.0.1 port 0 L4; loopback only
 test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded pure-function fuzz of the bundle reader over in-memory buffers; no I/O, ports or shared paths
 test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | safe | fake downloader/checksum/timer; cache in tmpdir L36/L49

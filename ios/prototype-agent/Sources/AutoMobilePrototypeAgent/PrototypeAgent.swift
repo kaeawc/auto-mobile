@@ -463,6 +463,12 @@ final class PrototypeAgent: NSObject {
     }
 
     private func setVisible(_ visible: Bool) {
+        // Every show (a replace included) and every hide ends the content that opened an in-app
+        // browser, and the window is reused, so close it now (#14238). Platform calls run in a later
+        // task, so a link the new prototype opens is presented after this.
+        #if canImport(SafariServices)
+            UIKitLinkOpener.dismissPresentedBrowser()
+        #endif
         if visible {
             attachWindow()
             window?.isHidden = captureHold.isHiding

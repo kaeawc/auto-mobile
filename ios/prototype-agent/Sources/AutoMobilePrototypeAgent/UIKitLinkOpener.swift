@@ -12,10 +12,22 @@
             await UIApplication.shared.open(url)
         }
 
+        /// The browser `links.open` presented last; it belongs to the prototype that opened it.
+        private weak static var presentedBrowser: SFSafariViewController?
+
         func presentInApp(_ url: URL) -> Bool {
             guard let presenter = Self.topViewController() else { return false }
-            presenter.present(SFSafariViewController(url: url), animated: true)
+            let browser = SFSafariViewController(url: url)
+            presenter.present(browser, animated: true)
+            Self.presentedBrowser = browser
             return true
+        }
+
+        /// Closes the in-app browser when its prototype is dismissed or replaced.
+        static func dismissPresentedBrowser() {
+            guard let browser = presentedBrowser, browser.presentingViewController != nil else { return }
+            browser.dismiss(animated: false)
+            presentedBrowser = nil
         }
 
         private static func topViewController() -> UIViewController? {

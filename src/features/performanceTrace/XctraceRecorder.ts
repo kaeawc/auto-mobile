@@ -182,6 +182,19 @@ function isEmptyRun(toc: XctraceToc): boolean {
   return toc.durationMs === 0 && toc.schemas.length === 0;
 }
 
+function timeProfilerSummaryWarnings(
+  template: PerformanceTraceTemplate,
+  sampleCount: number,
+  summary: PerformanceTraceSummary,
+): string[] {
+  if (template === "timeProfiler" && sampleCount > 0 && summary.topFunctions?.length === 0) {
+    return [
+      `performanceTrace timeProfiler: ${sampleCount} samples exported but no function names could be read; the Xcode export shape may be unsupported.`,
+    ];
+  }
+  return [];
+}
+
 /** Summarise a finished `.trace` through `xctrace export`: the TOC, then the template's table. */
 export async function summarizeXctrace(
   host: HostCommandExecutor,
@@ -233,6 +246,7 @@ export async function summarizeXctrace(
       await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
     );
     Object.assign(summary, summarizeXctraceTable(template, rows));
+    warnings.push(...timeProfilerSummaryWarnings(template, rows.length, summary));
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(

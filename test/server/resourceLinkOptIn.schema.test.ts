@@ -9,11 +9,18 @@ interface ToolDefinition {
 const tools: ToolDefinition[] = definitions;
 
 describe("resourceLink opt-in schema (#13942)", () => {
-  for (const name of ["getLogs", "exportPlan"]) {
+  for (const name of ["getLogs"]) {
     test(`${name} advertises a boolean resourceLink with no $ref`, () => {
       const tool = tools.find((candidate) => candidate.name === name);
       expect(tool?.inputSchema.properties?.resourceLink).toMatchObject({ type: "boolean" });
       expect(JSON.stringify(tool?.inputSchema)).not.toContain("$ref");
     });
   }
+});
+
+describe("resourceLink on plain-registered tools (#13942)", () => {
+  test("exportPlan does not advertise it: plain tools skip response finalization", () => {
+    const tool = tools.find((candidate) => candidate.name === "exportPlan");
+    expect(tool?.inputSchema.properties?.resourceLink).toBeUndefined();
+  });
 });

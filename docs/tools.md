@@ -21,7 +21,7 @@ Every tool works from the **CLI** (`bunx @kaeawc/auto-mobile --cli <tool>`), **M
 - 🔑 `sessionUuid` — run on a held device session (device tools)
 - 💡 `keepScreenAwake` — wake and keep a physical Android device awake (default on at session setup)
 - 🪞 `raw` / `project` (`skeleton` default, `full`) / `includeExtras` — observation output on action tools
-- 🔗 `resourceLink` — `getLogs` and `exportPlan` only: return the complete result as an `automobile:tool-output` resource and a `resource_link` block, keeping only `success` and `error` inline (default off, inline)
+- 🔗 `resourceLink` — `getLogs` only: return the complete result as an `automobile:tool-output` resource and a `resource_link` block, keeping only `success` and `error` inline (default off, inline)
 - 📱 `deviceId` — target a device explicitly on reads
 
 ### Reading a device you do not own (`deviceId`)

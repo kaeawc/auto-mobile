@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import type { LockOwnerGenerationVerdict } from "../utils/fileLock";
 import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import type { Platform } from "../models";
 
@@ -52,7 +53,8 @@ export interface DeviceClaims {
 export interface DeviceClaimMirror {
   /**
    * The table's row for `deviceId`, when one exists and its owner is not a reused PID. Undefined
-   * when no registry is open: readers then fall back to the claim files.
+   * when no registry is available, after briefly joining any existing open. Readers fall back
+   * to the claim files when the table is unavailable or cannot be read.
    */
   read?(deviceId: string): Promise<DeviceClaim | undefined>;
   /**
@@ -71,6 +73,8 @@ export interface StoreDeviceClaimMirrorOptions {
   platform: Platform;
   /** Resolved per write: the registry may open (or fail to open) after the mirror is attached. */
   store: () => DeviceClaims | undefined;
+  /** Joins an open already started by startup or maintenance; never starts an open. */
+  whenOpen?: () => Promise<DeviceClaims | undefined>;
   /** Probe only on deferred writes, using the existing bounded retry ladder. */
   registryFileExists?: () => boolean;
   /** True once registry opening is handled; false means ask again on the next write. */
@@ -88,6 +92,8 @@ export interface StoreDeviceClaimMirrorOptions {
 export const DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS: readonly number[] = [
   1_000, 5_000, 30_000, 120_000, 300_000,
 ];
+
+export const DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS = 2_000;
 
 type MirrorOwner = { pid: number; ownerToken: string; metadata?: string };
 
@@ -144,7 +150,16 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
   }
 
   async read(deviceId: string): Promise<DeviceClaim | undefined> {
-    const row = await this.options.store()?.get(this.options.platform, deviceId);
+    const store =
+      this.options.store() ??
+      (this.options.whenOpen
+        ? await raceWithDeadline(this.options.whenOpen, {
+            timer: this.options.timer,
+            timeoutMs: DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS,
+            label: "Device claim registry open",
+          })
+        : undefined);
+    const row = await store?.get(this.options.platform, deviceId);
     if (!row) {
       return undefined;
     }

@@ -1122,6 +1122,7 @@ describe("reading the host-wide claims table (#11811 c)", () => {
     const d = readingDaemon();
     await d.store.upsert(d.row());
     expect(await d.ownership.claim(DEVICE)).toBe(false);
+    expect(d.ownership.foreignOwnerPid(DEVICE)).toBe(FOREIGN_PID);
     expect(d.files.files.has(d.files.claimPath(DEVICE))).toBe(false);
     await d.mirror.idle();
     expect((await d.store.get("android", DEVICE))?.pid).toBe(FOREIGN_PID);

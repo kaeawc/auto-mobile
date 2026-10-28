@@ -2,6 +2,8 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonBroker } from "../../src/daemon/daemonCore/DaemonBroker";
 import { DeviceClaimMirrorHub } from "../../src/daemon/deviceClaimMirrorHub";
 import { BackgroundBindingRegistryUpgrade } from "../../src/daemon/sessionBroker/registry/BackgroundBindingRegistryUpgrade";
+import { BindingJournalRedriveLoop } from "../../src/daemon/sessionBroker/registry/BindingJournalRedriveLoop";
+import { BrokerExecutionRelease } from "../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { daemonSocketServerDouble } from "../../src/daemon/daemonSocketServer";
 import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
@@ -75,6 +77,51 @@ async function makeDaemon(
     incumbentOwnerGuard: guard,
   });
   return { daemon, internals: daemon, timer, tokenStore };
+}
+
+async function registryMaintenanceHarness() {
+  const { daemon, timer } = await makeDaemon({ port: 3161 });
+  const registry = await bindingRegistryModule.openSqliteBindingRegistry({
+    dbPath: ":memory:",
+    timer,
+  });
+  const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry").mockResolvedValue(
+    registry,
+  );
+  const reconcile = spyOn(daemon.testHooks.runtime.deviceClaimMirrors, "registryOpened");
+  const recover = spyOn(
+    BrokerExecutionRelease.prototype,
+    "recoverSettledBindings",
+  ).mockResolvedValue([]);
+  const loop = new BindingJournalRedriveLoop(
+    { runPass: mock(async () => ({ settled: [], blocked: [], skipped: 0 })) },
+    timer,
+  );
+  const redrive = spyOn(
+    daemon.testHooks.runtime.brokerDeviceAcquisition!,
+    "startJournalRedrive",
+  ).mockReturnValue(loop);
+  const nodeEnv = process.env.NODE_ENV;
+  return {
+    daemon,
+    registry,
+    open,
+    reconcile,
+    recover,
+    redrive,
+    close: async () => {
+      if (nodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = nodeEnv;
+      }
+      await daemon.testHooks.closeManagedExecutionRelease();
+      await registry.close();
+      [open, reconcile, recover, redrive].forEach((spy) => spy.mockRestore());
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
+    },
+  };
 }
 
 describe("Daemon.start() tool-call-end wiring", () => {
@@ -480,6 +527,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
     try {
       await expect(internals.testHooks.openBindingRegistry()).rejects.toThrow("fake open refused");
       expect(open).toHaveBeenCalledWith(expect.objectContaining({ migrate }));
+      expect(internals.testHooks.runtime.bindingRegistry).toBeUndefined();
     } finally {
       open.mockRestore();
       internals.testHooks.stopSessionTimers();
@@ -487,15 +535,101 @@ describe("Daemon.start() tool-call-end wiring", () => {
     }
   });
 
+  test("quiet registry open reconciles mirrors, then the first normal open starts maintenance once", async () => {
+    const h = await registryMaintenanceHarness();
+    process.env.NODE_ENV = "production";
+    try {
+      expect(await h.daemon.testHooks.openBindingRegistry(undefined, { quiet: true })).toBe(
+        h.registry,
+      );
+      expect(h.reconcile).toHaveBeenCalledTimes(1);
+      expect(h.reconcile).toHaveBeenCalledWith(h.registry.deviceClaims());
+      expect(h.recover).not.toHaveBeenCalled();
+      expect(h.redrive).not.toHaveBeenCalled();
+
+      expect(await h.daemon.testHooks.openBindingRegistry()).toBe(h.registry);
+      await Promise.all([
+        h.daemon.testHooks.openBindingRegistry(),
+        h.daemon.testHooks.openBindingRegistry(undefined, { quiet: true }),
+        h.daemon.testHooks.openBindingRegistry(),
+      ]);
+      expect(h.open).toHaveBeenCalledTimes(1);
+      expect(h.reconcile).toHaveBeenCalledTimes(1);
+      expect(h.recover).toHaveBeenCalledTimes(1);
+      expect(h.redrive).toHaveBeenCalledTimes(1);
+      expect(h.redrive).toHaveBeenCalledWith(h.registry);
+    } finally {
+      await h.close();
+    }
+  });
+
+  test("normal opens joining an in-flight quiet open start maintenance only after it resolves", async () => {
+    const h = await registryMaintenanceHarness();
+    const pending = Promise.withResolvers<SqliteBindingRegistry>();
+    h.open.mockReturnValue(pending.promise);
+    process.env.NODE_ENV = "production";
+    try {
+      const quiet = h.daemon.testHooks.openBindingRegistry(undefined, { quiet: true });
+      const normal = h.daemon.testHooks.openBindingRegistry();
+      const another = h.daemon.testHooks.openBindingRegistry();
+      expect(h.reconcile).not.toHaveBeenCalled();
+      expect(h.recover).not.toHaveBeenCalled();
+      expect(h.redrive).not.toHaveBeenCalled();
+      pending.resolve(h.registry);
+      expect(await Promise.all([quiet, normal, another])).toEqual([
+        h.registry,
+        h.registry,
+        h.registry,
+      ]);
+      expect(h.open).toHaveBeenCalledTimes(1);
+      expect(h.reconcile).toHaveBeenCalledTimes(1);
+      expect(h.recover).toHaveBeenCalledTimes(1);
+      expect(h.redrive).toHaveBeenCalledTimes(1);
+    } finally {
+      pending.resolve(h.registry);
+      await h.close();
+    }
+  });
+
   test.each([
-    { broker: false, exists: true },
-    { broker: false, exists: false },
-    { broker: true, exists: true },
-  ])("registry retirement startup ordering: %j", async ({ broker, exists }) => {
+    { nodeEnv: "production", broker: false, redrives: 1 },
+    { nodeEnv: "test", broker: false, redrives: 0 },
+    { nodeEnv: "production", broker: true, redrives: 0 },
+    { nodeEnv: "test", broker: true, redrives: 0 },
+  ])(
+    "fresh normal registry open preserves maintenance policy: %j",
+    async ({ nodeEnv, broker, redrives }) => {
+      const h = await registryMaintenanceHarness();
+      process.env.NODE_ENV = nodeEnv;
+      h.daemon.testHooks.setSessionBrokerConfigPath(broker ? "/memory/broker.json" : undefined);
+      try {
+        expect(await h.daemon.testHooks.openBindingRegistry()).toBe(h.registry);
+        await Promise.all([
+          h.daemon.testHooks.openBindingRegistry(),
+          h.daemon.testHooks.openBindingRegistry(),
+        ]);
+        expect(h.open).toHaveBeenCalledTimes(1);
+        expect(h.reconcile).toHaveBeenCalledTimes(1);
+        expect(h.recover).toHaveBeenCalledTimes(1);
+        expect(h.redrive).toHaveBeenCalledTimes(redrives);
+      } finally {
+        await h.close();
+      }
+    },
+  );
+
+  test.each([
+    { broker: false, exists: true, openFails: false },
+    { broker: false, exists: true, openFails: true },
+    { broker: false, exists: false, openFails: false },
+    { broker: true, exists: true, openFails: false },
+    { broker: true, exists: false, openFails: false },
+  ])("registry startup ordering: %j", async ({ broker, exists, openFails }) => {
     const { internals, timer, tokenStore } = await makeDaemon({ port: 3161, debug: true });
     tokenStore.write("incumbent-token");
     const events: string[] = [];
     let stopped = false;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const spies = [
       spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(exists),
       spyOn(internals, "initializeDatabase").mockResolvedValue(undefined),
@@ -504,15 +638,25 @@ describe("Daemon.start() tool-call-end wiring", () => {
       }),
       spyOn(internals, "initializeIosServices").mockResolvedValue(undefined),
       spyOn(logger, "info").mockImplementation(() => {}),
-      spyOn(logger, "warn").mockImplementation(() => {}),
+      warn,
+      spyOn(internals.getSessionManager(), "rehydratePersistedSessions").mockImplementation(
+        async () => {
+          events.push("rehydration");
+          return { rehydrated: [], terminalized: [], skipped: [], timedOut: false };
+        },
+      ),
     ];
     const startUpgrade = spyOn(BackgroundBindingRegistryUpgrade.prototype, "start");
     spies.push(startUpgrade);
     internals.testHooks.overrideStartSteps({
-      openBindingRegistry: async (signal) => {
-        events.push("retirement");
+      openBindingRegistry: async (signal, options) => {
+        expect(options?.quiet).toBe(!broker && !signal ? true : undefined);
+        events.push(signal ? "retirement" : "open-before-bind");
         if (broker) {
           throw new Error("legacy owner still live");
+        }
+        if (!signal && openFails) {
+          throw new Error("schema upgrade pending");
         }
         // The open never produces a registry; the abort is how the daemon cancels the wait.
         return await new Promise<SqliteBindingRegistry>((_resolve, reject) =>
@@ -551,12 +695,20 @@ describe("Daemon.start() tool-call-end wiring", () => {
         await expect(internals.testHooks.startThroughSocketBind()).rejects.toThrow(
           "Session broker cannot start",
         );
-        expect(events).toEqual(["retirement"]);
+        expect(events).toEqual(["open-before-bind"]);
       } else {
         await internals.testHooks.startThroughSocketBind();
         expect(events).toEqual(
-          exists ? ["ingress", "pool", "bind", "retirement"] : ["ingress", "pool", "bind"],
+          exists
+            ? ["open-before-bind", "ingress", "pool", "rehydration", "bind", "retirement"]
+            : ["ingress", "pool", "rehydration", "bind"],
         );
+        if (openFails) {
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining("will retry after socket bind"),
+            expect.objectContaining({ message: "schema upgrade pending" }),
+          );
+        }
         expect(startUpgrade).toHaveBeenCalledTimes(exists ? 1 : 0);
         if (exists) {
           const upgrade = internals.testHooks.runtime.backgroundRegistryUpgrade;

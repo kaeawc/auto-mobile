@@ -23,6 +23,7 @@ import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDisc
 import { sequenceBackoff, type BackoffInput } from "../utils/Backoff";
 import { type Timer } from "../utils/SystemTimer";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import type { PooledDevice } from "../daemon/devicePoolTypes";
 
 export interface DeviceObservationAccess {
   /** Host-only metadata; injected readers keep custom access independent of host AVD files. */
@@ -95,7 +96,7 @@ async function findObservationReadTarget(
           }
         }
         if (device && access.avdConfigReader) {
-          device = await enrichObservationReadFormFactor(device, access.avdConfigReader);
+          device = await enrichBootedDeviceFormFactor(device, access.avdConfigReader);
           signal?.throwIfAborted();
         }
         return { device, devices: fresh };
@@ -185,7 +186,7 @@ export function sessionlessDeviceReadFor(
 }
 
 /** Add only configured form-factor evidence, without issuing another device command. */
-async function enrichObservationReadFormFactor(
+async function enrichBootedDeviceFormFactor(
   device: BootedDevice,
   reader: AvdConfigReader,
 ): Promise<BootedDevice> {
@@ -203,7 +204,7 @@ async function enrichObservationReadFormFactor(
     const config = await reader.readConfig(device.name);
     if (!config) {
       // Optional host metadata: missing config leaves device reads usable without an inferred field.
-      logger.debug(`No AVD config for observation read of ${device.name}`);
+      logger.debug(`No AVD config for ${device.name}`);
       return device;
     }
     const formFactor = avdConfigFormFactor(config);
@@ -212,5 +213,44 @@ async function enrichObservationReadFormFactor(
     // Optional host metadata: unreadable config leaves form factor absent and never blocks observe.
     logger.debug(`AVD form factor unavailable for ${device.name}: ${errorMessage(error)}`);
     return device;
+  }
+}
+
+/** Optional form-factor metadata shared by all handlers using one held pool incarnation. */
+export class HeldDeviceFormFactorResolver {
+  // Weak keys follow the pool entry's lifetime, so retired devices do not accumulate here.
+  private readonly cache = new WeakMap<
+    PooledDevice,
+    { identity: string; value: Promise<BootedDevice["formFactor"]> }
+  >();
+
+  constructor(private readonly reader: AvdConfigReader | undefined) {}
+
+  async enrich(device: BootedDevice, pooled: PooledDevice | null): Promise<BootedDevice> {
+    const formFactor = await this.resolve(device, pooled);
+    return formFactor === undefined ? device : { ...device, formFactor };
+  }
+
+  private resolve(
+    device: BootedDevice,
+    pooled: PooledDevice | null,
+  ): Promise<BootedDevice["formFactor"]> {
+    const known = pooled?.androidImage?.formFactor;
+    if (known !== undefined || !pooled || !this.reader) {
+      return Promise.resolve(known);
+    }
+    const identity = `${pooled.incarnation}:${pooled.avdName ?? device.name}`;
+    const cached = this.cache.get(pooled);
+    if (cached?.identity === identity) {
+      return cached.value;
+    }
+    // Unknown emulator metadata needs one host read, shared even by concurrent calls. Known
+    // phones above pay none. Cache absence too: optional host failures never turn into polling.
+    const value = enrichBootedDeviceFormFactor(
+      { ...device, name: pooled.avdName ?? device.name },
+      this.reader,
+    ).then((enriched) => enriched.formFactor);
+    this.cache.set(pooled, { identity, value });
+    return value;
   }
 }

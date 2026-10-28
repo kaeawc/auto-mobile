@@ -43,6 +43,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_links_v1",
             // Contract only; the system picker runtimes are owed (#14318).
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
+            // Contract only; the location runtimes are owed (#14325, #14326).
+            "prototype_platform_location_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

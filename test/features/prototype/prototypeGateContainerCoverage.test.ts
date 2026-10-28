@@ -41,6 +41,10 @@ const calendarCall = {
     },
   ],
 };
+const locationCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "location.request", args: {} }],
+};
 const openUrlCall = {
   ...label,
   onTap: [
@@ -265,6 +269,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_links_v1: openUrlCall,
   prototype_platform_contacts_v1: contactsCall,
   prototype_platform_calendar_v1: calendarCall,
+  prototype_platform_location_v1: locationCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

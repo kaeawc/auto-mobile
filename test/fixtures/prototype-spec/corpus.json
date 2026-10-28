@@ -157,6 +157,7 @@
     "platform-feedback-handler.json",
     "platform-feedback-haptics-sound.json",
     "platform-handler.json",
+    "platform-location.json",
     "platform-reads.json",
     "platform-repeat.json",
     "platform-requires.json",
@@ -1047,6 +1048,15 @@
     "platform-handlers-missing-on.json",
     "platform-into-array-element.json",
     "platform-into-platform.json",
+    "platform-location-accuracy-unknown.json",
+    "platform-location-into-array-element.json",
+    "platform-location-max-age-negative.json",
+    "platform-location-status-key-not-string.json",
+    "platform-location-undeclared-module.json",
+    "platform-location-undeclared-permission.json",
+    "platform-location-unknown-arg.json",
+    "platform-location-unknown-event.json",
+    "platform-location-unknown-key.json",
     "platform-missing-argument.json",
     "platform-repeat-unknown-item.json",
     "platform-requires-unknown-field.json",
@@ -1642,6 +1652,7 @@
     "strict-gate-prototype_platform_device_v1.json",
     "strict-gate-prototype_platform_haptics_v1.json",
     "strict-gate-prototype_platform_links_v1.json",
+    "strict-gate-prototype_platform_location_v1.json",
     "strict-gate-prototype_platform_media_items_v1.json",
     "strict-gate-prototype_platform_namespace_v1.json",
     "strict-gate-prototype_platform_power_v1.json",
@@ -2814,6 +2825,11 @@
     "adaptive-supporting.json": ["prototype_adaptive_v1"],
     "adaptive-nested.json": ["prototype_adaptive_v1"],
     "adaptive-select.json": ["prototype_adaptive_v1"],
-    "adaptive-data-slots.json": ["prototype_adaptive_v1", "prototype_data_model_v1"]
+    "adaptive-data-slots.json": ["prototype_adaptive_v1", "prototype_data_model_v1"],
+    "platform-location.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_location_v1",
+      "prototype_platform_v1"
+    ]
   }
 }

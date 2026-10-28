@@ -37,6 +37,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_connectivity_v1",
             // Contract only; the biometric prompt runtime is owed (#14328).
             "prototype_platform_biometric_v1",
+            // Contract only; the settings launcher runtime is owed (#14320).
+            "prototype_platform_settings_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

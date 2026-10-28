@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "s1",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["settings"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open settings",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "settings.open",
+          "args": {}
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.page"
+}

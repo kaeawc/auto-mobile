@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "s2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["settings"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open settings",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "settings.open",
+          "args": {
+            "page": {
+              "value": "battery"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.page.value"
+}

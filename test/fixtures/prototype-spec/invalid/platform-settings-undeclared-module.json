@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "s4",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["haptics"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open settings",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "settings.open",
+          "args": {
+            "page": {
+              "value": "app"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].call"
+}

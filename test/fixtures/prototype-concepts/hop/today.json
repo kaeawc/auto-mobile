@@ -1,0 +1,879 @@
+{
+  "id": "hop-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "derive": {
+    "fareText": {
+      "of": {
+        "state": "farePrice"
+      },
+      "format": {
+        "currency": {
+          "code": "USD"
+        }
+      },
+      "locale": "en-US"
+    }
+  },
+  "state": {
+    "placesOpen": false,
+    "destination": "",
+    "rideId": "",
+    "rideName": "",
+    "farePrice": 0,
+    "etaMin": 0,
+    "payment": "card",
+    "stage": "matching",
+    "driverProgress": 0,
+    "rating": 0,
+    "tip": "0"
+  },
+  "data": {
+    "places": [
+      {
+        "id": "home",
+        "name": "Home",
+        "address": "4 Elm Row"
+      },
+      {
+        "id": "work",
+        "name": "Work",
+        "address": "200 Market St, floor 3"
+      },
+      {
+        "id": "gym",
+        "name": "Climbing gym",
+        "address": "9 Dock Rd"
+      }
+    ],
+    "rides": [
+      {
+        "id": "hop",
+        "name": "Hop",
+        "price": 14.2,
+        "eta": 4,
+        "seats": 4
+      },
+      {
+        "id": "xl",
+        "name": "Hop XL",
+        "price": 21.75,
+        "eta": 7,
+        "seats": 6
+      },
+      {
+        "id": "green",
+        "name": "Hop Green",
+        "price": 15.1,
+        "eta": 5,
+        "seats": 4
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "home_bar",
+            "title": "Hop"
+          },
+          {
+            "type": "box",
+            "testTag": "map",
+            "contentDescription": "You are at 18 Harbour St",
+            "style": {
+              "weight": 1,
+              "width": "fill",
+              "background": "surfaceContainerHigh",
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "alignment": "center",
+                  "spacing": 4
+                },
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "location_on",
+                    "variant": "filled",
+                    "contentDescription": "Pickup",
+                    "style": {
+                      "color": "primary"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "You are at 18 Harbour St",
+                    "style": {
+                      "textStyle": "labelMedium"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12,
+              "background": "surface"
+            },
+            "children": [
+              {
+                "type": "button",
+                "testTag": "where_to",
+                "label": "Where to?",
+                "icon": "search",
+                "variant": "tonal",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "placesOpen",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "bottomSheet",
+            "testTag": "places_sheet",
+            "openWhen": {
+              "key": "placesOpen",
+              "equals": true
+            },
+            "detents": ["half", "full"],
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 8
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "text": "Saved places",
+                  "semantics": {
+                    "heading": true
+                  },
+                  "style": {
+                    "textStyle": "titleMedium"
+                  }
+                },
+                {
+                  "type": "column",
+                  "repeat": {
+                    "items": {
+                      "path": "/places"
+                    },
+                    "as": "place",
+                    "key": "id"
+                  },
+                  "children": [
+                    {
+                      "type": "listItem",
+                      "testTag": "place_row",
+                      "headline": "{place.name}",
+                      "supporting": "{place.address}",
+                      "leadingIcon": "place",
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "destination",
+                          "value": "{place.name}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "placesOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "options"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "options": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "options_bar",
+            "title": "To {destination}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 8
+            },
+            "children": [
+              {
+                "type": "column",
+                "repeat": {
+                  "items": {
+                    "path": "/rides"
+                  },
+                  "as": "ride",
+                  "key": "id",
+                  "derive": {
+                    "priceText": {
+                      "of": {
+                        "item": "price"
+                      },
+                      "format": {
+                        "currency": {
+                          "code": "USD"
+                        }
+                      },
+                      "locale": "en-US"
+                    }
+                  }
+                },
+                "children": [
+                  {
+                    "type": "listItem",
+                    "testTag": "ride_option",
+                    "headline": "{ride.name}",
+                    "supporting": "{ride.priceText} · {ride.eta} min away · {ride.seats} seats",
+                    "leadingIcon": "local_taxi",
+                    "styleWhen": [
+                      {
+                        "when": {
+                          "key": "rideId",
+                          "equals": "{ride.id}"
+                        },
+                        "style": {
+                          "background": "secondaryContainer"
+                        }
+                      }
+                    ],
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "rideId",
+                        "value": "{ride.id}"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "rideName",
+                        "value": "{ride.name}"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "farePrice",
+                        "value": "{ride.price}"
+                      },
+                      {
+                        "type": "setState",
+                        "key": "etaMin",
+                        "value": "{ride.eta}"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "testTag": "surge_note",
+                "text": "Fares are higher than usual nearby.",
+                "style": {
+                  "textStyle": "bodySmall",
+                  "color": "error"
+                }
+              },
+              {
+                "type": "select",
+                "testTag": "payment_select",
+                "stateKey": "payment",
+                "label": "Pay with",
+                "options": [
+                  {
+                    "value": "card",
+                    "label": "Card ending 4242"
+                  },
+                  {
+                    "value": "wallet",
+                    "label": "Phone wallet"
+                  },
+                  {
+                    "value": "cash",
+                    "label": "Cash"
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "testTag": "request_ride",
+                "label": "Request {rideName}",
+                "enabledWhen": {
+                  "key": "rideId",
+                  "lengthGt": 0
+                },
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "ride_requested",
+                    "context": {
+                      "ride": {
+                        "state": "rideId"
+                      },
+                      "payment": {
+                        "state": "payment"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "stage",
+                    "value": "matching"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "driverProgress",
+                    "value": 0
+                  },
+                  {
+                    "type": "replace",
+                    "stack": "nav",
+                    "screen": "trip"
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "match",
+                    "afterMs": 2000,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "stage",
+                        "value": "arriving"
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "driver",
+                        "afterMs": 1000,
+                        "everyMs": 1000,
+                        "maxRuns": 4,
+                        "actions": [
+                          {
+                            "type": "decrement",
+                            "key": "etaMin"
+                          },
+                          {
+                            "type": "increment",
+                            "key": "driverProgress",
+                            "by": 25
+                          }
+                        ]
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "pickup",
+                        "afterMs": 5000,
+                        "actions": [
+                          {
+                            "type": "setState",
+                            "key": "stage",
+                            "value": "onTrip"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "dropoff",
+                        "afterMs": 9000,
+                        "actions": [
+                          {
+                            "type": "setState",
+                            "key": "stage",
+                            "value": "done"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "trip": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "trip_bar",
+            "title": "Your trip to {destination}"
+          },
+          {
+            "type": "box",
+            "testTag": "map",
+            "contentDescription": "Driver route",
+            "style": {
+              "weight": 1,
+              "width": "fill",
+              "background": "surfaceContainerHigh",
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "alignment": "center",
+                  "spacing": 4
+                },
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "location_on",
+                    "variant": "filled",
+                    "contentDescription": "Pickup",
+                    "style": {
+                      "color": "primary"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "Driver route",
+                    "style": {
+                      "textStyle": "labelMedium"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 8
+            },
+            "children": [
+              {
+                "type": "text",
+                "testTag": "stage_matching",
+                "visibleWhen": {
+                  "key": "stage",
+                  "equals": "matching"
+                },
+                "text": "Finding your driver…",
+                "semantics": {
+                  "liveRegion": "polite"
+                },
+                "style": {
+                  "textStyle": "titleLarge"
+                }
+              },
+              {
+                "type": "text",
+                "testTag": "stage_arriving",
+                "visibleWhen": {
+                  "key": "stage",
+                  "equals": "arriving"
+                },
+                "text": "Sam is {etaMin} min away",
+                "semantics": {
+                  "liveRegion": "polite"
+                },
+                "style": {
+                  "textStyle": "titleLarge"
+                }
+              },
+              {
+                "type": "text",
+                "testTag": "stage_onTrip",
+                "visibleWhen": {
+                  "key": "stage",
+                  "equals": "onTrip"
+                },
+                "text": "On the way to {destination}",
+                "semantics": {
+                  "liveRegion": "polite"
+                },
+                "style": {
+                  "textStyle": "titleLarge"
+                }
+              },
+              {
+                "type": "text",
+                "testTag": "stage_done",
+                "visibleWhen": {
+                  "key": "stage",
+                  "equals": "done"
+                },
+                "text": "You have arrived",
+                "semantics": {
+                  "liveRegion": "polite"
+                },
+                "style": {
+                  "textStyle": "titleLarge"
+                }
+              },
+              {
+                "type": "progress",
+                "testTag": "route_progress",
+                "variant": "linear",
+                "stateKey": "driverProgress",
+                "max": 100,
+                "visibleWhen": {
+                  "key": "stage",
+                  "equals": "arriving"
+                }
+              },
+              {
+                "type": "listItem",
+                "testTag": "driver_card",
+                "visibleWhen": {
+                  "any": [
+                    {
+                      "key": "stage",
+                      "equals": "arriving"
+                    },
+                    {
+                      "key": "stage",
+                      "equals": "onTrip"
+                    }
+                  ]
+                },
+                "headline": "Sam · Grey hatchback",
+                "supporting": "HOP 482 · ★ 4.9",
+                "leadingIcon": "account_circle"
+              },
+              {
+                "type": "text",
+                "testTag": "fare",
+                "text": "Fare {derived:fareText}",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "button",
+                "testTag": "cancel_ride",
+                "label": "Cancel ride",
+                "variant": "outlined",
+                "visibleWhen": {
+                  "any": [
+                    {
+                      "key": "stage",
+                      "equals": "matching"
+                    },
+                    {
+                      "key": "stage",
+                      "equals": "arriving"
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "match"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "driver"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "pickup"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "dropoff"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "ride_cancelled"
+                  },
+                  {
+                    "type": "popToRoot",
+                    "stack": "nav"
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "testTag": "rating_panel",
+                "visibleWhen": {
+                  "key": "stage",
+                  "equals": "done"
+                },
+                "style": {
+                  "spacing": 8
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Rate Sam",
+                    "semantics": {
+                      "heading": true
+                    },
+                    "style": {
+                      "textStyle": "titleMedium"
+                    }
+                  },
+                  {
+                    "type": "row",
+                    "testTag": "star_row",
+                    "style": {
+                      "spacing": 4
+                    },
+                    "children": [
+                      {
+                        "type": "iconButton",
+                        "testTag": "star_1",
+                        "icon": "star",
+                        "contentDescription": "1 star",
+                        "style": {
+                          "color": "outline"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "rating",
+                              "gt": 0
+                            },
+                            "style": {
+                              "color": "tertiary"
+                            }
+                          }
+                        ],
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "rating",
+                            "value": 1
+                          }
+                        ]
+                      },
+                      {
+                        "type": "iconButton",
+                        "testTag": "star_2",
+                        "icon": "star",
+                        "contentDescription": "2 stars",
+                        "style": {
+                          "color": "outline"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "rating",
+                              "gt": 1
+                            },
+                            "style": {
+                              "color": "tertiary"
+                            }
+                          }
+                        ],
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "rating",
+                            "value": 2
+                          }
+                        ]
+                      },
+                      {
+                        "type": "iconButton",
+                        "testTag": "star_3",
+                        "icon": "star",
+                        "contentDescription": "3 stars",
+                        "style": {
+                          "color": "outline"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "rating",
+                              "gt": 2
+                            },
+                            "style": {
+                              "color": "tertiary"
+                            }
+                          }
+                        ],
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "rating",
+                            "value": 3
+                          }
+                        ]
+                      },
+                      {
+                        "type": "iconButton",
+                        "testTag": "star_4",
+                        "icon": "star",
+                        "contentDescription": "4 stars",
+                        "style": {
+                          "color": "outline"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "rating",
+                              "gt": 3
+                            },
+                            "style": {
+                              "color": "tertiary"
+                            }
+                          }
+                        ],
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "rating",
+                            "value": 4
+                          }
+                        ]
+                      },
+                      {
+                        "type": "iconButton",
+                        "testTag": "star_5",
+                        "icon": "star",
+                        "contentDescription": "5 stars",
+                        "style": {
+                          "color": "outline"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "rating",
+                              "gt": 4
+                            },
+                            "style": {
+                              "color": "tertiary"
+                            }
+                          }
+                        ],
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "rating",
+                            "value": 5
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "segmentedButton",
+                    "testTag": "tip_picker",
+                    "stateKey": "tip",
+                    "options": [
+                      {
+                        "value": "0",
+                        "label": "No tip"
+                      },
+                      {
+                        "value": "1",
+                        "label": "$1"
+                      },
+                      {
+                        "value": "2",
+                        "label": "$2"
+                      },
+                      {
+                        "value": "5",
+                        "label": "$5"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "button",
+                    "testTag": "submit_rating",
+                    "label": "Done",
+                    "enabledWhen": {
+                      "key": "rating",
+                      "gt": 0
+                    },
+                    "onTap": [
+                      {
+                        "type": "emit",
+                        "name": "trip_rated",
+                        "context": {
+                          "rating": {
+                            "state": "rating"
+                          },
+                          "tip": {
+                            "state": "tip"
+                          }
+                        }
+                      },
+                      {
+                        "type": "setState",
+                        "key": "rating",
+                        "value": 0
+                      },
+                      {
+                        "type": "popToRoot",
+                        "stack": "nav"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

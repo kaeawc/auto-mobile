@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  adoptRestartResumeTargets,
   internalExecutionId,
   internalExecutionStartTime,
   internalMcpSessionId,
+  internalOneShotCli,
+  internalRestartResumeSessionUuid,
+  internalRestartResumeTargets,
 } from "../../src/server/internalToolParams";
 
 describe("internal call identity readers", () => {
@@ -29,5 +33,31 @@ describe("internal call identity readers", () => {
 
   test("a blank connection identity is still a string, as the stages read it today", () => {
     expect(internalMcpSessionId({ __mcpSessionId: "" })).toBe("");
+  });
+});
+
+describe("start-device handoff readers", () => {
+  test("one-shot CLI is only an exact true", () => {
+    expect(internalOneShotCli({ __oneShotCli: true })).toBe(true);
+    expect(internalOneShotCli({ __oneShotCli: "true" })).toBe(false);
+    expect(internalOneShotCli({})).toBe(false);
+  });
+
+  test("restart-resume fields read through with their declared types", () => {
+    const targets = [{ sessionId: "s1" }] as const;
+    const args = { __restartResumeTargets: targets, __restartResumeSessionUuid: "s1" };
+    expect(internalRestartResumeTargets(args)).toBe(targets);
+    expect(internalRestartResumeSessionUuid(args)).toBe("s1");
+    expect(internalRestartResumeTargets({})).toBeUndefined();
+    expect(internalRestartResumeSessionUuid({})).toBeUndefined();
+  });
+
+  test("adopting restart-resume targets never replaces ones the start already carries", () => {
+    const carried: { __restartResumeTargets?: string[] } = { __restartResumeTargets: ["mine"] };
+    adoptRestartResumeTargets(carried, ["other"]);
+    expect(carried.__restartResumeTargets).toEqual(["mine"]);
+    const empty: { __restartResumeTargets?: string[] } = {};
+    adoptRestartResumeTargets(empty, ["other"]);
+    expect(empty.__restartResumeTargets).toEqual(["other"]);
   });
 });

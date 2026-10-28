@@ -8,11 +8,13 @@ import androidx.compose.material3.adaptive.WindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.window.core.layout.WindowSizeClass
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -122,6 +124,31 @@ class PrototypeAdaptiveTest {
     show("listDetail", 900)
     compose.onNodeWithTag("List").assertIsDisplayed()
     compose.onNodeWithTag("Detail").assertIsDisplayed()
+  }
+
+  @Test
+  fun defaultWindowInfoRendersWithFakeFoldSourceAndServiceLikeContext() {
+    val folds = MutableStateFlow(PrototypeFold.HALF_OPENED_HORIZONTAL)
+    var subscriptions = 0
+    val source = PrototypeFoldSource {
+      subscriptions++
+      folds
+    }
+    compose.setContent {
+      val nonUiContext = LocalContext.current.applicationContext
+      CompositionLocalProvider(
+        LocalContext provides nonUiContext,
+        LocalPrototypeAdaptiveFoldSource provides source,
+      ) {
+        MaterialTheme {
+          RenderPrototypeAdaptive(mapPrototypeSpec(spec("listDetail")).root, interact = {})
+        }
+      }
+    }
+    compose.onNodeWithTag("List").assertIsDisplayed()
+    compose.runOnIdle { folds.value = PrototypeFold.NONE }
+    compose.onNodeWithTag("List").assertIsDisplayed()
+    compose.runOnIdle { assertEquals(1, subscriptions) }
   }
 
   private fun navigation(width: Int, expected: NavigationSuiteType) {

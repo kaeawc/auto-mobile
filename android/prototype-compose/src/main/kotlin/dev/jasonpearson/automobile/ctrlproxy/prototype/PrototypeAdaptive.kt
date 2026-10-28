@@ -5,25 +5,57 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.Posture
 import androidx.compose.material3.adaptive.WindowAdaptiveInfo
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.*
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntSize
 import androidx.window.core.layout.WindowSizeClass
 import dev.jasonpearson.automobile.protocol.PrototypeAdaptiveNode
 
-/** Uses Android's native window classes, including fold posture in the pane directive. */
+/** Null selects the Android source; tests can supply folds without framework window tracking. */
+internal val LocalPrototypeAdaptiveFoldSource =
+  staticCompositionLocalOf<PrototypeFoldSource?> { null }
+
+@Composable
+private fun prototypeAdaptiveWindowInfo(): WindowAdaptiveInfo {
+  val injected = LocalPrototypeAdaptiveFoldSource.current
+  val context = LocalContext.current
+  val source = remember(injected, context) { injected ?: AndroidPrototypeFoldSource(context) }
+  val fold by remember(source) { source.folds() }.collectAsState(initial = PrototypeFold.NONE)
+  return prototypeAdaptiveWindowInfo(
+    LocalWindowInfo.current.containerSize,
+    LocalDensity.current.density,
+    fold,
+  )
+}
+
+internal fun prototypeAdaptiveWindowInfo(
+  sizePx: IntSize,
+  density: Float,
+  fold: PrototypeFold,
+): WindowAdaptiveInfo =
+  WindowAdaptiveInfo(
+    WindowSizeClass.compute(sizePx.width / density, sizePx.height / density),
+    // The device fold source carries orientation/state, but no hinge bounds.
+    Posture(isTabletop = fold == PrototypeFold.HALF_OPENED_HORIZONTAL),
+  )
+
+/** Uses the composition's window size and UI-context-backed fold observation. */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 internal fun RenderPrototypeAdaptive(
   node: PrototypeRenderNode,
   modifier: Modifier = Modifier,
   interact: (PrototypeInteraction) -> Unit,
-  windowInfo: WindowAdaptiveInfo = currentWindowAdaptiveInfo(),
+  windowInfo: WindowAdaptiveInfo = prototypeAdaptiveWindowInfo(),
 ) {
   val source = node.source as PrototypeAdaptiveNode
   when (source.kind) {

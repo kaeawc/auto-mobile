@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.view.Display
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScreenShapeSource
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
@@ -28,6 +30,7 @@ internal interface PrototypeResultTransport {
 internal class PrototypeResultBroadcaster(
   private val transport: PrototypeResultTransport,
   private val resultBroadcaster: ResultBroadcaster,
+  private val shapeSource: PrototypeScreenShapeSource = PrototypeScreenShapeSource { null },
 ) : PrototypeResultSink {
   private suspend fun emit(requestId: String?, buildFrame: () -> String) {
     if (!transport.isRunning()) return
@@ -76,7 +79,7 @@ internal class PrototypeResultBroadcaster(
     appearance: PrototypeAppearance,
     hiddenReason: PrototypeHiddenReason?,
   ) =
-    emit(requestId) {
+    emitShown(requestId) { screenRound ->
       prototypeResultFrame(
         requestId,
         true,
@@ -84,8 +87,20 @@ internal class PrototypeResultBroadcaster(
         missingAssets,
         appearance,
         hiddenReason = hiddenReason,
+        screenRound = screenRound,
       )
     }
+
+  private val shownDisplays = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+  override fun noteShownDisplay(requestId: String?, displayId: Int) {
+    shownDisplays[requestId.orEmpty()] = displayId
+  }
+
+  private suspend fun emitShown(requestId: String?, buildFrame: (Boolean?) -> String) {
+    val displayId = shownDisplays.remove(requestId.orEmpty()) ?: Display.DEFAULT_DISPLAY
+    emit(requestId) { buildFrame(shapeSource.screenRound(displayId)) }
+  }
 
   private val shownBackdrops = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -101,7 +116,7 @@ internal class PrototypeResultBroadcaster(
     stacks: Map<String, PrototypeStackSnapshot>,
     hiddenReason: PrototypeHiddenReason?,
   ) =
-    emit(requestId) {
+    emitShown(requestId) { screenRound ->
       prototypeResultFrame(
         requestId,
         true,
@@ -111,6 +126,7 @@ internal class PrototypeResultBroadcaster(
         pages = pages,
         stacks = stacks,
         hiddenReason = hiddenReason,
+        screenRound = screenRound,
         backdrop = shownBackdrops.remove(requestId.orEmpty()),
       )
     }
@@ -124,7 +140,7 @@ internal class PrototypeResultBroadcaster(
     hiddenReason: PrototypeHiddenReason?,
     degradedEffects: List<PrototypeDegradedEffect>,
   ) =
-    emit(requestId) {
+    emitShown(requestId) { screenRound ->
       prototypeResultFrame(
         requestId,
         true,
@@ -134,6 +150,7 @@ internal class PrototypeResultBroadcaster(
         pages = pages,
         stacks = stacks,
         hiddenReason = hiddenReason,
+        screenRound = screenRound,
         backdrop = shownBackdrops.remove(requestId.orEmpty()),
         degradedEffects = degradedEffects,
       )

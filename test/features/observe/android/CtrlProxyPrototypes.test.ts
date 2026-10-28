@@ -661,6 +661,39 @@ describe("CtrlProxy prototypes", () => {
       }
     });
 
+    test.each([true, false, "true", 1, null, undefined])(
+      "a prototype_result forwards only boolean screenRound: %s",
+      async (screenRound) => {
+        const { client, socket, receive } = await harness(inspectable);
+        let finish!: (value: { requestId: string }) => void;
+        const sent = new Promise<{ requestId: string }>((resolve) => {
+          finish = resolve;
+        });
+        const send = spyOn(socket, "send").mockImplementation((data) =>
+          finish(JSON.parse(String(data))),
+        );
+        try {
+          const pending = client.requestInspectPrototypes();
+          const message = await sent;
+          await receive({
+            type: "prototype_result",
+            timestamp: 1,
+            requestId: message.requestId,
+            success: true,
+            screenRound,
+          });
+          const result = await pending;
+          if (typeof screenRound === "boolean") {
+            expect(result.screenRound).toBe(screenRound);
+          } else {
+            expect(result).not.toHaveProperty("screenRound");
+          }
+        } finally {
+          send.mockRestore();
+        }
+      },
+    );
+
     test("a reply's backdrop outcome is kept when blur or fallback and dropped otherwise (#15126)", async () => {
       for (const [reported, expected] of [
         ["blur", { backdrop: "blur" }],

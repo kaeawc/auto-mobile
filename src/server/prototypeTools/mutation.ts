@@ -324,7 +324,7 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...(await showAdviceOutput(authoredArgs, device, dependencies, result.success, signal)),
+      ...(await showAdviceOutput(authoredArgs, device, dependencies, result, signal)),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
@@ -377,7 +377,7 @@ async function showAdviceOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
   dependencies: Pick<PrototypeHandlerDependencies, "target" | "screenRoundFactory" | "adbFactory">,
-  success: boolean,
+  result: Pick<PrototypeResult, "success" | "screenRound">,
   signal?: AbortSignal,
 ): Promise<
   Pick<
@@ -390,12 +390,13 @@ async function showAdviceOutput(
     | "placeholderFindingsTotal"
   >
 > {
+  const { success, screenRound: deviceScreenRound } = result;
   return {
     ...(await platformNotesOutput(args, device, dependencies.target, success)),
     ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
     ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
     ...(await prototypeScreenShapeOutput(
-      { action: args.action, success, device, signal },
+      { action: args.action, success, device, deviceScreenRound, signal },
       dependencies,
     )),
   };

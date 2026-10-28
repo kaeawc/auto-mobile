@@ -14,15 +14,24 @@ export type ScreenRoundReaderFactory = (device: BootedDevice) => ScreenRoundRead
  * and report no field, and an unreadable display leaves it absent.
  */
 export async function prototypeScreenShapeOutput(
-  input: { action: string; success: boolean; device: BootedDevice; signal?: AbortSignal },
+  input: {
+    action: string;
+    success: boolean;
+    device: BootedDevice;
+    deviceScreenRound?: boolean;
+    signal?: AbortSignal;
+  },
   deps: { screenRoundFactory?: ScreenRoundReaderFactory; adbFactory?: AdbClientFactory },
 ): Promise<{ screenRound?: boolean }> {
-  const { action, success, device, signal } = input;
+  const { action, success, device, deviceScreenRound, signal } = input;
   if (action !== "show" || !success || device.platform !== "android") {
     return {};
   }
   if (device.formFactor !== "watch") {
     return {};
+  }
+  if (typeof deviceScreenRound === "boolean") {
+    return { screenRound: deviceScreenRound };
   }
   const reader =
     deps.screenRoundFactory?.(device) ??

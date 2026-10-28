@@ -1,0 +1,51 @@
+{
+  "spec": {
+    "id": "m1",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "purchase": {}
+    },
+    "state": {
+      "buyStatus": "",
+      "failed": false,
+      "changes": 0
+    },
+    "requires": {
+      "platform": ["battery"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Go Pro",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "commerce.purchase",
+              "args": {
+                "productId": {
+                  "value": "pro_monthly"
+                }
+              },
+              "into": "/data/purchase",
+              "statusKey": "buyStatus",
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "failed",
+                  "value": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].call"
+}

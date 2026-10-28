@@ -2169,6 +2169,15 @@ integer, a non-finite float, a battery level over 100), `format` (invalid UTF-8,
 of the wrong JSON type), `decodeOnly` and `unknown`. The TypeScript reference and its Kotlin and Swift twins
 replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and runtimes are not built.
 
+**Sandbox commerce (#14314).** The `commerce` module (`prototype_platform_commerce_v1`) has two calls.
+`commerce.purchase` takes a required `productId` (an identifier of at most 64 characters) and writes
+`{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`; a back-out is the
+typed error `cancelled`. `commerce.restore` takes no arguments. The `commerce.entitlementsChanged` event and the
+read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTransaction` complete the module.
+No argument carries an amount, merchant, key or card: prices come only from the catalog. The root `commerce`
+catalog block, the check that `productId` names a catalog product and `commerce.checkout` are not in the
+contract yet, and no production runtime advertises the module.
+
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
 exactly one `/<module>/<key>`: `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),

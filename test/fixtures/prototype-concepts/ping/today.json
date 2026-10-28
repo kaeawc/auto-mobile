@@ -1,0 +1,1762 @@
+{
+  "id": "ping-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "chatId": "",
+    "chatName": "",
+    "draft": "",
+    "replyTo": "",
+    "sendStatus": "sending",
+    "recording": false,
+    "recSeconds": 0,
+    "callState": "idle",
+    "callSeconds": 0,
+    "statusPage": 0,
+    "unread_ana": 2,
+    "unread_bo": 0,
+    "unread_climbing": 5,
+    "pinned_ana": true,
+    "pinned_bo": false,
+    "pinned_climbing": false,
+    "mine_a1": false,
+    "mine_a2": true,
+    "mine_a3": false,
+    "mine_b1": false,
+    "mine_c1": false,
+    "mine_c2": false
+  },
+  "data": {
+    "threads": [
+      {
+        "id": "ana",
+        "name": "Ana",
+        "last": "Great, I will bring the cable.",
+        "when": "09:41",
+        "messages": [
+          {
+            "id": "a1",
+            "from": "Ana",
+            "text": "Are we still on for the demo?",
+            "time": "09:30"
+          },
+          {
+            "id": "a2",
+            "from": "You",
+            "text": "Yes, 3 pm in the main hall.",
+            "time": "09:32"
+          },
+          {
+            "id": "a3",
+            "from": "Ana",
+            "text": "Great, I will bring the cable.",
+            "time": "09:41"
+          }
+        ]
+      },
+      {
+        "id": "bo",
+        "name": "Bo",
+        "last": "Lunch at noon?",
+        "when": "Yesterday",
+        "messages": [
+          {
+            "id": "b1",
+            "from": "Bo",
+            "text": "Lunch at noon?",
+            "time": "Yesterday"
+          }
+        ]
+      },
+      {
+        "id": "climbing",
+        "name": "Climbing crew",
+        "last": "Mia: Saturday works",
+        "when": "Mon",
+        "messages": [
+          {
+            "id": "c1",
+            "from": "Mia",
+            "text": "Saturday works",
+            "time": "Mon"
+          },
+          {
+            "id": "c2",
+            "from": "Leo",
+            "text": "Same for me",
+            "time": "Mon"
+          }
+        ]
+      }
+    ],
+    "pending": {
+      "text": "",
+      "quote": ""
+    },
+    "calls": [
+      {
+        "id": "l1",
+        "chat": "ana",
+        "name": "Ana",
+        "kind": "Outgoing",
+        "when": "Today, 08:10"
+      },
+      {
+        "id": "l2",
+        "chat": "bo",
+        "name": "Bo",
+        "kind": "Missed",
+        "when": "Yesterday, 19:02"
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "tabs",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "chats_bar",
+                    "title": "Ping"
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "chats_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "column",
+                      "repeat": {
+                        "items": {
+                          "path": "/threads"
+                        },
+                        "as": "chat",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "listItem",
+                          "testTag": "chat_row",
+                          "headline": "{chat.name}",
+                          "supporting": "{chat.when} · {chat.last}",
+                          "leadingIcon": "account_circle",
+                          "onTap": [
+                            {
+                              "type": "setState",
+                              "key": "chatId",
+                              "value": "{chat.id}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "chatName",
+                              "value": "{chat.name}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "replyTo",
+                              "value": ""
+                            },
+                            {
+                              "type": "setState",
+                              "key": "draft",
+                              "value": ""
+                            },
+                            {
+                              "type": "cancelTimer",
+                              "id": "recorder"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "recording",
+                              "value": false
+                            },
+                            {
+                              "type": "setState",
+                              "key": "recSeconds",
+                              "value": 0
+                            },
+                            {
+                              "type": "setData",
+                              "path": "/data/pending/text",
+                              "value": {
+                                "value": ""
+                              }
+                            },
+                            {
+                              "type": "setData",
+                              "path": "/data/pending/quote",
+                              "value": {
+                                "value": ""
+                              }
+                            },
+                            {
+                              "type": "setState",
+                              "key": "unread_{chat.id}",
+                              "value": 0
+                            },
+                            {
+                              "type": "push",
+                              "stack": "nav",
+                              "screen": "conversation"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "row",
+                          "testTag": "chat_meta",
+                          "style": {
+                            "padding": {
+                              "start": 72,
+                              "end": 16,
+                              "top": 0,
+                              "bottom": 8
+                            },
+                            "spacing": 8,
+                            "alignment": "center"
+                          },
+                          "children": [
+                            {
+                              "type": "icon",
+                              "name": "push_pin",
+                              "contentDescription": "Pinned",
+                              "visibleWhen": {
+                                "key": "pinned_{chat.id}",
+                                "equals": true
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "unread_badge",
+                              "text": "{unread_{chat.id}} unread",
+                              "visibleWhen": {
+                                "key": "unread_{chat.id}",
+                                "gt": 0
+                              },
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimary",
+                                "background": "primary",
+                                "cornerRadius": "full",
+                                "padding": {
+                                  "start": 8,
+                                  "end": 8,
+                                  "top": 2,
+                                  "bottom": 2
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "status_bar",
+                    "title": "Status",
+                    "actions": [
+                      {
+                        "icon": "play_arrow",
+                        "label": "Play statuses",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "statusPage",
+                            "value": 0
+                          },
+                          {
+                            "type": "startTimer",
+                            "id": "status",
+                            "afterMs": 3000,
+                            "everyMs": 3000,
+                            "maxRuns": 2,
+                            "actions": [
+                              {
+                                "type": "increment",
+                                "key": "statusPage"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "row",
+                    "testTag": "status_progress",
+                    "style": {
+                      "padding": {
+                        "start": 16,
+                        "end": 16,
+                        "top": 8,
+                        "bottom": 8
+                      },
+                      "spacing": 4
+                    },
+                    "children": [
+                      {
+                        "type": "box",
+                        "style": {
+                          "weight": 1,
+                          "height": {
+                            "dp": 4
+                          },
+                          "cornerRadius": "full",
+                          "background": "surfaceVariant"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "statusPage",
+                              "gt": -1
+                            },
+                            "style": {
+                              "background": "primary"
+                            }
+                          }
+                        ],
+                        "children": []
+                      },
+                      {
+                        "type": "box",
+                        "style": {
+                          "weight": 1,
+                          "height": {
+                            "dp": 4
+                          },
+                          "cornerRadius": "full",
+                          "background": "surfaceVariant"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "statusPage",
+                              "gt": 0
+                            },
+                            "style": {
+                              "background": "primary"
+                            }
+                          }
+                        ],
+                        "children": []
+                      },
+                      {
+                        "type": "box",
+                        "style": {
+                          "weight": 1,
+                          "height": {
+                            "dp": 4
+                          },
+                          "cornerRadius": "full",
+                          "background": "surfaceVariant"
+                        },
+                        "styleWhen": [
+                          {
+                            "when": {
+                              "key": "statusPage",
+                              "gt": 1
+                            },
+                            "style": {
+                              "background": "primary"
+                            }
+                          }
+                        ],
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "type": "pager",
+                    "id": "statusPager",
+                    "testTag": "status_pager",
+                    "stateKey": "statusPage",
+                    "style": {
+                      "weight": 1
+                    },
+                    "children": [
+                      {
+                        "type": "column",
+                        "style": {
+                          "background": "tertiaryContainer",
+                          "alignment": "center",
+                          "arrangement": "center",
+                          "spacing": 8,
+                          "padding": {
+                            "start": 16,
+                            "end": 16,
+                            "top": 16,
+                            "bottom": 16
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Ana",
+                            "semantics": {
+                              "heading": true
+                            },
+                            "style": {
+                              "textStyle": "headlineSmall"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "Demo day!",
+                            "style": {
+                              "textStyle": "bodyLarge"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "column",
+                        "style": {
+                          "background": "secondaryContainer",
+                          "alignment": "center",
+                          "arrangement": "center",
+                          "spacing": 8,
+                          "padding": {
+                            "start": 16,
+                            "end": 16,
+                            "top": 16,
+                            "bottom": 16
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Bo",
+                            "semantics": {
+                              "heading": true
+                            },
+                            "style": {
+                              "textStyle": "headlineSmall"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "New bike",
+                            "style": {
+                              "textStyle": "bodyLarge"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "column",
+                        "style": {
+                          "background": "primaryContainer",
+                          "alignment": "center",
+                          "arrangement": "center",
+                          "spacing": 8,
+                          "padding": {
+                            "start": 16,
+                            "end": 16,
+                            "top": 16,
+                            "bottom": 16
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Mia",
+                            "semantics": {
+                              "heading": true
+                            },
+                            "style": {
+                              "textStyle": "headlineSmall"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "Summit",
+                            "style": {
+                              "textStyle": "bodyLarge"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "calls_bar",
+                    "title": "Calls"
+                  },
+                  {
+                    "type": "column",
+                    "repeat": {
+                      "items": {
+                        "path": "/calls"
+                      },
+                      "as": "log",
+                      "key": "id"
+                    },
+                    "children": [
+                      {
+                        "type": "listItem",
+                        "testTag": "call_row",
+                        "headline": "{log.name}",
+                        "supporting": "{log.kind} · {log.when}",
+                        "leadingIcon": "call",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "chatId",
+                            "value": "{log.chat}"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "chatName",
+                            "value": "{log.name}"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "callState",
+                            "value": "ringing"
+                          },
+                          {
+                            "type": "cancelTimer",
+                            "id": "answer"
+                          },
+                          {
+                            "type": "cancelTimer",
+                            "id": "callClock"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "callSeconds",
+                            "value": 0
+                          },
+                          {
+                            "type": "push",
+                            "stack": "nav",
+                            "screen": "call"
+                          },
+                          {
+                            "type": "startTimer",
+                            "id": "answer",
+                            "afterMs": 2000,
+                            "actions": [
+                              {
+                                "type": "setState",
+                                "key": "callState",
+                                "value": "connected"
+                              },
+                              {
+                                "type": "startTimer",
+                                "id": "callClock",
+                                "afterMs": 1000,
+                                "everyMs": 1000,
+                                "maxRuns": 3600,
+                                "actions": [
+                                  {
+                                    "type": "increment",
+                                    "key": "callSeconds"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "tabs",
+            "items": [
+              {
+                "label": "Chats",
+                "icon": "chat"
+              },
+              {
+                "label": "Status",
+                "icon": "circle"
+              },
+              {
+                "label": "Calls",
+                "icon": "call"
+              }
+            ]
+          }
+        ]
+      },
+      "conversation": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "conversation_bar",
+            "title": "{chatName}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "cancelTimer",
+                  "id": "recorder"
+                },
+                {
+                  "type": "setState",
+                  "key": "recording",
+                  "value": false
+                },
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            },
+            "actions": [
+              {
+                "icon": "call",
+                "label": "Voice call",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "callState",
+                    "value": "ringing"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "answer"
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "callClock"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "callSeconds",
+                    "value": 0
+                  },
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "call"
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "answer",
+                    "afterMs": 2000,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "callState",
+                        "value": "connected"
+                      },
+                      {
+                        "type": "startTimer",
+                        "id": "callClock",
+                        "afterMs": 1000,
+                        "everyMs": 1000,
+                        "maxRuns": 3600,
+                        "actions": [
+                          {
+                            "type": "increment",
+                            "key": "callSeconds"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "scroll",
+            "testTag": "messages_scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 8
+              },
+              "children": [
+                {
+                  "type": "column",
+                  "testTag": "thread_ana",
+                  "visibleWhen": {
+                    "key": "chatId",
+                    "equals": "ana"
+                  },
+                  "style": {
+                    "spacing": 8
+                  },
+                  "repeat": {
+                    "items": {
+                      "path": "/threads/0/messages"
+                    },
+                    "as": "msg",
+                    "key": "id"
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "visibleWhen": {
+                        "key": "mine_{msg.id}",
+                        "equals": true
+                      },
+                      "style": {
+                        "width": "fill",
+                        "arrangement": "end"
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "testTag": "bubble_mine",
+                          "contentDescription": "Your message, hold to reply",
+                          "style": {
+                            "padding": {
+                              "start": 12,
+                              "end": 12,
+                              "top": 8,
+                              "bottom": 8
+                            },
+                            "background": "primaryContainer",
+                            "cornerRadius": "medium",
+                            "maxWidth": 300
+                          },
+                          "onLongPress": [
+                            {
+                              "type": "setState",
+                              "key": "replyTo",
+                              "value": "{msg.text}"
+                            }
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "{msg.from}",
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{msg.text}",
+                              "style": {
+                                "textStyle": "bodyLarge",
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{msg.time}",
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimaryContainer"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "column",
+                      "testTag": "bubble_theirs",
+                      "contentDescription": "Message, hold to reply",
+                      "style": {
+                        "padding": {
+                          "start": 12,
+                          "end": 12,
+                          "top": 8,
+                          "bottom": 8
+                        },
+                        "background": "surfaceContainerHigh",
+                        "cornerRadius": "medium",
+                        "maxWidth": 300
+                      },
+                      "onLongPress": [
+                        {
+                          "type": "setState",
+                          "key": "replyTo",
+                          "value": "{msg.text}"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "{msg.from}",
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onSurfaceVariant"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{msg.text}",
+                          "style": {
+                            "textStyle": "bodyLarge",
+                            "color": "onSurface"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{msg.time}",
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onSurfaceVariant"
+                          }
+                        }
+                      ],
+                      "visibleWhen": {
+                        "key": "mine_{msg.id}",
+                        "equals": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "thread_bo",
+                  "visibleWhen": {
+                    "key": "chatId",
+                    "equals": "bo"
+                  },
+                  "style": {
+                    "spacing": 8
+                  },
+                  "repeat": {
+                    "items": {
+                      "path": "/threads/1/messages"
+                    },
+                    "as": "msg",
+                    "key": "id"
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "visibleWhen": {
+                        "key": "mine_{msg.id}",
+                        "equals": true
+                      },
+                      "style": {
+                        "width": "fill",
+                        "arrangement": "end"
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "testTag": "bubble_mine",
+                          "contentDescription": "Your message, hold to reply",
+                          "style": {
+                            "padding": {
+                              "start": 12,
+                              "end": 12,
+                              "top": 8,
+                              "bottom": 8
+                            },
+                            "background": "primaryContainer",
+                            "cornerRadius": "medium",
+                            "maxWidth": 300
+                          },
+                          "onLongPress": [
+                            {
+                              "type": "setState",
+                              "key": "replyTo",
+                              "value": "{msg.text}"
+                            }
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "{msg.from}",
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{msg.text}",
+                              "style": {
+                                "textStyle": "bodyLarge",
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{msg.time}",
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimaryContainer"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "column",
+                      "testTag": "bubble_theirs",
+                      "contentDescription": "Message, hold to reply",
+                      "style": {
+                        "padding": {
+                          "start": 12,
+                          "end": 12,
+                          "top": 8,
+                          "bottom": 8
+                        },
+                        "background": "surfaceContainerHigh",
+                        "cornerRadius": "medium",
+                        "maxWidth": 300
+                      },
+                      "onLongPress": [
+                        {
+                          "type": "setState",
+                          "key": "replyTo",
+                          "value": "{msg.text}"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "{msg.from}",
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onSurfaceVariant"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{msg.text}",
+                          "style": {
+                            "textStyle": "bodyLarge",
+                            "color": "onSurface"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{msg.time}",
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onSurfaceVariant"
+                          }
+                        }
+                      ],
+                      "visibleWhen": {
+                        "key": "mine_{msg.id}",
+                        "equals": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "thread_climbing",
+                  "visibleWhen": {
+                    "key": "chatId",
+                    "equals": "climbing"
+                  },
+                  "style": {
+                    "spacing": 8
+                  },
+                  "repeat": {
+                    "items": {
+                      "path": "/threads/2/messages"
+                    },
+                    "as": "msg",
+                    "key": "id"
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "visibleWhen": {
+                        "key": "mine_{msg.id}",
+                        "equals": true
+                      },
+                      "style": {
+                        "width": "fill",
+                        "arrangement": "end"
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "testTag": "bubble_mine",
+                          "contentDescription": "Your message, hold to reply",
+                          "style": {
+                            "padding": {
+                              "start": 12,
+                              "end": 12,
+                              "top": 8,
+                              "bottom": 8
+                            },
+                            "background": "primaryContainer",
+                            "cornerRadius": "medium",
+                            "maxWidth": 300
+                          },
+                          "onLongPress": [
+                            {
+                              "type": "setState",
+                              "key": "replyTo",
+                              "value": "{msg.text}"
+                            }
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "{msg.from}",
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{msg.text}",
+                              "style": {
+                                "textStyle": "bodyLarge",
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{msg.time}",
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimaryContainer"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "column",
+                      "testTag": "bubble_theirs",
+                      "contentDescription": "Message, hold to reply",
+                      "style": {
+                        "padding": {
+                          "start": 12,
+                          "end": 12,
+                          "top": 8,
+                          "bottom": 8
+                        },
+                        "background": "surfaceContainerHigh",
+                        "cornerRadius": "medium",
+                        "maxWidth": 300
+                      },
+                      "onLongPress": [
+                        {
+                          "type": "setState",
+                          "key": "replyTo",
+                          "value": "{msg.text}"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "{msg.from}",
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onSurfaceVariant"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{msg.text}",
+                          "style": {
+                            "textStyle": "bodyLarge",
+                            "color": "onSurface"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{msg.time}",
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onSurfaceVariant"
+                          }
+                        }
+                      ],
+                      "visibleWhen": {
+                        "key": "mine_{msg.id}",
+                        "equals": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "row",
+                  "style": {
+                    "width": "fill",
+                    "arrangement": "end"
+                  },
+                  "children": [
+                    {
+                      "type": "column",
+                      "testTag": "bubble_sent",
+                      "visibleWhen": {
+                        "data": "/pending/text",
+                        "empty": false
+                      },
+                      "style": {
+                        "padding": {
+                          "start": 12,
+                          "end": 12,
+                          "top": 8,
+                          "bottom": 8
+                        },
+                        "background": "primaryContainer",
+                        "cornerRadius": "medium",
+                        "maxWidth": 300
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "testTag": "sent_quote",
+                          "visibleWhen": {
+                            "data": "/pending/quote",
+                            "empty": false
+                          },
+                          "text": "Replying to: {data:/pending/quote}",
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onPrimaryContainer"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "testTag": "sent_text",
+                          "text": "{data:/pending/text}",
+                          "style": {
+                            "textStyle": "bodyLarge",
+                            "color": "onPrimaryContainer"
+                          }
+                        },
+                        {
+                          "type": "row",
+                          "style": {
+                            "spacing": 4,
+                            "alignment": "center"
+                          },
+                          "children": [
+                            {
+                              "type": "text",
+                              "text": "now",
+                              "style": {
+                                "textStyle": "labelSmall",
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "icon",
+                              "testTag": "tick_sending",
+                              "name": "schedule",
+                              "contentDescription": "Sending",
+                              "visibleWhen": {
+                                "key": "sendStatus",
+                                "equals": "sending"
+                              },
+                              "style": {
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "icon",
+                              "testTag": "tick_sent",
+                              "name": "done",
+                              "contentDescription": "Sent",
+                              "visibleWhen": {
+                                "key": "sendStatus",
+                                "equals": "sent"
+                              },
+                              "style": {
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "icon",
+                              "testTag": "tick_delivered",
+                              "name": "done_all",
+                              "contentDescription": "Delivered",
+                              "visibleWhen": {
+                                "key": "sendStatus",
+                                "equals": "delivered"
+                              },
+                              "style": {
+                                "color": "onPrimaryContainer"
+                              }
+                            },
+                            {
+                              "type": "icon",
+                              "testTag": "tick_read",
+                              "name": "done_all",
+                              "contentDescription": "Read",
+                              "visibleWhen": {
+                                "key": "sendStatus",
+                                "equals": "read"
+                              },
+                              "style": {
+                                "color": "primary"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "row",
+            "testTag": "reply_bar",
+            "visibleWhen": {
+              "key": "replyTo",
+              "lengthGt": 0
+            },
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 8,
+                "top": 4,
+                "bottom": 4
+              },
+              "spacing": 8,
+              "alignment": "center",
+              "background": "surfaceContainer"
+            },
+            "children": [
+              {
+                "type": "icon",
+                "name": "reply",
+                "contentDescription": "Reply"
+              },
+              {
+                "type": "text",
+                "testTag": "reply_quote",
+                "text": "{replyTo}",
+                "style": {
+                  "weight": 1,
+                  "maxLines": 1,
+                  "overflow": "ellipsis",
+                  "textStyle": "bodySmall"
+                }
+              },
+              {
+                "type": "iconButton",
+                "testTag": "reply_cancel",
+                "icon": "close",
+                "contentDescription": "Cancel reply",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "replyTo",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "testTag": "recording_bar",
+            "visibleWhen": {
+              "key": "recording",
+              "equals": true
+            },
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 4,
+                "bottom": 4
+              },
+              "spacing": 8,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "icon",
+                "name": "graphic_eq",
+                "contentDescription": "Recording",
+                "style": {
+                  "color": "error"
+                }
+              },
+              {
+                "type": "text",
+                "testTag": "recording_time",
+                "text": "Recording {recSeconds} s, tap send to finish",
+                "semantics": {
+                  "liveRegion": "polite"
+                }
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "safeAreaPadding": {
+              "edges": ["bottom"],
+              "types": ["ime", "systemBars"]
+            },
+            "style": {
+              "padding": {
+                "start": 8,
+                "end": 8,
+                "top": 4,
+                "bottom": 4
+              },
+              "spacing": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "textField",
+                "testTag": "composer",
+                "stateKey": "draft",
+                "placeholder": "Message",
+                "imeAction": "send",
+                "checks": [
+                  {
+                    "message": "Type a message first",
+                    "required": true
+                  }
+                ],
+                "validateOn": "submit",
+                "style": {
+                  "weight": 1
+                },
+                "onSubmit": [
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/text",
+                    "value": {
+                      "state": "draft"
+                    }
+                  },
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/quote",
+                    "value": {
+                      "state": "replyTo"
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "sendStatus",
+                    "value": "sending"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "message_sent",
+                    "requireValid": ["draft"],
+                    "context": {
+                      "chat": {
+                        "state": "chatId"
+                      },
+                      "text": {
+                        "state": "draft"
+                      },
+                      "replyTo": {
+                        "state": "replyTo"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "draft",
+                    "value": ""
+                  },
+                  {
+                    "type": "setState",
+                    "key": "replyTo",
+                    "value": ""
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "sent",
+                    "afterMs": 400,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "sent"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "delivered",
+                    "afterMs": 1200,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "delivered"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "read",
+                    "afterMs": 3000,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "read"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "send_button",
+                "icon": "send",
+                "contentDescription": "Send",
+                "enabledWhen": {
+                  "key": "draft",
+                  "lengthGt": 0
+                },
+                "onTap": [
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/text",
+                    "value": {
+                      "state": "draft"
+                    }
+                  },
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/quote",
+                    "value": {
+                      "state": "replyTo"
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "sendStatus",
+                    "value": "sending"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "message_sent",
+                    "requireValid": ["draft"],
+                    "context": {
+                      "chat": {
+                        "state": "chatId"
+                      },
+                      "text": {
+                        "state": "draft"
+                      },
+                      "replyTo": {
+                        "state": "replyTo"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "draft",
+                    "value": ""
+                  },
+                  {
+                    "type": "setState",
+                    "key": "replyTo",
+                    "value": ""
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "sent",
+                    "afterMs": 400,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "sent"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "delivered",
+                    "afterMs": 1200,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "delivered"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "read",
+                    "afterMs": 3000,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "read"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "icon",
+                "testTag": "mic_button",
+                "name": "mic",
+                "contentDescription": "Voice note: hold to record",
+                "visibleWhen": {
+                  "key": "recording",
+                  "equals": false
+                },
+                "style": {
+                  "width": {
+                    "dp": 48
+                  },
+                  "height": {
+                    "dp": 48
+                  },
+                  "color": "primary"
+                },
+                "onLongPress": [
+                  {
+                    "type": "setState",
+                    "key": "recording",
+                    "value": true
+                  },
+                  {
+                    "type": "setState",
+                    "key": "recSeconds",
+                    "value": 0
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "recorder",
+                    "afterMs": 1000,
+                    "everyMs": 1000,
+                    "maxRuns": 120,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "recSeconds"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "icon",
+                "testTag": "mic_send",
+                "name": "send",
+                "contentDescription": "Send voice note",
+                "visibleWhen": {
+                  "key": "recording",
+                  "equals": true
+                },
+                "style": {
+                  "width": {
+                    "dp": 48
+                  },
+                  "height": {
+                    "dp": 48
+                  },
+                  "color": "error"
+                },
+                "onTap": [
+                  {
+                    "type": "cancelTimer",
+                    "id": "recorder"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "voice_note_sent",
+                    "context": {
+                      "chat": {
+                        "state": "chatId"
+                      },
+                      "seconds": {
+                        "state": "recSeconds"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "recording",
+                    "value": false
+                  },
+                  {
+                    "type": "setState",
+                    "key": "recSeconds",
+                    "value": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "call": {
+        "type": "column",
+        "style": {
+          "background": "inverseSurface",
+          "alignment": "center",
+          "arrangement": "center",
+          "spacing": 16,
+          "padding": {
+            "start": 16,
+            "end": 16,
+            "top": 16,
+            "bottom": 16
+          }
+        },
+        "children": [
+          {
+            "type": "icon",
+            "name": "account_circle",
+            "contentDescription": "Contact",
+            "style": {
+              "color": "inverseOnSurface"
+            }
+          },
+          {
+            "type": "text",
+            "text": "{chatName}",
+            "semantics": {
+              "heading": true
+            },
+            "style": {
+              "textStyle": "headlineMedium",
+              "color": "inverseOnSurface"
+            }
+          },
+          {
+            "type": "text",
+            "testTag": "call_ringing",
+            "visibleWhen": {
+              "key": "callState",
+              "equals": "ringing"
+            },
+            "text": "Calling…",
+            "semantics": {
+              "liveRegion": "polite"
+            },
+            "style": {
+              "color": "inverseOnSurface"
+            }
+          },
+          {
+            "type": "text",
+            "testTag": "call_connected",
+            "visibleWhen": {
+              "key": "callState",
+              "equals": "connected"
+            },
+            "text": "{callSeconds} s",
+            "semantics": {
+              "liveRegion": "polite"
+            },
+            "style": {
+              "color": "inverseOnSurface"
+            }
+          },
+          {
+            "type": "fab",
+            "testTag": "call_end",
+            "icon": "call_end",
+            "label": "End call",
+            "onTap": [
+              {
+                "type": "cancelTimer",
+                "id": "answer"
+              },
+              {
+                "type": "cancelTimer",
+                "id": "callClock"
+              },
+              {
+                "type": "emit",
+                "name": "call_ended",
+                "context": {
+                  "chat": {
+                    "state": "chatId"
+                  },
+                  "seconds": {
+                    "state": "callSeconds"
+                  }
+                }
+              },
+              {
+                "type": "setState",
+                "key": "callState",
+                "value": "idle"
+              },
+              {
+                "type": "setState",
+                "key": "callSeconds",
+                "value": 0
+              },
+              {
+                "type": "pop",
+                "stack": "nav"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

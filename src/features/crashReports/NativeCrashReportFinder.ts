@@ -28,28 +28,41 @@ export function unsupportedCrashReportFinder(reason: string): NativeCrashReportF
   return { find: async () => ({ status: "unsupported", reason }) };
 }
 
+/** Dropbox entries are written synchronously by system_server; ~2 s covers them. */
+export const ANDROID_CRASH_REPORT_POLL_DELAYS_MS: readonly number[] = [500, 500, 500];
+
 /**
- * ReportCrash writes the `.ips` shortly after the process dies, so a lookup
- * retries a few times on the injected timer before reporting `notFound`.
+ * ReportCrash writes the Simulator `.ips` asynchronously: under host load it
+ * lands 4-14 s after the process dies (#14103), so the lookup waits ~20 s.
+ * crashApp always sends SIGABRT, which always produces a report, so the full
+ * wait is only spent when the report is genuinely slow.
+ */
+export const IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS: readonly number[] = [
+  500, 500, 1_000, 1_000, 2_000, 3_000, 3_000, 3_000, 3_000, 3_000,
+];
+
+/**
+ * Retries a lookup on the injected timer, sleeping each delay in turn, before
+ * reporting `notFound`. Makes `delaysMs.length + 1` attempts.
  */
 export class PollingCrashReportFinder implements NativeCrashReportFinder {
   constructor(
     private readonly inner: NativeCrashReportFinder,
     private readonly timer: Pick<Timer, "sleep">,
-    private readonly attempts = 4,
-    private readonly intervalMs = 500,
+    private readonly delaysMs: readonly number[] = ANDROID_CRASH_REPORT_POLL_DELAYS_MS,
   ) {}
 
   async find(query: NativeCrashReportQuery): Promise<NativeCrashReportLookup> {
     let lookup: NativeCrashReportLookup = { status: "notFound" };
-    for (let attempt = 0; attempt < this.attempts; attempt += 1) {
+    for (let attempt = 0; attempt <= this.delaysMs.length; attempt += 1) {
       query.signal?.throwIfAborted();
       lookup = await this.inner.find(query);
       if (lookup.status !== "notFound") {
         return lookup;
       }
-      if (attempt + 1 < this.attempts) {
-        await this.timer.sleep(this.intervalMs);
+      const delayMs = this.delaysMs[attempt];
+      if (delayMs !== undefined) {
+        await this.timer.sleep(delayMs);
       }
     }
     return lookup;
@@ -75,6 +88,7 @@ export function createNativeCrashReportFinder(
   return new PollingCrashReportFinder(
     new IosSimulatorCrashReportFinder(device.deviceId, deps.fileSystem),
     deps.timer,
+    IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS,
   );
 }
 

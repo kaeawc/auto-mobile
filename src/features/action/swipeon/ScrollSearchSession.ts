@@ -11,6 +11,7 @@ import {
   SwipeOnResult,
   SwipeResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -434,7 +435,7 @@ export class ScrollSearchSession {
     const { startX, startY, endX, endY } = activeCoords;
     const chromeStartWarning = iosSwipeStartWarning({
       observation: this.lastObservation,
-      platform: this.deps.device.platform,
+      platform: requireAndroidOrIosPlatform(this.deps.device.platform, "swipeOn"),
       startX: Math.floor(startX),
       startY: Math.floor(startY),
     });

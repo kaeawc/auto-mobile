@@ -1,4 +1,5 @@
 import type { InstalledAppsTable } from "../models/InstalledAppsStore";
+import type { Platform } from "../models/Platform";
 import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 
 /**
@@ -10,7 +11,7 @@ import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 export interface DeviceConfigTable {
   id: Generated<number>;
   device_id: string;
-  platform: "android" | "ios";
+  platform: Platform;
   active_mode: string | null;
   config_json: string; // JSON blob for flexible config storage
   created_at: Generated<string>;
@@ -495,7 +496,7 @@ export interface DeviceSessionsTable {
   device_id: string;
   stable_device_id?: string | null;
   stable_identity_generation?: number;
-  platform: "android" | "ios";
+  platform: Platform;
   status: DeviceSessionStatus;
   source: string | null;
   autolock_enabled: number;

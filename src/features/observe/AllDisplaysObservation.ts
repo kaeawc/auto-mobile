@@ -1,4 +1,5 @@
 import type { BootedDevice, ObserveResult } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import type { DisplayObservation } from "../../models/ObserveResult";
 import { logger } from "../../utils/logger";
 import { errorMessage as describeError } from "../../utils/describeUnknownError";
@@ -42,7 +43,9 @@ export class AllDisplaysObservation {
     options?: ObserveScreenExecuteOptions & { deviceReadScreenshot?: ScreenshotEncodingOptions },
   ): Promise<ObserveResult> {
     const deviceReadScreenshot = options?.deviceReadScreenshot;
-    assertAllDisplayObserveSupported(this.d.device().platform);
+    assertAllDisplayObserveSupported(
+      requireAndroidOrIosPlatform(this.d.device().platform, "Observing all displays"),
+    );
     // Reuse the existing hierarchy-capture budget; one deadline covers every panel.
     const deadline = this.d.timer().now() + (options?.timeoutMs ?? 15000);
     const active = await this.readAggregatePanel("active", {

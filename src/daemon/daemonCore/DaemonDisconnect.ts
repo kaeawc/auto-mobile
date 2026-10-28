@@ -1,5 +1,6 @@
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
 import { logger } from "../../utils/logger";
+import type { Platform } from "../../models";
 import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 import { type Session } from "../sessionManager";
 import { SingleFlightInterval } from "../SingleFlightInterval";
@@ -70,10 +71,7 @@ export type { DisconnectMonitorCadence } from "../disconnectMonitorCadence";
 
 interface DisconnectSweep {
   adbServerResetCohort: readonly PooledDevice[];
-  selectPlatform: (
-    platforms: ("android" | "ios")[],
-    planOnTracked: boolean,
-  ) => "android" | "ios" | "either";
+  selectPlatform: (platforms: Platform[], planOnTracked: boolean) => "android" | "ios" | "either";
   idleSignature?: string;
 }
 
@@ -992,7 +990,7 @@ export class DaemonDisconnect {
 
   private async cleanupDisconnects(
     bootedDeviceIds: Set<string>,
-    succeededPlatforms: Set<"android" | "ios">,
+    succeededPlatforms: Set<Platform>,
     missingByDevice: Map<string, string[]>,
     activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>,
     sweep: { adbServerResetCohort: readonly PooledDevice[] },

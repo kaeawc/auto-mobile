@@ -24,7 +24,14 @@ import {
 } from "../features/observe/SnapshotReferenceStore";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
-import { BootedDevice, ObserveResult, ObserveToolPayload } from "../models";
+import {
+  type AndroidOrIosPlatform,
+  type Platform,
+  BootedDevice,
+  ObserveResult,
+  ObserveToolPayload,
+  requireAndroidOrIosPlatform,
+} from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
   hasOwnPrototype,
@@ -225,7 +232,8 @@ export function attachSnapshotReference(
   }
 }
 
-export function prepareObserveOptions(platform: BootedDevice["platform"], args: ObserveArgs) {
+export function prepareObserveOptions(devicePlatform: Platform, args: ObserveArgs) {
+  const platform = requireAndroidOrIosPlatform(devicePlatform, "observe");
   const deviceRead = getToolSelectionContext()?.explicitObserveDeviceRead === true;
   if (args.display === "all") {
     assertAllDisplayObserveSupported(platform, args);
@@ -252,6 +260,7 @@ export function prepareObserveOptions(platform: BootedDevice["platform"], args: 
   assertActiveWindowWaitForSupportedOnPlatform(platform, args.waitFor);
   const screenshot = requestedScreenshotMode(args);
   return {
+    platform,
     deviceRead,
     aggregate: args.display === "all",
     timeoutMs: aggregateObserveTimeoutMs(args),
@@ -320,7 +329,7 @@ export async function attachObserveCrop(
   result.crop = await createObserveCrop(
     args.crop,
     { ...result, deviceId: device.deviceId },
-    device.platform,
+    requireAndroidOrIosPlatform(device.platform, "Observe crop"),
     dependencies,
     selectorObservation,
   );
@@ -334,7 +343,7 @@ export async function attachObserveCrop(
 export function layerScopedObserveResult(
   result: ObserveResult,
   layer: HierarchyLayer | undefined,
-  platform: BootedDevice["platform"],
+  platform: AndroidOrIosPlatform,
   requirePrototype: boolean,
 ): ObserveResult {
   if (layer === undefined) {

@@ -235,7 +235,7 @@ describe("read listing status preserves incomplete discovery", () => {
     expect(await listBootedDevicesForResource("android", "test")).toEqual([]);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("android", "test")).toMatchObject({
       devices: [],
-      scanned: { android: false, ios: false },
+      scanned: { android: false, ios: false, watchos: false },
       discoveryErrors: { android: { code: "failed", message: "listing failed" } },
     });
   });
@@ -260,7 +260,7 @@ describe("read listing status preserves incomplete discovery", () => {
     installManager(manager);
     expect(await defaultDeviceObservationAccess.listBootedWithStatus!(undefined)).toEqual({
       devices: [device],
-      scanned: { android: true, ios: false },
+      scanned: { android: true, ios: false, watchos: false },
       discoveryErrors: { ios: error },
     });
   });
@@ -276,7 +276,7 @@ describe("read listing status preserves incomplete discovery", () => {
     installManager(manager);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toEqual({
       devices: [],
-      scanned: { android: true, ios: false },
+      scanned: { android: true, ios: false, watchos: false },
       discoveryErrors: { ios: error },
     });
   });
@@ -290,7 +290,7 @@ describe("read listing status preserves incomplete discovery", () => {
     installManager(manager);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toMatchObject({
       devices: [],
-      scanned: { android: true, ios: true },
+      scanned: { android: true, ios: true, watchos: false },
     });
     expect(await defaultDeviceObservationAccess.listBooted(undefined)).toEqual([]);
   });

@@ -8,7 +8,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod/v4";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import type { BootedDevice } from "../models";
+import { type BootedDevice, requireAndroidOrIosPlatform } from "../models";
 import type { ElementBounds } from "../models/ElementBounds";
 import { createDeviceHierarchyCapture } from "../features/observe/DeviceHierarchyCapture";
 import type { HierarchyCapture } from "../features/observe/HierarchyCapture";
@@ -107,7 +107,7 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
           source,
           requestedBounds,
           {
-            platform: device.platform,
+            platform: requireAndroidOrIosPlatform(device.platform, "snapshotOf"),
             screenSize: { width: screenSize.width, height: screenSize.height },
             rotation: snapshot.hierarchy.rotation,
             nativeScale: snapshot.hierarchy.nativeScale,

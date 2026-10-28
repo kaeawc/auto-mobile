@@ -1,6 +1,12 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../../src/models";
+import {
+  ActionableError,
+  type AndroidOrIosPlatform,
+  BootedDevice,
+  DeviceInfo,
+  Platform,
+} from "../../src/models";
 import {
   getAndroidSchema,
   isMismatchedBootedDeviceId,
@@ -35,7 +41,7 @@ const identifier = fc.constantFrom<string>(...IDENTIFIERS);
 const nonEmptyIdentifier = fc.constantFrom<string>(
   ...IDENTIFIERS.filter((value) => value.length > 0),
 );
-const platform = fc.constantFrom<Platform>("android", "ios");
+const platform = fc.constantFrom<AndroidOrIosPlatform>("android", "ios");
 
 // ---------------------------------------------------------------------------
 // getAndroidSchema — the tool call's input contract. It composes both
@@ -334,7 +340,10 @@ describe("validateRequestedAndroidSerial (property-based)", () => {
 // match when the AVD name (on the device or its source image) matches.
 // ---------------------------------------------------------------------------
 describe("isMismatchedBootedDeviceId (property-based)", () => {
-  const argsFor = (deviceId: string | undefined, devicePlatform: Platform): StartDeviceArgs => ({
+  const argsFor = (
+    deviceId: string | undefined,
+    devicePlatform: AndroidOrIosPlatform,
+  ): StartDeviceArgs => ({
     platform: devicePlatform,
     deviceId,
   });

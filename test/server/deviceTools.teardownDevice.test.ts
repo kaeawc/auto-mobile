@@ -1005,7 +1005,7 @@ describe("deleteDevice handler", () => {
     expect(recordingFilters).toContainEqual({
       status: "recording",
       deviceId: device.deviceId,
-      platform: device.platform,
+      platform: "ios",
     });
     expect(stoppedRecordingIds).toEqual(["recording-1"]);
   });

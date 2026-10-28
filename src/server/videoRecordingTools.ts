@@ -1,7 +1,12 @@
 import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
-import { ActionableError, type BootedDevice, type VideoRecordingConfigInput } from "../models";
+import {
+  ActionableError,
+  type BootedDevice,
+  requireAndroidOrIosPlatform,
+  type VideoRecordingConfigInput,
+} from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { videoRecordingResultSchema } from "./videoRecordingToolOutputSchemas";
 import {
@@ -512,7 +517,9 @@ async function stopResolvedDeviceRecordings(
     // so finalizing it replaces the single-recording stop for this device.
     const deviceSessions = segmentedSessions.forDevice(target);
     if (deviceSessions.length === 0) {
-      activeRecords ??= await listActiveVideoRecordings({ platform: device.platform });
+      activeRecords ??= await listActiveVideoRecordings({
+        platform: requireAndroidOrIosPlatform(device.platform, "videoRecording stop"),
+      });
       const matches = activeRecords.filter((record) => record.deviceId === target.deviceId);
       const latest = matches.length > 0 ? selectLatestRecording(matches) : undefined;
       const stoppedOrphans = await stopStartupOrphansForDevice(

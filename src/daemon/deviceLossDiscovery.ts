@@ -1,5 +1,5 @@
 import { didSourceSucceedForDevice, discoverySourceFor } from "../utils/discoverySource";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, Platform } from "../models";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -84,7 +84,7 @@ export async function discoverAndReconcile(
   }: {
     iosDeviceListMaxAgeMs?: number;
     isPlanDevice?: (deviceId: string) => boolean;
-    heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
+    heldDevices?: readonly { platform: Platform; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
   },
@@ -228,7 +228,7 @@ export async function getAndroidOfflineCanonicalIds(
 function findMissingAndroidCandidates(
   candidateDeviceIds: Set<string>,
   bootedDeviceIds: Set<string>,
-  candidatePlatforms: Map<string, "android" | "ios">,
+  candidatePlatforms: Map<string, Platform>,
 ): Set<string> {
   return new Set(
     [...candidateDeviceIds].filter(
@@ -262,7 +262,7 @@ export async function probeListedAndroidStates(
   planActive: boolean,
   candidateDeviceIds: Set<string>,
   bootedDeviceIds: Set<string>,
-  candidatePlatforms: Map<string, "android" | "ios">,
+  candidatePlatforms: Map<string, Platform>,
 ): Promise<ListedAndroidStates> {
   if (planActive) {
     return {};
@@ -346,7 +346,7 @@ export function collectDisconnectCandidates(
   activeRecordings: ActiveRecordings,
 ) {
   const candidateDeviceIds = new Set<string>();
-  const candidatePlatforms = new Map<string, "android" | "ios">();
+  const candidatePlatforms = new Map<string, Platform>();
   const candidateIncarnations = recordingCandidateIncarnations(activeRecordings);
   for (const recording of activeRecordings) {
     candidateDeviceIds.add(recording.deviceId);

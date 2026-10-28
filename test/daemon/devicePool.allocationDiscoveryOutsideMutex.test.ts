@@ -10,7 +10,7 @@ import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
 import { ActionableError } from "../../src/models/ActionableError";
 import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { BootedDevice, SomePlatform } from "../../src/models";
+import type { BootedDevice, Platform, SomePlatform } from "../../src/models";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -111,11 +111,7 @@ afterEach(() => {
 
 // Capture rejection immediately so intentionally pending/aborted acquisitions
 // never produce an unhandled rejection while another interleaving is exercised.
-function acquire(
-  sessionId: string,
-  platform: "android" | "ios",
-  controller = new AbortController(),
-) {
+function acquire(sessionId: string, platform: Platform, controller = new AbortController()) {
   let settled = false;
   const result = runWithAbortSignal(controller.signal, () =>
     pool.assignDeviceToSession(sessionId, platform),

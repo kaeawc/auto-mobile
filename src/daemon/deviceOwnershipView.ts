@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import type { Platform } from "../models";
+import { isAndroidOrIosPlatform, type Platform } from "../models";
 import { readExclusiveLockContent, type LockContent } from "../utils/fileLock";
 import { sortedReaddirSync } from "../utils/io";
 import { isProcessRunning } from "../utils/processLiveness";
@@ -290,7 +290,8 @@ export function createDefaultDeviceOwnershipSources(
       };
     },
     async execOwner(device) {
-      if (!options.registry) {
+      // Bindings hold only Android and iOS devices, so a watch has no binding execution owner.
+      if (!options.registry || !isAndroidOrIosPlatform(device.platform)) {
         return undefined;
       }
       const stable = options.stableDeviceId?.(device) ?? device.deviceId;

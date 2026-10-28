@@ -1,5 +1,5 @@
 import { holderOf } from "../deviceBinding";
-import { Platform } from "../../models";
+import { isAndroidOrIosPlatform, Platform } from "../../models";
 import { DeviceAllocationCriteria } from "../DeviceCriteriaMatcher";
 import { currentBindingReconciler, bindingRefusal } from "../sessionBroker/provisioning/exclusion";
 import {
@@ -93,6 +93,8 @@ export class DevicePoolBinding {
     const device = this.state.devices.get(input.deviceId);
     if (
       device &&
+      // Only an Android emulator is ever unresolved; the guard also narrows the refusal's platform.
+      isAndroidOrIosPlatform(device.platform) &&
       this.callbacks.isUnresolvedEmulatorWhileAndroidManaged(device) &&
       // A caller-supplied identity (the verified AVD name on acquire) was already judged above.
       !input.stableIds?.some((id) => id !== undefined && id !== "") &&

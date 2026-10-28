@@ -157,6 +157,7 @@
     "platform-calendar.json",
     "platform-call.json",
     "platform-camera-capture.json",
+    "platform-commerce.json",
     "platform-connectivity.json",
     "platform-contacts.json",
     "platform-feedback-bound-effect.json",
@@ -1062,6 +1063,12 @@
     "platform-camera-capture-undeclared-module.json",
     "platform-camera-capture-unknown-arg.json",
     "platform-camera-capture-unknown-media.json",
+    "platform-commerce-amount-arg.json",
+    "platform-commerce-missing-product.json",
+    "platform-commerce-product-id-pattern.json",
+    "platform-commerce-restore-arg.json",
+    "platform-commerce-undeclared-module.json",
+    "platform-commerce-unknown-event.json",
     "platform-condition-unknown-module.json",
     "platform-connectivity-unknown-key.json",
     "platform-contacts-multiple-not-boolean.json",
@@ -1704,6 +1711,7 @@
     "strict-gate-prototype_platform_calendar_v1.json",
     "strict-gate-prototype_platform_camera_v1.json",
     "strict-gate-prototype_platform_clipboard_v1.json",
+    "strict-gate-prototype_platform_commerce_v1.json",
     "strict-gate-prototype_platform_connectivity_v1.json",
     "strict-gate-prototype_platform_contacts_v1.json",
     "strict-gate-prototype_platform_device_v1.json",
@@ -2923,6 +2931,11 @@
     ],
     "location-block.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
     "location-block-minimal.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
+    "platform-commerce.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_commerce_v1",
+      "prototype_platform_v1"
+    ],
     "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"]
   }
 }

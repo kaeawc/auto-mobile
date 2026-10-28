@@ -1,4 +1,5 @@
 import { getAbortSignal } from "../utils/AbortContext";
+import type { Platform } from "../models";
 import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
@@ -244,7 +245,7 @@ export interface BindingInputGate {
   assertNotAssignedToBinding?(input: {
     action: string;
     deviceId: string;
-    platform: "android" | "ios";
+    platform: Platform;
     requesterSessionUuid?: string;
     maxAgeMs?: number;
   }): Promise<void>;
@@ -264,7 +265,7 @@ export const BINDING_INPUT_SNAPSHOT_MAX_AGE_MS = 1_000;
 export async function assertInputNotOnForeignBindingDevice(input: {
   action: string;
   deviceId: string;
-  platform: "android" | "ios";
+  platform: Platform;
   requesterSessionUuid: string | undefined;
   sessionManager: ToolSelectionSessionManager | undefined;
   gate: BindingInputGate;
@@ -286,7 +287,7 @@ export async function assertInputNotOnForeignBindingDevice(input: {
 export interface ForeignDaemonClaimGate {
   assertNotClaimedByForeignDaemon?(
     deviceId: string,
-    platform: "android" | "ios",
+    platform: Platform,
     remedy?: string,
     maxAgeMs?: number,
   ): Promise<void>;
@@ -307,7 +308,7 @@ export const FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS = 1_000;
  */
 export async function assertControlNotOnForeignDaemonDevice(input: {
   deviceId: string;
-  platform: "android" | "ios";
+  platform: Platform;
   gate: ForeignDaemonClaimGate;
   remedy?: string;
 }): Promise<void> {

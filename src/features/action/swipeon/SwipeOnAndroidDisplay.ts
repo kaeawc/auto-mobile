@@ -31,6 +31,7 @@ import {
   SwipeOnResult,
   SwipeResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ScrollableElementsQuery } from "../../../utils/interfaces/ElementTraitQueries";
@@ -491,7 +492,10 @@ export class SwipeOnAndroidDisplay {
     observation: ObserveResult;
     bounds?: Element["bounds"];
   }): Element["bounds"] {
-    const insetOptions = { observation, platform: this.ctx().device.platform };
+    const insetOptions = {
+      observation,
+      platform: requireAndroidOrIosPlatform(this.ctx().device.platform, "swipeOn"),
+    };
     const screenSize = swipeScreenSize(insetOptions) ?? observation.screenSize;
     return insetSwipeBounds({ ...insetOptions, bounds: bounds ?? getScreenBounds(screenSize) });
   }

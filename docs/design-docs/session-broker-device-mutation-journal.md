@@ -80,7 +80,7 @@ cleaning and require a revert. Power controls also require their verified journa
 revert; baseline cleaning never covers `power:*`.
 
 SMS, phone calls, SQL writes or unclassified queries, app-log deletion,
-secondary-display rotation, volume presses on both platforms, Android manufacturer
+secondary-display rotation, volume presses on both platforms, `mediaSession` volume, Android manufacturer
 profiles with kill/display facets (or unknown ids), and `deviceSnapshot` restore record
 fallback opaque intents. Read-only SQL records nothing. iOS keep-booted also escalates to erase on the `fallback:` intents
 recorded by volume presses, `sqlQuery` writes, `resetAppLogs`, `sendSms`, `phoneCall` and

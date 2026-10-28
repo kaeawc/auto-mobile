@@ -68,6 +68,22 @@ function pressButtonMutations(args: Record<string, unknown>, platform?: Platform
 }
 
 /**
+ * mediaSession `volume` sets a music, ring or alarm stream index. Like the pressButton volume keys,
+ * the live level has no journal revert, so a fallback intent prevents a clean keep-booted reset.
+ * `dispatch` sends a transport key to the app holding the media session: its effect is app-owned,
+ * so it keeps a diagnostic breadcrumb. `get` is a read.
+ */
+function mediaSessionMutations(args: Record<string, unknown>): ToolMutation[] {
+  const action = args.action;
+  if (isRecord(action) && "volume" in action) {
+    return [{ kind: "opaque", key: opaqueIntentKey("mediaSession", "volume") }];
+  }
+  return isRecord(action) && "dispatch" in action
+    ? [opaqueBreadcrumb("mediaSession", "dispatch")]
+    : [];
+}
+
+/**
  * A `type` command with `keyboardProfile` switches the CtrlProxy keyboard profile (persisted in its
  * preferences) for the call and restores it afterwards, the same row `keyboard setProfile` journals.
  * The commit-IME switch every Android `type`/`clear` performs rewrites secure settings
@@ -97,6 +113,9 @@ export function interactionToolMutations(
   }
   if (name === "sendKeys") {
     return sendKeysMutations(args, platform);
+  }
+  if (name === "mediaSession") {
+    return mediaSessionMutations(args);
   }
   return PURE_INPUT_TOOLS.has(name) ? [] : undefined;
 }

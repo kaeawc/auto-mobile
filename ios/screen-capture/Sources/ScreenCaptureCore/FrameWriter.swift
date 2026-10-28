@@ -174,7 +174,7 @@ public final class FrameWriter: @unchecked Sendable {
         return true
     }
 
-    public func metrics(now: Date = Date()) -> FrameWriterMetrics {
+    public func metrics() -> FrameWriterMetrics {
         stateLock.lock()
         defer { stateLock.unlock() }
         return FrameWriterMetrics(

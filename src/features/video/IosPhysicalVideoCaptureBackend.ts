@@ -8,11 +8,7 @@ import {
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import {
-  DefaultFfmpegClient,
-  type FfmpegClient,
-  type FfmpegProcess,
-} from "../../utils/media/FfmpegClient";
+import { DefaultFfmpegClient, type FfmpegClient } from "../../utils/media/FfmpegClient";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { IosScreenCaptureHelper } from "../screen-stream/IosScreenCaptureHelper";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";

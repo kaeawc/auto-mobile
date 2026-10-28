@@ -2069,6 +2069,19 @@ an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated si
 a password, secret or session token: the runtime keeps the token in the Keystore or Keychain and never exposes
 it. The root `auth` accounts block is not in the contract yet, and no production runtime advertises the module.
 
+**Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
+`location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole
+milliseconds, 0 to one day). The call needs `location` in `requires.permissions`; `precise` maps to
+`ACCESS_FINE_LOCATION` on Android and full accuracy on iOS, `approximate` to `ACCESS_COARSE_LOCATION` and
+reduced accuracy. Its `into` receives `{latitude, longitude, accuracyM, altitudeM?, speedMps?, bearingDeg?,
+timestampMs, approximate}`; a grant of approximate only sets `approximate: true` rather than failing. Failures
+use the typed codes `permission_denied`, `unavailable` (location services off), `timeout` and `platform_error`.
+The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
+`/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
+are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
+that fix after the session ends. The root subscription block and the reference outcome reducer are not in the
+contract yet, and no production runtime advertises the module.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

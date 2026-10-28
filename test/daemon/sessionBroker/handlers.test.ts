@@ -266,6 +266,28 @@ describe("session broker daemon handlers", () => {
     statsSpy.mockRestore();
     expect(broker.prepareCalls).toEqual([]);
   });
+
+  test("pool drain forwards to the broker, takes no parameters, and binds no connection", async () => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/drainBrokerPool",
+    )![1];
+    const drained = {
+      resources: [{ resourceId: "resource-1", outcome: "destroyed", cleanupPending: false }],
+    } as const;
+    const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({
+      resources: [...drained.resources],
+    });
+    expect(await handler(request({}), state, undefined, undefined, {})).toEqual({
+      success: true,
+      result: drained,
+    });
+    expect(drainSpy).toHaveBeenCalledTimes(1);
+    expect(
+      await handler(request({ resourceId: "x" }), state, undefined, undefined, {}),
+    ).toMatchObject({ success: false, code: "session_config_invalid" });
+    expect(drainSpy).toHaveBeenCalledTimes(1);
+    drainSpy.mockRestore();
+  });
   const exportParams = { ...exportIdentity, livenessOwnerToken: TOKEN };
 
   async function seedExport() {

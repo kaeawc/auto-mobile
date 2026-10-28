@@ -624,6 +624,23 @@ export class SqliteSessionBrokerStore {
   }
 
   /**
+   * Operator drain of the idle pool. Every idle resource leaves the reusable set in one
+   * transaction, so no acquisition can reserve it while its destruction is pending.
+   */
+  async drainIdle(): Promise<DestructionTicket[]> {
+    return this.db.transaction().execute(async (trx) => {
+      const resources = await this.readResources(trx, true);
+      const tickets: DestructionTicket[] = [];
+      for (const resource of resources.filter((entry) => entry.state === "idle")) {
+        tickets.push(
+          destructionTicket(await this.updateResource(trx, resource, { state: "destroying" })),
+        );
+      }
+      return tickets;
+    });
+  }
+
+  /**
    * The existing native journal must have confirmed authoritative absence and cleared the
    * physical binding. An old deletion receipt cannot free a new incarnation of a resource.
    */

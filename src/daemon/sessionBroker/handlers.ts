@@ -380,4 +380,28 @@ export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMeth
     (request, state) => handleAbandonBrokerSessionRequest(request, state),
   ],
   ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
+  ["daemon/drainBrokerPool", (request, state) => handleDrainBrokerPool(request, state)],
 ];
+
+/** Operator drain of idle pooled devices; takes no parameters and binds no connection. */
+export async function handleDrainBrokerPool(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const service = state.getSessionBrokerService?.();
+  if (!service) {
+    return unavailable(state);
+  }
+  const parsed = z
+    .object({})
+    .strict()
+    .safeParse(request.params ?? {});
+  if (!parsed.success) {
+    return { success: false, code: "session_config_invalid", error: "Drain takes no parameters" };
+  }
+  try {
+    return { success: true, result: { ...(await service.broker.drainIdlePool()) } };
+  } catch (error) {
+    return brokerRejection(error);
+  }
+}

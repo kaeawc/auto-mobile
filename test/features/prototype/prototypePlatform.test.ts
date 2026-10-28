@@ -800,6 +800,14 @@ describe("sensors module contract", () => {
       expect(state[name].value.integer).toBe(true);
     }
     expect(state.headingDeg.value.max).toBe(359);
+    expect(state.pitchDeg.value.min).toBe(-180);
+    expect(state.pitchDeg.value.max).toBe(180);
+    expect(state.rollDeg.value.min).toBe(-180);
+    expect(state.rollDeg.value.max).toBe(180);
+    expect(state.steps.value.min).toBe(0);
+    expect(state.steps.value.max).toBe(Number.MAX_SAFE_INTEGER);
+    expect(state.lightLux.value.min).toBe(0);
+    expect(state.lightLux.value.max).toBe(1_000_000);
     expect(state.proximityNear.value.kind).toBe("boolean");
     expect(state.lightLux.platforms).toEqual(["android"]);
     expect(state.steps.platforms).toEqual(["android", "ios"]);

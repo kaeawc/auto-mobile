@@ -1,3 +1,4 @@
+import { internalLiveDeadlineKey } from "../internalToolParams";
 import { provisionCancellationOutcomes } from "../../daemon/provisionCancellationOutcomes";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ProgressCallback } from "../toolRegistry";
@@ -137,8 +138,9 @@ async function cancelledProvisionDeviceResponse(
   );
   // The daemon answered the abandoned request already; hand it this result so that reply
   // can carry the typed envelope and recovery evidence.
-  if (args.__mcpLiveDeadlineKey) {
-    provisionCancellationOutcomes.publish(args.__mcpLiveDeadlineKey, cancelledResponse);
+  const liveDeadlineKey = internalLiveDeadlineKey(args);
+  if (liveDeadlineKey) {
+    provisionCancellationOutcomes.publish(liveDeadlineKey, cancelledResponse);
   }
   cancellation.response = cancelledResponse;
   return cancelledResponse;

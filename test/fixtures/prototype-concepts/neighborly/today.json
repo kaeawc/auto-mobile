@@ -926,8 +926,7 @@
                     "items": {
                       "path": "/groups"
                     },
-                    "as": "group",
-                    "key": "id"
+                    "as": "group"
                   },
                   "children": [
                     {

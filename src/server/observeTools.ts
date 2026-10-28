@@ -444,7 +444,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
-      const served = withDeviceDiagnostics(
+      const served = await withDeviceDiagnostics(
         layerScopedObserveResult(result, args.layer, device.platform, !waitOutcome),
         device,
         dependencies.audioInputDiagnostic,

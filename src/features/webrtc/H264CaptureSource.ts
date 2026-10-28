@@ -1,19 +1,8 @@
 import type { BootedDevice } from "../../models";
 import type { NativeFrameMetrics } from "../screen-stream/IosScreenCaptureHelper";
-import type { FrameQueueMetrics } from "../screen-stream/LatestFrameQueue";
-
-export interface H264EncoderFrameMetrics extends FrameQueueMetrics {
-  /** Duration of the last synchronous write into the encoder stdin buffer. */
-  outputWriteDurationMs: number | null;
-  /** Largest observed synchronous encoder-stdin write duration. */
-  outputWriteHighWaterDurationMs: number;
-}
-
-/** Queue and write-latency snapshots for the iOS raw-frame pipeline. */
+/** Native capture and encoder-write metrics supplied by the iOS helper. */
 export interface H264CaptureSourceMetrics {
   native: NativeFrameMetrics | null;
-  helper: FrameQueueMetrics | null;
-  encoder: H264EncoderFrameMetrics;
 }
 
 export interface H264CaptureSourceOptions {
@@ -29,7 +18,7 @@ export interface H264CaptureSourceOptions {
   /**
    * The source finished delivering one self-contained record through `onData`: an iOS encoded-helper
    * access unit, or one length-framed packet from the Android persistent encoder (config or frame).
-   * Sources that only stream raw bytes (iOS ffmpeg, Android screenrecord) never call it.
+   * Sources that only stream raw bytes (Android screenrecord) never call it.
    */
   onEncodedAccessUnit?: () => void;
   /** Whether this Simulator helper can attest native idle callbacks. */
@@ -65,9 +54,7 @@ export interface H264CaptureSourceOptions {
    * (`AndroidH264Source`) has no frame-rate flag and captures at the display's
    * native rate, so the hint is a no-op there. On iOS Simulator it requests a
    * capture rate (carrying `WebRtcStreamingConfig.iosSimulatorFps`); physical
-   * iOS captures at its own AVFoundation rate but still takes its declared
-   * rawvideo input rate and GOP
-   * length from it.
+   * iOS captures at its own AVFoundation rate.
    */
   fps?: number;
   audioEnabled?: boolean;

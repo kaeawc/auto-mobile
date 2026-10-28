@@ -7,7 +7,7 @@ import {
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
 import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
-import { listAppsResultSchema } from "./appToolOutputSchemas";
+import { installAppResultSchema, listAppsResultSchema } from "./appToolOutputSchemas";
 import { defineDeviceTool } from "./defineTool";
 
 // Schema definitions
@@ -231,6 +231,7 @@ export const installAppTool = defineDeviceTool({
     // does not use CtrlProxy.
     deviceReadiness: "booted",
     replacesProcess: true,
+    outputSchema: installAppResultSchema,
   },
 });
 

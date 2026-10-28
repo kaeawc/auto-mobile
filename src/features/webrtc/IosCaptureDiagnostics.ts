@@ -2,11 +2,11 @@ import type { IosScreenCaptureReadinessPhase } from "../screen-stream";
 import {
   NATIVE_FRAME_METRICS_PREFIX,
   SIMULATOR_IDLE_EVIDENCE_CAPABILITY,
+  type NativeFrameMetrics,
   type CapturePermission,
 } from "../screen-stream/IosScreenCaptureHelper";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import type { IosFramePipeline } from "./IosFramePipeline";
 import { isHelperError } from "./IosCaptureStartup";
 import type { IosFrameCaptureHelper, IosH264SourceOptions } from "./IosH264SourceConfig";
 
@@ -23,17 +23,14 @@ interface IosCaptureDiagnosticsDependencies {
   setLastReadinessPhase(phase: IosScreenCaptureReadinessPhase): void;
   helperStderrTail(): string[];
   failForHelperLine(line: string): void;
-  pipeline: Pick<
-    IosFramePipeline,
-    "helperFrameMetrics" | "nativeFrameMetrics" | "reportFrameMetrics"
-  >;
+  setNativeFrameMetrics(metrics: NativeFrameMetrics): void;
   options: Pick<
     IosH264SourceOptions,
     "onIdleAttestationSupport" | "onSourceIdle" | "onDroppedFrames" | "audioEnabled" | "onAudioData"
   >;
 }
 
-/** stderr/readiness/metrics/audio wiring shared by the raw and encoded paths. */
+/** Helper diagnostics and native encoder metrics for iOS WebRTC capture. */
 export function wireHelperDiagnostics(
   helper: IosFrameCaptureHelper,
   dependencies: IosCaptureDiagnosticsDependencies,
@@ -53,21 +50,10 @@ export function wireHelperDiagnostics(
       dependencies.options.onSourceIdle?.();
     }
   });
-  helper.on("frameMetrics", (metrics) => {
-    if (dependencies.isCurrentHelper() && dependencies.isActive()) {
-      dependencies.pipeline.helperFrameMetrics = metrics;
-      dependencies.pipeline.reportFrameMetrics();
-    }
-  });
   helper.on("captureMetrics", (metrics) => {
     if (dependencies.isCurrentHelper() && dependencies.isActive()) {
-      dependencies.pipeline.nativeFrameMetrics = metrics;
-      // The native writer's cumulative counter is the only one the encoded Simulator path (the
-      // default) advances on VideoToolbox overload — the raw-frame queue's `frameMetrics` counter
-      // never fires there because that path bypasses enqueueFrame. Forward the native counter so
-      // encoder saturation actually reaches the desktop quality controller.
       dependencies.options.onDroppedFrames?.(metrics.droppedFrames);
-      dependencies.pipeline.reportFrameMetrics();
+      dependencies.setNativeFrameMetrics(metrics);
     }
   });
   helper.on("audio", (audio) => {

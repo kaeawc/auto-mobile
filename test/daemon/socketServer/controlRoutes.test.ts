@@ -109,6 +109,23 @@ describe("controlRoutes passthrough forwards", () => {
     );
   });
 
+  test("resources/read preserves request metadata without leaking routing parameters", async () => {
+    const _meta = {
+      "io.modelcontextprotocol/clientCapabilities": {
+        extensions: { "io.modelcontextprotocol/ui": {} },
+      },
+    };
+    const { ctx, calls } = setup("resources/read", {
+      uri: "ui://automobile/observe",
+      _meta,
+      sessionUuid: "owner",
+    });
+    await runPassthroughForward(ctx);
+    expect(calls).toEqual([
+      ["readResource", { uri: "ui://automobile/observe", _meta }, { timeout: 500 }],
+    ]);
+  });
+
   test("ide/getNavigationGraph forwards the remaining timeout without admission", async () => {
     const { ctx, calls, admissions } = setup("ide/getNavigationGraph", { appId: "a" });
     await runPassthroughForward(ctx);

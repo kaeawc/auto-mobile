@@ -1372,12 +1372,12 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
           console.warn(`[#4349] could not sample egress bitrate / decoded fps: ${error}`);
         }
         // #4376: prove the on-demand keyframe path end-to-end. iOS only — the path
-        // under a delivery shortfall is IosH264Source.requestKeyFrame (encoder
-        // restart, PR #4374); AndroidH264Source has its own keyframe path, out of
+        // under a delivery shortfall is IosH264Source.requestKeyFrame (helper
+        // control channel); AndroidH264Source has its own keyframe path, out of
         // scope here. Fresh viewer subscribing relays a PLI upstream through
         // MediaMTX to the WHIP publisher, which calls source.requestKeyFrame().
         if (platform === "ios") {
-          const { IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS } =
+          const { IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS } =
             await import("../../src/features/webrtc/IosH264Source");
           await timeline.runPhase("keyframeRecovery", async () => {
             // A brand-new WHEP subscription is the relayed PLI: it renegotiates
@@ -1412,16 +1412,16 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
               );
             }
             const baseline: KeyframeRecoverySample = { keyFramesDecoded: 0, framesDecoded: 0 };
-            // Under a static Simulator screen the restarted encoder's IDR only
+            // Under a static Simulator screen the requested IDR only
             // rides out on the next delivered frame (SimulatorCaptureSession drops
             // non-`.complete` frames), so keep driving a visible change and poll
             // for the fresh keyframe on that delivered frame — never a fixed
-            // wall-clock sleep. The throttle floors one restart per
-            // IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS; allow delivery slack on top so a
+            // wall-clock sleep. The throttle allows one request per
+            // IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS; allow delivery slack on top so a
             // shortfall does not flake the lane.
             let recovered: KeyframeRecoverySample | null = null;
             let toggle = false;
-            const recoveryMessage = `iOS WHEP viewer did not recover to a fresh IDR within ~${IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}ms of the relayed PLI`;
+            const recoveryMessage = `iOS WHEP viewer did not recover to a fresh IDR within ~${IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS}ms of the relayed PLI`;
             try {
               await waitFor(
                 async (signal) => {
@@ -1435,7 +1435,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
                   return false;
                 },
                 recoveryMessage,
-                IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS + 30_000,
+                IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS + 30_000,
               );
             } catch (error) {
               // A non-timeout predicate failure is a distinct regression, not the catalogued IDR-recovery flake, and must not be relabeled or classify-failure would misdismiss it as the known flake.

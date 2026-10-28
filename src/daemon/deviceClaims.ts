@@ -71,6 +71,10 @@ export interface StoreDeviceClaimMirrorOptions {
   platform: Platform;
   /** Resolved per write: the registry may open (or fail to open) after the mirror is attached. */
   store: () => DeviceClaims | undefined;
+  /** Probe only on deferred writes, using the existing bounded retry ladder. */
+  registryFileExists?: () => boolean;
+  /** True once registry opening is handled; false means ask again on the next write. */
+  openRegistry?: () => boolean;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   daemonSessionId?: string;
   generationOf?: (pid: number) => string | undefined;
@@ -113,6 +117,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
   private readonly retryDelays: readonly number[];
   private versions = 0;
   private disposed = false;
+  private registryOpeningHandled = false;
 
   constructor(private readonly options: StoreDeviceClaimMirrorOptions) {
     this.generationOf =
@@ -220,6 +225,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     if (!store) {
       // The registry is not open (yet): the files decide meanwhile, and a retry or the registry's
       // opening writes this.
+      this.probeRegistry();
       this.scheduleRetry(deviceId, intent);
       return;
     }
@@ -250,6 +256,19 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
         }
       });
     this.inFlight.set(deviceId, settled);
+  }
+
+  private probeRegistry(): void {
+    if (this.registryOpeningHandled || !this.options.openRegistry) {
+      return;
+    }
+    try {
+      if (this.options.registryFileExists?.()) {
+        this.registryOpeningHandled = this.options.openRegistry();
+      }
+    } catch (error) {
+      logger.warn(`[DeviceClaims] Cannot start registry opening: ${errorMessage(error)}`, error);
+    }
   }
 
   private isGone(intent: MirrorIntent): boolean {

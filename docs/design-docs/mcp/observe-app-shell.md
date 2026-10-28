@@ -6,10 +6,10 @@ It takes no actions and makes no device-control calls; an element picker may com
 
 ## Who gets what
 
-| Client                                                                                                                              | `resources/read ui://automobile/observe`                                           |
-| ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Advertises `extensions["io.modelcontextprotocol/ui"]` at `initialize` (and, when it lists `mimeTypes`, `text/html;profile=mcp-app`) | The stable shell, with `_meta.ui` asking for no network origins and no permissions |
-| Anything else, including every client that does not render Apps                                                                     | The existing session-bound static snapshot, unchanged                              |
+| Client                                                                                                                                                         | `resources/read ui://automobile/observe`                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Advertises `extensions["io.modelcontextprotocol/ui"]` at `initialize` or in request capabilities (and, when it lists `mimeTypes`, `text/html;profile=mcp-app`) | The stable shell, with `_meta.ui` asking for no network origins and no permissions |
+| Anything else, including every client that does not render Apps                                                                                                | The existing session-bound static snapshot, unchanged                              |
 
 The shell is the same bytes for every read, session and device. It holds no observation: the
 host delivers each `observe` tool result to the App (`ui/notifications/tool-result`), so the view
@@ -17,8 +17,9 @@ always shows the invoking call's result and never a process-global cache or anot
 capture. A result with a hierarchy draws the boxes; if it carries an image content block (observe
 with `includeScreenshotImage: true`) the PNG/JPEG/WebP is drawn behind them, otherwise the view says
 no screenshot was included. A result that cannot be drawn clears the view instead of leaving the
-previous capture up. Capabilities are read from the session's `initialize`, so a stateless
-per-request connection that never initialised keeps the snapshot.
+previous capture up. Capabilities are read from the request declaration when present, falling back to the session's
+`initialize` capabilities. The stdio proxy forwards only its advertised UI extension with resource
+reads, so the daemon makes the same shell decision as the direct HTTP path.
 
 ## Containment
 

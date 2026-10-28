@@ -4,7 +4,7 @@ import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceShuttingDownError } from "../models/deviceAcquisitionRefusals";
-import { ActionableError, BootedDevice, DeviceInfo } from "../models";
+import { ActionableError, BootedDevice, DeviceInfo, type Platform } from "../models";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DaemonStateLike } from "../daemon/daemonState";
@@ -95,6 +95,17 @@ type StartDeviceHooks = {
   stripInternalAcquisitionParams: (rawArgs: object) => Record<string, unknown>;
 };
 
+function explicitDeviceOwnershipCheck(daemonState: DaemonStateLike) {
+  return async (deviceId: string, platform: Platform): Promise<void> => {
+    await getStartDevicePool(daemonState)?.assertNotClaimedByForeignDaemon(
+      deviceId,
+      platform,
+      undefined,
+      0,
+    );
+  };
+}
+
 const bootAndPrepareDevice = async (
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
@@ -133,6 +144,7 @@ const bootAndPrepareDevice = async (
     cleanupMayOutliveRequest: true,
     rollbackCreatedDevice: createdDeviceRollbackFor(options),
     checkBootCapacity: deps.checkBootCapacity,
+    assertExplicitDeviceNotForeignOwned: explicitDeviceOwnershipCheck(deps.daemonState),
     onAndroidColdBootTrackingChanged: () => {
       void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
         logger.warn(

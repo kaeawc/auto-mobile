@@ -49,6 +49,10 @@ const calendarCall = {
     },
   ],
 };
+const authCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "auth.signOut", args: {} }],
+};
 const openUrlCall = {
   ...label,
   onTap: [
@@ -261,6 +265,7 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "upsertData", path: "/data/rows", key: "/id", value: { value: { id: 1 } } }],
   },
+  prototype_platform_sensors_v1: statusRead("sensors", "proximityNear", true),
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
@@ -275,7 +280,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_mediaLibrary_v1: mediaPickCall,
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_calendar_v1: calendarCall,
-  prototype_platform_sensors_v1: statusRead("sensors", "proximityNear", true),
+  prototype_platform_auth_v1: authCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

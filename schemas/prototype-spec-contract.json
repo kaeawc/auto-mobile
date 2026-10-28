@@ -21954,6 +21954,51 @@
       "events": {},
       "state": {}
     },
+    "auth": {
+      "capability": "prototype_platform_auth_v1",
+      "calls": {
+        "signIn": {
+          "args": {
+            "style": {
+              "optional": true,
+              "value": {
+                "kind": "enum",
+                "values": ["chooser", "button"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        },
+        "signOut": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "sessionExpired": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "signedIn": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "userId": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "max": 64
+          }
+        }
+      }
+    },
     "sensors": {
       "capability": "prototype_platform_sensors_v1",
       "calls": {},

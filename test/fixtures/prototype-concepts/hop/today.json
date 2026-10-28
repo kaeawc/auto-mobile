@@ -300,6 +300,22 @@
                     ],
                     "onTap": [
                       {
+                        "type": "cancelTimer",
+                        "id": "match"
+                      },
+                      {
+                        "type": "cancelTimer",
+                        "id": "driver"
+                      },
+                      {
+                        "type": "cancelTimer",
+                        "id": "pickup"
+                      },
+                      {
+                        "type": "cancelTimer",
+                        "id": "dropoff"
+                      },
+                      {
                         "type": "setState",
                         "key": "rideId",
                         "value": "{ride.id}"
@@ -372,6 +388,10 @@
                         "state": "payment"
                       }
                     }
+                  },
+                  {
+                    "type": "cancelTimer",
+                    "id": "match"
                   },
                   {
                     "type": "cancelTimer",

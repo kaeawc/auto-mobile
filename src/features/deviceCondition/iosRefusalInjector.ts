@@ -20,6 +20,7 @@ const ANDROID_ONLY_FAULT_KEYS: ReadonlySet<string> = new Set([
   "faults.thermal",
   "faults.dontKeepActivities",
   "faults.storage",
+  "faults.clockSkew",
   "vehicle.motion",
   "vehicle.nightMode",
 ]);

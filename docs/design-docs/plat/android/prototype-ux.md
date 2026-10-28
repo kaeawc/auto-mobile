@@ -2046,6 +2046,19 @@ spec cannot name a component or an arbitrary handler. The validator does not yet
 cannot honour (`tel:` in `inApp`) or a URL that begins with a placeholder; the runtime reports those. The
 module has no events or `/platform` state. No production runtime advertises it yet.
 
+**Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
+permission and write device media items (see "Device media items") to `into`.
+`mediaLibrary` (`prototype_platform_mediaLibrary_v1`) has `mediaLibrary.pick` with `media` (required:
+`images`, `videos` or `imagesAndVideos`) and `maxItems` (optional whole number 1-64, default 1; 1 writes one
+item, more writes an array; Android clamps it to `MediaStore.getPickImagesMaxLimit()`). `camera`
+(`prototype_platform_camera_v1`) has `camera.capture` with `media` (required: `image` or `video`) and
+`maxDurationMs` (optional whole number 1-600000, used only for video). They are separate modules, so a
+device that has a picker but no camera (an iOS Simulator) advertises only `mediaLibrary`. Both calls are
+`sensitive` and have no events or `/platform` state. A cancel leaves `into` untouched and runs `onError`
+with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usage_description` when the iOS
+plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
+system-UI call per prototype at a time). No production runtime advertises either module yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

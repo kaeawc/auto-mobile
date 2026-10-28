@@ -21,7 +21,10 @@ import type { DevicePoolRefreshResult } from "./devicePoolRefresh";
 import type { DeviceRuntimeIdentity } from "./deviceRuntimeIdentity";
 import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
-import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import {
+  refreshAllocationBindingExclusion,
+  type BindingExclusion,
+} from "./sessionBroker/provisioning/exclusion";
 
 export interface DeviceAutoStartPort {
   readonly criteriaMatcher: Pick<
@@ -559,7 +562,7 @@ export class DeviceAutoStart {
     excludedImageIds: Set<string> = new Set(),
   ): Promise<DeviceInfo[]> {
     if (this.port.bindingExclusion) {
-      await this.port.bindingExclusion.refresh({ requireCurrent: true });
+      await refreshAllocationBindingExclusion(this.port.bindingExclusion);
     }
     const availableImages = await this.port.deviceManager.listDeviceImages(platform);
     if (availableImages.length === 0) {

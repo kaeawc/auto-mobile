@@ -2,6 +2,8 @@ import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
@@ -102,6 +104,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     manager = new FakeDeviceManager();
     bindingDevices = new Set();
     bindingExecSession = null;
+    bindingExclusion.refresh = async () => {};
   });
 
   afterEach(() => {
@@ -202,6 +205,33 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
 
     // Once the slot lets go, nothing else holds the device: it was never reserved for the row.
     bindingDevices.clear();
+    expect(pool.genericAvailability(SIM_A)).toBe("free");
+  });
+
+  test("an unknown registry schema still reserves the rehydration row's device", async () => {
+    await setUp([ios(SIM_A)], true);
+    const refreshRequirements: (boolean | undefined)[] = [];
+    bindingExclusion.refresh = async (options) => {
+      refreshRequirements.push(options?.requireCurrent);
+      if (options?.requireCurrent) {
+        throw new BindingRegistrySchemaUnsupportedError("fake-registry.db", ["future-migration"]);
+      }
+    };
+
+    await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
+
+    expect(refreshRequirements).toEqual([true, undefined]);
+    expect(pool.genericAvailability(SIM_A)).toBe("reserved");
+  });
+
+  test("an unreadable registry still reserves nothing for rehydration", async () => {
+    await setUp([ios(SIM_A)], true);
+    bindingExclusion.refresh = async () => {
+      throw new BindingDiscoveryIncompleteError("fake read failure");
+    };
+
+    await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
+
     expect(pool.genericAvailability(SIM_A)).toBe("free");
   });
 

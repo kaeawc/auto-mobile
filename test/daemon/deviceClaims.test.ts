@@ -162,6 +162,89 @@ describe("the claims mirror", () => {
     });
   }
 
+  test("a skipped hub cancels retries and never opens, reads, writes, or withdraws table rows", async () => {
+    const timer = new FakeTimer();
+    const store = new FakeDeviceClaims();
+    const hub = new DeviceClaimMirrorHub();
+    const resolveStore = mock((): DeviceClaims | undefined => undefined);
+    const openRegistry = mock(() => false);
+    const whenOpen = mock(async () => store);
+    const registryFileExists = mock(() => true);
+    const operations = [
+      spyOn(store, "get"),
+      spyOn(store, "upsert"),
+      spyOn(store, "release"),
+      spyOn(store, "releaseOwnedBy"),
+    ];
+    const makeMirror = () =>
+      hub.register(
+        new StoreDeviceClaimMirror({
+          platform: "android",
+          timer,
+          store: resolveStore,
+          openRegistry,
+          whenOpen,
+          registryFileExists,
+        }),
+      );
+    const mirror = makeMirror();
+    mirror.claimed("emulator-5554", OWNER);
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    hub.skip();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    const priorCalls = [resolveStore, openRegistry, whenOpen, registryFileExists].map(
+      (call) => call.mock.calls.length,
+    );
+    resolveStore.mockImplementation(() => store);
+    for (const current of [mirror, makeMirror()]) {
+      current.claimed("emulator-5554", OWNER);
+      current.released("emulator-5554", OWNER);
+      current.reconcile(store);
+      expect(await current.read("emulator-5554")).toBeUndefined();
+    }
+    hub.registryOpened(store);
+    timer.advanceTime(1_000_000);
+    await hub.idle();
+    await hub.releaseOwnedClaims(store);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(
+      [resolveStore, openRegistry, whenOpen, registryFileExists].map(
+        (call) => call.mock.calls.length,
+      ),
+    ).toEqual(priorCalls);
+    for (const operation of operations) {
+      expect(operation).not.toHaveBeenCalled();
+      operation.mockRestore();
+    }
+  });
+
+  test.each(["resolve", "reject"] as const)(
+    "a skip while joining an open that will %s suppresses the table read",
+    async (outcome) => {
+      const timer = new FakeTimer();
+      const store = new FakeDeviceClaims();
+      const opened = Promise.withResolvers<DeviceClaims>();
+      const get = spyOn(store, "get");
+      const mirror = new StoreDeviceClaimMirror({
+        platform: "ios",
+        timer,
+        store: () => undefined,
+        whenOpen: () => opened.promise,
+      });
+      const reading = mirror.read("simulator");
+      mirror.skip();
+      if (outcome === "resolve") {
+        opened.resolve(store);
+      } else {
+        opened.reject(new Error("unsupported schema"));
+      }
+      expect(await reading).toBeUndefined();
+      expect(get).not.toHaveBeenCalled();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      get.mockRestore();
+    },
+  );
+
   test("a claim is recorded with the owner and its process generation, then withdrawn", async () => {
     const store = new FakeDeviceClaims();
     const mirror = mirrorOver(() => store);

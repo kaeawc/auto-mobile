@@ -1,3 +1,4 @@
+import { BindingRegistrySchemaUnsupportedError } from "../sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
@@ -144,6 +145,8 @@ export class DaemonBroker {
   private bindingRedrive: BindingJournalRedriveLoop | undefined;
   private readonly maintainedRegistries = new WeakSet<SqliteBindingRegistry>();
   private registryClosing = false;
+  // No retry can make this daemon understand new migrations; restart re-evaluates the schema.
+  private unsupportedRegistrySchema: BindingRegistrySchemaUnsupportedError | undefined;
   constructor(private readonly host: DaemonBrokerHost) {}
 
   /**
@@ -331,6 +334,9 @@ export class DaemonBroker {
     signal?: AbortSignal,
     options?: { quiet?: boolean },
   ): Promise<SqliteBindingRegistry> {
+    if (this.unsupportedRegistrySchema) {
+      return Promise.reject(this.unsupportedRegistrySchema);
+    }
     const cached = this.host.bindingRegistry();
     if (cached) {
       return options?.quiet
@@ -388,8 +394,12 @@ export class DaemonBroker {
       () => undefined,
     );
     opening.catch((error: unknown) => {
-      // The release that asked reports this failure; forgetting the failed open lets the next
-      // release retry instead of failing forever.
+      if (error instanceof BindingRegistrySchemaUnsupportedError) {
+        this.host.deviceClaimMirrors().skip();
+        this.unsupportedRegistrySchema = error;
+      }
+      // The release that asked reports this failure; forgetting the failed open lets transient
+      // failures retry. An unsupported schema is latched above and never opened again here.
       logger.debug(`[Daemon] Binding registry open failed: ${errorMessage(error)}`);
       if (this.host.bindingRegistry() === opening) {
         this.host.setBindingRegistry(undefined);

@@ -3,6 +3,7 @@ import { BindingRegistryUpgradePendingError } from "../../../../src/daemon/sessi
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   currentBindingReconciler,
+  refreshAllocationBindingExclusion,
   bindingRefusal,
   RegistryBindingExclusion,
   runAsBindingReconciler,
@@ -10,6 +11,7 @@ import {
 import {
   DEVICE_ASSIGNED_TO_BINDING_CODE,
   DeviceAssignedToBindingError,
+  BindingRegistrySchemaUnsupportedError,
   BINDING_DISCOVERY_INCOMPLETE_CODE,
   BindingDiscoveryIncompleteError,
 } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
@@ -37,6 +39,104 @@ describe("RegistryBindingExclusion", () => {
     opens++;
     return registry;
   };
+
+  test("unknown migrations use files only, warn once per path, and stay degraded until restart", async () => {
+    const error = new BindingRegistrySchemaUnsupportedError("/fake/files-only.sqlite", [
+      "2026_10_26_014_device_claims",
+      "2026_10_27_015_device_claims_metadata",
+    ]);
+    const open = async (): Promise<BindingRegistry> => {
+      opens++;
+      throw error;
+    };
+    const exclusion = exclusionOver(open);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await exclusion.refresh();
+      await exclusion.refresh({ fresh: true });
+      await exclusionOver(open).refresh();
+      expect(opens).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain(error.unknownMigrations.join(", "));
+      expect(warn.mock.calls[0]?.[0]).toContain("allocation claim files decide ownership");
+      expect(warn.mock.calls[0]?.[0]).toContain(error.remedy);
+      expect(exclusion.lastReadFailed()).toBe(false);
+      expect(exclusion.holderOf({ platform: "ios", stableIds: ["BROKER"] })).toBeUndefined();
+      expect([...exclusion.stableIdsFor("ios")]).toEqual([]);
+      expect(exclusion.degraded()).toEqual({
+        code: error.code,
+        retryable: false,
+        mode: "files_only",
+        dbPath: error.dbPath,
+        unknownMigrations: error.unknownMigrations,
+        remedy: error.remedy,
+      });
+      for (const options of [
+        { requireCurrent: true },
+        { refuseUpgradePending: true },
+        { requireCurrent: true, maxAgeMs: 60_000 },
+        { refuseUpgradePending: true, maxAgeMs: 60_000 },
+      ]) {
+        await expect(exclusion.refresh(options)).rejects.toBe(error);
+      }
+      expect(opens).toBe(2);
+      const otherError = new BindingRegistrySchemaUnsupportedError(
+        "/fake/other-files-only.sqlite",
+        ["other-future"],
+      );
+      await exclusionOver(async () => {
+        throw otherError;
+      }).refresh();
+      expect(warn).toHaveBeenCalledTimes(2);
+      // A restarted view re-evaluates the registry rather than inheriting a terminal snapshot.
+      const restarted = exclusionOver(openFake);
+      await restarted.refresh();
+      expect(restarted.degraded()).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("concurrent generic and strict refreshes share the open but keep separate outcomes", async () => {
+    const opened = Promise.withResolvers<BindingRegistry>();
+    const exclusion = exclusionOver(() => opened.promise);
+    const generic = exclusion.refresh();
+    const strict = exclusion.refresh({ requireCurrent: true });
+    const error = new BindingRegistrySchemaUnsupportedError("/fake/concurrent.sqlite", ["future"]);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      opened.reject(error);
+      const strictResult = expect(strict).rejects.toBe(error);
+      await generic;
+      await strictResult;
+      expect(exclusion.degraded()?.mode).toBe("files_only");
+      expect(exclusion.lastReadFailed()).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test.each(["requireCurrent", "refuseUpgradePending"] as const)(
+    "%s propagates unsupported schema even with a retained readable snapshot",
+    async (option) => {
+      await assignBindingDevice(registry, "ios", "BROKER");
+      const exclusion = exclusionOver(openFake);
+      await exclusion.refresh();
+      const error = new BindingRegistrySchemaUnsupportedError(`/fake/${option}.sqlite`, ["future"]);
+      registry.snapshotManagedDevices = async () => {
+        throw error;
+      };
+      await expect(exclusion.refresh({ [option]: true })).rejects.toBe(error);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await refreshAllocationBindingExclusion(exclusion, { maxAgeMs: 60_000 });
+        expect(exclusion.degraded()?.code).toBe(error.code);
+        expect(exclusion.holderOf({ platform: "ios", stableIds: ["BROKER"] })).toBeUndefined();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 
   test("pending upgrade warns once, remains absent, and re-probes on every refresh", async () => {
     let pending = true;

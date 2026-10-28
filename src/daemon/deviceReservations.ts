@@ -19,7 +19,10 @@ import {
   DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS,
   isSameHolderSession,
 } from "./inputDeviceOwnership";
-import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import {
+  type BindingExclusion,
+  refreshAllocationBindingExclusion,
+} from "./sessionBroker/provisioning/exclusion";
 import { isDeviceRestartReleaseReason } from "../db/deviceSessionRepository";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
@@ -351,10 +354,10 @@ export class DeviceReservations {
       return;
     }
     if (this.port.bindingExclusion) {
+      // Unknown schemas use claim files and reserve by identity; unreadable registries reserve nothing.
       try {
-        await this.port.bindingExclusion.refresh({ requireCurrent: true });
+        await refreshAllocationBindingExclusion(this.port.bindingExclusion);
       } catch (error) {
-        // Which devices broker bindings hold is unknown, and they win: reserve nothing.
         logger.warn(
           `[DevicePool] Not reserving devices for restart recovery: ${errorMessage(error)}`,
           error,

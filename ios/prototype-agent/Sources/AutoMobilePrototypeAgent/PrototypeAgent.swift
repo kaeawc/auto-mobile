@@ -35,8 +35,9 @@ private final class PrototypeSceneActivationObserver: NSObject {
 /// A window above the app's own windows (including its alerts) that accepts touches only inside
 /// the prototype content and the host dismiss control; everything else falls through to the app.
 @MainActor
-final class PassthroughWindow: UIWindow {
+final class PassthroughWindow: UIWindow, PrototypeOverlayWindow {
     weak var model: PrototypeModel?
+    var showsPrototype: Bool { model?.spec != nil }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let model, model.spec != nil else { return nil }
@@ -463,6 +464,12 @@ final class PrototypeAgent: NSObject {
     }
 
     private func setVisible(_ visible: Bool) {
+        // Every show (a replace included) and every hide ends the content that opened an in-app
+        // browser, and the window is reused, so close it now (#14238). Platform calls run in a later
+        // task, so a link the new prototype opens is presented after this.
+        #if canImport(SafariServices)
+            UIKitLinkOpener.dismissPresentedBrowser()
+        #endif
         if visible {
             attachWindow()
             window?.isHidden = captureHold.isHiding

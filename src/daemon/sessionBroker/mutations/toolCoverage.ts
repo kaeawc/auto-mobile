@@ -143,6 +143,14 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "journaled",
     { fallback: true },
   ),
+  // Input events that change no device state a later session could observe. Verified against what
+  // each tool executes: `input tap/swipe/touchscreen/stylus/keyevent`, CtrlProxy accessibility
+  // actions and gestures, `cmd statusbar expand/collapse`, a CtrlProxy overlay window that removes
+  // itself, an emulator accelerometer vector the call restores in a `finally`, and wake/dismiss-
+  // keyguard key events that move the device toward the ready state. Effects the target app causes
+  // (a tapped Settings switch, a notification's content intent, text typed into a field) are
+  // app-owned and outside the journal's scope; the keep-booted baseline clean still covers shared
+  // settings, packages and files.
   ...tools(
     [
       "accessibilityFocus",

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { DeviceLockState } from "../../src/models";
 import { deviceToolMutations } from "../../src/server/deviceMutationAdapters";
+import { DEVICE_MUTATION_TOOL_COVERAGE } from "../../src/daemon/sessionBroker/mutations/toolCoverage";
 import { InteractionMutationPriorReader } from "../../src/server/deviceMutationInteractionPriorReader";
 import { interactionToolMutations } from "../../src/server/deviceMutationInteractionAdapters";
 import { pressButtonInput } from "../../src/server/interactionTools/deviceSchemas";
@@ -24,33 +25,21 @@ const IOS: BootedDevice = { deviceId: "sim", platform: "ios", name: "Sim" };
 const SCREEN_STATE = { kind: "device-setting", key: "screen-state" };
 const VOLUME = { kind: "opaque", key: opaqueIntentKey("pressButton", "volume") };
 
-/** Every tool the Interaction family owns whose calls never change persistent device state. */
-const PURE_INPUT_TOOLS = [
-  "accessibilityFocus",
-  "dragAndDrop",
-  "dragPath",
-  "highlight",
-  "homeScreen",
-  "hoverAt",
-  "multiTouch",
-  "pinchOn",
-  "recentApps",
-  "selectAllText",
-  "shake",
-  "swipeAt",
-  "swipeOn",
-  "systemTray",
-  "tapAny",
-  "tapAt",
-  "tapOn",
-  "wakeAndUnlock",
-];
+/** Every tool the coverage table says changes no persistent device state. */
+const NOT_JOURNALED_TOOLS = Object.entries(DEVICE_MUTATION_TOOL_COVERAGE)
+  .filter(([, coverage]) => coverage.status === "notJournaled")
+  .map(([tool]) => tool);
 
 describe("Interaction journal intents (#14359)", () => {
-  test.each(PURE_INPUT_TOOLS)("%s is an owned tool that records nothing", (tool) => {
-    expect(interactionToolMutations(tool, {}, "android")).toEqual([]);
-    expect(interactionToolMutations(tool, {}, "ios")).toEqual([]);
+  test("pure input tools are covered as notJournaled", () => {
+    expect(NOT_JOURNALED_TOOLS).toEqual(
+      expect.arrayContaining(["tapOn", "swipeOn", "dragAndDrop", "systemTray", "wakeAndUnlock"]),
+    );
+  });
+
+  test.each(NOT_JOURNALED_TOOLS)("%s records nothing on either platform", (tool) => {
     expect(deviceToolMutations(tool, {}, "android")).toEqual([]);
+    expect(deviceToolMutations(tool, {}, "ios")).toEqual([]);
   });
 
   test("tools of other families are not claimed", () => {

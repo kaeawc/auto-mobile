@@ -4,37 +4,6 @@ import { SCREEN_STATE_MUTATION_KEY } from "../daemon/sessionBroker/mutations/scr
 import { isRecord } from "./pipeline/isRecord";
 import type { ToolMutation } from "./deviceMutationAdapters";
 
-/**
- * Input events that change no device state a later session could observe. Verified against what
- * each tool executes: `input tap/swipe/touchscreen/stylus/keyevent`, CtrlProxy accessibility
- * actions and gestures, `cmd statusbar expand/collapse`, a CtrlProxy overlay window that removes
- * itself, an emulator accelerometer vector the call restores in a `finally`, and wake/dismiss-
- * keyguard key events that move the device toward the ready state. Effects the target app causes
- * (a tapped Settings switch, a notification's content intent, text typed into a field) are
- * app-owned and outside the journal's scope; the keep-booted baseline clean still covers shared
- * settings, packages and files.
- */
-const PURE_INPUT_TOOLS: ReadonlySet<string> = new Set([
-  "accessibilityFocus",
-  "dragAndDrop",
-  "dragPath",
-  "highlight",
-  "homeScreen",
-  "hoverAt",
-  "multiTouch",
-  "pinchOn",
-  "recentApps",
-  "selectAllText",
-  "shake",
-  "swipeAt",
-  "swipeOn",
-  "systemTray",
-  "tapAny",
-  "tapAt",
-  "tapOn",
-  "wakeAndUnlock",
-]);
-
 function opaqueBreadcrumb(...parts: readonly string[]): ToolMutation {
   return { kind: "opaque", key: ["tool", ...parts].join(":") };
 }
@@ -117,5 +86,5 @@ export function interactionToolMutations(
   if (name === "mediaSession") {
     return mediaSessionMutations(args);
   }
-  return PURE_INPUT_TOOLS.has(name) ? [] : undefined;
+  return undefined;
 }

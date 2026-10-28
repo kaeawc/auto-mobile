@@ -389,6 +389,7 @@ export class AndroidInboundResponseHandlers {
           ? { droppedEvents: message.droppedEvents }
           : {}),
         ...parsePrototypeBackdrop(message.backdrop),
+        ...(typeof message.screenRound === "boolean" ? { screenRound: message.screenRound } : {}),
         ...(Number.isSafeInteger(message.cleared) && message.cleared! >= 0
           ? { cleared: message.cleared }
           : {}),

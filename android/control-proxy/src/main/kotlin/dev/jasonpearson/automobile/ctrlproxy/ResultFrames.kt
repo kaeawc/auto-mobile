@@ -69,6 +69,7 @@ internal fun prototypeResultFrame(
   fired: Int? = null,
   backdrop: String? = null,
   degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
+  screenRound: Boolean? = null,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     PrototypeResult(
@@ -86,6 +87,7 @@ internal fun prototypeResultFrame(
       fired = fired,
       backdrop = backdrop,
       degradedEffects = degradedEffects.ifEmpty { null },
+      screenRound = screenRound,
     ),
   )
 

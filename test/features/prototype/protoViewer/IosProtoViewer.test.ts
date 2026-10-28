@@ -6,8 +6,10 @@ import {
 } from "../../../../src/features/prototype/protoViewer/IosProtoViewer";
 import {
   ProtoViewerEntryPointMissingError,
+  ProtoViewerForegroundError,
   ProtoViewerStorageError,
 } from "../../../../src/features/prototype/protoViewer/protoViewerDevice";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { SimctlCommandTimeoutError } from "../../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
@@ -45,8 +47,10 @@ class Simctl implements IosProtoViewerSimctl {
   argv: readonly string[] = [];
   calls: string[] = [];
   launchFailure?: Error;
+  onLaunch: () => void = () => {};
   async launch(udid: string, _timeoutMs: number) {
     this.calls.push(`launch:${udid}`);
+    this.onLaunch();
     if (this.launchFailure) {
       throw this.launchFailure;
     }
@@ -199,9 +203,53 @@ test("iOS brings ProtoViewer to the foreground before openurl so no Open-in aler
   await viewer.importBundle(new Uint8Array([1]), undefined, 1000);
   expect(simctl.calls).toEqual([`launch:${UDID}`, "openurl"]);
 });
-test("iOS still tries openurl when the foreground launch fails (#15435)", async () => {
-  const { viewer, simctl } = setup();
-  simctl.launchFailure = new Error("launch failed");
-  expect((await viewer.importBundle(new Uint8Array([1]), undefined, 1000)).status).toBe("imported");
-  expect(simctl.calls).toEqual([`launch:${UDID}`, "openurl"]);
+test.each(["import", "open"] as const)(
+  "iOS %s fails actionably without URL delivery or polling when foreground launch fails (#15435)",
+  async (action) => {
+    for (const failure of [new Error("launch failed"), new SimctlCommandTimeoutError("deadline")]) {
+      const { viewer, simctl, files, timer } = setup();
+      simctl.launchFailure = failure;
+      files.pending = 10_000;
+      const result =
+        action === "import"
+          ? viewer.importBundle(new Uint8Array([1]), undefined, 15_000)
+          : viewer.open(ID, 15_000);
+      await expect(result).rejects.toBeInstanceOf(ProtoViewerForegroundError);
+      await expect(result).rejects.toBeInstanceOf(ActionableError);
+      await expect(result).rejects.toMatchObject({
+        name: "ProtoViewerForegroundError",
+        message:
+          'Could not bring ProtoViewer to the foreground on the iOS simulator. An "Open in ProtoViewer?" alert may be pending; dismiss it, open ProtoViewer manually, and retry.',
+        cause: failure,
+      });
+      expect(simctl.calls).toEqual([`launch:${UDID}`]);
+      expect(files.reads).toBe(0);
+      expect(timer.getSleepHistory()).toEqual([]);
+      for (const path of [
+        `results/${REQUEST}.json`,
+        `inbox/${REQUEST}.automobile-proto`,
+        `inbox/${REQUEST}.automobile-proto.tmp`,
+      ]) {
+        expect(files.events).toContain(`remove:${ROOT}/${path}`);
+      }
+    }
+  },
+);
+test("iOS preserves cancellation during foreground launch and still cleans up", async () => {
+  const { viewer, simctl, files, timer } = setup();
+  const controller = new AbortController();
+  const cancelled = new Error("caller cancelled launch");
+  simctl.onLaunch = () => controller.abort(cancelled);
+  simctl.launchFailure = cancelled;
+  await expect(
+    viewer.importBundle(new Uint8Array([1]), undefined, 15_000, controller.signal),
+  ).rejects.toBe(cancelled);
+  expect(simctl.calls).toEqual([`launch:${UDID}`]);
+  expect(files.reads).toBe(0);
+  expect(timer.getSleepHistory()).toEqual([]);
+  expect(files.events.filter((event) => event.startsWith("remove:"))).toEqual([
+    `remove:${ROOT}/results/${REQUEST}.json`,
+    `remove:${ROOT}/inbox/${REQUEST}.automobile-proto`,
+    `remove:${ROOT}/inbox/${REQUEST}.automobile-proto.tmp`,
+  ]);
 });

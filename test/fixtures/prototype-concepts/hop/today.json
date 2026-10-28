@@ -397,6 +397,16 @@
                   },
                   {
                     "type": "setState",
+                    "key": "rating",
+                    "value": 0
+                  },
+                  {
+                    "type": "setState",
+                    "key": "tip",
+                    "value": "0"
+                  },
+                  {
+                    "type": "setState",
                     "key": "stage",
                     "value": "matching"
                   },

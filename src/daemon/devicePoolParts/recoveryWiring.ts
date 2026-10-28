@@ -279,6 +279,7 @@ export class DevicePoolRecoveryWiring {
             owner,
             sessionId,
             session,
+            signal,
           ]: Parameters<AndroidRebootCoordinatorPoolPort["stopAndroidEmulatorForRecovery"]>
         ) =>
           this.callbacks.stopAndroidEmulatorForRecovery({
@@ -289,6 +290,7 @@ export class DevicePoolRecoveryWiring {
             handoffOwner: owner,
             preservedSessionId: sessionId,
             preservedSession: session,
+            signal,
           }),
         rebindSameAvdReplacementSession: (
           ...[device, avdName, sessionId, session, autolockSessionId, image, owner]: Parameters<

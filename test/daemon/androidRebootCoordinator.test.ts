@@ -91,12 +91,14 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
     this.calls.push("finish");
     this.finishes.push({ retainRecoveryImage, lateShutdownSettled });
   }
+  readonly stopSignals: Array<AbortSignal | undefined> = [];
   async stopAndroidEmulatorForRecovery(
-    _device: PooledDevice,
-    _avdName: string,
-    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+    ...[, , retainLeaseUntil, , , , , signal]: Parameters<
+      AndroidRebootCoordinatorPoolPort["stopAndroidEmulatorForRecovery"]
+    >
   ): Promise<"stopped"> {
     this.calls.push("stop");
+    this.stopSignals.push(signal);
     this.onStop?.(retainLeaseUntil);
     return "stopped";
   }
@@ -245,6 +247,20 @@ describe("AndroidRebootCoordinator", () => {
     expect(outcomes).toEqual(["recovered"]);
     expect(timer.getSleepHistory()).toEqual([1000]);
     expect(port.calls.slice(-3)).toEqual(["bind:none", "clear-owner", "finish"]);
+  });
+
+  test("threads its recovery signal into the emulator stop (#15671)", async () => {
+    const { coordinator, port } = setup(async () => null);
+    const signal = new AbortController().signal;
+    await coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+      oldDevice,
+      "incident",
+      {},
+      signal,
+      () => {},
+    );
+    expect(port.stopSignals.length).toBe(1);
+    expect(port.stopSignals[0]).toBe(signal);
   });
 
   test("settles cancellation during a failed launch without a registered replacement", async () => {

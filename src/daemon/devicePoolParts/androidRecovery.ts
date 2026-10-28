@@ -162,6 +162,7 @@ export class DevicePoolAndroidRecovery {
       handoffOwner,
       preservedSessionId,
       preservedSession,
+      signal,
     } = options;
     const current = this.state.devices.get(device.id);
     if (this.sameAvdReplacements(device, avdName).length > 0) {
@@ -196,6 +197,7 @@ export class DevicePoolAndroidRecovery {
         handoffOwner,
         preservedSessionId,
         preservedSession,
+        signal,
       });
     }
     return "stopped";

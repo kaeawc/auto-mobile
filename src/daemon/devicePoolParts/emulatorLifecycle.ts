@@ -4,7 +4,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { ActionableError, BootedDevice, DeviceInfo } from "../../models";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
+import { runWithAbortSignal } from "../../utils/AbortContext";
 import { UnconfirmedRecoveryShutdownError } from "../UnconfirmedRecoveryShutdownError";
 import type { PooledDevice } from "../devicePoolTypes";
 import { ANDROID_OFFLINE_PROBE_TIMEOUT_MS, StopDiscoveredEmulatorOptions } from "./contracts";
@@ -90,11 +90,11 @@ export class DevicePoolEmulatorLifecycle {
       handoffOwner,
       preservedSessionId,
       preservedSession,
+      signal: callerSignal,
     } = options;
     const timeoutMs = 30000;
     const deadlineMs = this.state.timer.now() + timeoutMs;
     const deadlineController = new AbortController();
-    const callerSignal = getAbortSignal();
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, deadlineController.signal])
       : deadlineController.signal;

@@ -1,3 +1,4 @@
+import { mcpAppsRequestMeta } from "./mcpAppsSupport";
 import type { SessionDeviceRebound } from "../daemon/sessionDeviceReboundBroadcast";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
@@ -717,7 +718,11 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
 
     try {
-      const result = await proxy.readResource(uri, { signal: ctx.mcpReq.signal });
+      const meta = mcpAppsRequestMeta(server.server.getClientCapabilities());
+      const result = await proxy.readResource(uri, {
+        signal: ctx.mcpReq.signal,
+        ...(meta !== undefined && { _meta: meta }),
+      });
       return result;
     } catch (error) {
       ctx.mcpReq.signal.throwIfAborted();

@@ -14,7 +14,8 @@
     "localeTag": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
     "uploadDisposition": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])",
     "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])",
-    "openUrl": "^(?:https?|mailto|tel|sms|geo|maps):[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
+    "openUrl": "^(?:https?|mailto|tel|sms|geo|maps):[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
+    "reservedEmail": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -86,6 +87,76 @@
     "MAX_PROTOTYPE_KEYFRAME_NODES": 16
   },
   "definitions": {
+    "authAccount": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": false
+        },
+        "name": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "email": {
+          "rule": {
+            "kind": "string",
+            "pattern": "reservedEmail",
+            "max": 254
+          },
+          "optional": false
+        },
+        "avatar": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": true
+        }
+      }
+    },
+    "authBlock": {
+      "kind": "object",
+      "fields": {
+        "provider": {
+          "rule": {
+            "kind": "enum",
+            "values": ["fake"]
+          },
+          "optional": false
+        },
+        "accounts": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 8,
+            "item": {
+              "kind": "ref",
+              "name": "authAccount"
+            }
+          },
+          "optional": false
+        },
+        "sessionTtlSeconds": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 60,
+            "max": 2592000
+          },
+          "optional": true
+        }
+      }
+    },
     "iconEffectTrigger": {
       "kind": "object",
       "exactlyOne": ["key", "data"],
@@ -15331,6 +15402,10 @@
           "rule": {
             "kind": "strings"
           },
+          "optional": true
+        },
+        "auth": {
+          "rule": { "kind": "ref", "name": "authBlock" },
           "optional": true
         },
         "channels": {

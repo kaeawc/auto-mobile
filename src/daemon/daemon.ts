@@ -667,6 +667,7 @@ export class Daemon {
       identity,
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
       bindingRegistry: () => daemon.runtime.bindingRegistry,
       deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,
@@ -736,6 +737,7 @@ export class Daemon {
       reownRehydratedManagedExecutions: (...args) =>
         this.broker.reownRehydratedManagedExecutions(...args),
       installSessionBroker: (...args) => this.broker.installSessionBroker(...args),
+      startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
       initializeIosServices: (...args) => this.initializeIosServices(...args),
       restoreIncumbentOwnerRecord: (...args) => this.identity.restoreIncumbentOwnerRecord(...args),
       republishIdentity: (...args) => this.identity.republishIdentity(...args),

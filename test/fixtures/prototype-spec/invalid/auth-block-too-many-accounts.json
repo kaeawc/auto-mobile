@@ -1,0 +1,131 @@
+{
+  "spec": {
+    "id": "b5",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "session": {}
+    },
+    "state": {
+      "signInStatus": "",
+      "expired": false
+    },
+    "requires": {
+      "platform": ["auth"]
+    },
+    "platform": {
+      "on": {
+        "auth.sessionExpired": [
+          {
+            "type": "setState",
+            "key": "expired",
+            "value": true
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Signed in as {platform:/auth/userId}",
+          "visibleWhen": {
+            "platform": "/auth/signedIn",
+            "equals": true
+          }
+        },
+        {
+          "type": "button",
+          "label": "Sign in",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "auth.signIn",
+              "args": {
+                "style": {
+                  "value": "chooser"
+                }
+              },
+              "into": "/data/session",
+              "statusKey": "signInStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "expired",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Sign out",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "auth.signOut",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    },
+    "auth": {
+      "provider": "fake",
+      "accounts": [
+        {
+          "id": "u0",
+          "name": "User 0",
+          "email": "u0@example.test"
+        },
+        {
+          "id": "u1",
+          "name": "User 1",
+          "email": "u1@example.test"
+        },
+        {
+          "id": "u2",
+          "name": "User 2",
+          "email": "u2@example.test"
+        },
+        {
+          "id": "u3",
+          "name": "User 3",
+          "email": "u3@example.test"
+        },
+        {
+          "id": "u4",
+          "name": "User 4",
+          "email": "u4@example.test"
+        },
+        {
+          "id": "u5",
+          "name": "User 5",
+          "email": "u5@example.test"
+        },
+        {
+          "id": "u6",
+          "name": "User 6",
+          "email": "u6@example.test"
+        },
+        {
+          "id": "u7",
+          "name": "User 7",
+          "email": "u7@example.test"
+        },
+        {
+          "id": "u8",
+          "name": "User 8",
+          "email": "u8@example.test"
+        }
+      ],
+      "sessionTtlSeconds": 3600
+    }
+  },
+  "expectedPath": "auth.accounts"
+}

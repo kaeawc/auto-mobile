@@ -596,6 +596,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: {
       ...base,
       requires: { platform: ["auth"] },
+      auth: {
+        provider: "fake",
+        accounts: [{ id: "u1", name: "Ada Lovelace", email: "ada@example.test" }],
+      },
       root: {
         ...base.root,
         children: [{ ...label, onTap: [{ type: "platform", call: "auth.signIn", args: {} }] }],

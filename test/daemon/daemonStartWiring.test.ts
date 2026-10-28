@@ -1,5 +1,7 @@
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonBroker } from "../../src/daemon/daemonCore/DaemonBroker";
+import { DeviceClaimMirrorHub } from "../../src/daemon/deviceClaimMirrorHub";
+import { BackgroundBindingRegistryUpgrade } from "../../src/daemon/sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import { daemonSocketServerDouble } from "../../src/daemon/daemonSocketServer";
 import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
@@ -485,13 +487,17 @@ describe("Daemon.start() tool-call-end wiring", () => {
     }
   });
 
-  test.each([false, true])("registry retirement startup ordering (broker: %s)", async (broker) => {
+  test.each([
+    { broker: false, exists: true },
+    { broker: false, exists: false },
+    { broker: true, exists: true },
+  ])("registry retirement startup ordering: %j", async ({ broker, exists }) => {
     const { internals, timer, tokenStore } = await makeDaemon({ port: 3161, debug: true });
     tokenStore.write("incumbent-token");
     const events: string[] = [];
     let stopped = false;
     const spies = [
-      spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(true),
+      spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(exists),
       spyOn(internals, "initializeDatabase").mockResolvedValue(undefined),
       spyOn(internals, "initializeDevicePoolWithTimeout").mockImplementation(async () => {
         events.push("pool");
@@ -500,6 +506,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
       spyOn(logger, "info").mockImplementation(() => {}),
       spyOn(logger, "warn").mockImplementation(() => {}),
     ];
+    const startUpgrade = spyOn(BackgroundBindingRegistryUpgrade.prototype, "start");
+    spies.push(startUpgrade);
     internals.testHooks.overrideStartSteps({
       openBindingRegistry: async (signal) => {
         events.push("retirement");
@@ -546,11 +554,24 @@ describe("Daemon.start() tool-call-end wiring", () => {
         expect(events).toEqual(["retirement"]);
       } else {
         await internals.testHooks.startThroughSocketBind();
-        expect(events).toEqual(["ingress", "pool", "bind", "retirement"]);
+        expect(events).toEqual(
+          exists ? ["ingress", "pool", "bind", "retirement"] : ["ingress", "pool", "bind"],
+        );
+        expect(startUpgrade).toHaveBeenCalledTimes(exists ? 1 : 0);
+        if (exists) {
+          const upgrade = internals.testHooks.runtime.backgroundRegistryUpgrade;
+          expect(internals.testHooks.startBackgroundRegistryUpgrade()).toBe(true);
+          expect(internals.testHooks.runtime.backgroundRegistryUpgrade).toBe(upgrade);
+          expect(startUpgrade).toHaveBeenCalledTimes(1);
+        } else {
+          // No open means startup cannot create a registry for a host without one.
+          expect(internals.testHooks.runtime.backgroundRegistryUpgrade).toBeUndefined();
+          expect(internals.testHooks.runtime.bindingRegistry).toBeUndefined();
+        }
         expect(tokenStore.read()).not.toBe("incumbent-token");
         expect(stopped).toBe(false);
         await internals.testHooks.closeManagedExecutionRelease();
-        expect(stopped).toBe(true);
+        expect(stopped).toBe(exists);
         expect(timer.now()).toBe(0);
       }
     } finally {
@@ -558,6 +579,96 @@ describe("Daemon.start() tool-call-end wiring", () => {
       internals.testHooks.stopSessionTimers();
       timer.reset();
     }
+  });
+
+  test("pool mirrors defer opening until bind, share one upgrade, and cannot reopen during close", async () => {
+    const registered = spyOn(DeviceClaimMirrorHub.prototype, "register");
+    const exists = spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(false);
+    const startUpgrade = spyOn(BackgroundBindingRegistryUpgrade.prototype, "start");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    const pending = Promise.withResolvers<SqliteBindingRegistry>();
+    const open = mock((_signal?: AbortSignal) => pending.promise);
+    daemon.testHooks.overrideStartSteps({ openBindingRegistry: open });
+    const android = registered.mock.calls[0]![0];
+    const ios = registered.mock.calls[1]![0];
+    try {
+      expect(daemon.testHooks.startBackgroundRegistryUpgrade()).toBe(false);
+      android.claimed("emulator-5610", { pid: 100, ownerToken: "android" });
+      expect(open).not.toHaveBeenCalled();
+      exists.mockReturnValue(true);
+      timer.advanceTime(1_000);
+      expect(open).not.toHaveBeenCalled();
+      expect(daemon.testHooks.runtime.backgroundRegistryUpgrade).toBeUndefined();
+      daemon.testHooks.setSocketBindCommitted(true);
+      timer.advanceTime(5_000);
+      expect(open).toHaveBeenCalledTimes(1);
+      const upgrade = daemon.testHooks.runtime.backgroundRegistryUpgrade;
+      expect(upgrade).toBeInstanceOf(BackgroundBindingRegistryUpgrade);
+      ios.claimed("UDID-1", { pid: 100, ownerToken: "ios" });
+      expect(daemon.testHooks.startBackgroundRegistryUpgrade()).toBe(true);
+      expect(daemon.testHooks.runtime.backgroundRegistryUpgrade).toBe(upgrade);
+      expect(startUpgrade).toHaveBeenCalledTimes(1);
+
+      // Close is still joining the opener; the hub is not disposed yet.
+      const closing = daemon.testHooks.closeManagedExecutionRelease();
+      expect(open.mock.calls[0]![0]?.aborted).toBe(true);
+      expect(daemon.testHooks.startBackgroundRegistryUpgrade()).toBe(false);
+      pending.reject(new Error("fake open aborted"));
+      await closing;
+      expect(daemon.testHooks.runtime.backgroundRegistryUpgrade).toBeUndefined();
+      expect(daemon.testHooks.startBackgroundRegistryUpgrade()).toBe(false);
+      timer.advanceTime(1_000_000);
+      expect(open).toHaveBeenCalledTimes(1);
+    } finally {
+      pending.reject(new Error("fake open aborted"));
+      await daemon.testHooks.closeManagedExecutionRelease();
+      registered.mockRestore();
+      exists.mockRestore();
+      startUpgrade.mockRestore();
+      warn.mockRestore();
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("broker-mode late writes leave registry preparation to broker startup", async () => {
+    const registered = spyOn(DeviceClaimMirrorHub.prototype, "register");
+    const exists = spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(true);
+    const startUpgrade = spyOn(BackgroundBindingRegistryUpgrade.prototype, "start");
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    const open = mock(async (): Promise<SqliteBindingRegistry> => {
+      throw new Error("local upgrade must not run in broker mode");
+    });
+    daemon.testHooks.overrideStartSteps({ openBindingRegistry: open });
+    daemon.testHooks.setSessionBrokerConfigPath("/memory/broker.json");
+    daemon.testHooks.setSocketBindCommitted(true);
+    try {
+      expect(daemon.testHooks.startBackgroundRegistryUpgrade()).toBe(true);
+      const mirror = registered.mock.calls[0]![0];
+      mirror.claimed("emulator-5610", { pid: 100, ownerToken: "owner" });
+      timer.advanceTime(1_000_000);
+      expect(open).not.toHaveBeenCalled();
+      expect(startUpgrade).not.toHaveBeenCalled();
+      expect(daemon.testHooks.runtime.backgroundRegistryUpgrade).toBeUndefined();
+    } finally {
+      daemon.testHooks.runtime.deviceClaimMirrors.dispose();
+      registered.mockRestore();
+      exists.mockRestore();
+      startUpgrade.mockRestore();
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("shutdown-in-progress refuses a late upgrade before the registry close stage", async () => {
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    daemon.testHooks.setSocketBindCommitted(true);
+    daemon.testHooks.markShutdownInProgress();
+    expect(daemon.testHooks.startBackgroundRegistryUpgrade()).toBe(false);
+    expect(daemon.testHooks.runtime.backgroundRegistryUpgrade).toBeUndefined();
+    daemon.testHooks.stopSessionTimers();
+    timer.reset();
   });
 
   test("a started daemon stamps a session's activity at the end of its tool call", async () => {

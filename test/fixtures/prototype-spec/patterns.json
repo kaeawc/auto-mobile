@@ -269,5 +269,26 @@
       "https:",
       ""
     ]
+  },
+  "reservedEmail": {
+    "accepted": [
+      "ada@example.test",
+      "grace.hopper@example.com",
+      "u+1@mail.example.test",
+      "x@sub.example.com",
+      "ada@anything.invalid"
+    ],
+    "rejected": [
+      "ada@gmail.com",
+      "ada@example.org",
+      "ada@example.test.evil.com",
+      "ada@EXAMPLE.TEST",
+      "@example.test",
+      "ada example.test",
+      "ada@example.test\n",
+      "ada@invalid",
+      "ada@example.testx",
+      ""
+    ]
   }
 }

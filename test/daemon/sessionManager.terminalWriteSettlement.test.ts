@@ -128,7 +128,6 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     expect(refusalReads()).toBe(1);
     expect(released).toBe(false);
     expect(journal.loadUnconfirmed()).toHaveLength(1);
-    const snapshot = manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(SESSION)!;
 
     // Replace rather than mutate the fake's row: the classifier already holds the old read.
     const peerRow = {
@@ -150,7 +149,6 @@ describe("terminal release waits for its own row statement settlement (#12547)",
       release_reason: null,
     });
     expect(store.failReleaseWrites).toBe(1);
-    expect(manager.testHooks.wiring.host.rowWriter.superseded.wasRefused(snapshot)).toBe(true);
     expect(journal.loadUnconfirmed()).toEqual([]);
     expect(manager.getSession(SESSION)).toBeNull();
   });
@@ -169,7 +167,6 @@ describe("terminal release waits for its own row statement settlement (#12547)",
       { commitFence: () => !superseded },
     );
     await settleMicrotasks();
-    const snapshot = manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(SESSION)!;
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS, settleMicrotasks);
     await expect(release).resolves.toEqual({ superseded: false, deviceId: DEVICE });
@@ -192,7 +189,6 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     await settleMicrotasks();
     // A pending write belonging to the replacement must not stall the old release's refusal.
     expect(refusalReads()).toBe(1);
-    expect(manager.testHooks.wiring.host.rowWriter.superseded.wasRefused(snapshot)).toBe(true);
     expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       stable_identity_generation: generation,

@@ -22,6 +22,8 @@ enum SdkContractRunner {
         let tap = SdkContractBatchTap(belongsToRun: SdkContractBatchTap.networkEvents(forRun: launch.runId))
         tap.start()
         defer { tap.stop() }
+        let server = SdkContractLoopbackServer()
+        defer { server.stop() }
         do {
             guard launch.scenario == networkScenario else {
                 throw SdkContractError.unknownScenario(launch.scenario)
@@ -29,8 +31,6 @@ enum SdkContractRunner {
             AutoMobileNetwork.shared.setEnabled(true)
             AutoMobileNetwork.shared.setCaptureHeaders(true)
             AutoMobileNetwork.shared.setCaptureBodies(true)
-            let server = SdkContractLoopbackServer()
-            defer { server.stop() }
             let runId = launch.runId
             manifest.network = try await withTimeout(seconds: scenarioTimeoutSeconds) {
                 let ports = try await server.start()
@@ -48,7 +48,9 @@ enum SdkContractRunner {
             manifest.undecodableBatches = captured.undecodableBatches
             manifest.status = .complete
         } catch {
-            manifest.failure = SdkContractError.describe(error)
+            let serverLog = server.eventLog().joined(separator: "; ")
+            let serverDetail = serverLog.isEmpty ? "no events" : serverLog
+            manifest.failure = "\(SdkContractError.describe(error)) | server: \(serverDetail)"
             manifest.status = .failed
         }
         do {

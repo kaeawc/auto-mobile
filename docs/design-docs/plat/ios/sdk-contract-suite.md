@@ -75,4 +75,6 @@ host and launch time until every SDK request id appears.
 - No CtrlProxy reachable from the app: the SDK keeps events pending and the cases report
   `sdk-endpoint`.
 - The session's CtrlProxy client is not draining: events stay queued and report `ios-client`.
-- The scenario times out after 30 s or a listener fails: `fixture-host` with the reason.
+- The scenario times out after 30 s, a case fails or a listener fails: `fixture-host` with the
+  case name, the error domain and code, and the loopback server's event log (accepted, request
+  path, response sent, early close).

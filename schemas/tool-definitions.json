@@ -27359,6 +27359,34 @@
                 "deadTaps": {
                   "type": "boolean"
                 },
+                "keepScreenOn": {
+                  "type": "boolean",
+                  "description": "Keep the screen awake while shown; needs prototype_platform_window_controls_v1"
+                },
+                "brightness": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "system"
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    }
+                  ],
+                  "description": "Screen brightness 0-100 for the prototype window while shown, or system; needs prototype_platform_window_controls_v1"
+                },
+                "orientation": {
+                  "type": "string",
+                  "enum": ["portrait", "landscape", "unlocked"],
+                  "description": "Requested orientation while shown (best effort over an overlay); needs prototype_platform_window_controls_v1"
+                },
+                "statusBar": {
+                  "type": "string",
+                  "enum": ["light", "dark", "auto"],
+                  "description": "Status bar content style while shown (best effort where the runtime does not own the status bar); needs prototype_platform_window_controls_v1"
+                },
                 "opacity": {
                   "type": "integer",
                   "minimum": 0,

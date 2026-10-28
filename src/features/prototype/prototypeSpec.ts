@@ -866,6 +866,28 @@ const windowSchema = z
         "Fullscreen only: none (default on a device advertising prototype_window_chrome_v1) removes the host dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill for 5 s. Device persistence defaults to bar. An older device keeps the bar and refuses explicit none; lastResult.chrome reports what it draws",
       ),
     deadTaps: z.boolean().optional(),
+    keepScreenOn: z
+      .boolean()
+      .optional()
+      .describe("Keep the screen awake while shown; needs prototype_platform_window_controls_v1"),
+    brightness: z
+      .union([z.literal("system"), z.number().finite().int().min(0).max(100)])
+      .optional()
+      .describe(
+        "Screen brightness 0-100 for the prototype window while shown, or system; needs prototype_platform_window_controls_v1",
+      ),
+    orientation: z
+      .enum(["portrait", "landscape", "unlocked"])
+      .optional()
+      .describe(
+        "Requested orientation while shown (best effort over an overlay); needs prototype_platform_window_controls_v1",
+      ),
+    statusBar: z
+      .enum(["light", "dark", "auto"])
+      .optional()
+      .describe(
+        "Status bar content style while shown (best effort where the runtime does not own the status bar); needs prototype_platform_window_controls_v1",
+      ),
     opacity: z.number().finite().int().min(0).max(100).default(100),
     layer: z
       .enum(["app", "system"])

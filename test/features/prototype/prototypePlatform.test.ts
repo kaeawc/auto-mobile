@@ -647,3 +647,49 @@ describe("picker module contracts", () => {
     }
   });
 });
+
+describe("links module contract", () => {
+  const open = PROTOTYPE_PLATFORM_MODULES.links.calls.open;
+  const allowed = new RegExp(contract.patterns.openUrl);
+
+  test("open takes a bounded url and an optional mode from the closed list", () => {
+    expect(Object.keys(open.args)).toEqual(["url", "mode"]);
+    expect(open.args.url.optional).toBe(false);
+    expect(open.args.url.value.max).toBe(2048);
+    expect(open.args.url.value.pattern).toBe("openUrl");
+    expect(open.args.mode.value.values).toEqual(["external", "inApp", "auto"]);
+  });
+
+  test("the scheme allowlist accepts web, mail, phone, sms and map links", () => {
+    for (const url of [
+      "https://example.com/a?b=1",
+      "http://example.com",
+      "mailto:ada@example.test?subject=Hi%20there",
+      "tel:+15551234567",
+      "sms:+15551234567",
+      "geo:37.78,-122.41",
+      "maps://?q=coffee",
+      "https://example.com/{id}",
+    ]) {
+      expect(allowed.test(url)).toBe(true);
+    }
+  });
+
+  test("the scheme allowlist refuses component, local and script schemes", () => {
+    for (const url of [
+      "intent://scan/#Intent;scheme=zxing;end",
+      "file:///etc/passwd",
+      "content://com.android.contacts/contacts",
+      "javascript:alert(1)",
+      "data:text/html,hello",
+      "myapp://open",
+      "HTTPS://example.com",
+      "example.com",
+      "https://example.com/a b",
+      "https://example.com/\u0000",
+      "https:",
+    ]) {
+      expect(allowed.test(url)).toBe(false);
+    }
+  });
+});

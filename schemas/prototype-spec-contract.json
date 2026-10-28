@@ -13,7 +13,8 @@
     "stringKey": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$",
     "localeTag": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
     "uploadDisposition": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])",
-    "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])"
+    "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])",
+    "openUrl": "^(?:https?|mailto|tel|sms|geo|maps):[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -21853,6 +21854,35 @@
                 "kind": "string",
                 "nonblank": true,
                 "max": 2048
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "links": {
+      "capability": "prototype_platform_links_v1",
+      "calls": {
+        "open": {
+          "args": {
+            "url": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "pattern": "openUrl",
+                "max": 2048
+              }
+            },
+            "mode": {
+              "optional": true,
+              "value": {
+                "kind": "enum",
+                "values": ["external", "inApp", "auto"]
               }
             }
           },

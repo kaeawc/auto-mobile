@@ -42,6 +42,7 @@
   "prototype_platform_contacts_v1",
   "prototype_platform_device_v1",
   "prototype_platform_haptics_v1",
+  "prototype_platform_links_v1",
   "prototype_platform_media_items_v1",
   "prototype_platform_namespace_v1",
   "prototype_platform_power_v1",

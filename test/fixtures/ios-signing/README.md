@@ -2,10 +2,11 @@
 
 Inputs for `IosPackageSigningInspector` and `parseCodesignDisplay` tests.
 
-These files are **transcribed**: they follow the layout of the macOS tools' output but were not
-captured from a Mac (the change was written on Linux). Identifiers, hashes, UDIDs and the team id
-are placeholders. #14099 asks for captured output, so replace each file with a real capture and
-keep the test assertions in sync:
+`codesign-dvvv-simulator-adhoc.txt` is a real capture from an Xcode-built Playground installed on an
+iOS 26.5 Simulator; only the container path and UUIDs are redacted. The other two files are still
+**transcribed** (they follow the tools' output layout, with placeholder identifiers, hashes, UDIDs
+and team id) because they need a development-signed build on a physical device (#15062). Replace
+each with a real capture and keep the test assertions in sync:
 
 | File                                         | Capture command                                                                                             |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |

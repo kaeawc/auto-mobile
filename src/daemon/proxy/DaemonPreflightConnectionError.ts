@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "../client";
+import { DaemonUnavailableError } from "../client/client";
 
 /** A transport failed before dispatch, rather than a reconciliation policy gate. */
 export class DaemonPreflightConnectionError extends DaemonUnavailableError {

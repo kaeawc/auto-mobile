@@ -5,7 +5,7 @@ import path from "node:path";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
-} from "../daemonSocketReachability";
+} from "../client/daemonSocketReachability";
 import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
 import { AuxiliarySocketOwner } from "../auxiliarySocketOwner";
 import {

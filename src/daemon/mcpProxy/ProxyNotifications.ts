@@ -3,7 +3,7 @@ import {
   type SessionDeviceRebound,
 } from "../sessionDeviceReboundBroadcast";
 import { logger } from "../../utils/logger";
-import { type DaemonClientLike } from "../client";
+import { type DaemonClientLike } from "../client/client";
 import {
   listChangedKindForMethod,
   RESOURCE_UPDATED_NOTIFICATION_METHOD,

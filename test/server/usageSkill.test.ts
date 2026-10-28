@@ -4,7 +4,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { createMcpServer } from "../../src/server/index";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { UsageSkillSource } from "../../src/server/usageSkill";

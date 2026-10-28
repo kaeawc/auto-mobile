@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import * as versions from "../../src/utils/mcpVersion";
 import * as constants from "../../src/daemon/wire/constants";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import * as net from "node:net";
 import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import { SocketServerRuntime } from "../../src/daemon/socketServerParts/SocketServerRuntime";

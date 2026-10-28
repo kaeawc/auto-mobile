@@ -31,7 +31,7 @@ afterEach(() => {
   createConnectionSpy.mockRestore();
 });
 
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 
 function createClient() {
   return new DaemonClient("/fake/socket", 1_000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, null, {

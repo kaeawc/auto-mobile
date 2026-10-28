@@ -11,7 +11,7 @@ import {
 } from "../features/toolSelection/toolSelectionControl";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
-import { DaemonUnavailableError } from "../daemon/client";
+import { DaemonUnavailableError } from "../daemon/client/client";
 import {
   DaemonMcpProxy,
   DaemonVersionMismatchError,

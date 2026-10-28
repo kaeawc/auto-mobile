@@ -11,7 +11,7 @@ import {
   createRawDaemonSocketExchange,
   type DaemonSocketExchange,
   type DaemonSocketExchangeOutcome,
-} from "../../src/daemon/deviceLeaseOwnerQuery";
+} from "../../src/daemon/client/deviceLeaseOwnerQuery";
 import {
   DAEMON_DEVICE_LEASE_STATUS_METHOD,
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,

@@ -1,6 +1,6 @@
 import { describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

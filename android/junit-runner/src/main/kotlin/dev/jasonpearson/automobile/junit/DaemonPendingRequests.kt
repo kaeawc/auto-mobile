@@ -99,7 +99,7 @@ internal class DaemonPendingRequests(
   }
 
   private companion object {
-    // Keep in sync with DAEMON_RESPONSE_GRACE_MS in src/daemon/client.ts.
+    // Keep in sync with DAEMON_RESPONSE_GRACE_MS in src/daemon/client/client.ts.
     const val RESPONSE_GRACE_MS = 2000L
     const val BUDGET_CHECK_INTERVAL_MS = 100L
   }

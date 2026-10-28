@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import type { DaemonRequest } from "../../src/daemon/types";
 
 // DaemonClient.connect() stats the socket path (existsSync), which does not hold for a

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { BrokerSessions, type BrokerSessionsPort } from "../../../src/daemon/proxy/BrokerSessions";
-import type { DaemonClientLike } from "../../../src/daemon/client";
+import type { DaemonClientLike } from "../../../src/daemon/client/client";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResult";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../../src/daemon/sessionReleasedDuringCall";
-import { daemonResponseError } from "../../../src/daemon/clientResponseDecoding";
+import { daemonResponseError } from "../../../src/daemon/client/clientResponseDecoding";
 import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
 import { FakeTimer } from "../../fakes/FakeTimer";

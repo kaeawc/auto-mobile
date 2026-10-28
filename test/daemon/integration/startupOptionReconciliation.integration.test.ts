@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonClient } from "../../../src/daemon/client";
+import { DaemonClient } from "../../../src/daemon/client/client";
 import { DaemonMcpProxy } from "../../../src/daemon/daemonMcpProxy";
 import type { DaemonManagerLike, DaemonRestartResult } from "../../../src/daemon/manager";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";

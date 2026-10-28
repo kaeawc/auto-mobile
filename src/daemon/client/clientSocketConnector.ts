@@ -1,8 +1,8 @@
 import { Socket, createConnection } from "node:net";
 import type { Duplex } from "node:stream";
-import type { Timer } from "../utils/SystemTimer";
-import { logger } from "../utils/logger";
-import { DaemonUnavailableError, toDaemonTransportError } from "./DaemonUnavailableError";
+import type { Timer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
+import { DaemonUnavailableError, toDaemonTransportError } from "../DaemonUnavailableError";
 
 /** The slice of {@link DaemonClient} state the socket connector reads and mutates. */
 export interface DaemonSocketConnectorHost {

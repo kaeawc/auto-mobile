@@ -5,7 +5,7 @@ import type { Socket } from "node:net";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { useScratchRoot } from "../helpers/scratchRoot";
-import { DaemonSocketReachability } from "../../src/daemon/daemonSocketReachability";
+import { DaemonSocketReachability } from "../../src/daemon/client/daemonSocketReachability";
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";

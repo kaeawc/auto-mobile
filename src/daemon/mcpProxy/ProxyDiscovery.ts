@@ -1,7 +1,7 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { DaemonUnavailableError, type DaemonClientLike } from "../client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../client/client";
 import { DAEMON_BOUND_SESSION_PARAM, DAEMON_RELEASED_SESSION_PARAM } from "../wire/constants";
 import { DeviceControlTransportError } from "../deviceControlTransportFailure";
 import { type ListChangedKind } from "../listChangedBroadcast";

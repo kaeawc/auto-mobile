@@ -3,7 +3,7 @@ import { useScratchRoot } from "../helpers/scratchRoot";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 import { dirname, join } from "node:path";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { getDaemonHealthReport, runSocketDiagnostics } from "../../src/daemon/debugTools";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";

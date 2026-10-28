@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   SESSION_DEVICE_META_KEY,
   withRoutedSessionMeta,

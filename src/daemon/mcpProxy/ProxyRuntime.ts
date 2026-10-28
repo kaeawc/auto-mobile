@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger";
 import { probeCheckoutMcpServerVersion } from "../../utils/mcpVersion";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { getCurrentBuildIdentity, type BuildIdentity } from "../wire/buildIdentity";
-import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "../client";
+import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "../client/client";
 import { CONNECTION_TIMEOUT_MS, DAEMON_VERSION, SOCKET_PATH } from "../wire/constants";
 import { type ListChangedKind } from "../listChangedBroadcast";
 import { DaemonManager, type DaemonManagerLike } from "../manager";

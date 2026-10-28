@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "./client";
+import { DaemonUnavailableError } from "./client/client";
 
 export const DAEMON_REPUBLISH_IDENTITY_METHOD = "ide/republishIdentity";
 export const DAEMON_PREPARE_RESTART_METHOD = "ide/prepareRestart";

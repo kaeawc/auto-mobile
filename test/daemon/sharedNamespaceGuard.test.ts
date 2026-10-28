@@ -5,7 +5,7 @@ import {
   SharedDaemonNamespaceError,
   SHARED_DAEMON_NAMESPACE_CODE,
 } from "../../src/daemon/sharedNamespaceGuard";
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike } from "../../src/daemon/client/client";
 import { resolveDaemonStatePath } from "../../src/daemon/wire/constants";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";

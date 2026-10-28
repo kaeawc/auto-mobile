@@ -7,7 +7,7 @@ import {
 } from "../../src/cli";
 import { runDaemonCommand } from "../../src/daemon/manager";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
+import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";

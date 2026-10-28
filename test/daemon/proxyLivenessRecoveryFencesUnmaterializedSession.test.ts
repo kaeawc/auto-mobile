@@ -1,7 +1,7 @@
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

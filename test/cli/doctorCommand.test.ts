@@ -12,7 +12,7 @@ import {
 } from "../../src/cli";
 import { CLI_OUTPUT_INLINE_MAX_BYTES } from "../../src/cli/toolOutput";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { ActionableError } from "../../src/models/ActionableError";
 
 import type { DoctorReport } from "../../src/doctor/types";

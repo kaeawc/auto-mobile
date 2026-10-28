@@ -9,7 +9,7 @@ import {
   DaemonClient,
   DaemonUnavailableError,
   type DaemonClientLike,
-} from "../../src/daemon/client";
+} from "../../src/daemon/client/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";

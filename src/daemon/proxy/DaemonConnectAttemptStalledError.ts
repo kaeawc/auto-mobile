@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "../client";
+import { DaemonUnavailableError } from "../client/client";
 
 /**
  * A daemon connection attempt did not settle within its bound (#15019). The attempt is

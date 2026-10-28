@@ -25,7 +25,7 @@ import { up as addActivitySequence } from "../../src/db/migrations/2026_10_15_00
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { DAEMON_ONE_SHOT_CLI_PARAM } from "../../src/daemon/wire/constants";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";

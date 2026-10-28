@@ -14,7 +14,7 @@ import {
   DaemonMcpProxy,
   resourceUriNamesSession,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { createMcpServer } from "../../src/server/index";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";

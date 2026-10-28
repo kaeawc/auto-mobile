@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
 import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
 import { DaemonErrorClassifier } from "../../../src/daemon/proxy/DaemonErrorClassifier";
-import { DaemonUnavailableError } from "../../../src/daemon/client";
+import { DaemonUnavailableError } from "../../../src/daemon/client/client";
 import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/DaemonVersionMismatchError";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../../src/daemon/types";
 import { DaemonRestartOptionsUnknownError } from "../../../src/daemon/proxy/DaemonRestartOptionsUnknownError";

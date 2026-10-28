@@ -1,24 +1,24 @@
 import { z } from "zod";
-import { ActionableError } from "../models";
-import { type BuildIdentity } from "./wire/buildIdentity";
+import { ActionableError } from "../../models";
+import { type BuildIdentity } from "../wire/buildIdentity";
 import { type DaemonMethodCallOptions } from "./client";
-import { DaemonBoundSessionLostError } from "./DaemonBoundSessionLostError";
-import { isDaemonHandshakeFailure } from "./wire/daemonHandshake";
-import { DaemonHandshakeMismatchError } from "./DaemonHandshakeMismatchError";
-import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
-import { DaemonShuttingDownError } from "./DaemonShuttingDownError";
+import { DaemonBoundSessionLostError } from "../DaemonBoundSessionLostError";
+import { isDaemonHandshakeFailure } from "../wire/daemonHandshake";
+import { DaemonHandshakeMismatchError } from "../DaemonHandshakeMismatchError";
+import { isDaemonShuttingDownFailure } from "../daemonShutdownOutcome";
+import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
 import {
   DeviceControlTransportError,
   sanitizeDeviceControlTransportFailure,
-} from "./deviceControlTransportFailure";
-import type { LivenessOwnerHold } from "./livenessOwnerLease";
-import { McpOverloadError, sanitizeMcpOverloadFailure } from "./wire/McpTimeoutError";
+} from "../deviceControlTransportFailure";
+import type { LivenessOwnerHold } from "../livenessOwnerLease";
+import { McpOverloadError, sanitizeMcpOverloadFailure } from "../wire/McpTimeoutError";
 import {
   type TaskRelayFrame,
   type TaskRelayMethod,
   isRelayedJsonRpcError,
-} from "./tasks/taskRelay";
-import type { DaemonOptions, DaemonStatus } from "./types";
+} from "../tasks/taskRelay";
+import type { DaemonOptions, DaemonStatus } from "../types";
 import {
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   daemonInstanceFromError,
@@ -28,7 +28,7 @@ import {
   releasedSessionNotFoundFields,
   sanitizeBoundSessionLoss,
   sanitizeDaemonRequestFailureCause,
-} from "./types";
+} from "../types";
 
 export const daemonOptionsSchema = z.object({
   port: z.number().finite().optional(),

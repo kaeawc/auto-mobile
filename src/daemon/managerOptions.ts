@@ -1,6 +1,6 @@
-import type { DaemonClientFactory } from "./client";
+import type { DaemonClientFactory } from "./client/client";
 import type { DaemonStateLike } from "./daemonState";
-import type { DaemonSocketReachabilityLike } from "./daemonSocketReachability";
+import type { DaemonSocketReachabilityLike } from "./client/daemonSocketReachability";
 import type { DaemonLauncher, DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 import type { IdentityRecoveryIO } from "./identityRecovery";
 import type { DaemonPortAvailabilityChecker } from "./portAvailability";

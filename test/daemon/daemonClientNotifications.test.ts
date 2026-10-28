@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { isDaemonNotification, type DaemonNotification } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";

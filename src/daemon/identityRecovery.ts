@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { daemonOptionsSchema } from "./client";
+import { daemonOptionsSchema } from "./client/client";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
 import type { DaemonStatus, PidFileData } from "./types";
 

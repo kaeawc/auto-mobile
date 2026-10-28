@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "../client";
+import { DaemonUnavailableError } from "../client/client";
 
 /**
  * An observation-only connection (a heartbeat or liveness recovery) found a lifecycle-capable

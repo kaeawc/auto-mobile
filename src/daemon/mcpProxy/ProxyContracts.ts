@@ -5,7 +5,7 @@ import { type IdGenerator } from "../../utils/IdGenerator";
 import { type Timer } from "../../utils/SystemTimer";
 import { carryToolFailureMark } from "../../utils/toolFailureSignal";
 import { type BuildIdentity } from "../wire/buildIdentity";
-import { DaemonClient, type DaemonClientFactory } from "../client";
+import { DaemonClient, type DaemonClientFactory } from "../client/client";
 import { DaemonBoundSessionLostError } from "../DaemonBoundSessionLostError";
 import {
   type DeviceSessionSuspectRefusal,

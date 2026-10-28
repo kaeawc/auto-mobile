@@ -1,6 +1,6 @@
 import type { Socket } from "node:net";
 import type { Duplex } from "node:stream";
-import type { Timer } from "../utils/SystemTimer";
+import type { Timer } from "../../utils/SystemTimer";
 import type { PendingDaemonRequest } from "./clientInboundFrames";
 
 /**

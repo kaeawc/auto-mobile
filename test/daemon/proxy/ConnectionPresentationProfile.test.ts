@@ -4,7 +4,7 @@ import {
   connectionPresentationUpdates,
   type ConnectionPresentationProfilePort,
 } from "../../../src/daemon/proxy/ConnectionPresentationProfile";
-import { DaemonUnavailableError } from "../../../src/daemon/client";
+import { DaemonUnavailableError } from "../../../src/daemon/client/client";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../../src/features/toolSelection/toolSelectionControl";
 import {
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,

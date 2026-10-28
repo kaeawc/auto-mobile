@@ -63,7 +63,7 @@ import {
   MAX_EXECUTE_PLAN_BUDGET_STEPS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
 } from "../../src/daemon/mcpRequestTimeout";
-import { resolveExplicitToolTimeoutOverrideMs } from "../../src/daemon/clientMcpRequestTimeout";
+import { resolveExplicitToolTimeoutOverrideMs } from "../../src/daemon/client/clientMcpRequestTimeout";
 import {
   TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
   TAP_ANY_SEARCH_UNTIL_MAX_MS,

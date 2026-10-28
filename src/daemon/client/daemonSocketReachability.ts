@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 const ABSENT_CONFIRM_DELAY_MS = 50;
 

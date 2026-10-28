@@ -10,7 +10,7 @@ import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { parseDaemonResponseLine } from "./helpers/parseDaemonResponseLine";
 import type { SocketFrameTraceEvent } from "../../src/daemon/socketServer";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {

@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { Duplex } from "node:stream";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../../src/daemon/wire/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { McpOverloadError } from "../../src/daemon/wire/McpTimeoutError";

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-// #11868: semantics the fake must share with src/daemon/client.ts. The real client is driven
+// #11868: semantics the fake must share with src/daemon/client/client.ts. The real client is driven
 // hermetically through testHooks.attachSocket + FakeSocket (no real socket, pid file or daemon).
 
 function realClient(): { client: DaemonClient; hangUp: () => void } {

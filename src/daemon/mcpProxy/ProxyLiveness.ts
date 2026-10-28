@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
-import { DaemonUnavailableError, type DaemonClientLike } from "../client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../client/client";
 import { DAEMON_HEARTBEAT_METHOD } from "../wire/constants";
 import { BoundSessionHeartbeat } from "../proxy/BoundSessionHeartbeat";
 import { HeldSessionHeartbeatOutcomes } from "../proxy/HeldSessionHeartbeatOutcomes";

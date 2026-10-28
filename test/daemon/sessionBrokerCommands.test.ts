@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
-import type { DaemonMethodCallOptions } from "../../src/daemon/client";
+import type { DaemonMethodCallOptions } from "../../src/daemon/client/client";
 import {
   daemonCommandArgumentError,
   runDaemonCommand,

@@ -1,20 +1,20 @@
 import { existsSync } from "node:fs";
 import { Socket } from "node:net";
 import { z } from "zod";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { errorMessage } from "../utils/describeUnknownError";
-import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./wire/LineFramer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES, LineFramer } from "../wire/LineFramer";
 import {
   DAEMON_DEVICE_LEASE_STATUS_METHOD,
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
-} from "./wire/constants";
+} from "../wire/constants";
 import type {
   ForwardLeaseOwnerProbe,
   ForwardLeaseOwnerReport,
   ForwardLeaseRelinquishProbe,
   ForwardLeaseRelinquishReport,
-} from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
+} from "../../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 
 /** Outcome of one request/response exchange over a daemon control socket. */
 export type DaemonSocketExchangeOutcome =

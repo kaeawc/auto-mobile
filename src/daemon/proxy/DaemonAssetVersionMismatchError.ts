@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "../client";
+import { DaemonUnavailableError } from "../client/client";
 
 export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
   readonly clientAssetVersion: string;

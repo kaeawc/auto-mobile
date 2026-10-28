@@ -8,7 +8,7 @@ import {
   DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES,
   LineFramer,
 } from "../../src/daemon/wire/LineFramer";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
+import { DaemonFrameTooLargeError } from "../../src/daemon/wire/DaemonFrameTooLargeError";
 import { webRtcStreamSocketResponseSchema } from "../../src/daemon/webrtcStreamSocketTypes";
 import type {
   WebRtcStreamSocketRequest,

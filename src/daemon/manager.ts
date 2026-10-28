@@ -20,7 +20,7 @@ import {
   type DaemonClientFactory,
   type DaemonClientFactoryOptions,
   type DaemonClientLike,
-} from "./client";
+} from "./client/client";
 import {
   type AcceptanceSessionRestartScope,
   type DaemonAdmittedRestart,
@@ -30,7 +30,7 @@ import { type DaemonRestartResult } from "./daemonRestart";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
-} from "./daemonSocketReachability";
+} from "./client/daemonSocketReachability";
 import { type DaemonStateLike, daemonStateLikeFrom, defaultDaemonContext } from "./daemonContext";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryExecutor";

@@ -6,7 +6,7 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
 } from "./wire/constants";
-import type { DaemonClientFactoryOptions, DaemonClientLike } from "./client";
+import type { DaemonClientFactoryOptions, DaemonClientLike } from "./client/client";
 import { daemonProcessOptions } from "./daemonOptionScopes";
 import {
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,

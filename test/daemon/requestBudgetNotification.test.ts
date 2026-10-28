@@ -3,7 +3,7 @@ import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUni
 import { resolveMcpRequestTimeoutMs } from "../../src/daemon/mcpRequestTimeout";
 import { REQUEST_BUDGET_NOTIFICATION_METHOD, type DaemonRequest } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import { DaemonClient, DAEMON_RESPONSE_GRACE_MS } from "../../src/daemon/client";
+import { DaemonClient, DAEMON_RESPONSE_GRACE_MS } from "../../src/daemon/client/client";
 import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import { createRequestContext } from "../../src/daemon/requestContext";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

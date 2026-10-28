@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { DaemonClientLike } from "../../../src/daemon/client";
+import type { DaemonClientLike } from "../../../src/daemon/client/client";
 import {
   ToolCallForwarder,
   type ForwardedResultContext,

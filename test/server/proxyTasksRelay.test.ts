@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { SKILLS_EXTENSION_ID } from "@modelcontextprotocol/server/ext/skills";

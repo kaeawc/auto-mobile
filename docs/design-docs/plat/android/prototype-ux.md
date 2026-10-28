@@ -2072,7 +2072,20 @@ spec cannot name a component or an arbitrary handler, and a URL that begins with
 scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
 `SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
 `mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
-resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
+resolve. The module has no events or `/platform` state.
+
+CtrlProxy registers the Android `links` runtime and advertises the capability; the embedded renderer
+leaves the module to its host app. An omitted `mode` is `auto`. `tel:` starts `ACTION_DIAL` (never
+`ACTION_CALL`, so no call is placed and no `CALL_PHONE` is needed), `mailto:` and `sms:` start
+`ACTION_SENDTO` (a composer; nothing is sent), and every other scheme starts `ACTION_VIEW`, always with
+`FLAG_ACTIVITY_NEW_TASK` because the overlay is not an activity. Only `http` and `https` can open in a
+Custom Tab. The Custom Tab intent targets one Custom Tabs browser, the default browser when it provides
+them and otherwise the first that does, so an App Link app cannot take the URL. The runtime writes the
+Custom Tabs session extra itself, so CtrlProxy needs no `androidx.browser` dependency. `inApp` with no Custom Tabs service (AOSP images without Chrome) opens
+externally and reports `outcome: "fallback"`; `auto` makes the same choice and reports `opened`. Success
+writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, `mode` is how the URL
+actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
+fails with `unavailable`.
 
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.

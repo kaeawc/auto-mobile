@@ -1,0 +1,29 @@
+{
+  "description": "Pitch is clamped to -180..180 at the 30 Hz cap.",
+  "key": "pitchDeg",
+  "rateHz": 30,
+  "samples": [
+    {
+      "timestampMs": 0,
+      "value": 200
+    },
+    {
+      "timestampMs": 40,
+      "value": -190
+    },
+    {
+      "timestampMs": 50,
+      "value": -180.4
+    }
+  ],
+  "expectedWrites": [
+    {
+      "timestampMs": 0,
+      "value": 180
+    },
+    {
+      "timestampMs": 40,
+      "value": -180
+    }
+  ]
+}

@@ -246,6 +246,7 @@ class PrototypeStateWriteValidatorTest {
         Triple("material-app-bar-dialog-pickers", "editing", PrototypeScalar.Text("wrong")),
         Triple("material-app-bar-dialog-pickers", "saved", PrototypeScalar.Text("wrong")),
         Triple("repeat-state-keys", "liked_a", PrototypeScalar.Text("wrong")),
+        Triple("secure-storage", "token", PrototypeScalar.Numeric(1.0)),
       )
 
     @BeforeAll

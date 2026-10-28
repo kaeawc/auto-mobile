@@ -7,7 +7,8 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Cross-argument `links.open` rule. Custom Tabs and SFSafariViewController load only web pages, so
- * `inApp` needs an http(s) URL. A spec's bound arguments are checked once the runtime resolves them.
+ * `inApp` needs an http(s) URL. A spec's bound arguments are checked once the runtime resolves
+ * them.
  */
 object PrototypeLinks {
   const val IN_APP_MESSAGE = "links.open mode inApp requires an http or https url"

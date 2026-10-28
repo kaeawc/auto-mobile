@@ -14,7 +14,8 @@ class PrototypeLinksTest {
 
   @Test
   fun `resolved inApp with a non-web scheme is refused at the mode argument`() {
-    for (url in listOf("tel:+15551234567", "mailto:a@b.test", "sms:+1555", "geo:1,2", "maps://?q=a")) {
+    for (url in
+      listOf("tel:+15551234567", "mailto:a@b.test", "sms:+1555", "geo:1,2", "maps://?q=a")) {
       assertEquals(
         PrototypeSpecError("platform.args.mode", PrototypeLinks.IN_APP_MESSAGE),
         PrototypePlatformCalls.argumentsError("links.open", resolved(url, "inApp")),
@@ -24,8 +25,12 @@ class PrototypeLinksTest {
 
   @Test
   fun `resolved web urls and non-inApp modes pass`() {
-    assertNull(PrototypePlatformCalls.argumentsError("links.open", resolved("https://a.test", "inApp")))
-    assertNull(PrototypePlatformCalls.argumentsError("links.open", resolved("http://a.test", "inApp")))
+    assertNull(
+      PrototypePlatformCalls.argumentsError("links.open", resolved("https://a.test", "inApp")),
+    )
+    assertNull(
+      PrototypePlatformCalls.argumentsError("links.open", resolved("http://a.test", "inApp")),
+    )
     for (mode in listOf("external", "auto", null)) {
       assertNull(PrototypePlatformCalls.argumentsError("links.open", resolved("tel:+1555", mode)))
     }

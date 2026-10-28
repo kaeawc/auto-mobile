@@ -16,7 +16,6 @@ import { type HealthFailureKind } from "./daemonHealthCheck";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { DevicePool } from "./devicePool";
 import { createForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import { type SqliteBindingRegistry } from "./sessionBroker/registry/sqliteBindingRegistry";
 import { ENV, readEnvRaw } from "../config/env";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import { DEFAULT_DAEMON_PORT } from "./wire/constants";
@@ -598,7 +597,7 @@ export class Daemon {
       /** Replaces start-sequence steps with doubles on this instance. */
       overrideStartSteps: (steps: {
         startThroughSocketBind?: () => Promise<void>;
-        openBindingRegistry?: (signal?: AbortSignal) => Promise<SqliteBindingRegistry>;
+        openBindingRegistry?: DaemonBroker["openBindingRegistry"];
         setupShutdownHandlers?: () => void;
       }): void => {
         this.startThroughSocketBind = steps.startThroughSocketBind ?? this.startThroughSocketBind;

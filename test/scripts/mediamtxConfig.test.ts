@@ -26,7 +26,7 @@ const MEASURED_IOS_P95_MS = 15_065;
  *
  * `IOS_FIRST_FRAME_TIMEOUT_MS` starts just before `helper.start()` and ends on the
  * helper's first frame, so its window is a strict *sub-interval* of
- * `whipConnected -> sourceStarted` (that span also contains ffmpeg validation,
+ * `whipConnected -> sourceStarted` (that span also contains helper resolution,
  * simulator window resolution, and helper spawn). We cannot isolate it from the
  * current instrumentation, so we hold the contract against the whole enclosing
  * span — deliberately conservative in the safe direction.

@@ -1,3 +1,11 @@
+import {
+  adoptRestartResumeSessionUuid,
+  adoptRestartResumeTargets,
+  internalMcpSessionId,
+  internalOneShotCli,
+  internalRestartResumeSessionUuid,
+  internalRestartResumeTargets,
+} from "../internalToolParams";
 import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
 import { DeviceInfo } from "../../models";
 import { logger } from "../../utils/logger";
@@ -21,19 +29,19 @@ export function provisionSessionArgs(args: ProvisionDeviceArgs): StartDeviceArgs
     platform: args.device.platform,
     name: args.device.name,
     matchExactName: true,
-    __restartResumeTargets: args.__restartResumeTargets,
+    __restartResumeTargets: internalRestartResumeTargets(args),
     timeoutMs: args.timeoutMs,
-    __mcpSessionId: args.__mcpSessionId,
-    __restartResumeSessionUuid: args.__restartResumeSessionUuid,
-    ...(args.__oneShotCli ? { __oneShotCli: true } : {}),
+    __mcpSessionId: internalMcpSessionId(args),
+    __restartResumeSessionUuid: internalRestartResumeSessionUuid(args),
+    ...(internalOneShotCli(args) ? { __oneShotCli: true } : {}),
   };
 }
 
 export function admitRestartReservedProvision(args: ProvisionDeviceArgs, deviceId?: string): void {
   const start = { ...provisionSessionArgs(args), deviceId };
   admitRestartReservedStart(start);
-  args.__restartResumeSessionUuid ??= start.__restartResumeSessionUuid;
-  args.__restartResumeTargets ??= start.__restartResumeTargets;
+  adoptRestartResumeSessionUuid(args, internalRestartResumeSessionUuid(start));
+  adoptRestartResumeTargets(args, internalRestartResumeTargets(start));
 }
 
 /**

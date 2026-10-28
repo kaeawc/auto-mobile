@@ -52,11 +52,23 @@ const handler = cancellationHandlers(
   interactionDeps,
 );
 
+/** The structured envelope: text and `structuredContent` carry the payload; `success`/`error` hoist. */
+const structuredEnvelope = (
+  payload: Record<string, unknown> & { success: boolean; error?: string },
+  isError: boolean,
+) => ({
+  content: [{ type: "text", text: JSON.stringify(payload) }],
+  structuredContent: payload,
+  success: payload.success,
+  ...(payload.error === undefined ? {} : { error: payload.error }),
+  ...(isError ? { isError: true } : {}),
+});
+
 describe("clipboard and recentApps failure envelopes", () => {
   const device: BootedDevice = { name: "Test Android", deviceId: "fake", platform: "android" };
 
   test.each([false, true])(
-    "clipboard success=%s preserves the text payload and gates isError",
+    "clipboard success=%s returns its structured envelope and gates isError",
     async (success) => {
       const result = {
         success,
@@ -69,10 +81,7 @@ describe("clipboard and recentApps failure envelopes", () => {
       const message = success
         ? "Pasted clipboard content into focused field (via adb)"
         : "Failed to execute clipboard paste: cmd clipboard unsupported (via adb)";
-      expect(response).toEqual({
-        content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
-        ...(success ? {} : { isError: true }),
-      });
+      expect(response).toEqual(structuredEnvelope({ message, ...result }, !success));
       if (success) {
         expect(response).not.toHaveProperty("isError");
       }
@@ -80,7 +89,7 @@ describe("clipboard and recentApps failure envelopes", () => {
   );
 
   test.each([false, true])(
-    "recentApps success=%s preserves the text payload and gates isError",
+    "recentApps success=%s returns its structured envelope and gates isError",
     async (success) => {
       const result = {
         success,
@@ -92,10 +101,7 @@ describe("clipboard and recentApps failure envelopes", () => {
       const message = success
         ? "Opened recent apps"
         : "Failed to open recent apps: App Switcher did not appear";
-      expect(response).toEqual({
-        content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
-        ...(success ? {} : { isError: true }),
-      });
+      expect(response).toEqual(structuredEnvelope({ message, ...result }, !success));
       if (success) {
         expect(response).not.toHaveProperty("isError");
       }
@@ -615,7 +621,7 @@ describe("keyboard failure envelopes", () => {
       expect(toolIsError(response)).toBe(true);
     },
   );
-  test.each([false, true])("shake success=%s preserves its text envelope", async (success) => {
+  test.each([false, true])("shake success=%s returns its structured envelope", async (success) => {
     const result = {
       success,
       duration: 10,
@@ -627,36 +633,30 @@ describe("keyboard failure envelopes", () => {
     const message = success
       ? "Shook device for 10ms with intensity 20"
       : "Failed to shake device: shake rejected";
-    expect(response).toEqual({
-      content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
-      ...(success ? {} : { isError: true }),
-    });
+    expect(response).toEqual(structuredEnvelope({ message, ...result }, !success));
   });
-  test.each([false, true])("homeScreen success=%s preserves its text envelope", async (success) => {
-    const result = {
-      success,
-      navigationMethod: "hardware" as const,
-      ...(success ? {} : { error: "No visual change observed" }),
-    };
-    const execute = spyOn(HomeScreen.prototype, "execute").mockResolvedValue(result);
-    try {
-      const response = await handler("homeScreen")(device, {});
-      expect(response).toEqual({
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              message: "Pressed home button to return to the home screen",
-              ...result,
-            }),
-          },
-        ],
-        ...(success ? {} : { isError: true }),
-      });
-    } finally {
-      execute.mockRestore();
-    }
-  });
+  test.each([false, true])(
+    "homeScreen success=%s returns its structured envelope",
+    async (success) => {
+      const result = {
+        success,
+        navigationMethod: "hardware" as const,
+        ...(success ? {} : { error: "No visual change observed" }),
+      };
+      const execute = spyOn(HomeScreen.prototype, "execute").mockResolvedValue(result);
+      try {
+        const response = await handler("homeScreen")(device, {});
+        expect(response).toEqual(
+          structuredEnvelope(
+            { message: "Pressed home button to return to the home screen", ...result },
+            !success,
+          ),
+        );
+      } finally {
+        execute.mockRestore();
+      }
+    },
+  );
   test("homeScreen already at home preserves its indication without isError", async () => {
     const result = {
       success: true,
@@ -667,9 +667,7 @@ describe("keyboard failure envelopes", () => {
     try {
       const response = await handler("homeScreen")(device, {});
       const { message, ...rest } = result;
-      expect(response).toEqual({
-        content: [{ type: "text", text: JSON.stringify({ message, ...rest }) }],
-      });
+      expect(response).toEqual(structuredEnvelope({ message, ...rest }, false));
       expect(response).not.toHaveProperty("isError");
     } finally {
       execute.mockRestore();

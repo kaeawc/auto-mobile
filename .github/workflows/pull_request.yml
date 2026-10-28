@@ -343,6 +343,8 @@ jobs:
               - 'test/fixtures/prototype-embedded-routing/**'
               # Shared fixtures read by renderer, protocol, runner, and CtrlProxy tests.
               - 'test/fixtures/prototype-spec/**'
+              # Concept slices read by PrototypeConceptCorpusTest.
+              - 'test/fixtures/prototype-concepts/**'
               - 'test/fixtures/prototype/**'
               - 'test/fixtures/refusal-wire/**'
               - 'test/fixtures/refusal-wire-hints/**'
@@ -417,6 +419,8 @@ jobs:
               - 'test/fixtures/prototype-capabilities/**'
               - 'test/fixtures/prototype-embedded-routing/**'
               - 'test/fixtures/prototype-spec/**'
+              # Concept slices read by PrototypeConceptCorpusTests.
+              - 'test/fixtures/prototype-concepts/**'
               - 'test/fixtures/prototype/**'
               - 'test/fixtures/prototype-saved-layout/**'
               - 'test/fixtures/desktop-wire/**'

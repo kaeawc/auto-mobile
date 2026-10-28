@@ -51,6 +51,7 @@ class PrototypeDisplayHostTest {
             displays.managers.values.any { it.isViewAttached(view) }
         },
         sdkInt = 30,
+        firstRenderWaiter = PrototypeFirstRenderWaiter { _, _ -> true },
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),
         densityProvider = { 2.5f },
@@ -160,7 +161,9 @@ class PrototypeDisplayHostTest {
     val inner = displays.connect(2)
     inner.failAdd = true
     host.show(sheet(0))
-    assertFalse(host.replace(sheet(2)))
+    assertTrue(
+      runCatching { host.replace(sheet(2)) }.exceptionOrNull() is PrototypeRenderFailedException,
+    )
     assertTrue(host.isShowing)
     assertEquals(0, defaultManager.removals)
     assertTrue(host.dismiss())

@@ -67,8 +67,12 @@ export class SqliteDeviceClaims implements DeviceClaims {
       .execute();
   }
 
-  async releaseOwnedBy(pid: number): Promise<void> {
-    await this.db.deleteFrom("device_claims").where("pid", "=", pid).execute();
+  async releaseOwnedBy(owner: { pid: number; ownerToken: string }): Promise<void> {
+    await this.db
+      .deleteFrom("device_claims")
+      .where("pid", "=", owner.pid)
+      .where("owner_token", "=", owner.ownerToken)
+      .execute();
   }
 
   async get(platform: Platform, deviceId: string): Promise<DeviceClaim | undefined> {

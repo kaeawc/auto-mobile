@@ -350,18 +350,6 @@ describe("device capture registry", () => {
     sinks.onDroppedFrames?.(4);
     const metrics: Parameters<NonNullable<H264CaptureSourceOptions["onFrameMetrics"]>>[0] = {
       native: null,
-      helper: null,
-      encoder: {
-        captureTimestampMs: null,
-        frameAgeMs: null,
-        queueDepth: 0,
-        droppedFrames: 0,
-        bytesQueued: 0,
-        highWaterMarkBytes: 0,
-        maxFrameBytes: 100,
-        outputWriteDurationMs: null,
-        outputWriteHighWaterDurationMs: 0,
-      },
     };
     sinks.onFrameMetrics?.(metrics);
     expect(seen[0]).toEqual(seen[1]);
@@ -937,18 +925,6 @@ describe("review regressions", () => {
     await a.start();
     const metrics: H264CaptureSourceMetrics = {
       native: null,
-      helper: null,
-      encoder: {
-        captureTimestampMs: null,
-        frameAgeMs: null,
-        queueDepth: 0,
-        droppedFrames: 0,
-        bytesQueued: 0,
-        highWaterMarkBytes: 0,
-        maxFrameBytes: 100,
-        outputWriteDurationMs: null,
-        outputWriteHighWaterDurationMs: 0,
-      },
     };
     h.sources[0].options.onFrameMetrics?.(metrics);
     const b = h.acquire({ onFrameMetrics: (value) => seen[1].push(value) });
@@ -1017,18 +993,6 @@ type FrameMetrics = Parameters<NonNullable<H264CaptureSourceOptions["onFrameMetr
 
 const idleFrameMetrics = (): FrameMetrics => ({
   native: null,
-  helper: null,
-  encoder: {
-    captureTimestampMs: null,
-    frameAgeMs: null,
-    queueDepth: 0,
-    droppedFrames: 0,
-    bytesQueued: 0,
-    highWaterMarkBytes: 0,
-    maxFrameBytes: 100,
-    outputWriteDurationMs: null,
-    outputWriteHighWaterDurationMs: 0,
-  },
 });
 
 test("android relay-first then a metrics consumer shares one capture and detaches by refcount", async () => {

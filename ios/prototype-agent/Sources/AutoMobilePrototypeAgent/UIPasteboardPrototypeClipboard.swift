@@ -29,6 +29,9 @@
 
     extension PrototypePlatformRegistry {
         public static let system =
-            PrototypePlatformRegistry(modules: [PrototypeClipboardModule(clipboard: UIPasteboardPrototypeClipboard())])
+            PrototypePlatformRegistry(modules: [
+                PrototypeClipboardModule(clipboard: UIPasteboardPrototypeClipboard()),
+                PrototypeLinksModule(opener: UIKitLinkOpener()),
+            ])
     }
 #endif

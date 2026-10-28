@@ -614,7 +614,8 @@ and "virtual loopback" can be told apart.
 - **`audio_input_unavailable` (#13627).** `src/utils/audio/audioInputDiagnostic.ts` derives the
   diagnostic from a non-available `*.audioInput` entry, so there is no second detection path. An iOS
   simulator reads the live cached host probe (not an inventory captured at discovery); an Android
-  emulator uses its booted inventory, and a device without one gets nothing. Physical devices never
+  emulator uses its inventory, read from its AVD config by name when the device arrives without one
+  (the daemon session path builds a bare device). Physical devices never
   get it. `observe` adds it to its own served copy only, so cached observations reused by action
   tools never carry it; a microphone grant keeps `success` and adds it under `diagnostics`.
 - **Probe.** `src/utils/audio/coreAudioHal.ts` reads the CoreAudio HAL through `bun:ffi`

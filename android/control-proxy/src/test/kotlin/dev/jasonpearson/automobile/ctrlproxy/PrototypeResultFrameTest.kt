@@ -19,10 +19,39 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 class PrototypeResultFrameTest {
+  companion object {
+    @JvmStatic
+    @BeforeClass
+    fun warmCodec() {
+      // Polymorphic protocol serializers load once per JVM, outside per-test timing.
+      val frame = prototypeResultFrame("warmup", true, null, screenRound = false)
+      Json.decodeFromString<WebSocketResponse>(frame)
+    }
+  }
+
   private val json = Json { classDiscriminator = "type" }
+
+  @Test
+  fun `show shape is optional even with explicit default encoding`() {
+    val defaults = Json { encodeDefaults = true }
+    val result = PrototypeResult(timestamp = 1, success = true)
+    assertFalse(
+      "screenRound" in
+        defaults.encodeToJsonElement(PrototypeResult.serializer(), result).jsonObject,
+    )
+    for (round in listOf(true, false)) {
+      val frame = prototypeResultFrame("show", true, null, screenRound = round)
+      assertEquals(JsonPrimitive(round), json.parseToJsonElement(frame).jsonObject["screenRound"])
+      assertEquals(
+        round,
+        (json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult).screenRound,
+      )
+    }
+  }
 
   @Test
   fun `patch conflict carries revision and scalar state in the same result frame`() {

@@ -182,6 +182,25 @@
                               "value": ""
                             },
                             {
+                              "type": "setState",
+                              "key": "draft",
+                              "value": ""
+                            },
+                            {
+                              "type": "cancelTimer",
+                              "id": "recorder"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "recording",
+                              "value": false
+                            },
+                            {
+                              "type": "setState",
+                              "key": "recSeconds",
+                              "value": 0
+                            },
+                            {
                               "type": "setData",
                               "path": "/data/pending/text",
                               "value": {

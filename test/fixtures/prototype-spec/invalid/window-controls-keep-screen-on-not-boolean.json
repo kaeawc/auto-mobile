@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "w7",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "keepScreenOn": "yes",
+      "brightness": 100,
+      "orientation": "portrait",
+      "statusBar": "light"
+    },
+    "root": {
+      "type": "text",
+      "text": "Boarding pass"
+    }
+  },
+  "expectedPath": "window.keepScreenOn"
+}

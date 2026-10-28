@@ -2007,8 +2007,21 @@ path. No production runtime advertises them yet: the Android and iOS readers are
 **Connectivity (#14273).** The `connectivity` module (`prototype_platform_connectivity_v1`) follows the
 same shape: `/platform/connectivity/online` and `metered` and `constrained` are booleans, and
 `transport` is `wifi`, `cellular`, `ethernet`, `vpn`, `other` or `none`. `constrained` is iOS Low Data
-Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery per 500 ms. No
-production runtime advertises it yet.
+Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery per 500 ms.
+
+CtrlProxy registers the Android runtime and advertises the capability; the embedded renderer leaves the
+module to its host app. It reads the default network with `registerDefaultNetworkCallback`, registered on
+the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. The
+state is seeded from the active network before the callback registers, so the callback's first delivery
+is not a transition and a prototype does not see `connectivity.changed` just for starting. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
+`online: false` with `transport: "wifi"`. With no default network the state is offline on `none` with
+`metered` and `constrained` false. `transport` takes the first of `vpn`, `wifi`, `cellular`, `ethernet`
+that the network carries, so a VPN reports `vpn` over its underlying transport, and anything else is
+`other`. `metered` is the absence of `NET_CAPABILITY_NOT_METERED`. `constrained` is Data Saver on
+(`getRestrictBackgroundStatus` not `DISABLED`) on a metered network, because Data Saver restricts only
+metered networks. State updates at once; the event fires once the state has been quiet for the
+debounce, and a flap that settles back on the last delivered state is not an event. The iOS runtime and
+the offline simulation override are not built.
 
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
@@ -2020,6 +2033,15 @@ attempt while the prompt stays up. It has no `/platform` state and needs no decl
 call proves presence only and returns no biometric data. Failures use the typed codes: `cancelled`, and
 `unavailable` for a locked-out, unenrolled or hardware-less device. No production runtime advertises the
 module yet.
+
+**Window controls (#14320).** Four optional root `window` fields need
+`prototype_platform_window_controls_v1`; they are not a platform module, so no `requires.platform` entry.
+`keepScreenOn` (boolean) keeps the screen awake, `brightness` (whole 0-100, or `system`) sets the prototype
+window's brightness, `orientation` (`portrait`, `landscape` or `unlocked`) requests an orientation, and
+`statusBar` (`light`, `dark` or `auto`) picks the status bar content style. Each applies only while the
+prototype is shown and is restored on dismiss; none writes a system setting. `orientation` over an overlay
+and `statusBar` where the runtime does not own the status bar (an Android overlay, the injected iOS agent) are
+best effort, and the iOS Simulator ignores `brightness`. No production runtime advertises the capability yet.
 
 **Settings deep links (#14320).** The `settings` module (`prototype_platform_settings_v1`) has one call,
 `settings.open` with `page` one of `app`, `notifications`, `location`, `wifi`, `bluetooth` or `display`. The
@@ -2046,7 +2068,20 @@ spec cannot name a component or an arbitrary handler, and a URL that begins with
 scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
 `SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
 `mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
-resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
+resolve. The module has no events or `/platform` state.
+
+CtrlProxy registers the Android `links` runtime and advertises the capability; the embedded renderer
+leaves the module to its host app. An omitted `mode` is `auto`. `tel:` starts `ACTION_DIAL` (never
+`ACTION_CALL`, so no call is placed and no `CALL_PHONE` is needed), `mailto:` and `sms:` start
+`ACTION_SENDTO` (a composer; nothing is sent), and every other scheme starts `ACTION_VIEW`, always with
+`FLAG_ACTIVITY_NEW_TASK` because the overlay is not an activity. Only `http` and `https` can open in a
+Custom Tab. The Custom Tab intent targets one Custom Tabs browser, the default browser when it provides
+them and otherwise the first that does, so an App Link app cannot take the URL. The runtime writes the
+Custom Tabs session extra itself, so CtrlProxy needs no `androidx.browser` dependency. `inApp` with no Custom Tabs service (AOSP images without Chrome) opens
+externally and reports `outcome: "fallback"`; `auto` makes the same choice and reports `opened`. Success
+writes `{outcome, url, mode, handler?}`, where `url` is cut to 2048 characters, `mode` is how the URL
+actually opened (`external` or `inApp`) and `handler` is the resolved package. No resolving activity
+fails with `unavailable`.
 
 **Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
 permission and write device media items (see "Device media items") to `into`.
@@ -2079,8 +2114,13 @@ use the typed codes `permission_denied`, `unavailable` (location services off), 
 The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
 `/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
 are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
-that fix after the session ends. The root subscription block and the reference outcome reducer are not in the
-contract yet, and no production runtime advertises the module.
+that fix after the session ends. `applyPrototypeLocationOutcome` (`prototypeLocationOutcome.ts`) is the
+reference both runtimes copy. A fix is written only when its coordinates are in range, and it carries only the
+optional fields the platform reported. `<into>__meta` then gets `{durationMs, approximate}`. A failure leaves
+`into` untouched and records `{durationMs, error}`: a code outside the four above becomes `platform_error`, and
+only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the fix is rolled
+back. The root subscription block is not in the contract yet, and no production runtime advertises the
+module.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

@@ -24,6 +24,10 @@ enum PrototypeBundleCapabilities {
         if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
             .contains(where: { $0.hasPrefix("stack:") }) { need("routes") }
         if spec["window"]?.objectFields?["backdrop"] != nil { need("backdrop") }
+        if let window = spec["window"]?.objectFields,
+           ["keepScreenOn", "brightness", "orientation", "statusBar"].contains(where: { window[$0] != nil }) {
+            need("platform_window_controls")
+        }
         if spec["platform"] != nil || spec["requires"] != nil { need("platform") }
         if case let .array(modules) = spec["requires"]?.objectFields?["platform"] {
             for module in modules {

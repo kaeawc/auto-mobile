@@ -1,0 +1,15 @@
+{
+  "id": "window-controls-system",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "brightness": "system",
+    "orientation": "unlocked",
+    "statusBar": "auto"
+  },
+  "root": {
+    "type": "text",
+    "text": "Boarding pass"
+  }
+}

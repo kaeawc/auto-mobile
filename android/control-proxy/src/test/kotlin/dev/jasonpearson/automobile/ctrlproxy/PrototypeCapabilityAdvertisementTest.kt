@@ -56,7 +56,9 @@ class PrototypeCapabilityAdvertisementTest {
     val overlay = prototypeRuntimePlatform(android.content.ContextWrapper(null))
     assertEquals(
       setOf(
+        "prototype_platform_connectivity_v1",
         "prototype_platform_haptics_v1",
+        "prototype_platform_links_v1",
         "prototype_platform_sound_v1",
         "prototype_platform_test_v1",
       ),

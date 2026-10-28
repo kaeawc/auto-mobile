@@ -1,8 +1,10 @@
 import type { DeviceDisplays } from "./DisplayPanel";
 import type { FormFactor } from "./DeviceMatchCriteria";
 import type { ObservationInsets } from "./ObservationInsets";
+import type { Platform } from "./Platform";
 
-export type DevicePlatform = "android" | "ios";
+/** Records which platform a described device is; watchOS devices are described, not driven. */
+export type DevicePlatform = Platform;
 export type DeviceLifecycleState =
   | "configured"
   | "booting"

@@ -124,5 +124,6 @@ describe("logSkippedObservationStreamDevice", () => {
   test("does not throw for either platform", () => {
     expect(() => logSkippedObservationStreamDevice("android", "d", "connect")).not.toThrow();
     expect(() => logSkippedObservationStreamDevice("ios", "d", "connect")).not.toThrow();
+    expect(() => logSkippedObservationStreamDevice("watchos", "d", "connect")).not.toThrow();
   });
 });

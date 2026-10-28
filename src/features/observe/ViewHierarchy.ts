@@ -6,6 +6,7 @@ import { androidCtrlProxyClientForPlatform } from "./android/androidCtrlProxyCli
 import {
   BootedDevice,
   Element,
+  requireAndroidOrIosPlatform,
   ScreenIdentity,
   ViewHierarchyQueryOptions,
   ViewHierarchyResult,
@@ -488,10 +489,11 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   projectActionableHierarchy(hierarchy: ViewHierarchyResult): ViewHierarchyResult {
+    const platform = requireAndroidOrIosPlatform(this.device.platform, "Observing the hierarchy");
     return projectActionableHierarchy(
-      this.device.platform,
+      platform,
       hierarchy,
-      this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+      platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
     );
   }
 

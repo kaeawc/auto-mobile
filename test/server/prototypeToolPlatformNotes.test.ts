@@ -14,12 +14,12 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
-const ios: BootedDevice = { deviceId: "notes-ios", platform: "ios", name: "Fake iPhone" };
-const android: BootedDevice = {
+const ios = { deviceId: "notes-ios", platform: "ios", name: "Fake iPhone" } satisfies BootedDevice;
+const android = {
   deviceId: "notes-android",
   platform: "android",
   name: "Fake Android",
-};
+} satisfies BootedDevice;
 const spec: PrototypeSpec = {
   id: "panel",
   window: { placement: { type: "fullscreen" }, opacity: 1 },
@@ -84,7 +84,7 @@ describe("prototype tool platform notes", () => {
     unsubscribe();
     restore();
   });
-  async function call(input: Record<string, unknown>, device = ios) {
+  async function call(input: Record<string, unknown>, device: BootedDevice = ios) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
     return {
       raw: readToolResponse(response).structuredContent,

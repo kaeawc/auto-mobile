@@ -9,7 +9,7 @@ import {
   DeviceReadiness,
   type ConnectedPlatformScan,
 } from "../../daemon/readiness/DeviceReadiness";
-import { BootedDevice, SomePlatform } from "../../models";
+import { BootedDevice, type Platform, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
@@ -42,6 +42,7 @@ import {
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../../daemon/executionTracker";
 import { deviceActionClock } from "./deviceActionClock";
+import { assertToolSupportsDevicePlatform } from "../watchOsToolSupport";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -492,9 +493,9 @@ export function assertInternalCallWithinBrokerGrant(
 
 /** The platforms a target may be on: the pool's record, else the call's platform, else both. */
 export function bindingPlatformsFor(
-  pooledPlatform: "android" | "ios" | undefined,
+  pooledPlatform: Platform | undefined,
   requestedPlatform: unknown,
-): Array<"android" | "ios"> {
+): Platform[] {
   if (pooledPlatform) {
     return [pooledPlatform];
   }
@@ -590,6 +591,8 @@ export async function invokeResolvedDeviceHandler(input: {
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
   const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
+  // Fail closed: a watch never reaches a tool that has not opted in (#14899).
+  assertToolSupportsDevicePlatform(name, target.device);
   if (target.deviceRead) {
     // A read-only device read is not this caller's use of the device: no navigation recording
     // and no audit run on a device the caller may not hold (#10830).

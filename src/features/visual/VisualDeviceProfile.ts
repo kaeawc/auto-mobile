@@ -1,11 +1,11 @@
-import type { Platform } from "../../models/Platform";
+import type { AndroidOrIosPlatform } from "../../models/Platform";
 
 /**
  * The display configuration a screenshot baseline is only valid for (#14083): a baseline recorded
  * at one size, density, font scale or theme is never compared against another.
  */
 export interface VisualDeviceProfile {
-  platform: Platform;
+  platform: AndroidOrIosPlatform;
   /** Full-screen screenshot pixels, in display orientation. */
   width: number;
   height: number;

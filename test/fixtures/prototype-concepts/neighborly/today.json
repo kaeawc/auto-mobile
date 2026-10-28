@@ -1,0 +1,1345 @@
+{
+  "id": "neighborly-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "derive": {
+    "listingPriceText": {
+      "of": {
+        "state": "listingPrice"
+      },
+      "format": {
+        "currency": {
+          "code": "USD"
+        }
+      },
+      "locale": "en-US"
+    }
+  },
+  "state": {
+    "drawerOpen": false,
+    "refreshing": false,
+    "tag": "",
+    "priceFilter": "any",
+    "listingTitle": "",
+    "listingPrice": 0,
+    "listingDistance": "",
+    "groupId": "",
+    "groupName": "",
+    "groupMembers": 0,
+    "draft": "",
+    "typing": false,
+    "kind_text": "text",
+    "kind_photo": "photo",
+    "kind_link": "link",
+    "kind_video": "video",
+    "react_p1": false,
+    "react_p2": false,
+    "react_p3": false,
+    "react_p4": false,
+    "reaction_p1": "",
+    "reaction_p2": "",
+    "reaction_p3": "",
+    "reaction_p4": "",
+    "joined_g1": true,
+    "joined_g2": false,
+    "joined_g3": false
+  },
+  "data": {
+    "posts": [
+      {
+        "url": "",
+        "id": "p1",
+        "kind": "text",
+        "author": "Rosa",
+        "when": "12 min",
+        "body": "Lost a grey cat near Elm Row, answers to Pixel. #lostpet"
+      },
+      {
+        "url": "",
+        "id": "p2",
+        "kind": "photo",
+        "author": "Theo",
+        "when": "1 h",
+        "body": "The community garden is finally blooming"
+      },
+      {
+        "url": "https://example.com/street-fair",
+        "id": "p3",
+        "kind": "link",
+        "author": "Nadia",
+        "when": "3 h",
+        "body": "Street fair schedule is out"
+      },
+      {
+        "url": "",
+        "id": "p4",
+        "kind": "video",
+        "author": "Ike",
+        "when": "Yesterday",
+        "body": "Drone flight over the river"
+      }
+    ],
+    "groups": [
+      {
+        "id": "g1",
+        "name": "Elm Row neighbours",
+        "members": 214
+      },
+      {
+        "id": "g2",
+        "name": "Weekend runners",
+        "members": 58
+      },
+      {
+        "id": "g3",
+        "name": "Seed swap",
+        "members": 97
+      }
+    ],
+    "listings": [
+      {
+        "id": "l1",
+        "title": "Road bike",
+        "price": 180,
+        "band": "over50",
+        "distance": "0.4 mi"
+      },
+      {
+        "id": "l2",
+        "title": "Bookshelf",
+        "price": 35,
+        "band": "under50",
+        "distance": "1.1 mi"
+      },
+      {
+        "id": "l3",
+        "title": "Desk chair",
+        "price": 45,
+        "band": "under50",
+        "distance": "0.8 mi"
+      },
+      {
+        "id": "l4",
+        "title": "Stand mixer",
+        "price": 120,
+        "band": "over50",
+        "distance": "2.3 mi"
+      }
+    ],
+    "pending": {
+      "text": ""
+    },
+    "reply": {
+      "text": ""
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "tabs",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "feed_bar",
+                    "title": "Neighborly",
+                    "navigationIcon": {
+                      "icon": "menu",
+                      "label": "Shortcuts",
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "drawerOpen",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "feed_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "refresh": {
+                      "stateKey": "refreshing",
+                      "onRefresh": [
+                        {
+                          "type": "setState",
+                          "key": "refreshing",
+                          "value": false
+                        }
+                      ]
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 12
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/posts"
+                        },
+                        "as": "post",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "card",
+                          "testTag": "post_card",
+                          "variant": "outlined",
+                          "contentDescription": "Post, long press to react",
+                          "onLongPress": [
+                            {
+                              "type": "setState",
+                              "key": "react_{post.id}",
+                              "value": true
+                            }
+                          ],
+                          "children": [
+                            {
+                              "type": "column",
+                              "style": {
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 16,
+                                  "bottom": 16
+                                },
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "row",
+                                  "style": {
+                                    "spacing": 8,
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "account_circle",
+                                      "contentDescription": "Author"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{post.author}",
+                                      "style": {
+                                        "textStyle": "titleSmall",
+                                        "weight": 1
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "{post.when}",
+                                      "style": {
+                                        "textStyle": "labelSmall"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "post_body",
+                                  "text": "{post.body}",
+                                  "linkify": {
+                                    "kinds": ["hashtag"],
+                                    "style": {
+                                      "color": "primary"
+                                    },
+                                    "onTap": [
+                                      {
+                                        "type": "setState",
+                                        "key": "tag",
+                                        "value": {
+                                          "match": "text"
+                                        }
+                                      },
+                                      {
+                                        "type": "push",
+                                        "stack": "nav",
+                                        "screen": "tag"
+                                      }
+                                    ]
+                                  },
+                                  "style": {
+                                    "textStyle": "bodyLarge"
+                                  }
+                                },
+                                {
+                                  "type": "box",
+                                  "testTag": "post_photo",
+                                  "visibleWhen": {
+                                    "key": "kind_{post.kind}",
+                                    "equals": "photo"
+                                  },
+                                  "style": {
+                                    "width": "fill",
+                                    "aspectRatio": 1.5,
+                                    "background": "tertiaryContainer",
+                                    "cornerRadius": "medium",
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "image",
+                                      "contentDescription": "Photo",
+                                      "style": {
+                                        "color": "onTertiaryContainer"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "box",
+                                  "testTag": "post_video",
+                                  "visibleWhen": {
+                                    "key": "kind_{post.kind}",
+                                    "equals": "video"
+                                  },
+                                  "style": {
+                                    "width": "fill",
+                                    "aspectRatio": 1.78,
+                                    "background": "inverseSurface",
+                                    "cornerRadius": "medium",
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "play_circle",
+                                      "contentDescription": "Video",
+                                      "style": {
+                                        "color": "inverseOnSurface"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "card",
+                                  "testTag": "post_link",
+                                  "variant": "filled",
+                                  "visibleWhen": {
+                                    "key": "kind_{post.kind}",
+                                    "equals": "link"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "text": "{post.url}",
+                                      "linkify": {
+                                        "kinds": ["url"],
+                                        "onTap": [
+                                          {
+                                            "type": "emit",
+                                            "name": "link_opened",
+                                            "context": {
+                                              "url": {
+                                                "match": "text"
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "style": {
+                                        "textStyle": "bodySmall",
+                                        "padding": {
+                                          "start": 12,
+                                          "end": 12,
+                                          "top": 12,
+                                          "bottom": 12
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "post_reaction",
+                                  "visibleWhen": {
+                                    "key": "reaction_{post.id}",
+                                    "lengthGt": 0
+                                  },
+                                  "text": "You reacted: {reaction_{post.id}}",
+                                  "style": {
+                                    "textStyle": "labelMedium"
+                                  }
+                                },
+                                {
+                                  "type": "menu",
+                                  "testTag": "reaction_menu",
+                                  "openWhen": {
+                                    "key": "react_{post.id}",
+                                    "equals": true
+                                  },
+                                  "items": [
+                                    {
+                                      "label": "👍 Like",
+                                      "onTap": [
+                                        {
+                                          "type": "setState",
+                                          "key": "reaction_{post.id}",
+                                          "value": "like"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "label": "❤️ Love",
+                                      "onTap": [
+                                        {
+                                          "type": "setState",
+                                          "key": "reaction_{post.id}",
+                                          "value": "love"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "label": "😂 Haha",
+                                      "onTap": [
+                                        {
+                                          "type": "setState",
+                                          "key": "reaction_{post.id}",
+                                          "value": "laugh"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "label": "😮 Wow",
+                                      "onTap": [
+                                        {
+                                          "type": "setState",
+                                          "key": "reaction_{post.id}",
+                                          "value": "wow"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "market_bar",
+                    "title": "Marketplace"
+                  },
+                  {
+                    "type": "segmentedButton",
+                    "testTag": "price_filter",
+                    "stateKey": "priceFilter",
+                    "options": [
+                      {
+                        "value": "any",
+                        "label": "Any price"
+                      },
+                      {
+                        "value": "under50",
+                        "label": "Under $50"
+                      },
+                      {
+                        "value": "over50",
+                        "label": "$50 and up"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "market_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "grid",
+                      "columns": 2,
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 12
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/listings"
+                        },
+                        "as": "item",
+                        "key": "id",
+                        "derive": {
+                          "priceText": {
+                            "of": {
+                              "item": "price"
+                            },
+                            "format": {
+                              "currency": {
+                                "code": "USD"
+                              }
+                            },
+                            "locale": "en-US"
+                          }
+                        }
+                      },
+                      "children": [
+                        {
+                          "type": "card",
+                          "testTag": "listing_card",
+                          "variant": "outlined",
+                          "visibleWhen": {
+                            "any": [
+                              {
+                                "key": "priceFilter",
+                                "equals": "any"
+                              },
+                              {
+                                "key": "priceFilter",
+                                "equals": "{item.band}"
+                              }
+                            ]
+                          },
+                          "onTap": [
+                            {
+                              "type": "setState",
+                              "key": "listingTitle",
+                              "value": "{item.title}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "listingPrice",
+                              "value": "{item.price}"
+                            },
+                            {
+                              "type": "setState",
+                              "key": "listingDistance",
+                              "value": "{item.distance}"
+                            },
+                            {
+                              "type": "push",
+                              "stack": "nav",
+                              "screen": "listing"
+                            }
+                          ],
+                          "children": [
+                            {
+                              "type": "column",
+                              "style": {
+                                "padding": {
+                                  "start": 12,
+                                  "end": 12,
+                                  "top": 12,
+                                  "bottom": 12
+                                },
+                                "spacing": 4
+                              },
+                              "children": [
+                                {
+                                  "type": "box",
+                                  "style": {
+                                    "width": "fill",
+                                    "aspectRatio": 1,
+                                    "background": "surfaceVariant",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "name": "sell",
+                                      "contentDescription": "Listing photo"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{item.priceText}",
+                                  "style": {
+                                    "textStyle": "titleSmall"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{item.title}",
+                                  "style": {
+                                    "textStyle": "bodyMedium"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{item.distance}",
+                                  "style": {
+                                    "textStyle": "labelSmall"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "messenger_bar",
+                    "title": "Messages"
+                  },
+                  {
+                    "type": "column",
+                    "style": {
+                      "padding": {
+                        "start": 16,
+                        "end": 16,
+                        "top": 16,
+                        "bottom": 16
+                      },
+                      "spacing": 8
+                    },
+                    "children": [
+                      {
+                        "type": "listItem",
+                        "testTag": "thread_row",
+                        "headline": "Theo · Road bike",
+                        "supporting": "Is it still available?",
+                        "leadingIcon": "account_circle"
+                      },
+                      {
+                        "type": "column",
+                        "testTag": "pending_message",
+                        "visibleWhen": {
+                          "data": "/pending/text",
+                          "empty": false
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "testTag": "pending_text",
+                            "text": "You: {data:/pending/text}",
+                            "style": {
+                              "textStyle": "bodyLarge"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "testTag": "typing_indicator",
+                        "visibleWhen": {
+                          "key": "typing",
+                          "equals": true
+                        },
+                        "text": "Theo is typing…",
+                        "semantics": {
+                          "liveRegion": "polite"
+                        },
+                        "style": {
+                          "textStyle": "labelSmall"
+                        }
+                      },
+                      {
+                        "type": "column",
+                        "testTag": "reply_message",
+                        "visibleWhen": {
+                          "data": "/reply/text",
+                          "empty": false
+                        },
+                        "semantics": {
+                          "liveRegion": "polite"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Theo: {data:/reply/text}",
+                            "style": {
+                              "textStyle": "bodyLarge"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "spacer",
+                    "style": {
+                      "weight": 1
+                    }
+                  },
+                  {
+                    "type": "row",
+                    "safeAreaPadding": {
+                      "edges": ["bottom"],
+                      "types": ["ime", "systemBars"]
+                    },
+                    "style": {
+                      "padding": {
+                        "start": 8,
+                        "end": 8,
+                        "top": 4,
+                        "bottom": 4
+                      },
+                      "spacing": 4,
+                      "alignment": "center"
+                    },
+                    "children": [
+                      {
+                        "type": "textField",
+                        "testTag": "composer",
+                        "stateKey": "draft",
+                        "checks": [
+                          {
+                            "message": "Type a message first",
+                            "required": true
+                          }
+                        ],
+                        "validateOn": "submit",
+                        "placeholder": "Message Theo",
+                        "imeAction": "send",
+                        "style": {
+                          "weight": 1
+                        },
+                        "onSubmit": [
+                          {
+                            "type": "setData",
+                            "path": "/data/pending/text",
+                            "value": {
+                              "state": "draft"
+                            }
+                          },
+                          {
+                            "type": "emit",
+                            "name": "message_sent",
+                            "requireValid": ["draft"],
+                            "context": {
+                              "text": {
+                                "state": "draft"
+                              }
+                            }
+                          },
+                          {
+                            "type": "setState",
+                            "key": "draft",
+                            "value": ""
+                          },
+                          {
+                            "type": "startTimer",
+                            "id": "typing",
+                            "afterMs": 1000,
+                            "actions": [
+                              {
+                                "type": "setState",
+                                "key": "typing",
+                                "value": true
+                              }
+                            ]
+                          },
+                          {
+                            "type": "startTimer",
+                            "id": "reply",
+                            "afterMs": 3500,
+                            "actions": [
+                              {
+                                "type": "setState",
+                                "key": "typing",
+                                "value": false
+                              },
+                              {
+                                "type": "setData",
+                                "path": "/data/reply/text",
+                                "value": {
+                                  "value": "Still available, want to see it tonight?"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "iconButton",
+                        "testTag": "send_button",
+                        "icon": "send",
+                        "contentDescription": "Send",
+                        "enabledWhen": {
+                          "key": "draft",
+                          "lengthGt": 0
+                        },
+                        "onTap": [
+                          {
+                            "type": "setData",
+                            "path": "/data/pending/text",
+                            "value": {
+                              "state": "draft"
+                            }
+                          },
+                          {
+                            "type": "emit",
+                            "name": "message_sent",
+                            "requireValid": ["draft"],
+                            "context": {
+                              "text": {
+                                "state": "draft"
+                              }
+                            }
+                          },
+                          {
+                            "type": "setState",
+                            "key": "draft",
+                            "value": ""
+                          },
+                          {
+                            "type": "startTimer",
+                            "id": "typing",
+                            "afterMs": 1000,
+                            "actions": [
+                              {
+                                "type": "setState",
+                                "key": "typing",
+                                "value": true
+                              }
+                            ]
+                          },
+                          {
+                            "type": "startTimer",
+                            "id": "reply",
+                            "afterMs": 3500,
+                            "actions": [
+                              {
+                                "type": "setState",
+                                "key": "typing",
+                                "value": false
+                              },
+                              {
+                                "type": "setData",
+                                "path": "/data/reply/text",
+                                "value": {
+                                  "value": "Still available, want to see it tonight?"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "tabs",
+            "items": [
+              {
+                "label": "Feed",
+                "icon": "home"
+              },
+              {
+                "label": "Marketplace",
+                "icon": "storefront"
+              },
+              {
+                "label": "Messages",
+                "icon": "chat"
+              }
+            ]
+          },
+          {
+            "type": "drawer",
+            "testTag": "shortcuts_drawer",
+            "edge": "start",
+            "openWhen": {
+              "key": "drawerOpen",
+              "equals": true
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 8
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "text": "Your groups",
+                  "semantics": {
+                    "heading": true
+                  },
+                  "style": {
+                    "textStyle": "titleMedium"
+                  }
+                },
+                {
+                  "type": "column",
+                  "repeat": {
+                    "items": {
+                      "path": "/groups"
+                    },
+                    "as": "group"
+                  },
+                  "children": [
+                    {
+                      "type": "listItem",
+                      "testTag": "group_row",
+                      "headline": "{group.name}",
+                      "supporting": "{group.members} members",
+                      "leadingIcon": "groups",
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "groupId",
+                          "value": "{group.id}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "groupName",
+                          "value": "{group.name}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "groupMembers",
+                          "value": "{group.members}"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "drawerOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "group"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "group": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "group_bar",
+            "title": "{groupName}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "text",
+                "testTag": "group_members",
+                "text": "{groupMembers} members",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "button",
+                "testTag": "join_group",
+                "label": "Join group",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "groupId",
+                      "equals": "g1"
+                    },
+                    {
+                      "key": "joined_g1",
+                      "equals": false
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "joined_g1",
+                    "value": true
+                  },
+                  {
+                    "type": "emit",
+                    "name": "group_joined",
+                    "context": {
+                      "group": {
+                        "value": "g1"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "testTag": "leave_group",
+                "label": "Leave group",
+                "variant": "outlined",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "groupId",
+                      "equals": "g1"
+                    },
+                    {
+                      "key": "joined_g1",
+                      "equals": true
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "joined_g1",
+                    "value": false
+                  },
+                  {
+                    "type": "emit",
+                    "name": "group_left",
+                    "context": {
+                      "group": {
+                        "value": "g1"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "testTag": "join_group",
+                "label": "Join group",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "groupId",
+                      "equals": "g2"
+                    },
+                    {
+                      "key": "joined_g2",
+                      "equals": false
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "joined_g2",
+                    "value": true
+                  },
+                  {
+                    "type": "emit",
+                    "name": "group_joined",
+                    "context": {
+                      "group": {
+                        "value": "g2"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "testTag": "leave_group",
+                "label": "Leave group",
+                "variant": "outlined",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "groupId",
+                      "equals": "g2"
+                    },
+                    {
+                      "key": "joined_g2",
+                      "equals": true
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "joined_g2",
+                    "value": false
+                  },
+                  {
+                    "type": "emit",
+                    "name": "group_left",
+                    "context": {
+                      "group": {
+                        "value": "g2"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "testTag": "join_group",
+                "label": "Join group",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "groupId",
+                      "equals": "g3"
+                    },
+                    {
+                      "key": "joined_g3",
+                      "equals": false
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "joined_g3",
+                    "value": true
+                  },
+                  {
+                    "type": "emit",
+                    "name": "group_joined",
+                    "context": {
+                      "group": {
+                        "value": "g3"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "testTag": "leave_group",
+                "label": "Leave group",
+                "variant": "outlined",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "groupId",
+                      "equals": "g3"
+                    },
+                    {
+                      "key": "joined_g3",
+                      "equals": true
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "joined_g3",
+                    "value": false
+                  },
+                  {
+                    "type": "emit",
+                    "name": "group_left",
+                    "context": {
+                      "group": {
+                        "value": "g3"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "Group posts appear here once a group can filter the feed.",
+                "style": {
+                  "textStyle": "bodySmall"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "listing": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "listing_bar",
+            "title": "{listingTitle}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "box",
+                "testTag": "listing_map",
+                "contentDescription": "Map of the pickup area",
+                "style": {
+                  "width": "fill",
+                  "height": {
+                    "dp": 160
+                  },
+                  "background": "surfaceContainerHigh",
+                  "cornerRadius": "medium",
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "location_on",
+                    "contentDescription": "Pickup area"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "testTag": "listing_price",
+                "text": "{derived:listingPriceText}",
+                "style": {
+                  "textStyle": "headlineSmall"
+                }
+              },
+              {
+                "type": "text",
+                "text": "{listingDistance} away",
+                "style": {
+                  "textStyle": "bodyMedium"
+                }
+              },
+              {
+                "type": "button",
+                "testTag": "message_seller",
+                "label": "Message seller",
+                "icon": "chat",
+                "onTap": [
+                  {
+                    "type": "pop",
+                    "stack": "nav"
+                  },
+                  {
+                    "type": "setPage",
+                    "pager": "tabs",
+                    "page": 2
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "tag": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "tag_bar",
+            "title": "{tag}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": "Posts tagged {tag}",
+            "style": {
+              "textStyle": "bodyLarge",
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

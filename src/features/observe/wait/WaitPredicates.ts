@@ -1,7 +1,14 @@
 import { type DisplayInventoryClassification } from "../../../utils/deviceMatcher";
 import type { ConditionEvaluation } from "../interfaces/WaitForCondition";
 import { waitCaptureUnavailableReason } from "../ConditionPredicates";
-import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../models";
+import {
+  type AndroidOrIosPlatform,
+  BootedDevice,
+  Element,
+  ObserveResult,
+  requireAndroidOrIosPlatform,
+  ViewHierarchyResult,
+} from "../../../models";
 import { scopeHierarchyToLayer } from "../hierarchyLayer";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import { type MatchMode, type ContainerFailure } from "../../utility/ElementResolver";
@@ -51,7 +58,7 @@ export function trackContainerFailure(
 const matchesActiveWindow = (
   observation: ObserveResult,
   waitFor: ObserveWaitForOptions,
-  platform?: BootedDevice["platform"],
+  platform?: AndroidOrIosPlatform,
 ): boolean => {
   if (!waitFor.activeWindow) {
     return true;
@@ -96,7 +103,7 @@ const matchesAbsent = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform: BootedDevice["platform"] | undefined,
+  platform: AndroidOrIosPlatform | undefined,
   sizeOptions: ScreenSizeForOffscreenCheckOptions,
   evaluation: ConditionEvaluation,
 ): boolean => {
@@ -155,10 +162,14 @@ export const evaluateWaitForObservation = (
   finder: ConditionResolver,
   waitFor: WaitForWithSettled,
   observation: ObserveResult,
-  platform: BootedDevice["platform"] | undefined,
+  devicePlatform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
   { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
 ): ObserveConditionEvaluation & { awaitedElement?: Element } => {
+  const platform =
+    devicePlatform === undefined
+      ? undefined
+      : requireAndroidOrIosPlatform(devicePlatform, "Waiting for an observe condition");
   observation = layerScopedObservation(observation, waitFor.layer);
   const sizeOptions = {
     platform,

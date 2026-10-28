@@ -81,9 +81,13 @@ async function findObservationReadTarget(
     return await new DefaultRetryExecutor(retry.timer).executeOrThrow(
       async () => {
         signal?.throwIfAborted();
-        const listing = access.listBootedWithStatus
+        // The plain listing scans Android and iOS only, so a watch never reads as freshly listed.
+        const listing: BootedResourceReadListing = access.listBootedWithStatus
           ? await access.listBootedWithStatus(signal)
-          : { devices: await access.listBooted(signal), scanned: { android: true, ios: true } };
+          : {
+              devices: await access.listBooted(signal),
+              scanned: { android: true, ios: true, watchos: false },
+            };
         signal?.throwIfAborted();
         const fresh = listing.devices.filter((device) => listing.scanned[device.platform]);
         let device = matchRunningReadTarget(fresh, deviceId, targetPlatform);

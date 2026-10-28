@@ -3,6 +3,7 @@ import {
   BootedDevice,
   ClipboardResult,
   OpenURLResult,
+  requireAndroidOrIosPlatform,
   type ObserveResult,
   type TapOnElementResult,
 } from "../models";
@@ -804,7 +805,10 @@ export const createOpenLinkHandler =
     // iOS-rejects-activityName check (raw request platform) can be skipped
     // entirely when the caller omitted it. Re-validate against the resolved
     // `device.platform` before opening the URL.
-    assertActiveWindowWaitForSupportedOnPlatform(device.platform, args.waitFor);
+    assertActiveWindowWaitForSupportedOnPlatform(
+      requireAndroidOrIosPlatform(device.platform, "openLink"),
+      args.waitFor,
+    );
     if (args.chooserAppPackage && device.platform !== "android") {
       throw new ActionableError("chooserAppPackage is supported only on Android.");
     }

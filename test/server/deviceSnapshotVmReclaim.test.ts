@@ -6,6 +6,7 @@ import {
   type DeviceSnapshotConfig,
   type DeviceSnapshotManifest,
   type DeviceSnapshotType,
+  requireAndroidOrIosPlatform,
 } from "../../src/models";
 import {
   captureDeviceSnapshot,
@@ -187,7 +188,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
             timestamp,
             deviceId: device.deviceId,
             deviceName: device.name,
-            platform: device.platform,
+            platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
             snapshotType: "adb",
             includeAppData: true,
             includeSettings: false,

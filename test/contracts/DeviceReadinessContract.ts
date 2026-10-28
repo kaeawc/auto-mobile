@@ -216,7 +216,7 @@ export function runDeviceReadinessContract(name: string, make: () => ScriptedRea
         "SIM-1",
         "emulator-5554",
       ]);
-      expect(scan.scanned).toEqual({ android: true, ios: true });
+      expect(scan.scanned).toEqual({ android: true, ios: true, watchos: false });
     });
 
     test("verifying a device that is not connected rejects", async () => {

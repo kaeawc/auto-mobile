@@ -1,6 +1,7 @@
 import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { IdGenerator } from "../../utils/IdGenerator";
@@ -375,6 +376,7 @@ export function createDeviceHierarchyCapture(
   device: BootedDevice,
   dependencies: DeviceHierarchyCaptureDependencies = {},
 ): HierarchyCapture {
+  const platform = requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy");
   const reader = new ViewHierarchyCaptureReader(
     {
       getViewHierarchy: (queryOptions, request) => {
@@ -452,11 +454,11 @@ export function createDeviceHierarchyCapture(
     },
     (hierarchy) =>
       projectActionableHierarchy(
-        device.platform,
+        platform,
         hierarchy,
-        device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
+        platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
       ),
     dependencies.settle,
   );
-  return new DefaultHierarchyCapture(device.platform, reader, dependencies.timer, dependencies.ids);
+  return new DefaultHierarchyCapture(platform, reader, dependencies.timer, dependencies.ids);
 }

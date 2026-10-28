@@ -3,7 +3,7 @@ import type { DeviceBootServiceDependencies } from "./deviceBootSelection";
 import type { DeviceBootExecution } from "./DeviceBootExecution";
 import type { VirtualDeviceLifecycleCoordinator } from "./virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../models";
-import { ActionableError } from "../models";
+import { ActionableError, requireAndroidOrIosPlatform } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { matchesDeviceCriteria } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
@@ -30,7 +30,7 @@ export async function revalidateRunningIdentity(
   context: BootDeadlineContext,
 ): Promise<StableVirtualDeviceIdentity> {
   const devices = await host.execution.discoverBootedDevices(
-    device.platform,
+    requireAndroidOrIosPlatform(device.platform, "Starting a device"),
     context,
     "revalidating the running device after lifecycle wait",
     device.platform === "android",

@@ -58,6 +58,11 @@ describe("disconnect monitor cadence decisions", () => {
     expect(selectDisconnectScope([], 10_000, 5_000, 30_000)).toBe("either");
     expect(selectDisconnectScope(["ios"], 35_000, 5_000, 30_000)).toBe("either");
   });
+
+  test("a tracked watch never narrows the disconnect scope", () => {
+    expect(selectDisconnectScope(["ios", "watchos"], 10_000, 5_000, 30_000)).toBe("ios");
+    expect(selectDisconnectScope(["watchos"], 10_000, 5_000, 30_000)).toBe("either");
+  });
 });
 
 describe("disconnect monitor schedule", () => {

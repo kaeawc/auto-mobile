@@ -74,6 +74,24 @@ describe("Interaction journal intents (#14359)", () => {
     },
   );
 
+  test("mediaSession volume forces the keep-booted fallback; dispatch keeps a breadcrumb", () => {
+    const volume = deviceToolMutations(
+      "mediaSession",
+      { action: { volume: { stream: "music", level: 3 } } },
+      "android",
+    );
+    expect(volume).toEqual([{ kind: "opaque", key: opaqueIntentKey("mediaSession", "volume") }]);
+    expect(volume.every((row) => opaqueForcesFallback(row))).toBe(true);
+    const dispatch = deviceToolMutations(
+      "mediaSession",
+      { action: { dispatch: "play" } },
+      "android",
+    );
+    expect(dispatch).toEqual([{ kind: "opaque", key: "tool:mediaSession:dispatch" }]);
+    expect(dispatch.some((row) => opaqueForcesFallback(row))).toBe(false);
+    expect(deviceToolMutations("mediaSession", { action: "get" }, "android")).toEqual([]);
+  });
+
   test("pressButton classifies every button the schema accepts", () => {
     const transient = [
       "home",

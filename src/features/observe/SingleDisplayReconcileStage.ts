@@ -1,7 +1,12 @@
 import { WindowIdentityFreshnessResolver } from "./WindowIdentityFreshness";
 import { PostCaptureForegroundIdentity } from "./ActiveWindowAttribution";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "./DeviceHierarchyCapture";
-import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../models";
+import {
+  BootedDevice,
+  ObserveResult,
+  requireAndroidOrIosPlatform,
+  ViewHierarchyResult,
+} from "../../models";
 import {
   isMultiDisplayPrimarySample,
   SingleDisplayCaptured,
@@ -78,7 +83,7 @@ export class SingleDisplayReconcileStage {
     // navigation-graph recorder) ever observes the other platform's data.
     const hierarchyPlatformValid = enforceHierarchyPlatform(
       result,
-      this.d.device().platform,
+      requireAndroidOrIosPlatform(this.d.device().platform, "Observing the view hierarchy"),
       this.d.device().deviceId,
       this.d.platformValidator(),
     );

@@ -16,7 +16,7 @@ import {
 import { IosSimFleetCostCollector } from "../../../../src/features/iosSimFleet/FleetCostCollector";
 import { InMemoryBootDurationHistory } from "../../../../src/features/iosSimFleet/BootDurationHistory";
 import { BootCapacityExhaustedError } from "../../../../src/models/BootCapacityExhaustedError";
-import type { Platform } from "../../../../src/models/Platform";
+import type { AndroidOrIosPlatform } from "../../../../src/models/Platform";
 import { FakeAndroidCapacitySource } from "../../../fakes/FakeAndroidCapacitySource";
 import { FakeFleetHostSource } from "../../../fakes/FakeFleetHostSource";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
@@ -35,7 +35,7 @@ import {
   FakeProvisioner,
 } from "../registry/fixtures/reconcilerFakes";
 
-async function setup(platform: Platform) {
+async function setup(platform: AndroidOrIosPlatform) {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer);
   const host = new SharedBootAdmissionHostState();

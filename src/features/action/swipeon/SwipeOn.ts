@@ -33,6 +33,7 @@ import {
   ScrollableCandidate,
   SwipeResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ScrollableElementsQuery } from "../../../utils/interfaces/ElementTraitQueries";
@@ -742,7 +743,7 @@ export class SwipeOn extends BaseVisualChange {
         previous,
         result.observation,
         { x: result.x1, y: result.y1 },
-        this.device.platform,
+        requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
       );
     const assessment = await settleSdkRouteAssessment(
       assess(),
@@ -794,7 +795,7 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const insetOptions = {
           observation: observeResult,
-          platform: this.device.platform,
+          platform: requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
           includeSystemInsets: options.includeSystemInsets,
           includeFloatingBars: !options.fromEdge,
         };
@@ -1039,7 +1040,7 @@ export class SwipeOn extends BaseVisualChange {
       viewHierarchy,
       containerElement,
       observeResult,
-      platform: this.device.platform,
+      platform: requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
     });
   }
 

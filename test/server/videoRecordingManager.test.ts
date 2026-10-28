@@ -29,7 +29,7 @@ import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/features/video";
-import { ActionableError, type BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice, requireAndroidOrIosPlatform } from "../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import {
   adoptOwnerlessActiveVideoRecordings,
@@ -1418,7 +1418,7 @@ describe("videoRecordingManager", () => {
     await fakeRepository.insertRecording({
       recordingId: "stale-recording",
       deviceId: testDevice.deviceId,
-      platform: testDevice.platform,
+      platform: requireAndroidOrIosPlatform(testDevice.platform, "Video recording"),
       filePath,
       fileName: "capture.mp4",
       format: "mp4",
@@ -1730,7 +1730,7 @@ describe("videoRecordingManager", () => {
     await fakeRepository.insertRecording({
       recordingId: "completed-segment",
       deviceId: testDevice.deviceId,
-      platform: testDevice.platform,
+      platform: requireAndroidOrIosPlatform(testDevice.platform, "Video recording"),
       filePath,
       fileName: "segment.mp4",
       format: "mp4",

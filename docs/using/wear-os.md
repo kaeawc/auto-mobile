@@ -4,9 +4,8 @@ AutoMobile can drive a Wear OS emulator with the same tools it uses on a phone. 
 setting one up, the watch-specific behaviour, and what is out of scope.
 
 > [!WARNING]
-> **Not yet verified on a device.** The watch-specific behaviour below is built and unit tested
-> against fakes. The baseline run on a real Wear OS emulator has not happened, so every
-> behaviour that depends on the emulator is **unverified**.
+> **Not yet verified on a device.** The watch-specific behaviour below has not been run on a real
+> Wear OS emulator yet, so every behaviour that depends on the emulator is **unverified**.
 
 ## Create the emulator by hand
 

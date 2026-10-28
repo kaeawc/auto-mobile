@@ -48,6 +48,7 @@ const RAW_DEFINITIONS: RawToolDefinition[] = toolDefinitionsJson as RawToolDefin
 const DEBUG_ONLY_META_KEY = "automobile/debugOnly";
 const EMBEDDED_SDK_ONLY_META_KEY = "automobile/embeddedSdkOnly";
 const PLAN_ONLY_META_KEY = "automobile/planOnly";
+const DEVICE_RESOURCE_BUDGET_META_KEY = "automobile/deviceResourceBudget";
 
 function isConnectedFallbackAvailable(
   tool: RawToolDefinition,
@@ -77,6 +78,7 @@ function toolDefinitions(
     delete meta[DEBUG_ONLY_META_KEY];
     delete meta[EMBEDDED_SDK_ONLY_META_KEY];
     delete meta[PLAN_ONLY_META_KEY];
+    delete meta[DEVICE_RESOURCE_BUDGET_META_KEY];
     const definition: ProxiedToolDefinition = {
       name: tool.name,
       title: tool.title,
@@ -117,6 +119,19 @@ export function getConnectedStaticToolDefinitions(
  * and other processes that cannot load the registry derive tool behaviour from the generated
  * schema instead of keeping their own tool-name list (#11825).
  */
+/**
+ * Whether the committed definition of `toolName` carries the `deviceResourceBudget` trait
+ * (`_meta["automobile/deviceResourceBudget"]`). The daemon's request-budget sizing reads the trait
+ * here instead of a tool-name set (#15672); the flag is stripped from the cold wire payload.
+ */
+export function staticToolDeclaresDeviceResourceBudget(toolName: string): boolean {
+  return (
+    RAW_DEFINITIONS.find((tool) => tool.name === toolName)?._meta?.[
+      DEVICE_RESOURCE_BUDGET_META_KEY
+    ] === true
+  );
+}
+
 export function staticToolDeclaresInput(toolName: string, property: string): boolean {
   const properties = RAW_DEFINITIONS.find((tool) => tool.name === toolName)?.inputSchema.properties;
   return typeof properties === "object" && properties !== null && property in properties;

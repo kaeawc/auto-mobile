@@ -77,7 +77,11 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
         },
       );
     },
-    { defaultEnabled: false, outputSchema: setDeviceResourcesResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: setDeviceResourcesResultSchema,
+      deviceResourceBudget: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -116,7 +120,11 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
         },
       );
     },
-    { defaultEnabled: false, outputSchema: reconcileDeviceResourcesResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: reconcileDeviceResourcesResultSchema,
+      deviceResourceBudget: true,
+    },
   );
 }
 

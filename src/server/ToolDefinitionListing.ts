@@ -62,6 +62,7 @@ export class ToolDefinitionListing {
           "automobile/embeddedSdkOnly"?: boolean;
           "automobile/planOnly"?: boolean;
           "automobile/deviceReadOnly"?: boolean;
+          "automobile/deviceResourceBudget"?: boolean;
           "automobile/deviceReadOnlyArgs"?: readonly DeviceReadOnlyArgShape[];
           ui?: { resourceUri: string };
         };
@@ -96,6 +97,10 @@ export class ToolDefinitionListing {
       }
       if (tool.embeddedSdkOnly) {
         definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
+      }
+      // Request-budget trait for processes that cannot load the registry (#15672).
+      if (tool.deviceResourceBudget) {
+        definition._meta = { ...definition._meta, "automobile/deviceResourceBudget": true };
       }
       // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
       if (tool.deviceReadOnly === true) {

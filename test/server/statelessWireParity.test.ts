@@ -172,6 +172,7 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
    */
   const GATING_META_KEYS = [
     "automobile/debugOnly",
+    "automobile/deviceResourceBudget",
     "automobile/embeddedSdkOnly",
     "automobile/planOnly",
   ];

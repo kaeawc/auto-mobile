@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createPublicKey, verify } from "node:crypto";
+import path from "node:path";
 import {
   createGrpcAuthorizer,
   JwtGrpcAuthorizer,
@@ -7,6 +8,9 @@ import {
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
 import { CountingIdGenerator } from "../../../../src/utils/CountingIdGenerator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+
+/** Where the authorizer writes its first key; built like the source does, so Windows separators match. */
+const KEY_FILE = path.join("/jwks", "key-1.jwk");
 
 /** An in-memory jwks dir; `acceptKeys` mimics the emulator loading new keys into its active set. */
 function fakeJwksFs(acceptKeys: boolean): JwtKeyFs & { files: Map<string, string> } {
@@ -54,7 +58,7 @@ describe("JwtGrpcAuthorizer", () => {
       "/android.emulation.control.EmulatorController/injectAudio",
     );
 
-    const jwkFile = fs.files.get("/jwks/key-1.jwk");
+    const jwkFile = fs.files.get(KEY_FILE);
     expect(jwkFile).toBeDefined();
     const [jwk] = (JSON.parse(jwkFile ?? "{}") as { keys: JsonWebKey[] }).keys;
     expect(jwk).toMatchObject({
@@ -83,7 +87,7 @@ describe("JwtGrpcAuthorizer", () => {
     expect(valid).toBe(true);
 
     await authorizer.dispose();
-    expect(fs.files.has("/jwks/key-1.jwk")).toBe(false);
+    expect(fs.files.has(KEY_FILE)).toBe(false);
     await authorizer.dispose();
   });
 
@@ -100,7 +104,7 @@ describe("JwtGrpcAuthorizer", () => {
     );
 
     await expect(authorizer.authorization("/m")).rejects.toThrow(/-grpc-use-token/);
-    expect(fs.files.has("/jwks/key-1.jwk")).toBe(false);
+    expect(fs.files.has(KEY_FILE)).toBe(false);
     expect(timer.getSleepCallCount()).toBe(10);
   });
 });

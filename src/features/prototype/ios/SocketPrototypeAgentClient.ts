@@ -3,6 +3,11 @@ import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { type Timer } from "../../../utils/SystemTimer";
+import {
+  PROTOTYPE_CHANNEL_DEVICE_FRAME_TYPES,
+  routePrototypeChannelFrame,
+  type PrototypeChannelHost,
+} from "../prototypeChannelHost";
 import type { PrototypeRequestHost, PrototypeResponseSender } from "../prototypeRequestHandler";
 import {
   PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE,
@@ -65,6 +70,7 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
   private agentHandshake: PrototypeAgentHandshake | undefined;
   private closedError: Error | undefined;
   private requestHost: PrototypeRequestHost | undefined;
+  private channelHost: PrototypeChannelHost | undefined;
 
   constructor(
     private readonly socket: PrototypeAgentSocket,
@@ -148,6 +154,10 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
 
   attachRequestHost(host: PrototypeRequestHost | undefined): void {
     this.requestHost = host;
+  }
+
+  attachChannelHost(host: PrototypeChannelHost | undefined): void {
+    this.channelHost = host;
   }
 
   close(): void {
@@ -234,6 +244,18 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
       this.requestHost?.handleCancel(message);
       return;
     }
+    if (
+      typeof message.type === "string" &&
+      PROTOTYPE_CHANNEL_DEVICE_FRAME_TYPES.has(message.type)
+    ) {
+      routePrototypeChannelFrame(this.channelHost, message, (channelMessage) => {
+        if (this.closedError !== undefined) {
+          throw new Error("Prototype agent connection is closed");
+        }
+        this.send(channelMessage);
+      });
+      return;
+    }
     // A reply that arrives after its request timed out has nobody waiting; dropping it is safe.
     logger.debug(`[prototype-agent] ignoring unmatched frame: ${JSON.stringify(message)}`);
   }
@@ -306,6 +328,7 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
     }
     this.waiters.clear();
     this.requestHost?.handleDisconnect();
+    this.channelHost?.handleDisconnect();
     this.socket.end();
     this.closedListeners.forEach((listener) => listener(error));
     this.closedListeners.clear();

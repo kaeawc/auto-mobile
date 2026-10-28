@@ -4,6 +4,7 @@ import {
   PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE,
   PROTOTYPE_REQUEST_MESSAGE_TYPE,
 } from "../../prototype/prototypeRequestProtocol";
+import { PROTOTYPE_CHANNEL_DEVICE_FRAME_TYPES } from "../../prototype/prototypeChannelHost";
 import { displayTransitions } from "../DisplayTransition";
 import { deriveSdkNavigationScreenIdentity } from "../sdkScreenIdentity";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
@@ -35,10 +36,14 @@ import {
   parseCtrlProxyJson,
   SDK_TELEMETRY_EVENT_TYPES,
 } from "./androidCtrlProxyInboundWire";
-/** Host-proxied prototype HTTP frames (#12527): not in the Kotlin-mirrored wire manifest. */
+/**
+ * Host-proxied prototype HTTP (#12527) and channel (#14268) frames: not in the Kotlin-mirrored wire
+ * manifest.
+ */
 const PROTOTYPE_HOST_FRAME_TYPES: ReadonlySet<string> = new Set([
   PROTOTYPE_REQUEST_MESSAGE_TYPE,
   PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE,
+  ...PROTOTYPE_CHANNEL_DEVICE_FRAME_TYPES,
 ]);
 
 export class AndroidInboundMessageRouter {
@@ -388,6 +393,10 @@ export class AndroidInboundMessageRouter {
    * must not hold up the inbound handler drain. `prototype_request_cancel` aborts one (no reply).
    */
   private routePrototypeHostFrame(type: string, message: unknown): void {
+    if (PROTOTYPE_CHANNEL_DEVICE_FRAME_TYPES.has(type)) {
+      this.ctx.prototypes.handlePrototypeChannelFrame(message);
+      return;
+    }
     if (type === PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE) {
       this.ctx.prototypes.handlePrototypeRequestCancel(message);
       return;

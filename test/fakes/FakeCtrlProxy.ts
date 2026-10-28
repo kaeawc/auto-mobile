@@ -27,6 +27,7 @@ import {
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
 import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
+import type { PrototypeChannelHost } from "../../src/features/prototype/prototypeChannelHost";
 import type { PrototypeRequestHost } from "../../src/features/prototype/prototypeRequestHandler";
 import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
@@ -55,6 +56,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   constructor(private readonly timer: Timer = defaultTimer) {}
 
   private prototypeRequestHost: PrototypeRequestHost | undefined;
+  private prototypeChannelHost: PrototypeChannelHost | undefined;
   private nodeActionSelectorsSupported = true;
   private nodeActionHistory: Array<{
     action: string;
@@ -1596,6 +1598,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   attachPrototypeRequestHost(host: PrototypeRequestHost | undefined): void {
     this.prototypeRequestHost = host;
+  }
+
+  attachPrototypeChannelHost(host: PrototypeChannelHost | undefined): void {
+    this.prototypeChannelHost = host;
+  }
+
+  getPrototypeChannelHost(): PrototypeChannelHost | undefined {
+    return this.prototypeChannelHost;
   }
 
   getPrototypeRequestHost(): PrototypeRequestHost | undefined {

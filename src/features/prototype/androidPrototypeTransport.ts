@@ -37,7 +37,10 @@ export type AndroidPrototypeClient = Pick<
   Partial<
     Pick<
       AndroidCtrlProxyClient,
-      "attachPrototypeRequestHost" | "requestClearPrototypeStorage" | "requestAdvancePrototypeClock"
+      | "attachPrototypeRequestHost"
+      | "attachPrototypeChannelHost"
+      | "requestClearPrototypeStorage"
+      | "requestAdvancePrototypeClock"
     >
   >;
 

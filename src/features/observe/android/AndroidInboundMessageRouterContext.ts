@@ -104,7 +104,10 @@ interface InboundDelegateContext {
   readonly focus: Pick<CtrlProxyFocus, "convertAccessibilityNodeToElement">;
   readonly prototypes: Pick<
     CtrlProxyPrototypes,
-    "handlePrototypeEvent" | "handlePrototypeRequest" | "handlePrototypeRequestCancel"
+    | "handlePrototypeEvent"
+    | "handlePrototypeRequest"
+    | "handlePrototypeRequestCancel"
+    | "handlePrototypeChannelFrame"
   >;
   readonly storage: { notifyStorageChangeListeners(event: StorageChangedEvent): void };
 }

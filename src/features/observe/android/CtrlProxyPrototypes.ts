@@ -57,6 +57,11 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
 import {
+  routePrototypeChannelFrame,
+  webSocketChannelSender,
+  type PrototypeChannelHost,
+} from "../../prototype/prototypeChannelHost";
+import {
   webSocketResponseSender,
   type PrototypeRequestHost,
 } from "../../prototype/prototypeRequestHandler";
@@ -332,6 +337,7 @@ export class CtrlProxyPrototypes {
   /** Pushes that arrived with no subscriber; bounded like the device's offline ring. */
   private readonly staged: PrototypeEvent[] = [];
   private requestHost: PrototypeRequestHost | undefined;
+  private channelHost: PrototypeChannelHost | undefined;
 
   constructor(
     private readonly context: DelegateContext,
@@ -970,6 +976,21 @@ export class CtrlProxyPrototypes {
   /** The connection closed: requests still running for this device have nobody to answer. */
   handleDisconnect(): void {
     this.requestHost?.handleDisconnect();
+    this.channelHost?.handleDisconnect();
+  }
+
+  /** Routes device `prototype_channel_*` frames (#14268) to the host channel proxy. */
+  attachChannelHost(host: PrototypeChannelHost | undefined): void {
+    this.channelHost = host;
+  }
+
+  /** Routes one `prototype_channel_open`, `_send` or `_close` frame; replies go to the same socket. */
+  handlePrototypeChannelFrame(frame: unknown): void {
+    routePrototypeChannelFrame(
+      this.channelHost,
+      frame,
+      webSocketChannelSender(() => this.context.getWebSocket()),
+    );
   }
 
   /** Answers one `prototype_request` frame with a `prototype_response` on the same socket. */

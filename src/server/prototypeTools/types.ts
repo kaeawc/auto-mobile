@@ -1,4 +1,5 @@
 import type { PrototypeTestSessionStore } from "../../db/prototypeTestSessionRepository";
+import type { PrototypeChannelExecutor } from "../../features/prototype/PrototypeChannelExecutor";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { z } from "zod/v4";
 import type { ProtoViewerDevice } from "../../features/prototype/protoViewer/protoViewerDevice";
@@ -51,6 +52,8 @@ export interface PrototypeTarget {
 export interface PrototypeToolDependencies {
   testSessionStore?: PrototypeTestSessionStore;
   idGenerator?: IdGenerator;
+  /** Replaces the host WebSocket and SSE transports for channels; tests supply a fake. */
+  channelExecutor?: PrototypeChannelExecutor;
   /** Host feature gates; tests supply an isolated environment. */
   env?: NodeJS.ProcessEnv;
   shaderAssetCache?: Pick<

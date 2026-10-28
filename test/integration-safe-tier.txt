@@ -59,6 +59,7 @@ test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :mem
 test/daemon/sessionBroker/brokerTiming.integration.test.ts | safe | private file-backed registry temp directory, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/exports.integration.test.ts | safe | file-backed registry in tracked harness temp directory with FakeNativePort and FakeTimer
 test/daemon/sessionBroker/provisioning/bindingRegistryAbsence.integration.test.ts | safe | temp-dir SQLite via bindFileBackedDbHarness L18, FakeTimer
+test/daemon/sessionBroker/provisioning/cachedRegistrySchema.integration.test.ts | safe | two SQLite registry handles over a private mkdtemp file with FakeTimer, closed and removed afterwards
 test/daemon/sessionBroker/provisioning/simctlCatalog.integration.test.ts | safe | real resolver and SimCtlClient over injected exec seam and FakeTimer; no host commands
 test/daemon/sessionBroker/registry/bindingJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
 test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts | safe | real SQLite handles on useScratchRoot temp files and a file-backed harness, explicit dbPath, no host tooling

@@ -19,6 +19,8 @@ export interface RefusalFields {
   recovering?: boolean;
   externalDevices?: string[];
   heldDevices?: string[];
+  dbPath?: string;
+  unknownMigrations?: string[];
 }
 
 export interface Expectations {
@@ -61,6 +63,8 @@ export interface WirePayload {
   code?: string;
   retryable?: boolean;
   nextAction?: string;
+  dbPath?: string;
+  unknownMigrations?: string[];
   error?: {
     retryAfterMs?: number;
     recovering?: boolean;
@@ -248,6 +252,8 @@ export function readWirePayload(value: unknown): WirePayload {
     code: optionalString(record, "code", "wire payload"),
     retryable: optionalBoolean(record, "retryable", "wire payload"),
     nextAction: optionalString(record, "nextAction", "wire payload"),
+    dbPath: optionalString(record, "dbPath", "wire payload"),
+    unknownMigrations: optionalStringArray(record, "unknownMigrations", "wire payload"),
     ...(envelope
       ? {
           error: {
@@ -283,6 +289,8 @@ function readFieldRecord(record: Record<string, unknown>, label: string) {
   const recovering = optionalBoolean(record, "recovering", label);
   const externalDevices = optionalStringArray(record, "externalDevices", label);
   const heldDevices = optionalStringArray(record, "heldDevices", label);
+  const dbPath = optionalString(record, "dbPath", label);
+  const unknownMigrations = optionalStringArray(record, "unknownMigrations", label);
   return {
     ...(code === undefined ? {} : { code }),
     acquireNewSession: requireBoolean(record, "acquireNewSession", label),
@@ -290,6 +298,8 @@ function readFieldRecord(record: Record<string, unknown>, label: string) {
     ...(recovering === undefined ? {} : { recovering }),
     ...(externalDevices === undefined ? {} : { externalDevices }),
     ...(heldDevices === undefined ? {} : { heldDevices }),
+    ...(dbPath === undefined ? {} : { dbPath }),
+    ...(unknownMigrations === undefined ? {} : { unknownMigrations }),
   };
 }
 
@@ -301,6 +311,8 @@ const FIELD_KEYS = [
   "recovering",
   "externalDevices",
   "heldDevices",
+  "dbPath",
+  "unknownMigrations",
 ] as const;
 
 function readRefusalFields(value: unknown, label: string): RefusalFields {

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
+import type { BindingRegistrySchemaProbe } from "./bindingRegistryMigrations";
 
 /**
  * Host-wide registry of managed device bindings (#11172, #11174).
@@ -392,7 +393,7 @@ export const BINDING_JOURNAL_TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export type BindingExecOwnerLiveness = (owner: BindingProcessIdentity) => boolean;
 
-export interface BindingRegistry {
+export interface BindingRegistry extends BindingRegistrySchemaProbe {
   /**
    * Admit an acquisition into a scope, creating it on first use and recording the acquisition time.
    * Revives a scope invalidated only by abandonment; never revives one that was reset, and never

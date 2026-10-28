@@ -3401,6 +3401,31 @@ in `PrototypeEffectShaders`.
   `PrototypeSpecContentScreenshotTest`), and a real-GPU look at the AGSL effects. Robolectric covers
   decoding, API planning, the clock and budget on fakes, and bounds stability.
 
+## Maps (#14308, design for the `map` node)
+
+The `map` node (#14309) is not in the contract yet; these are the owner-decided rules its contract and
+renderers (#14310, #14311) follow.
+
+- **Backends.** A spec never names a tile URL or SDK. An optional `backend` defaults to `auto`: MapLibre on
+  Android, MapKit on iOS. Google Maps is an Android opt-in backend, offered only when the runtime holds a
+  host-configured key, because a disposable app's package and signature change per prototype and a key cannot
+  be pre-restricted to them. MapLibre on iOS stays optional, for the offline style and pixel parity.
+- **Styles.** `style` is a closed list, never a URL. `plain` is the default: offline and deterministic (a
+  background colour, an optional grid and graticule, then markers and polylines), with no network. CI and every
+  screenshot test use it. `streets` draws tiles from the runtime's configured source. `satellite` is not offered
+  until a source for it is chosen. On iOS, MapKit always fetches Apple tiles, so `plain` there is drawn by
+  MapLibre iOS or by an `MKTileOverlay` with `canReplaceMapContent` serving local tiles; #14311 picks one.
+- **Tile source.** The `streets` source is configured once per runtime (ProtoViewer settings, or the daemon
+  pushing configuration to a disposable app), never per spec. The public OpenStreetMap tile server is never
+  used.
+- **Keys.** A Google Maps or tile-provider key lives only in host configuration and reaches the runtime over
+  the device channel. It is never written into a spec, a saved bundle, `inspect`, `observe`, logs or a
+  ProtoViewer share; each renderer has a redaction test for this.
+- **Egress.** Tile fetches count as network for ProtoViewer's switch that allows network for imported
+  prototypes (#13622). With the switch off, `streets` falls back to `plain` with a visible "offline map" chip.
+  Only the configured tile origin is contacted, and the runtime draws the data attribution outside spec
+  control.
+
 ## Charts (#14209, not device-verified)
 
 A `chart` node draws a `line`, `area`, `bar` or `ring` chart from 1 to 4 `series`. Each series

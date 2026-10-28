@@ -1,5 +1,10 @@
 import Foundation
 
+/// Only prototype content extends beneath the home indicator; the viewer's chrome keeps its safe area.
+enum ProtoViewerContentLayout {
+    static let ignoresBottomContainerSafeArea = true
+}
+
 /// ProtoViewer's own chrome keys on the platform's native horizontal size class: compact on a phone,
 /// the iPhone Duo cover panel and a narrow iPad window; regular on a full iPad window and the Duo inner
 /// panel. There are no Material window-size breakpoints on iOS (#15244). Prototype content is separate:

@@ -50,6 +50,7 @@ import { isIndeterminate, shownSpecOutcome } from "../prototypeShownOutcome";
 import { sendPrototype, stageAssets } from "./assets";
 import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./preflight";
 import { prototypeSchema } from "./schemas";
+import { prototypeScreenShapeOutput } from "./screenShape";
 import type {
   AnchorStage,
   AssetStage,
@@ -323,7 +324,7 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...(await showAdviceOutput(authoredArgs, device, prototypeTarget, result.success)),
+      ...(await showAdviceOutput(authoredArgs, device, dependencies, result.success, signal)),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
@@ -351,15 +352,17 @@ function pseudoLocalizedArgs<T extends { action: string; pseudoLocale?: boolean;
     : args;
 }
 
-/** Advisory platform notes and accessibility findings for a successful show. */
+/** Advisory platform notes, accessibility findings and watch screen shape for a successful show. */
 async function showAdviceOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
-  target: PrototypeTarget,
+  dependencies: Pick<PrototypeHandlerDependencies, "target" | "screenRoundFactory" | "adbFactory">,
   success: boolean,
+  signal?: AbortSignal,
 ): Promise<
   Pick<
     PrototypeOutput,
+    | "screenRound"
     | "platformNotes"
     | "accessibilityFindings"
     | "accessibilityFindingsTotal"
@@ -368,9 +371,13 @@ async function showAdviceOutput(
   >
 > {
   return {
-    ...(await platformNotesOutput(args, device, target, success)),
+    ...(await platformNotesOutput(args, device, dependencies.target, success)),
     ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
     ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
+    ...(await prototypeScreenShapeOutput(
+      { action: args.action, success, device, signal },
+      dependencies,
+    )),
   };
 }
 

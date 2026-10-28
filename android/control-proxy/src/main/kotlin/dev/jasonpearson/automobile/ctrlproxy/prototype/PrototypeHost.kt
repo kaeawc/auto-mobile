@@ -280,6 +280,7 @@ interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
  * the window's own display. All other platform access is constructor-injected. No permission probe
  * occurs.
  */
+@Suppress("LargeClass") // One host owns the window, its show transaction and rollback; split when a second owner appears.
 class DefaultPrototypeHost(
   private val context: Context,
   private val windowManager: WindowManager =

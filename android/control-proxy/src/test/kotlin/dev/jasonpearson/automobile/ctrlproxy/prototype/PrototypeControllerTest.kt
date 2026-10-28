@@ -8,10 +8,10 @@ import dev.jasonpearson.automobile.ctrlproxy.prototypeStatusFrame
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
@@ -52,7 +52,7 @@ class PrototypeControllerTest {
       onDismissed = { dismissed++ },
       eventSink = PrototypeEventSink { if (connected) events += it },
       clock = { 42L },
-      requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+      requestScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
       lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
       render = { spec ->
         mapPrototypeSpec(spec).also { models += it }.request()

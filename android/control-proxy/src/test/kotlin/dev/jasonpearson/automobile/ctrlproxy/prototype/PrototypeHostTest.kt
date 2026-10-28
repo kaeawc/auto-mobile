@@ -1165,7 +1165,7 @@ class PrototypeHostTest {
   }
 
   /** show and replace hop to main twice (before and after the composition await); drain both. */
-  private suspend fun TestScope.drainMain() {
+  private fun TestScope.drainMain() {
     repeat(2) {
       runCurrent()
       main.drain()

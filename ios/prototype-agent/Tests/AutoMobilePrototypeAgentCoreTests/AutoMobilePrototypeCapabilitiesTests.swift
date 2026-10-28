@@ -33,6 +33,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // Contract only; the device status readers are owed (#14323).
             "prototype_platform_battery_v1", "prototype_platform_power_v1",
             "prototype_platform_audio_v1",
+            // Contract only; the connectivity runtimes are owed (#14273).
+            "prototype_platform_connectivity_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

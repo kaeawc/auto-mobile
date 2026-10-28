@@ -519,3 +519,49 @@ describe("haptics and sound platform modules (#14329)", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("device status module contract", () => {
+  const values = (module: string, key: string): unknown =>
+    PROTOTYPE_PLATFORM_MODULES[module]?.state?.[key]?.value.values;
+  const keys = (module: string) => Object.keys(PROTOTYPE_PLATFORM_MODULES[module]?.state ?? {});
+
+  test("each module exposes exactly its documented keys and one debounced changed event", () => {
+    expect(keys("battery")).toEqual(["level", "state"]);
+    expect(keys("power")).toEqual(["saver", "thermal"]);
+    expect(keys("audio")).toEqual(["volume", "muted", "route", "ringer"]);
+    expect(keys("connectivity")).toEqual(["online", "transport", "metered", "constrained"]);
+    for (const module of ["battery", "power", "audio", "connectivity"]) {
+      expect(Object.keys(PROTOTYPE_PLATFORM_MODULES[module].calls)).toEqual([]);
+      expect(PROTOTYPE_PLATFORM_MODULES[module].events).toEqual({
+        changed: { sensitive: false, debounceMs: 500 },
+      });
+    }
+  });
+
+  test("enum values are the documented sets", () => {
+    expect(values("battery", "state")).toEqual(["charging", "full", "unplugged", "unknown"]);
+    expect(values("power", "thermal")).toEqual(["nominal", "fair", "serious", "critical"]);
+    expect(values("audio", "route")).toEqual([
+      "speaker",
+      "wired",
+      "bluetooth",
+      "usb",
+      "airplay",
+      "cast",
+      "other",
+    ]);
+    expect(values("audio", "ringer")).toEqual(["normal", "vibrate", "silent"]);
+    expect(values("connectivity", "transport")).toEqual([
+      "wifi",
+      "cellular",
+      "ethernet",
+      "vpn",
+      "other",
+      "none",
+    ]);
+  });
+
+  test("the ringer is Android only", () => {
+    expect(PROTOTYPE_PLATFORM_MODULES.audio.state?.ringer.platforms).toEqual(["android"]);
+  });
+});

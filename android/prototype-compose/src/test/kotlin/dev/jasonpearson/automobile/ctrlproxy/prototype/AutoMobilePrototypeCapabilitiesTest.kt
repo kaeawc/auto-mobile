@@ -56,6 +56,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_battery_v1",
       "prototype_platform_power_v1",
       "prototype_platform_audio_v1",
+      // Contract only; the connectivity runtimes are owed (#14273).
+      "prototype_platform_connectivity_v1",
     )
 
   @Test

@@ -1,0 +1,57 @@
+{
+  "id": "platform-connectivity",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "changes": 0
+  },
+  "requires": {
+    "platform": ["connectivity"]
+  },
+  "platform": {
+    "on": {
+      "connectivity.changed": [
+        {
+          "type": "increment",
+          "key": "changes"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "{platform:/connectivity/transport} ({changes})"
+      },
+      {
+        "type": "text",
+        "text": "You are offline",
+        "visibleWhen": {
+          "platform": "/connectivity/online",
+          "equals": false
+        }
+      },
+      {
+        "type": "text",
+        "text": "Low data mode",
+        "visibleWhen": {
+          "platform": "/connectivity/constrained",
+          "equals": true
+        }
+      },
+      {
+        "type": "text",
+        "text": "Metered",
+        "visibleWhen": {
+          "platform": "/connectivity/metered",
+          "equals": true
+        }
+      }
+    ]
+  }
+}

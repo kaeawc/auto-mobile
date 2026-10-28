@@ -229,6 +229,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_battery_v1: statusRead("battery", "state", "charging"),
   prototype_platform_power_v1: statusRead("power", "thermal", "serious"),
   prototype_platform_audio_v1: statusRead("audio", "muted", true),
+  prototype_platform_connectivity_v1: statusRead("connectivity", "online", false),
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
   prototype_platform_sound_v1: soundCall,

@@ -2004,6 +2004,12 @@ path. No production runtime advertises them yet: the Android and iOS readers are
 | `power` (`prototype_platform_power_v1`)     | `saver` boolean; `thermal` `nominal`, `fair`, `serious` or `critical`                                                                                                                 |
 | `audio` (`prototype_platform_audio_v1`)     | `volume` 0-100 (media stream); `muted` boolean; `route` `speaker`, `wired`, `bluetooth`, `usb`, `airplay`, `cast` or `other`; `ringer` `normal`, `vibrate` or `silent` (Android only) |
 
+**Connectivity (#14273).** The `connectivity` module (`prototype_platform_connectivity_v1`) follows the
+same shape: `/platform/connectivity/online` and `metered` and `constrained` are booleans, and
+`transport` is `wifi`, `cellular`, `ethernet`, `vpn`, `other` or `none`. `constrained` is iOS Low Data
+Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery per 500 ms. No
+production runtime advertises it yet.
+
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
 

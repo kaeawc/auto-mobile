@@ -480,6 +480,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_connectivity_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["connectivity"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/connectivity/transport}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_haptics_v1: {
     minimalSpec: {
       ...base,

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform, tmpdir } from "node:os";
 import path from "node:path";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

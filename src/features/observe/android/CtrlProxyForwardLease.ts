@@ -13,7 +13,7 @@ import {
   tryAcquireExclusiveLock,
 } from "../../../utils/fileLock";
 import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
-import { DaemonDeviceLeaseOwnerProbe } from "../../../daemon/deviceLeaseOwnerQuery";
+import { DaemonDeviceLeaseOwnerProbe } from "../../../daemon/client/deviceLeaseOwnerQuery";
 import {
   decideForwardLeaseReclaim,
   decodeForwardLeaseOwnerMetadata,

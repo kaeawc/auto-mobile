@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, daemonResponseError } from "../../src/daemon/client";
+import { DaemonClient, daemonResponseError } from "../../src/daemon/client/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

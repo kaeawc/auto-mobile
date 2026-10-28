@@ -1,6 +1,6 @@
-import type { DaemonRequest } from "./types";
-import { DAEMON_NON_FINITE_ENCODED_PARAM } from "./wire/constants";
-import { encodeNonFinite } from "../utils/nonFiniteJson";
+import type { DaemonRequest } from "../types";
+import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../wire/constants";
+import { encodeNonFinite } from "../../utils/nonFiniteJson";
 
 /**
  * Serialize an outbound request as a newline-delimited frame, encoding any

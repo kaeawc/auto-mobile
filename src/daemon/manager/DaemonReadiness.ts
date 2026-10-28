@@ -1,4 +1,4 @@
-import { toDaemonStatus } from "../clientResponseDecoding";
+import { toDaemonStatus } from "../client/clientResponseDecoding";
 import { recordedProcessGenerationToken } from "../processGenerationFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -11,8 +11,8 @@ import {
   READINESS_PROBE_BACKOFF_MS,
 } from "../wire/constants";
 import { DaemonStatus } from "../types";
-import { type DaemonClientFactoryOptions, type DaemonClientLike } from "../client";
-import { type DaemonSocketReachabilityLike } from "../daemonSocketReachability";
+import { type DaemonClientFactoryOptions, type DaemonClientLike } from "../client/client";
+import { type DaemonSocketReachabilityLike } from "../client/daemonSocketReachability";
 import { Timer } from "../../utils/SystemTimer";
 import { type DaemonProcessRecord } from "../processTable";
 import { stderrLog } from "./DaemonLaunch";

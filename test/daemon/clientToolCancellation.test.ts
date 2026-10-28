@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,

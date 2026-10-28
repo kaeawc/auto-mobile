@@ -8,7 +8,7 @@ import {
   buildIdentitiesMatch,
   buildIdentityFromStatus,
 } from "../wire/buildIdentity";
-import { type DaemonClientLike } from "../client";
+import { type DaemonClientLike } from "../client/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_ONE_SHOT_CLI_PARAM,

@@ -59,7 +59,7 @@ import {
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client";
+import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";

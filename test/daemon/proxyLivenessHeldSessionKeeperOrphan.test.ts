@@ -1,6 +1,6 @@
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";

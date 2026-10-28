@@ -1,6 +1,6 @@
 import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { DaemonClientLike, DaemonMethodCallOptions } from "../../src/daemon/client";
-import { DaemonUnavailableError } from "../../src/daemon/client";
+import type { DaemonClientLike, DaemonMethodCallOptions } from "../../src/daemon/client/client";
+import { DaemonUnavailableError } from "../../src/daemon/client/client";
 import {
   DAEMON_CAPABILITIES_COMMAND_USAGE,
   DAEMON_CAPABILITIES_TIMEOUT_MS,

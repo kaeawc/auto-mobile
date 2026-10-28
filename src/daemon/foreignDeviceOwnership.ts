@@ -37,7 +37,7 @@ import {
 import {
   DaemonDeviceLeaseOwnerProbe,
   DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
-} from "./deviceLeaseOwnerQuery";
+} from "./client/deviceLeaseOwnerQuery";
 import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 /**

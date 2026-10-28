@@ -5,7 +5,7 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredError";
 import { type BuildIdentity } from "../wire/buildIdentity";
-import { DaemonUnavailableError, type DaemonClientLike } from "../client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../client/client";
 import {
   DAEMON_CONNECT_ATTEMPT_TIMEOUT_MS,
   DAEMON_RELEASE_SESSION_METHOD,

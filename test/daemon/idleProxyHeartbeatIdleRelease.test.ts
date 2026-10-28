@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,

@@ -1,6 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import { parseBooleanFlagValue, splitFlagToken } from "../../utils/flagTokens";
-import type { DaemonMethodCallOptions } from "../client";
+import type { DaemonMethodCallOptions } from "../client/client";
 import { DAEMON_CAPABILITIES_METHOD } from "../daemonRequestHandlers";
 
 /** A readiness query should fail promptly when the existing daemon cannot answer. */

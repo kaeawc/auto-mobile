@@ -13,7 +13,7 @@ import {
   type ForwardLeaseOwnerProbe,
   type ForwardLeaseOwnerReport,
 } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
-import { DaemonDeviceLeaseOwnerProbe } from "./deviceLeaseOwnerQuery";
+import { DaemonDeviceLeaseOwnerProbe } from "./client/deviceLeaseOwnerQuery";
 import { sortedReaddirSync } from "../utils/io";
 
 /** One device's CtrlProxy forwarding-lease holder, read from its lock file. */

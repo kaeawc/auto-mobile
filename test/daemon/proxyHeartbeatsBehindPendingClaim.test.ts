@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_HEARTBEAT_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {

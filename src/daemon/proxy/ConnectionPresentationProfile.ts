@@ -1,5 +1,5 @@
-import type { DaemonClientLike } from "../client";
-import { DaemonUnavailableError } from "../client";
+import type { DaemonClientLike } from "../client/client";
+import { DaemonUnavailableError } from "../client/client";
 import {
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,

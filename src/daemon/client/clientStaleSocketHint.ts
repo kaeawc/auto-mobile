@@ -1,7 +1,7 @@
-import { PID_FILE_PATH } from "./wire/constants";
-import { DaemonUnavailableError } from "./DaemonUnavailableError";
-import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
-import { logger } from "../utils/logger";
+import { PID_FILE_PATH } from "../wire/constants";
+import { DaemonUnavailableError } from "../DaemonUnavailableError";
+import { isProcessRunning, readPidFileDataSync } from "../daemonFiles";
+import { logger } from "../../utils/logger";
 
 /** Options consulted only to produce the stale-socket diagnostic hint (issue #6140). */
 export interface StaleSocketHintOptions {

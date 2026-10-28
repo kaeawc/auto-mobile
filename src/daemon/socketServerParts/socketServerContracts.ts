@@ -16,7 +16,7 @@ import {
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
-} from "../daemonSocketReachability";
+} from "../client/daemonSocketReachability";
 import { isProcessRunning, readPidFileDataSync } from "../daemonFiles";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 

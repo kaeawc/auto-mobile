@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { mkdtempSync } from "node:fs";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 
 const isWindows = platform() === "win32";
 

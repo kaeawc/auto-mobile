@@ -5,7 +5,7 @@ import {
   DaemonClient,
   type DaemonClientLike,
   type DaemonMethodCallOptions,
-} from "../../src/daemon/client";
+} from "../../src/daemon/client/client";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,

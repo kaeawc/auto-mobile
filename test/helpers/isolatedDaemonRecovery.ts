@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import type { DaemonClientRecoveryOptions } from "../../src/daemon/client";
+import type { DaemonClientRecoveryOptions } from "../../src/daemon/client/client";
 
 /**
  * Recovery options that keep a unit-test DaemonClient off the host's real

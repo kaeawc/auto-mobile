@@ -22,7 +22,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/wire/buildIdentity";
-import { DaemonClient } from "../src/daemon/client";
+import { DaemonClient } from "../src/daemon/client/client";
 import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
   DAEMON_VERSION,

@@ -49,7 +49,7 @@ import type {
 import type { DaemonLaunchedProcess } from "../../src/daemon/DaemonLauncher";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike } from "../../src/daemon/client/client";
 import { RESTART_ADMISSION_TIMEOUT_MS } from "../../src/daemon/manager/DaemonRestartCoordinator";
 import { ActionableError } from "../../src/models";
 import {

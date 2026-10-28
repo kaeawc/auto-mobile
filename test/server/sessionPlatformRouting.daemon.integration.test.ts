@@ -9,7 +9,7 @@ import {
   DaemonMcpProxy,
 } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";

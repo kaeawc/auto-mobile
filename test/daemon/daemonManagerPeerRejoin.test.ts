@@ -2,12 +2,12 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike } from "../../src/daemon/client/client";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import type {
   DaemonSocketReachabilityLike,
   SocketReachability,
-} from "../../src/daemon/daemonSocketReachability";
+} from "../../src/daemon/client/daemonSocketReachability";
 import type { PidFileData } from "../../src/daemon/types";
 import { readPidFileDataSync } from "../../src/daemon/daemonFiles";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";

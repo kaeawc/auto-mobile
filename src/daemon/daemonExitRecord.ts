@@ -1,6 +1,6 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { z } from "zod";
-import { daemonOptionsSchema } from "./client";
+import { daemonOptionsSchema } from "./client/client";
 import type { DaemonOptions } from "./types";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";

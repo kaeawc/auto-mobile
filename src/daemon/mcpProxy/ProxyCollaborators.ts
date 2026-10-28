@@ -1,6 +1,6 @@
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { type BuildIdentity } from "../wire/buildIdentity";
-import { type DaemonClientLike } from "../client";
+import { type DaemonClientLike } from "../client/client";
 import { DAEMON_HEARTBEAT_METHOD, SOCKET_PATH } from "../wire/constants";
 import { SessionOutsideBoundSessionError } from "../deviceOutsideBoundSessionRefusal";
 import {

@@ -25,7 +25,7 @@ import {
   DaemonClient,
   DaemonUnavailableError,
   type DaemonClientLike,
-} from "../../src/daemon/client";
+} from "../../src/daemon/client/client";
 import type { DaemonRestartResult } from "../../src/daemon/manager";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,

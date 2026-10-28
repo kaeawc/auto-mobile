@@ -17,7 +17,7 @@ import { SOCKET_PATH, DAEMON_LAUNCH_NONCE_ENV } from "../../src/daemon/wire/cons
 import { logger } from "../../src/utils/logger";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { toDaemonStatus } from "../../src/daemon/clientResponseDecoding";
+import { toDaemonStatus } from "../../src/daemon/client/clientResponseDecoding";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "../../src/daemon/types";
 import {
   createDaemonHealthCheck,

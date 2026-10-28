@@ -1,4 +1,4 @@
-import { logger } from "../utils/logger";
+import { logger } from "../../utils/logger";
 
 /** Locate a quoted key/id's end; JSON.parse validates its escapes and contents. */
 function overflowStringEnd(prefix: string, start: number): number {

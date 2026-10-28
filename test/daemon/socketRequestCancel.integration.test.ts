@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { provisionCancellationOutcomes } from "../../src/daemon/provisionCancellationOutcomes";
-import { DAEMON_RESPONSE_GRACE_MS, DaemonClient } from "../../src/daemon/client";
+import { DAEMON_RESPONSE_GRACE_MS, DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";

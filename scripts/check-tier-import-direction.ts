@@ -51,7 +51,7 @@ export const TIER_RULES: readonly TierRule[] = [
   // the daemon's session, pool or socket-server runtime (#11790).
   // The wire contract imports nothing else from the daemon, so every process can depend on it (#11790).
   { tier: "daemon/wire", forbiddenModules: ["src/daemon/"], allowedPrefixes: ["src/daemon/wire/"] },
-  ...["daemon/proxy", "daemon/mcpProxy"].map((tier) => ({
+  ...["daemon/proxy", "daemon/mcpProxy", "daemon/client"].map((tier) => ({
     tier,
     forbiddenModules: DAEMON_RUNTIME_MODULES,
     allowedModules: DAEMON_RUNTIME_LEAVES,

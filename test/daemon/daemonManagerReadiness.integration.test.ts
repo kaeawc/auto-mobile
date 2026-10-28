@@ -18,11 +18,11 @@ import {
   DEFAULT_SOCKET_PATH,
   READINESS_PROBE_MAX_ATTEMPTS,
 } from "../../src/daemon/wire/constants";
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike } from "../../src/daemon/client/client";
 import type {
   DaemonSocketReachabilityLike,
   SocketReachability,
-} from "../../src/daemon/daemonSocketReachability";
+} from "../../src/daemon/client/daemonSocketReachability";
 import type { DaemonStatus, PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 

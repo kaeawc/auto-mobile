@@ -1,8 +1,8 @@
 import { createConnection } from "node:net";
 import { statSync } from "node:fs";
 import { platform } from "node:os";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
 
 /**
  * Lightweight raw socket probe behind `DaemonClient.isAvailable`: no logging, no
@@ -26,7 +26,7 @@ export async function probeDaemonSocket(
     } catch (error) {
       // statSync throws when the path doesn't exist (or is unreadable); either way
       // there's no live daemon socket to connect to, so report unavailable.
-      logger.debug(`src/daemon/client.ts fallback failed: ${error}`, error);
+      logger.debug(`src/daemon/client/client.ts fallback failed: ${error}`, error);
       return false;
     }
   }

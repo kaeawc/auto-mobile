@@ -10,7 +10,7 @@ import {
   type SocketOwnerStatus,
   type SocketReclaimLock,
 } from "../../src/daemon/socketServer";
-import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
+import type { DaemonSocketReachabilityLike } from "../../src/daemon/client/daemonSocketReachability";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";

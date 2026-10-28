@@ -8,7 +8,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models";
 import { DaemonStatus, DaemonOptions } from "../types";
-import { type DaemonClientFactoryOptions, type DaemonClientLike } from "../client";
+import { type DaemonClientFactoryOptions, type DaemonClientLike } from "../client/client";
 import {
   DAEMON_REPUBLISH_IDENTITY_METHOD,
   DaemonRestartDeferredError,

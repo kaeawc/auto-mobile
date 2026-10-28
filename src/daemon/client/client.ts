@@ -5,12 +5,12 @@ import { existsSync } from "node:fs";
 import type { Socket } from "node:net";
 import { platform } from "node:os";
 import type { Duplex } from "node:stream";
-import { errorMessage } from "../utils/describeUnknownError";
-import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import { logger } from "../utils/logger";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
-import { type BuildIdentity, liveDaemonIdentity } from "./wire/buildIdentity";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { type IdGenerator, defaultIdGenerator } from "../../utils/IdGenerator";
+import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../../utils/SystemTimer";
+import { type BuildIdentity, liveDaemonIdentity } from "../wire/buildIdentity";
 import { serializeRequestFrame } from "./clientFrameSerialization";
 import { handleInboundLine } from "./clientInboundFrames";
 import { overflowingResponseId } from "./clientInboundOverflow";
@@ -35,20 +35,20 @@ import {
   resolveDaemonVersion,
   syncSettledDaemonVersion,
   SOCKET_PATH,
-} from "./wire/constants";
-import { DaemonDisconnectError } from "./DaemonDisconnectError";
-import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
-import { ProgressExtendableDeadline, clampCallerMcpRequestTimeoutMs } from "./mcpRequestTimeout";
+} from "../wire/constants";
+import { DaemonDisconnectError } from "../DaemonDisconnectError";
+import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredError";
+import { ProgressExtendableDeadline, clampCallerMcpRequestTimeoutMs } from "../mcpRequestTimeout";
 import {
   resolveClientMcpRequestTimeoutMs,
   resolveExplicitToolTimeoutOverrideMs,
 } from "./clientMcpRequestTimeout";
-import { McpTimeoutError } from "./wire/McpTimeoutError";
-import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
-import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./wire/LineFramer";
-import { type TaskRelayFrame, type TaskRelayMethod } from "./tasks/taskRelay";
-import type { DaemonStatus } from "./types";
-import { DaemonNotification, DaemonRequest, DaemonResponse } from "./types";
+import { McpTimeoutError } from "../wire/McpTimeoutError";
+import { DaemonFrameTooLargeError } from "../wire/DaemonFrameTooLargeError";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "../wire/LineFramer";
+import { type TaskRelayFrame, type TaskRelayMethod } from "../tasks/taskRelay";
+import type { DaemonStatus } from "../types";
+import { DaemonNotification, DaemonRequest, DaemonResponse } from "../types";
 export {
   DAEMON_RESPONSE_GRACE_MS,
   type DaemonClientFactory,
@@ -60,7 +60,7 @@ export {
   type DaemonToolCallOptions,
 } from "./clientResponseDecoding";
 
-import { DaemonUnavailableError, toDaemonTransportError } from "./DaemonUnavailableError";
+import { DaemonUnavailableError, toDaemonTransportError } from "../DaemonUnavailableError";
 
 export { DaemonUnavailableError, toDaemonTransportError };
 

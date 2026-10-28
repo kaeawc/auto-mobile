@@ -7,7 +7,7 @@ import {
   isDeviceSessionAcquisitionTool,
   type DeviceSessionSuspectRefusal,
 } from "../deviceSessionResult";
-import type { DaemonClientLike } from "../client";
+import type { DaemonClientLike } from "../client/client";
 import { isDeviceInventoryTool, type DaemonProxyProgressCallback } from "../daemonMcpProxy";
 import { isReplaySafeToolName } from "../deviceControlTransportFailure";
 import type { DaemonErrorClassifier } from "./DaemonErrorClassifier";

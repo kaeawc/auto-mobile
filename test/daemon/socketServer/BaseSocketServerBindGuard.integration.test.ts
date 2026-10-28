@@ -18,7 +18,7 @@ import {
   AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
   BaseSocketServer,
 } from "../../../src/daemon/socketServer/BaseSocketServer";
-import type { DaemonSocketReachabilityLike } from "../../../src/daemon/daemonSocketReachability";
+import type { DaemonSocketReachabilityLike } from "../../../src/daemon/client/daemonSocketReachability";
 import { AuxiliarySocketHeldError } from "../../../src/daemon/AuxiliarySocketHeldError";
 import { AuxiliarySocketOwner } from "../../../src/daemon/auxiliarySocketOwner";
 import {

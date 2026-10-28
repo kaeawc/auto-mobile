@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
 import { SOCKET_PATH, PID_FILE_PATH } from "./wire/constants";
-import { DaemonClient } from "./client";
+import { DaemonClient } from "./client/client";
 import { readFile } from "node:fs/promises";
 import { PidFileData } from "./types";
 import { Timer, defaultTimer } from "../utils/SystemTimer";

@@ -1,6 +1,6 @@
 import { McpError, ErrorCode } from "../../src/daemon/mcpError";
 import { describe, expect, test } from "bun:test";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/client/client";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import {

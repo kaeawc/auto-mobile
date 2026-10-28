@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

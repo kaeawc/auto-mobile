@@ -3,7 +3,7 @@ import { useScratchRoot } from "../helpers/scratchRoot";
 import { existsSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { getDaemonHealthReport, runSocketDiagnostics } from "../../src/daemon/debugTools";
 import type { PidFileData } from "../../src/daemon/types";
 

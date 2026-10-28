@@ -4,7 +4,7 @@ import {
   DaemonAmbiguousSessionSelectorError,
   DaemonMcpProxy,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_OWNED_SESSIONS_PARAM,

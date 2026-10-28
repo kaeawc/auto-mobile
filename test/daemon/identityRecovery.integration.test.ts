@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createFileBackedDbHarness } from "../db/withFileBackedDb";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DaemonManager } from "../../src/daemon/manager";
 import { isCompleteRecoveryRecord } from "../../src/daemon/identityRecovery";
 import type { PidFileData } from "../../src/daemon/types";

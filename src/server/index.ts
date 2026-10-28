@@ -550,7 +550,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // tool caller cannot influence, so a direct in-memory / stdio client
     // (`daemonMode: false`) can never assert daemon transport provenance by forging
     // the in-arguments flag — its arguments are left untouched regardless. Sentinel
-    // encoding is only ever performed by the daemon client (`daemon/client.ts`),
+    // encoding is only ever performed by the daemon client (`daemon/client/client.ts`),
     // whose requests always terminate at this `daemonMode: true` loopback server, so
     // gating reverts nothing legitimate. `reviveNonFiniteArguments` still strips the
     // flag when present; a forged flag on a direct server is stripped instead by

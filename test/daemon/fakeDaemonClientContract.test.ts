@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect } from "bun:test";
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike } from "../../src/daemon/client/client";
 import type { DaemonNotification } from "../../src/daemon/types";
 import { ROUTED_SESSION_META_KEY } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   DaemonSocketReachabilityLike,
   SocketReachability,
-} from "../../src/daemon/daemonSocketReachability";
+} from "../../src/daemon/client/daemonSocketReachability";
 import type { SocketFileIdentity, SocketPathFs } from "../../src/daemon/socketFileIdentity";
 import { decideStaleAuxSocketReclaim } from "../../src/daemon/staleAuxSocketReclaim";
 

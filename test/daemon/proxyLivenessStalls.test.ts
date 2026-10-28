@@ -5,7 +5,7 @@ import {
   DaemonMcpProxy,
   DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

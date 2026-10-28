@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
 import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
-import { DaemonUnavailableError, type DaemonClientLike } from "../../../src/daemon/client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../../../src/daemon/client/client";
 import {
   ConnectionRecovery,
   type ConnectionRecoveryPort,

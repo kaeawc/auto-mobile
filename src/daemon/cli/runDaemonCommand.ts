@@ -26,7 +26,7 @@ import {
   describeBuildIdentity,
   type BuildIdentity,
 } from "../wire/buildIdentity";
-import type { DaemonClientFactory } from "../client";
+import type { DaemonClientFactory } from "../client/client";
 import type { DaemonStateLike } from "../daemonState";
 import type { DaemonManager, DaemonManagerOptions } from "../manager";
 import type { DaemonOptions, DaemonStatus } from "../types";

@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DAEMON_VERSION, MCP_STREAMABLE_PATH } from "../../src/daemon/wire/constants";

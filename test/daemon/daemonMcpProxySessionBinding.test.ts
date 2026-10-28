@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,

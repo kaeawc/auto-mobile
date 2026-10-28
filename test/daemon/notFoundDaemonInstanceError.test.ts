@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/client/client";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonResponse } from "../../src/daemon/types";
 
 test("failed responses carry only a non-empty daemon instance", () => {

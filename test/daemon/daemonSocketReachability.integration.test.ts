@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonSocketReachability } from "../../src/daemon/daemonSocketReachability";
+import { DaemonSocketReachability } from "../../src/daemon/client/daemonSocketReachability";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 // Real sockets, but skip the 50 ms absence-confirmation wait so the test stays well under budget.

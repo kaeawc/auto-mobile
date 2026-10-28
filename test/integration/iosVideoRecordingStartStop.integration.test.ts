@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { computeBuildIdentity } from "../../src/daemon/wire/buildIdentity";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   CLI_SESSION_LIVENESS_POLICY,
   CONNECTION_TIMEOUT_MS,

@@ -1,6 +1,6 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
-import type { DaemonClientLike } from "../client";
+import type { DaemonClientLike } from "../client/client";
 import { DAEMON_HEARTBEAT_METHOD } from "../wire/constants";
 import {
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,

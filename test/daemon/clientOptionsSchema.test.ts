@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { daemonOptionsSchema, daemonOptionsSchemaCoversAllKeys } from "../../src/daemon/client";
+import {
+  daemonOptionsSchema,
+  daemonOptionsSchemaCoversAllKeys,
+} from "../../src/daemon/client/client";
 import { STARTUP_OPTION_DEFICIT_KEYS } from "../../src/daemon/daemonMcpProxy";
 
 describe("daemonOptionsSchema", () => {

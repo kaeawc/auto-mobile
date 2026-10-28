@@ -19,7 +19,8 @@ class PrototypeBleCodecsTest {
 
   private fun bytes(hex: String) = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
-  private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+  private fun hex(bytes: ByteArray) =
+    bytes.joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
   @Test
   fun `the codec list and attribute limit match the shared fixture`() {

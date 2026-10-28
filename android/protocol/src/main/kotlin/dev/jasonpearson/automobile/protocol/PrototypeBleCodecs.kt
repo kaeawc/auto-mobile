@@ -61,7 +61,7 @@ object PrototypeBleCodecs {
     Regex("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$")
   private val hexPattern = Regex("^(?:[0-9A-Fa-f]{2})*$")
 
-  private fun fail(error: Error) = Result.Failure(error)
+  internal fun fail(error: Error) = Result.Failure(error)
 
   private fun le(bytes: ByteArray) = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -80,7 +80,12 @@ object PrototypeBleCodecs {
         if (text.toByteArray(Charsets.UTF_8).contentEquals(bytes)) Result.Ok(JsonPrimitive(text))
         else fail(Error.FORMAT)
       }
-      "hex" -> Result.Ok(JsonPrimitive(bytes.joinToString("") { "%02x".format(it) }))
+      "hex" ->
+        Result.Ok(
+          JsonPrimitive(
+            bytes.joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') },
+          ),
+        )
       "base64" -> Result.Ok(JsonPrimitive(Base64.getEncoder().encodeToString(bytes)))
       "float32le" -> decodeFloat(bytes)
       "gatt.battery_level" ->
@@ -89,7 +94,7 @@ object PrototypeBleCodecs {
           bytes[0].toInt() and 0xff > 100 -> fail(Error.RANGE)
           else -> Result.Ok(JsonPrimitive(bytes[0].toInt() and 0xff))
         }
-      "gatt.heart_rate_measurement" -> decodeHeartRate(bytes)
+      "gatt.heart_rate_measurement" -> PrototypeBleHeartRate.decode(bytes)
       else -> decodeInteger(codec, bytes)
     }
 
@@ -110,46 +115,6 @@ object PrototypeBleCodecs {
         else -> buffer.int.toLong() and 0xffffffffL
       }
     return Result.Ok(JsonPrimitive(value))
-  }
-
-  private fun uint16(bytes: ByteArray, offset: Int) =
-    (bytes[offset].toInt() and 0xff) or ((bytes[offset + 1].toInt() and 0xff) shl 8)
-
-  private fun decodeHeartRate(bytes: ByteArray): Result<JsonElement> {
-    if (bytes.size < 2) return fail(Error.LENGTH)
-    val flags = bytes[0].toInt() and 0xff
-    val wide = flags and 0x01 != 0
-    var offset = if (wide) 3 else 2
-    if (bytes.size < offset) return fail(Error.LENGTH)
-    val energy = flags and 0x08 != 0
-    if (energy && bytes.size < offset + 2) return fail(Error.LENGTH)
-    val energyOffset = offset
-    if (energy) offset += 2
-    val rest = bytes.size - offset
-    val intervals = flags and 0x10 != 0
-    if (if (intervals) rest % 2 != 0 else rest != 0) return fail(Error.LENGTH)
-    return Result.Ok(
-      buildJsonObject {
-        put("heartRate", if (wide) uint16(bytes, 1) else bytes[1].toInt() and 0xff)
-        put(
-          "sensorContact",
-          when {
-            flags and 0x04 == 0 -> "unsupported"
-            flags and 0x02 != 0 -> "detected"
-            else -> "notDetected"
-          },
-        )
-        if (energy) put("energyExpended", uint16(bytes, energyOffset))
-        if (intervals) {
-          // RR intervals are in 1/1024 s; report whole milliseconds.
-          val ms =
-            (0 until rest / 2).map {
-              JsonPrimitive((uint16(bytes, offset + it * 2) * 1000.0 / 1024).roundToLong())
-            }
-          put("rrIntervalsMs", JsonArray(ms))
-        }
-      },
-    )
   }
 
   /** Whole numbers stay integers so they compare equal to JSON literals like `4660`. */
@@ -199,4 +164,47 @@ object PrototypeBleCodecs {
     val whole = value.toLong()
     return Result.Ok(ByteArray(width.bytes) { ((whole shr (8 * it)) and 0xff).toByte() })
   }
+}
+
+/** `gatt.heart_rate_measurement` (Bluetooth SIG 0x2A37), decode only. */
+internal object PrototypeBleHeartRate {
+  private fun uint16(bytes: ByteArray, offset: Int) =
+    (bytes[offset].toInt() and 0xff) or ((bytes[offset + 1].toInt() and 0xff) shl 8)
+
+  fun decode(bytes: ByteArray): PrototypeBleCodecs.Result<JsonElement> {
+    val tooShort = PrototypeBleCodecs.fail(PrototypeBleCodecs.Error.LENGTH)
+    if (bytes.size < 2) return tooShort
+    val flags = bytes[0].toInt() and 0xff
+    val wide = flags and 0x01 != 0
+    val energy = flags and 0x08 != 0
+    val energyOffset = if (wide) 3 else 2
+    val intervalsOffset = energyOffset + if (energy) 2 else 0
+    if (bytes.size < intervalsOffset) return tooShort
+    val rest = bytes.size - intervalsOffset
+    val intervals = flags and 0x10 != 0
+    if (if (intervals) rest % 2 != 0 else rest != 0) return tooShort
+    return PrototypeBleCodecs.Result.Ok(
+      buildJsonObject {
+        put("heartRate", if (wide) uint16(bytes, 1) else bytes[1].toInt() and 0xff)
+        put("sensorContact", sensorContact(flags))
+        if (energy) put("energyExpended", uint16(bytes, energyOffset))
+        if (intervals) put("rrIntervalsMs", rrIntervalsMs(bytes, intervalsOffset))
+      },
+    )
+  }
+
+  private fun sensorContact(flags: Int) =
+    when {
+      flags and 0x04 == 0 -> "unsupported"
+      flags and 0x02 != 0 -> "detected"
+      else -> "notDetected"
+    }
+
+  /** RR intervals are in 1/1024 s; report whole milliseconds. */
+  private fun rrIntervalsMs(bytes: ByteArray, offset: Int) =
+    JsonArray(
+      (0 until (bytes.size - offset) / 2).map {
+        JsonPrimitive((uint16(bytes, offset + it * 2) * 1000.0 / 1024).roundToLong())
+      },
+    )
 }

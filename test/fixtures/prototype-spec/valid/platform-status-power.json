@@ -1,0 +1,41 @@
+{
+  "id": "platform-status-power",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "changes": 0
+  },
+  "requires": {
+    "platform": ["power"]
+  },
+  "platform": {
+    "on": {
+      "power.changed": [
+        {
+          "type": "increment",
+          "key": "changes"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "Thermal {platform:/power/thermal} ({changes})"
+      },
+      {
+        "type": "text",
+        "text": "Saver on",
+        "visibleWhen": {
+          "platform": "/power/saver",
+          "equals": true
+        }
+      }
+    ]
+  }
+}

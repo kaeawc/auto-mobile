@@ -1,0 +1,56 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "changes": 0
+    },
+    "requires": {
+      "platform": ["audio"]
+    },
+    "platform": {
+      "on": {
+        "audio.changed": [
+          {
+            "type": "increment",
+            "key": "changes"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Volume {platform:/audio/volume} via {platform:/audio/route} ({changes})"
+        },
+        {
+          "type": "text",
+          "text": "Muted",
+          "visibleWhen": {
+            "platform": "/audio/muted",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Silent ringer",
+          "visibleWhen": {
+            "platform": "/audio/ringer",
+            "equals": "silent"
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_audio_v1"
+}

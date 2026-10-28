@@ -52,6 +52,10 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_haptics_v1",
       "prototype_platform_sound_v1",
       "prototype_platform_media_items_v1",
+      // Contract only; the device status readers are owed (#14322).
+      "prototype_platform_battery_v1",
+      "prototype_platform_power_v1",
+      "prototype_platform_audio_v1",
     )
 
   @Test

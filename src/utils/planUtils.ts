@@ -10,5 +10,4 @@ import { YamlPlanSerializer } from "./plan/PlanSerializer";
 const serializer = new YamlPlanSerializer();
 
 // Re-export functions for backward compatibility
-export const exportPlanFromLogs = serializer.exportPlanFromLogs.bind(serializer);
 export const importPlanFromYaml = serializer.importPlanFromYaml.bind(serializer);

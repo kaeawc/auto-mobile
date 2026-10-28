@@ -462,6 +462,21 @@ effect, a separate issue). The contract is conservative, one closed choice per o
 - A successful show reports `lastResult.backdrop`: `blur`, or `fallback` when the tonal fill was
   drawn. It is absent without `window.backdrop`, on dismiss, on a failed show and for adopted prototypes.
 
+## Wear OS
+
+Dismiss affordances are inset into the inscribed square of a round display so their corners
+remain visible; non-round displays retain their existing placement. Authored fullscreen content
+keeps its viewport.
+
+On a watch, a successful `show` reports `screenRound` from the host's
+`Configuration.isScreenRound`; the device omits it when the shape is unknown. TypeScript uses a
+device-reported boolean directly and falls back to the ADB display reader only when it is absent.
+Other form factors omit the tool's `screenRound` output.
+
+On a watch whose launcher does not support pinned shortcuts, `save` with `pin:true` keeps the save
+and reports `pinned:"unsupported"`. Round-aware layouts, `ScalingLazyColumn`, Wear Material
+components and rotary input in prototypes are out of scope.
+
 ## Common node properties
 
 Every node has required `type`. All other common properties are optional:
@@ -2020,8 +2035,14 @@ that the network carries, so a VPN reports `vpn` over its underlying transport, 
 `other`. `metered` is the absence of `NET_CAPABILITY_NOT_METERED`. `constrained` is Data Saver on
 (`getRestrictBackgroundStatus` not `DISABLED`) on a metered network, because Data Saver restricts only
 metered networks. State updates at once; the event fires once the state has been quiet for the
-debounce, and a flap that settles back on the last delivered state is not an event. The iOS runtime and
-the offline simulation override are not built.
+debounce, and a flap that settles back on the last delivered state is not an event. On iOS the agent and
+Viewer registries run `NWPathMonitor` (no entitlement), started on the module's first read: `online` is a
+satisfied path with an interface, `transport` is the first of Wi-Fi, cellular and wired Ethernet the path
+uses (a VPN's utun reports `other`), `metered` is `isExpensive` and `constrained` is Low Data Mode. The
+first path after start is the baseline, not a change. Every path that changes the state refreshes
+`/platform` at once through a state-only refresh signal the driver applies without running a handler, so
+a prototype shown before the first path still sees it; only `connectivity.changed` waits for the
+debounce. The offline simulation override is not built.
 
 The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
 `fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
@@ -2880,19 +2901,6 @@ Bottom navigation, bottom sheets, and text-field-bearing content normally opt
 into bottom/systemBars, plus ime when the keyboard should move content. Cutout
 padding is normally useful at top/start/end. Anchors stay in screen coordinates;
 inset padding does not reinterpret their coordinate origin.
-
-## Wear OS (not device-verified)
-
-Prototypes render on a watch with the same overlay and Material 3 components as on a phone; the
-spec has no round-aware nodes, Wear components or rotary input.
-
-- On a device whose `formFactor` is `watch`, a successful `show` reports `screenRound`, read from
-  `dumpsys display` like `observe`'s `isScreenRound`. Content in the corners of a round display is
-  clipped. Other devices pay no read; an unreadable display leaves the field absent.
-- The dismiss affordance keeps its phone placement; it is not moved into the round display's
-  inscribed area.
-- Wear launchers are not expected to support pinned shortcuts, so `save` with `pin:true` takes the
-  unsupported-launcher path: the save is kept and the result reports `pinned:"unsupported"`.
 
 ## Lifecycle and safety
 

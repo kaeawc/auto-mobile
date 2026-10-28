@@ -2,10 +2,14 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.annotation.TargetApi
 import android.content.Context
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.Display
+import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
+import kotlin.math.roundToInt
 
 /** Narrow seam over DisplayManager: can this logical display host a prototype window right now? */
 fun interface PrototypeDisplayProvider {
@@ -60,7 +64,49 @@ class PrototypeDisplayWindow(
   val windowManager: WindowManager,
   val navigationBarBottomPx: () -> Int = { 0 },
   val density: () -> Float,
-)
+) {
+  /** Keep a persistent non-fullscreen host, including its close target, inside a round display. */
+  internal fun constrainDismissWindow(
+    params: WindowManager.LayoutParams,
+    request: PrototypeRequest,
+  ) {
+    if (!request.persistent || request.placement is PrototypePlacement.Fullscreen) return
+    val configuration = context.resources.configuration
+    if (!configuration.isScreenRound) return
+    val metrics = context.resources.displayMetrics
+    val safe = prototypeRoundSafeArea(metrics.widthPixels, metrics.heightPixels, true)
+    val width = metrics.widthPixels - 2 * safe.horizontal
+    val height = metrics.heightPixels - 2 * safe.vertical
+    // WRAP_CONTENT has no finite upper bound in LayoutParams. Give round floating hosts a
+    // bounded viewport; authored content still lays out inside it using its existing rules.
+    val minimumTarget = (48 * density()).roundToInt()
+    params.width =
+      if (params.width > 0) params.width.coerceAtLeast(minimumTarget).coerceAtMost(width) else width
+    params.height =
+      if (params.height > 0) params.height.coerceAtLeast(minimumTarget).coerceAtMost(height)
+      else height
+    val bounds = Rect()
+    Gravity.apply(
+      params.gravity,
+      params.width,
+      params.height,
+      Rect(0, 0, metrics.widthPixels, metrics.heightPixels),
+      params.x,
+      params.y,
+      bounds,
+      configuration.layoutDirection,
+    )
+    params.gravity = Gravity.TOP or Gravity.START
+    val left =
+      bounds.left.coerceIn(safe.horizontal, metrics.widthPixels - safe.horizontal - params.width)
+    params.x =
+      if (configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL)
+        metrics.widthPixels - left - params.width
+      else left
+    params.y =
+      bounds.top.coerceIn(safe.vertical, metrics.heightPixels - safe.vertical - params.height)
+  }
+}
 
 fun interface PrototypeDisplayWindows {
   /**

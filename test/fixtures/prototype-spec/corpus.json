@@ -167,6 +167,8 @@
     "platform-camera-capture.json",
     "platform-commerce.json",
     "platform-connectivity.json",
+    "platform-contacts-fields-pair.json",
+    "platform-contacts-fields-single.json",
     "platform-contacts-fields.json",
     "platform-contacts.json",
     "platform-feedback-bound-effect.json",
@@ -2480,6 +2482,16 @@
       "prototype_platform_v1"
     ],
     "platform-contacts-fields.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_contacts_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-contacts-fields-single.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_contacts_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-contacts-fields-pair.json": [
       "prototype_data_model_v1",
       "prototype_platform_contacts_v1",
       "prototype_platform_v1"

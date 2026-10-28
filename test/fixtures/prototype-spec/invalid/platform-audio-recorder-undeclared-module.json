@@ -27,10 +27,6 @@
       "type": "column",
       "children": [
         {
-          "type": "text",
-          "text": "{platform:/audioRecorder/status} {platform:/audioRecorder/elapsedMs} {platform:/audioRecorder/level}"
-        },
-        {
           "type": "button",
           "label": "Hold to record",
           "onTap": [
@@ -72,6 +68,6 @@
       ]
     }
   },
-  "expectedPath": "root.children[1].onTap[0].call",
+  "expectedPath": "root.children[0].onTap[0].call",
   "expectedMessage": "Platform module audioRecorder is not declared in requires.platform"
 }

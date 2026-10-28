@@ -77,6 +77,7 @@ function parseDocumentExamples(document: string): { id?: string }[] {
 
 describe("shared prototype contract", () => {
   const decoded = new Map<string, unknown>();
+  const capabilitiesByName = new Map<string, string[]>();
   beforeAll(() => {
     const warmup = valid.find((fixture) => fixture.name === "doc-example-1.json") ?? valid[0];
     if (warmup) {
@@ -88,6 +89,7 @@ describe("shared prototype contract", () => {
         throw new Error(JSON.stringify(result.error));
       }
       decoded.set(name, result.data);
+      capabilitiesByName.set(name, prototypeGateCapabilities(result.data));
     }
   });
   test("all three corpus runners consume the complete captured inventory", () => {
@@ -114,9 +116,8 @@ describe("shared prototype contract", () => {
   });
   for (const { name, json } of valid) {
     test(`capabilities ${name}`, () => {
-      expect(prototypeGateCapabilities(decoded.get(name))).toEqual(
-        inventory.validCapabilities[name],
-      );
+      expect(capabilitiesByName.get(name)).toBeDefined();
+      expect(capabilitiesByName.get(name)).toEqual(inventory.validCapabilities[name]);
     });
     test(`decode ${name}`, () => {
       const result = validatePrototypeSpec(json);

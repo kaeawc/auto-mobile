@@ -30,6 +30,7 @@ portable test/doctor/iosExecResultConsolidation.test.ts                  # AST s
 portable test/utils/coreSimulatorDeviceSetEnvConstant.test.ts            # source scan of one environment-name constant
 portable test/utils/ios-cmdline-tools/DeviceAppManagerLaunchPreconditions.drift.test.ts # drift guard that reads source
 portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo wire scanner plus a Windows path-separator guard
+portable test/features/observe/ios/observationBridgeState.test.ts        # pure parser plus the capability probe over fakes
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
 

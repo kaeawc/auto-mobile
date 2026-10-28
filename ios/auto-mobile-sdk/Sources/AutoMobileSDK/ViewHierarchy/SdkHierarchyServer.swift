@@ -67,6 +67,7 @@
         let keychainDeletionRouteHandler = SdkKeychainDeletionRouteHandler()
         let preferenceRouteHandler = SdkPreferenceRouteHandler()
         private let triggerRouteHandler = SdkTriggerRouteHandler()
+        private let observationBridgeState: @Sendable () -> ObservationBridgeState
 
         init(
             tracker: any SdkHierarchyServing,
@@ -77,9 +78,13 @@
                 try SdkHierarchyServer.makeListener(port: $0)
             },
             warning: @escaping (String) -> Void = { InternalLogger.warning($0) },
-            error: @escaping (String) -> Void = { InternalLogger.error($0) }
+            error: @escaping (String) -> Void = { InternalLogger.error($0) },
+            observationBridgeState: @escaping @Sendable () -> ObservationBridgeState = {
+                AutoMobileObservationRegistry.shared.state
+            }
         ) {
             self.tracker = tracker
+            self.observationBridgeState = observationBridgeState
             self.identity = identity
             self.warning = warning
             self.error = error
@@ -374,7 +379,8 @@
                 status: "ok",
                 bundleId: tracker?.bundleId,
                 capabilities: Self.capabilities,
-                simulatorUdid: identity.udid
+                simulatorUdid: identity.udid,
+                observationBridge: observationBridgeState()
             )
             guard let data = try? JSONEncoder().encode(payload) else {
                 return SdkRouteResponse(statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
@@ -570,6 +576,7 @@
         let bundleId: String?
         let capabilities: Set<String>
         let simulatorUdid: String?
+        let observationBridge: ObservationBridgeState
     }
 
     private struct SetMockRulesResponse: Encodable {

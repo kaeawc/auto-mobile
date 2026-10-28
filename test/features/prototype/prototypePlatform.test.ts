@@ -798,3 +798,42 @@ describe("commerce module contract", () => {
     expect(Object.keys(commerce.state ?? {})).toEqual(["entitlements", "lastTransaction"]);
   });
 });
+
+describe("sensors module contract", () => {
+  const sensors = PROTOTYPE_PLATFORM_MODULES.sensors;
+
+  test("sensors has no calls and one shake event", () => {
+    expect(sensors.calls).toEqual({});
+    expect(sensors.events).toEqual({ shake: { sensitive: false } });
+  });
+
+  test("continuous readings are flat whole-number keys and light is Android only", () => {
+    const state = sensors.state ?? {};
+    expect(Object.keys(state)).toEqual([
+      "pitchDeg",
+      "rollDeg",
+      "headingDeg",
+      "steps",
+      "proximityNear",
+      "lightLux",
+    ]);
+    for (const name of ["pitchDeg", "rollDeg", "headingDeg", "steps", "lightLux"]) {
+      expect(state[name].value.integer).toBe(true);
+    }
+    expect(state.headingDeg.value.min).toBe(0);
+    expect(state.headingDeg.value.max).toBe(359);
+    expect(state.pitchDeg.value.min).toBe(-180);
+    expect(state.pitchDeg.value.max).toBe(180);
+    expect(state.rollDeg.value.min).toBe(-180);
+    expect(state.rollDeg.value.max).toBe(180);
+    expect(state.steps.value.min).toBe(0);
+    expect(state.steps.value.max).toBe(Number.MAX_SAFE_INTEGER);
+    expect(state.lightLux.value.min).toBe(0);
+    expect(state.lightLux.value.max).toBe(1_000_000);
+    expect(state.proximityNear.value.kind).toBe("boolean");
+    expect(state.lightLux.platforms).toEqual(["android"]);
+    expect(state.steps.platforms).toEqual(["android", "ios"]);
+    expect(state.headingDeg.platforms).toEqual(["android", "ios"]);
+    expect(state.proximityNear.platforms).toEqual(["android", "ios"]);
+  });
+});

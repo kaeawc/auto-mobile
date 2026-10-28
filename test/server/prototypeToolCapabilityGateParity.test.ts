@@ -658,6 +658,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_sensors_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["sensors"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/sensors/steps}" }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_calendar_v1: {
     minimalSpec: {
       ...base,

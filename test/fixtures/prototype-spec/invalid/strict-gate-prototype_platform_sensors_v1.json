@@ -1,0 +1,64 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "shakes": 0
+    },
+    "requires": {
+      "platform": ["sensors"]
+    },
+    "platform": {
+      "on": {
+        "sensors.shake": [
+          {
+            "type": "increment",
+            "key": "shakes"
+          },
+          {
+            "type": "emit",
+            "name": "shake"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Shakes {shakes}, heading {platform:/sensors/headingDeg}"
+        },
+        {
+          "type": "text",
+          "text": "Steps {platform:/sensors/steps}"
+        },
+        {
+          "type": "text",
+          "text": "Too close",
+          "visibleWhen": {
+            "platform": "/sensors/proximityNear",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Dark here",
+          "visibleWhen": {
+            "platform": "/sensors/lightLux",
+            "equals": 0
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_sensors_v1"
+}

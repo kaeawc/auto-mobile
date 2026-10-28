@@ -174,6 +174,7 @@
     "platform-reads.json",
     "platform-repeat.json",
     "platform-requires.json",
+    "platform-sensors.json",
     "platform-settings.json",
     "platform-state-device.json",
     "platform-status-audio.json",
@@ -1125,6 +1126,10 @@
     "platform-repeat-unknown-item.json",
     "platform-requires-unknown-field.json",
     "platform-reserved-emit.json",
+    "platform-sensors-nested-key.json",
+    "platform-sensors-undeclared-module.json",
+    "platform-sensors-unknown-event.json",
+    "platform-sensors-unknown-key.json",
     "platform-settings-missing-page.json",
     "platform-settings-undeclared-module.json",
     "platform-settings-unknown-arg.json",
@@ -1740,6 +1745,7 @@
     "strict-gate-prototype_platform_realtime_device_v1.json",
     "strict-gate-prototype_platform_realtime_v1.json",
     "strict-gate-prototype_platform_secureStorage_v1.json",
+    "strict-gate-prototype_platform_sensors_v1.json",
     "strict-gate-prototype_platform_settings_v1.json",
     "strict-gate-prototype_platform_share_v1.json",
     "strict-gate-prototype_platform_sound_v1.json",
@@ -2965,6 +2971,7 @@
       "prototype_platform_v1"
     ],
     "hide-keyboard-free-form-maps.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "hide-keyboard-ignored-accessory.json": ["prototype_platform_namespace_v1"]
+    "hide-keyboard-ignored-accessory.json": ["prototype_platform_namespace_v1"],
+    "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"]
   }
 }

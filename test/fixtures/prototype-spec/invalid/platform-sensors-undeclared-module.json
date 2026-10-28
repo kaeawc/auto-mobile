@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "s1",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "shakes": 0
+    },
+    "requires": {
+      "platform": ["battery"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Too close",
+          "visibleWhen": {
+            "platform": "/sensors/proximityNear",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].visibleWhen.platform"
+}

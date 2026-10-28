@@ -2069,6 +2069,19 @@ an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated si
 a password, secret or session token: the runtime keeps the token in the Keystore or Keychain and never exposes
 it. The root `auth` accounts block is not in the contract yet, and no production runtime advertises the module.
 
+**Location (#14324).** The `location` module (`prototype_platform_location_v1`) has one call,
+`location.request` with `accuracy` (optional: `precise` or `approximate`) and `maxAgeMs` (optional, whole
+milliseconds, 0 to one day). The call needs `location` in `requires.permissions`; `precise` maps to
+`ACCESS_FINE_LOCATION` on Android and full accuracy on iOS, `approximate` to `ACCESS_COARSE_LOCATION` and
+reduced accuracy. Its `into` receives `{latitude, longitude, accuracyM, altitudeM?, speedMps?, bearingDeg?,
+timestampMs, approximate}`; a grant of approximate only sets `approximate: true` rather than failing. Failures
+use the typed codes `permission_denied`, `unavailable` (location services off), `timeout` and `platform_error`.
+The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
+`/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
+are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
+that fix after the session ends. The root subscription block and the reference outcome reducer are not in the
+contract yet, and no production runtime advertises the module.
+
 **Sandbox commerce (#14314).** The `commerce` module (`prototype_platform_commerce_v1`) has two calls.
 `commerce.purchase` takes a required `productId` (an identifier of at most 64 characters) and writes
 `{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`; a back-out is the
@@ -3409,6 +3422,31 @@ in `PrototypeEffectShaders`.
 - **Owed device checks.** Goldens on API 30, 33 and 36 (`effects_all_types`, pending in
   `PrototypeSpecContentScreenshotTest`), and a real-GPU look at the AGSL effects. Robolectric covers
   decoding, API planning, the clock and budget on fakes, and bounds stability.
+
+## Maps (#14308, design for the `map` node)
+
+The `map` node (#14309) is not in the contract yet; these are the owner-decided rules its contract and
+renderers (#14310, #14311) follow.
+
+- **Backends.** A spec never names a tile URL or SDK. An optional `backend` defaults to `auto`: MapLibre on
+  Android, MapKit on iOS. Google Maps is an Android opt-in backend, offered only when the runtime holds a
+  host-configured key, because a disposable app's package and signature change per prototype and a key cannot
+  be pre-restricted to them. MapLibre on iOS stays optional, for the offline style and pixel parity.
+- **Styles.** `style` is a closed list, never a URL. `plain` is the default: offline and deterministic (a
+  background colour, an optional grid and graticule, then markers and polylines), with no network. CI and every
+  screenshot test use it. `streets` draws tiles from the runtime's configured source. `satellite` is not offered
+  until a source for it is chosen. On iOS, MapKit always fetches Apple tiles, so `plain` there is drawn by
+  MapLibre iOS or by an `MKTileOverlay` with `canReplaceMapContent` serving local tiles; #14311 picks one.
+- **Tile source.** The `streets` source is configured once per runtime (ProtoViewer settings, or the daemon
+  pushing configuration to a disposable app), never per spec. The public OpenStreetMap tile server is never
+  used.
+- **Keys.** A Google Maps or tile-provider key lives only in host configuration and reaches the runtime over
+  the device channel. It is never written into a spec, a saved bundle, `inspect`, `observe`, logs or a
+  ProtoViewer share; each renderer has a redaction test for this.
+- **Egress.** Tile fetches count as network for ProtoViewer's switch that allows network for imported
+  prototypes (#13622). With the switch off, `streets` falls back to `plain` with a visible "offline map" chip.
+  Only the configured tile origin is contacted, and the runtime draws the data attribution outside spec
+  control.
 
 ## Charts (#14209, not device-verified)
 

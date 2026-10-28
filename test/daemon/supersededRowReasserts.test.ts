@@ -166,7 +166,7 @@ describe("SupersededRowReasserts (#11799 W3)", () => {
     expect(ledger.isReassertPending(session.sessionId)).toBe(false);
   });
 
-  test("release bookkeeping: predecessors chain and refusals", () => {
+  test("release bookkeeping: predecessors chain", () => {
     const first = releaseOf(session.sessionId, "idle-timeout");
     const second = releaseOf(session.sessionId, "device-disconnected");
     const third = releaseOf(session.sessionId, "device-killed");
@@ -174,9 +174,5 @@ describe("SupersededRowReasserts (#11799 W3)", () => {
     ledger.notePredecessors(third, second);
     expect(ledger.predecessors(third)).toEqual(["idle-timeout", "device-disconnected"]);
     expect(ledger.predecessors(first)).toEqual([]);
-
-    ledger.noteRefused(first);
-    expect(ledger.wasRefused(first)).toBe(true);
-    expect(ledger.wasRefused(second)).toBe(false);
   });
 });

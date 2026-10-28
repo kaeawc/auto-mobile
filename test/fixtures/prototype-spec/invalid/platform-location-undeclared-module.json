@@ -1,0 +1,72 @@
+{
+  "spec": {
+    "id": "l2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "here": {}
+    },
+    "state": {
+      "locStatus": "",
+      "located": false,
+      "fixes": 0
+    },
+    "requires": {
+      "platform": ["battery"],
+      "permissions": [
+        {
+          "name": "location",
+          "purpose": "Show rides near you"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Fixes {fixes}"
+        },
+        {
+          "type": "button",
+          "label": "Find me",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "location.request",
+              "args": {
+                "accuracy": {
+                  "value": "precise"
+                },
+                "maxAgeMs": {
+                  "value": 60000
+                }
+              },
+              "timeoutMs": 10000,
+              "into": "/data/here",
+              "statusKey": "locStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "located",
+                  "value": true
+                }
+              ],
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "located",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].call"
+}

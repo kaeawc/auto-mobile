@@ -33,7 +33,7 @@ export interface SessionReleasePersistenceHost {
   dropReleaseRetry(snapshot: SessionReleaseSnapshot): void;
   readSessionRow(sessionId: string): Promise<DeviceSession | undefined>;
   readonly sessions: Pick<Map<string, Session>, "get" | "has">;
-  readonly superseded: Pick<SupersededRowReasserts, "predecessors" | "noteRefused">;
+  readonly superseded: Pick<SupersededRowReasserts, "predecessors">;
   readonly daemonSessionId: string | undefined;
   retryRefusedRowWrite<T>(
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
@@ -240,7 +240,6 @@ export class SessionReleasePersistence {
     if (error instanceof DeviceSessionRowNotReleasableError) {
       // Expected refusal: this row is not ours to release. Resolve intent, without a retry.
       logger.debug(`[SessionManager] Release row refused for ${snapshot.sessionId}`);
-      this.host.superseded.noteRefused(snapshot);
       this.confirmReleaseWrite(snapshot);
       return true;
     }
@@ -276,7 +275,6 @@ export class SessionReleasePersistence {
         if (error instanceof DeviceSessionRowNotReleasableError) {
           // Expected refusal: no terminal write landed, so no compensating rewrite is owed.
           logger.debug(`[SessionManager] Late release row refused for ${snapshot.sessionId}`);
-          this.host.superseded.noteRefused(snapshot);
           this.confirmReleaseWrite(snapshot);
           return;
         }
@@ -428,7 +426,6 @@ export class SessionReleasePersistence {
         }
         // Expected refusal: the winning row is left untouched and this release is no longer owed.
         logger.debug(`[SessionManager] Retried release row refused for ${snapshot.sessionId}`);
-        this.host.superseded.noteRefused(snapshot);
         this.confirmReleaseWrite(snapshot);
         this.host.dropReleaseRetry(snapshot);
         return;

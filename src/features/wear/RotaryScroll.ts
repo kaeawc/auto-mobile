@@ -10,9 +10,11 @@ import {
 } from "../utility/androidDisplayGeometryCommands";
 
 /**
- * Wear OS rotary (crown) scroll (#14948). Every command here is a hypothesis from
- * docs/design-docs/plat/android/form-factors.md (checklist row 6): none has run on a Wear
- * emulator. Each candidate is tried in order and followed by a read-back (the screen
+ * Wear OS rotary (crown) scroll (#14948). The native SCROLL axis command is confirmed on
+ * a Wear OS emulator; its axis sign is inverted relative to delta. The emulator-console
+ * candidate and physical-device behaviour remain unconfirmed (see
+ * docs/design-docs/plat/android/form-factors.md, checklist row 6).
+ * Each candidate is tried in order and followed by a read-back (the screen
  * fingerprint changed), so a command a release lacks costs one attempt, not a wrong answer.
  */
 
@@ -116,7 +118,10 @@ export class AdbRotaryScroller implements RotaryScroller {
 
   private async candidates(delta: number, signal?: AbortSignal): Promise<Candidate[]> {
     const candidates: Candidate[] = [
-      { method: "input_rotaryencoder", command: `shell input rotaryencoder scroll ${delta}` },
+      {
+        method: "input_rotaryencoder",
+        command: `shell input rotaryencoder scroll --axis SCROLL,${-delta}`,
+      },
     ];
     if (this.deps.deviceId.startsWith("emulator-")) {
       candidates.push({

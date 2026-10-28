@@ -1,18 +1,16 @@
 Executable=/Users/runner/Library/Developer/CoreSimulator/Devices/5D1E0C2A-7A4B-4C8E-9F1D-2B3C4D5E6F70/data/Containers/Bundle/Application/0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9/Playground.app/Playground
 Identifier=dev.jasonpearson.automobile.Playground
 Format=app bundle with Mach-O thin (arm64)
-CodeDirectory v=20400 size=1844 flags=0x2(adhoc) hashes=46+7 location=embedded
+CodeDirectory v=20400 size=319 flags=0x2(adhoc) hashes=3+3 location=embedded
 Hash type=sha256 size=32
-CandidateCDHash sha256=3f9a1c0e7b52d4a8e6f01b2c3d4e5f60718293a4
-CandidateCDHashFull sha256=3f9a1c0e7b52d4a8e6f01b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6
+CandidateCDHash sha256=12ea874d0000bc74673a1bb4cc6a3ef5a52807f3
+CandidateCDHashFull sha256=12ea874d0000bc74673a1bb4cc6a3ef5a52807f3a3813f4a28245285a2d64668
 Hash choices=sha256
-CMSDigest=3f9a1c0e7b52d4a8e6f01b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6
+CMSDigest=12ea874d0000bc74673a1bb4cc6a3ef5a52807f3a3813f4a28245285a2d64668
 CMSDigestType=2
-Launch Constraints:
-	None
-CDHash=3f9a1c0e7b52d4a8e6f01b2c3d4e5f60718293a4
+CDHash=12ea874d0000bc74673a1bb4cc6a3ef5a52807f3
 Signature=adhoc
-Info.plist entries=32
+Info.plist entries=33
 TeamIdentifier=not set
-Sealed Resources version=2 rules=10 files=58
+Sealed Resources version=2 rules=10 files=14
 Internal requirements count=0 size=12

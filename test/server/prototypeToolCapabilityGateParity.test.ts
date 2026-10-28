@@ -599,6 +599,21 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_location_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["location"],
+        permissions: [{ name: "location", purpose: "Show rides near you" }],
+      },
+      root: {
+        ...base.root,
+        children: [{ ...label, onTap: [{ type: "platform", call: "location.request", args: {} }] }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_commerce_v1: {
     minimalSpec: {
       ...base,

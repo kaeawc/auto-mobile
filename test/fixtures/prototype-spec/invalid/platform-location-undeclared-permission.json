@@ -1,0 +1,81 @@
+{
+  "spec": {
+    "id": "l1",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "here": {}
+    },
+    "state": {
+      "locStatus": "",
+      "located": false,
+      "fixes": 0
+    },
+    "requires": {
+      "platform": ["location"]
+    },
+    "platform": {
+      "on": {
+        "location.updated": [
+          {
+            "type": "increment",
+            "key": "fixes"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Fixes {fixes}",
+          "visibleWhen": {
+            "platform": "/location/servicesEnabled",
+            "equals": true
+          }
+        },
+        {
+          "type": "button",
+          "label": "Find me",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "location.request",
+              "args": {
+                "accuracy": {
+                  "value": "precise"
+                },
+                "maxAgeMs": {
+                  "value": 60000
+                }
+              },
+              "timeoutMs": 10000,
+              "into": "/data/here",
+              "statusKey": "locStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "located",
+                  "value": true
+                }
+              ],
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "located",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].call",
+  "expectedMessage": "Platform call location.request requires permission location in requires.permissions"
+}

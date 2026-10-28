@@ -755,6 +755,29 @@ describe("auth module contract", () => {
   });
 });
 
+describe("location module contract", () => {
+  const location = PROTOTYPE_PLATFORM_MODULES.location;
+
+  test("location.request takes optional accuracy and maxAgeMs and needs the location permission", () => {
+    const request = location.calls.request;
+    expect(Object.keys(request.args)).toEqual(["accuracy", "maxAgeMs"]);
+    expect(Object.values(request.args).every((argument) => argument.optional)).toBe(true);
+    expect(request.args.accuracy.value.values).toEqual(["precise", "approximate"]);
+    expect(request.args.maxAgeMs.value.integer).toBe(true);
+    expect(request.args.maxAgeMs.value.min).toBe(0);
+    expect(request.permissions).toEqual(["location"]);
+    expect(request.background).toEqual([]);
+    expect(request.sensitive).toBe(true);
+  });
+
+  test("location.updated is sensitive and the state is the current fix and the services toggle", () => {
+    expect(location.events).toEqual({ updated: { sensitive: true } });
+    expect(Object.keys(location.state ?? {})).toEqual(["current", "servicesEnabled"]);
+    expect(location.state?.current.value.kind).toBe("json");
+    expect(location.state?.servicesEnabled.value.kind).toBe("boolean");
+  });
+});
+
 describe("commerce module contract", () => {
   const commerce = PROTOTYPE_PLATFORM_MODULES.commerce;
 

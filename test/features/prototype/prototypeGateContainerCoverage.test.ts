@@ -53,6 +53,10 @@ const authCall = {
   ...label,
   onTap: [{ type: "platform", call: "auth.signOut", args: {} }],
 };
+const locationCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "location.request", args: {} }],
+};
 const commerceCall = {
   ...label,
   onTap: [{ type: "platform", call: "commerce.restore", args: {} }],
@@ -281,6 +285,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_links_v1: openUrlCall,
   prototype_platform_contacts_v1: contactsCall,
   prototype_platform_mediaLibrary_v1: mediaPickCall,
+  prototype_platform_location_v1: locationCall,
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_calendar_v1: calendarCall,
   prototype_platform_commerce_v1: commerceCall,

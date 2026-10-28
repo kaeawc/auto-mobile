@@ -111,3 +111,13 @@ export function getConnectedStaticToolDefinitions(
 ): ProxiedToolDefinition[] {
   return toolDefinitions(daemonOptions);
 }
+
+/**
+ * Whether the advertised definition of `toolName` declares `property` as an input. Lets the CLI
+ * and other processes that cannot load the registry derive tool behaviour from the generated
+ * schema instead of keeping their own tool-name list (#11825).
+ */
+export function staticToolDeclaresInput(toolName: string, property: string): boolean {
+  const properties = RAW_DEFINITIONS.find((tool) => tool.name === toolName)?.inputSchema.properties;
+  return typeof properties === "object" && properties !== null && property in properties;
+}

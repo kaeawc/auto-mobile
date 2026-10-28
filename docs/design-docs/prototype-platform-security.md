@@ -48,16 +48,18 @@ background leases) run only from taps, submits and user-initiated platform event
 `onAppear`, timers or show time, and each module has a call rate limit. _Not yet enforced_
 ([#15637](https://github.com/kaeawc/auto-mobile/issues/15637)).
 
-**R4: runtime isolation.** Where a module runs decides which privileges it can reach.
+**R4: runtime isolation.** Where a module runs decides which privileges it can reach. The split
+below is the design; it is _not yet enforced_
+([#15642](https://github.com/kaeawc/auto-mobile/issues/15642)).
 
 - CtrlProxy and the iOS prototype agent never advertise permissioned modules. They offer only
   modules that need no permission and no identity of their own.
-- The injected iOS agent never calls TCC APIs, and the Info.plist filtering of the module
-  registry keeps usage strings out of an app that did not declare them.
+- The injected iOS agent never calls TCC APIs, and Info.plist filtering keeps usage strings out of
+  an app that did not declare them.
 - A per-prototype disposable app holds exactly the permissions the spec's `requires.permissions`
   declares and is uninstalled on delete or expiry.
 - Capability gates run before show, so an unsupported module is refused with its capability name
-  instead of being drawn and silently ignored.
+  instead of being drawn and silently ignored. This part is enforced.
 
 **R5: simulation is host-only.** Simulated events and call outcomes arrive only on the
 authenticated host connection, never from spec content, intents or links. Imported prototypes

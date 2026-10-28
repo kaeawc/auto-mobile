@@ -198,6 +198,30 @@
                       "onTap": [
                         {
                           "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
+                        {
+                          "type": "cancelTimer",
                           "id": "sent"
                         },
                         {
@@ -319,6 +343,30 @@
                       "onTap": [
                         {
                           "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
+                        {
+                          "type": "cancelTimer",
                           "id": "sent"
                         },
                         {
@@ -438,6 +486,30 @@
                         "minHeight": 48
                       },
                       "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
                         {
                           "type": "cancelTimer",
                           "id": "sent"
@@ -569,6 +641,30 @@
                         "minHeight": 48
                       },
                       "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
                         {
                           "type": "cancelTimer",
                           "id": "sent"

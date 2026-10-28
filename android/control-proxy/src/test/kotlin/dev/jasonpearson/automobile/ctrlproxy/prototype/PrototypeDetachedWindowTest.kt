@@ -49,6 +49,7 @@ class PrototypeDetachedWindowTest {
         manager,
         isViewAttached = manager::isViewAttached,
         sdkInt = 30,
+        firstRenderWaiter = PrototypeFirstRenderWaiter { _, _ -> true },
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),
         densityProvider = { density },

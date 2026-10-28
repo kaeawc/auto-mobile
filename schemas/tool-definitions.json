@@ -28979,6 +28979,7 @@
             "not_found",
             "unsupported_format",
             "internal_error",
+            "render_failed",
             "unsupported_capability",
             "unsupported_platform"
           ]

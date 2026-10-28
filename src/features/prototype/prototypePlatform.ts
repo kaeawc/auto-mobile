@@ -7,6 +7,10 @@ import {
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import {
+  prototypeSecureStorageEmitError,
+  prototypeSecureStorageError,
+} from "./prototypeSecureStorage";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -560,7 +564,7 @@ export function prototypePlatformError(
     }
   }
   for (const { value, path } of actions) {
-    const found = emitNameError(value, path);
+    const found = emitNameError(value, path) ?? prototypeSecureStorageEmitError(value, path, root);
     if (found) {
       return found;
     }
@@ -568,9 +572,17 @@ export function prototypePlatformError(
   return undefined;
 }
 
-/** The first error in the root-level blocks: realtime channels, the auth block, then `requires`. */
+/**
+ * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
+ * then `requires`.
+ */
 function rootBlockError(root: Raw): PrototypePlatformError | undefined {
-  return prototypeChannelsError(root) ?? prototypeAuthBlockError(root) ?? requiresError(root);
+  return (
+    prototypeChannelsError(root) ??
+    prototypeAuthBlockError(root) ??
+    prototypeSecureStorageError(root) ??
+    requiresError(root)
+  );
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */

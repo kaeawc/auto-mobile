@@ -2166,6 +2166,15 @@ integer, a non-finite float, a battery level over 100), `format` (invalid UTF-8,
 of the wrong JSON type), `decodeOnly` and `unknown`. The TypeScript reference and its Kotlin and Swift twins
 replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and runtimes are not built.
 
+**Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
+Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
+and it may not also appear in `storage.keys`. The list needs the `secureStorage` module
+(`prototype_platform_secureStorage_v1`) in `requires.platform`; its one read-only key,
+`/platform/secureStorage/locked`, is true while a biometric-bound key is still locked.
+`secureAuth: {"state:<key>": "biometric"}` binds a secure key to a `biometric.authenticate` and needs `biometric`
+in `requires.platform`. A secure key never leaves the device through an emit `context`. The validators refuse
+`{state: <secure key>}` there. No production runtime advertises the module yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

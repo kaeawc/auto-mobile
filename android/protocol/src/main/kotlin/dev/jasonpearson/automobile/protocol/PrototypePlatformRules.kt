@@ -68,6 +68,9 @@ internal object PrototypePlatformRules {
     PrototypeAuthRules.blockError(root)?.let {
       return it
     }
+    PrototypeSecureStorageRules.blockError(root)?.let {
+      return it
+    }
     requiresError(root)?.let {
       return it
     }
@@ -82,9 +85,10 @@ internal object PrototypePlatformRules {
         }
     }
     for ((action, path) in context.actions) {
-      emitNameError(action, path)?.let {
-        return it
-      }
+      (emitNameError(action, path) ?: PrototypeSecureStorageRules.emitError(action, path, root))
+        ?.let {
+          return it
+        }
     }
     return null
   }

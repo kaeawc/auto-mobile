@@ -33858,6 +33858,23 @@
                   },
                   "minItems": 1,
                   "maxItems": 64
+                },
+                "secure": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 261
+                  },
+                  "minItems": 1,
+                  "maxItems": 8
+                },
+                "secureAuth": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "const": "biometric"
+                  }
                 }
               },
               "required": ["version", "keys"],

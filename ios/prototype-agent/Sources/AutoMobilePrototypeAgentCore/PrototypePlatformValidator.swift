@@ -110,20 +110,24 @@ enum PrototypePlatformValidator {
         var channels: [String: JSONValue] = [:]
         /// Whether the spec has a root `auth` block for `auth.*` calls (#14303).
         var hasAuth = false
+        /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
+        var secureKeys: Set<String> = []
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
         requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
-        root: JSONValue, state: [String: JSONValue]
+        storage: JSONValue? = nil, root: JSONValue, state: [String: JSONValue]
     )
         throws
     {
         try PrototypeChannels.validate(channels?.objectFields, requires: requires, state: state)
         try PrototypeAuthRules.validateBlock(auth, requires: requires)
+        try PrototypeSecureStorageRules.validateBlock(storage, requires: requires, state: state)
         var declared = try validateRequires(requires)
         declared.channels = channels?.objectFields ?? [:]
         declared.hasAuth = auth?.objectFields != nil
+        declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
@@ -290,6 +294,7 @@ enum PrototypePlatformValidator {
                     "Emit names starting with \(reservedEmitPrefix) are reserved for runtime events"
                 )
             }
+            try PrototypeSecureStorageRules.validateEmit(fields, path: path, secure: declared.secureKeys)
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)

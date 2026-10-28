@@ -17,7 +17,15 @@ import kotlinx.serialization.json.doubleOrNull
  * the spec id and restores on the next show of that id. The contract validates the shape; the host
  * validates the cross-references.
  */
-@Serializable data class PrototypeStorageBlock(val version: Int, val keys: List<String>)
+@Serializable
+data class PrototypeStorageBlock(
+  val version: Int,
+  val keys: List<String>,
+  /** `state:` keys for the Keystore, never plaintext storage (#14321); validated, not yet used. */
+  val secure: List<String>? = null,
+  /** Secure keys that unlock only after `biometric.authenticate` (#14321). */
+  val secureAuth: Map<String, String>? = null,
+)
 
 /** One entry of a [PrototypeStorageBlock.keys] list, parsed. */
 sealed interface PrototypeStorageKey {

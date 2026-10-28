@@ -1,0 +1,50 @@
+{
+  "spec": {
+    "id": "secure-storage-undeclared-module",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "token": "",
+      "remember": false
+    },
+    "requires": {
+      "platform": ["biometric"]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:remember"],
+      "secure": ["state:token"],
+      "secureAuth": {
+        "state:token": "biometric"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "token"
+        },
+        {
+          "type": "button",
+          "label": "Save",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "save",
+              "context": {
+                "r": {
+                  "state": "remember"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "storage.secure"
+}

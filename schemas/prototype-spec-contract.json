@@ -15433,6 +15433,30 @@
             "max": 64
           },
           "optional": false
+        },
+        "secure": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "string",
+              "max": 261
+            },
+            "min": 1,
+            "unique": true,
+            "max": 8
+          },
+          "optional": true
+        },
+        "secureAuth": {
+          "rule": {
+            "kind": "record",
+            "maxEntries": 8,
+            "item": {
+              "kind": "enum",
+              "values": ["biometric"]
+            }
+          },
+          "optional": true
         }
       }
     },
@@ -22153,6 +22177,19 @@
           }
         },
         "servicesEnabled": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        }
+      }
+    },
+    "secureStorage": {
+      "capability": "prototype_platform_secureStorage_v1",
+      "calls": {},
+      "events": {},
+      "state": {
+        "locked": {
           "platforms": ["android", "ios"],
           "value": {
             "kind": "boolean"

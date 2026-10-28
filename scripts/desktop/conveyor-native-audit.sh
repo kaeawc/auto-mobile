@@ -108,15 +108,17 @@ platform_of() {
   esac
 }
 
+# Prints "yes" when a platform from platform_of belongs to a different OS or architecture than
+# the target, "no" otherwise. Echoes instead of returning so callers keep `set -e` in force.
 is_foreign() {
   local platform="$1"
   case "$platform" in
-    "") return 1 ;;
-    all) return 0 ;;
-    linux) [[ "$target" != linux-* ]] ;;
-    mac) [[ "$target" != mac-* ]] ;;
-    "$target") return 1 ;;
-    *) return 0 ;;
+    "") echo no ;;
+    all) echo yes ;;
+    linux) [[ "$target" == linux-* ]] && echo no || echo yes ;;
+    mac) [[ "$target" == mac-* ]] && echo no || echo yes ;;
+    "$target") echo no ;;
+    *) echo yes ;;
   esac
 }
 
@@ -127,7 +129,8 @@ while IFS= read -r -d '' file; do
   size="$(wc -c <"$file" | tr -d ' ')"
   total=$((total + size))
   platform="$(platform_of "$file")"
-  if is_foreign "$platform"; then
+  foreign_file="$(is_foreign "$platform")"
+  if [[ "$foreign_file" == yes ]]; then
     foreign=$((foreign + size))
     foreign_lines+="$(printf '%12d  %-12s %s' "$size" "$platform" "${file#"$root"/}")"$'\n'
   fi

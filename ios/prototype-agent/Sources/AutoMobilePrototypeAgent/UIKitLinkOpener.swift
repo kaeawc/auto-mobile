@@ -2,6 +2,13 @@
     import SafariServices
     import UIKit
 
+    /// A window that draws a prototype over the app. The injected agent's `PassthroughWindow` is
+    /// one; the embeddable library, which excludes the agent, has none.
+    @MainActor
+    protocol PrototypeOverlayWindow: UIWindow {
+        var showsPrototype: Bool { get }
+    }
+
     /// `links.open` on iOS (#14238): `UIApplication.open` for external opens, and
     /// `SFSafariViewController` presented over the top view controller of the prototype's overlay
     /// window, or of the key window when the prototype is embedded in the app.
@@ -37,7 +44,7 @@
                 .flatMap(\.windows)
             let candidates = windows.map { window in
                 PrototypePresenterWindow.Candidate(
-                    isPrototypeOverlay: (window as? PassthroughWindow)?.model?.spec != nil,
+                    isPrototypeOverlay: (window as? PrototypeOverlayWindow)?.showsPrototype == true,
                     isKey: window.isKeyWindow,
                     isHidden: window.isHidden
                 )

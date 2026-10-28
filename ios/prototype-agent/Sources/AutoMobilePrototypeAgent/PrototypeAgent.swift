@@ -35,8 +35,9 @@ private final class PrototypeSceneActivationObserver: NSObject {
 /// A window above the app's own windows (including its alerts) that accepts touches only inside
 /// the prototype content and the host dismiss control; everything else falls through to the app.
 @MainActor
-final class PassthroughWindow: UIWindow {
+final class PassthroughWindow: UIWindow, PrototypeOverlayWindow {
     weak var model: PrototypeModel?
+    var showsPrototype: Bool { model?.spec != nil }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let model, model.spec != nil else { return nil }

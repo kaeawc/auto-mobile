@@ -1,0 +1,26 @@
+{
+  "id": "platform-settings",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["settings"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Open settings",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "settings.open",
+        "args": {
+          "page": {
+            "value": "notifications"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "c5",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "recipient": {},
+      "saved": {}
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["calendar"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "calendar.insert",
+          "args": {
+            "title": {
+              "value": "Dinner"
+            },
+            "start": {
+              "value": -1
+            },
+            "end": {
+              "value": 1793003600000
+            }
+          },
+          "into": "/data/saved",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.start.value"
+}

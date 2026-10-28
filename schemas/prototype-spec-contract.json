@@ -21760,6 +21760,109 @@
         }
       },
       "state": {}
+    },
+    "settings": {
+      "capability": "prototype_platform_settings_v1",
+      "calls": {
+        "open": {
+          "args": {
+            "page": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["app", "notifications", "location", "wifi", "bluetooth", "display"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "contacts": {
+      "capability": "prototype_platform_contacts_v1",
+      "calls": {
+        "pick": {
+          "args": {
+            "multiple": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": true
+        }
+      },
+      "events": {},
+      "state": {}
+    },
+    "calendar": {
+      "capability": "prototype_platform_calendar_v1",
+      "calls": {
+        "insert": {
+          "args": {
+            "title": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 256
+              }
+            },
+            "start": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 253402300799000
+              }
+            },
+            "end": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 253402300799000
+              }
+            },
+            "allDay": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            },
+            "location": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 256
+              }
+            },
+            "notes": {
+              "optional": true,
+              "value": {
+                "kind": "string",
+                "nonblank": true,
+                "max": 2048
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {},
+      "state": {}
     }
   },
   "platformNamespaces": {

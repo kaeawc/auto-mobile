@@ -49,7 +49,7 @@ import {
   displayConfigToolOptions,
 } from "./displayConfigTool";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { BootedDevice, Platform } from "../models";
+import { BootedDevice, Platform, requireAndroidOrIosPlatform } from "../models";
 import {
   addDeviceTargetingToSchema,
   addSessionUuidToSchema,
@@ -540,7 +540,7 @@ async function captureBiometricEnrollment(
       failure: {
         success: false,
         deviceId: device.deviceId,
-        platform: device.platform,
+        platform: requireAndroidOrIosPlatform(device.platform, "Biometric enrollment"),
         biometrics: state,
         ...(state.error ? { error: state.error } : {}),
       },

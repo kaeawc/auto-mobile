@@ -63,7 +63,7 @@ import type {
   PreferenceStoreResolution,
   StorageWriteOptions,
 } from "../../features/storage/storageTypes";
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, Platform } from "../../models";
 import { executionTracker, type ActiveExecution } from "../executionTracker";
 import { processGenerationRecordFields } from "../processGenerationFields";
 import { sessionReleaseThatCancelledCall } from "../sessionReleasedDuringCall";
@@ -92,7 +92,7 @@ export interface IdeDeviceRoutesPorts {
         ReturnType<DaemonStateAccess["getDevicePool"]>,
         "isShutdownReserved" | "assertNotAssignedToBinding"
       > & {
-        getAllDevices?(): readonly { id: string; platform: "android" | "ios" }[];
+        getAllDevices?(): readonly { id: string; platform: Platform }[];
       };
   };
   adbClientFactory: () => AdbClientFactory;

@@ -8,7 +8,7 @@ import { adbServerScope } from "../../daemon/foreignDeviceOwnership";
 import { getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
 import { FileHostBootAdmissionRegistry } from "./FileHostBootAdmissionRegistry";
 import { ActionableError } from "../../models/ActionableError";
-import type { Platform } from "../../models/Platform";
+import { isAndroidOrIosPlatform, type Platform } from "../../models/Platform";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
@@ -183,6 +183,10 @@ export async function assertBootCapacityAvailable(
   options: { signal?: AbortSignal } = {},
   gates: Pick<SharedBootAdmissionGates, "android" | "ios"> = getSharedBootAdmissionGates(),
 ): Promise<void> {
+  // Only Android and iOS boots are gated; like reserveBootCapacity, an ungated platform passes.
+  if (!isAndroidOrIosPlatform(platform)) {
+    return;
+  }
   await gates[platform]?.assertCapacityAvailable(options);
 }
 

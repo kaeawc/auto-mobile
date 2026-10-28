@@ -16,6 +16,7 @@ import {
   Element,
   ObserveResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../models";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import {
@@ -174,7 +175,7 @@ export class DragAndDrop extends BaseVisualChange {
     this.selector =
       deps.selector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: device.platform,
+        platform: requireAndroidOrIosPlatform(device.platform, "dragAndDrop"),
         iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
       });
     this.hierarchyCapture =

@@ -14,7 +14,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import type { AndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import type { DeviceRecoveryPolicy } from "../../src/daemon/poolConfig";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, Platform } from "../../src/models";
 import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
@@ -104,7 +104,7 @@ describe("DevicePool.create", () => {
       onLoss: true,
       maxAttempts: 2,
     };
-    const onDeviceRemoved = (_deviceId: string, _platform: "android" | "ios"): void => {};
+    const onDeviceRemoved = (_deviceId: string, _platform: Platform): void => {};
     const emulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer);
     const cancelDeviceSessionExecutions = async () => 0;
     const idGenerator = new CountingIdGenerator("create-test");

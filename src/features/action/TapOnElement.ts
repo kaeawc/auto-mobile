@@ -22,7 +22,12 @@ import {
   type DisplayTransitionTracker,
 } from "../observe/DisplayTransition";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, ObserveResult } from "../../models";
+import {
+  ActionableError,
+  BootedDevice,
+  ObserveResult,
+  requireAndroidOrIosPlatform,
+} from "../../models";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -469,7 +474,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: this.device.platform,
+        platform: requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
         iosMultiPanel:
           this.platformTraits.panelAwareSelection && (this.device.displays?.panels.length ?? 0) > 1,
       })

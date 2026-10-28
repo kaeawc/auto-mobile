@@ -12,6 +12,7 @@ import { pathExists } from "../utils/filesystem/DefaultFileSystem";
 import {
   ActionableError,
   BootedDevice,
+  requireAndroidOrIosPlatform,
   VideoRecordingConfig,
   VideoRecordingConfigInput,
   VideoRecordingHighlightEntry,
@@ -49,6 +50,7 @@ import {
 import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingResourceUris";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
+  applyRecordingDisplayWarning,
   resolveAndroidRecordingDisplay,
   type AndroidRecordingDisplay,
 } from "../features/video/AndroidRecordingDisplay";
@@ -1341,16 +1343,6 @@ function videoRecordingStartOptions(
   };
 }
 
-function applyRecordingDisplayWarning(
-  active: ActiveVideoRecording,
-  recordingDisplay: AndroidRecordingDisplay | undefined,
-): void {
-  active.warning = recordingDisplay?.warning ?? active.warning;
-  if (active.warning?.includes("rejected --display-id")) {
-    active.recordedPanel = undefined;
-  }
-}
-
 /** Publish capture ownership before inserting its row, and preserve adoption during that insert. */
 async function persistStartedVideoRecording(
   deps: VideoRecordingManagerDependencies,
@@ -1367,7 +1359,7 @@ async function persistStartedVideoRecording(
     recordingId: active.recordingId,
     captureTeardown: videoRecorderService.getCaptureTeardown(active.recordingId),
     deviceId: request.device.deviceId,
-    platform: request.device.platform,
+    platform: requireAndroidOrIosPlatform(request.device.platform, "Video recording"),
     status: "recording",
     outputName: active.outputName,
     fileName: active.fileName,
@@ -1398,6 +1390,8 @@ async function persistStartedVideoRecording(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
+  // Fail closed before any capture state exists: no recorder drives a watch (#14899).
+  requireAndroidOrIosPlatform(request.device.platform, "Video recording");
   request = { ...request };
   const start = beginVideoRecordingStart(request);
   let active: ActiveVideoRecording | undefined;

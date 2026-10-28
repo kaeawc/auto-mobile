@@ -4,12 +4,12 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import type { PooledDevice } from "../../devicePool";
 import { deviceStableId, type BindingDeviceClaim, type BindingDeviceClaims } from "./reconciler";
 import type { LiveExecutionSessions } from "../registry/ownerLiveness";
-import type { BindingPlatform } from "../registry/bindingRegistry";
+import type { Platform } from "../../../models/Platform";
 
 export interface BindingClaimPool {
   getAllDevices(): PooledDevice[];
   /** Throws when another live daemon claims the device. */
-  assertNotClaimedByForeignDaemon(deviceId: string, platform: BindingPlatform): Promise<void>;
+  assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
 }
 
 /**

@@ -17,7 +17,7 @@ import type {
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { serverConfig } from "../utils/ServerConfig";
-import { BootedDevice } from "../models";
+import { BootedDevice, requireAndroidOrIosPlatform } from "../models";
 import { logger } from "../utils/logger";
 import {
   computeStorageCapabilities,
@@ -87,7 +87,7 @@ export function resolveStorageCapabilityContext(
   debuggableBuild?: boolean,
 ): StorageCapabilityContext {
   return {
-    platform: device.platform,
+    platform: requireAndroidOrIosPlatform(device.platform, "Storage capability resolution"),
     deviceType: resolveDeviceType(device),
     embeddedSdk: serverConfig.isEmbeddedSdkEnabled(),
     // A resolved booted device implies a live runner session for the SDK path.

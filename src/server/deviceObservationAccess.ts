@@ -21,7 +21,8 @@ import {
 } from "./resourceDeviceResolver";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { sequenceBackoff, type BackoffInput } from "../utils/Backoff";
-import { type Timer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import type { PooledDevice } from "../daemon/devicePoolTypes";
 
@@ -216,6 +217,8 @@ async function enrichBootedDeviceFormFactor(
   }
 }
 
+const HELD_FORM_FACTOR_READ_TIMEOUT_MS = 2000;
+
 /** Optional form-factor metadata shared by all handlers using one held pool incarnation. */
 export class HeldDeviceFormFactorResolver {
   // Weak keys follow the pool entry's lifetime, so retired devices do not accumulate here.
@@ -224,7 +227,11 @@ export class HeldDeviceFormFactorResolver {
     { identity: string; value: Promise<BootedDevice["formFactor"]> }
   >();
 
-  constructor(private readonly reader: AvdConfigReader | undefined) {}
+  constructor(
+    private readonly reader: AvdConfigReader | undefined,
+    private readonly timer: Timer = defaultTimer,
+    private readonly timeoutMs: number = HELD_FORM_FACTOR_READ_TIMEOUT_MS,
+  ) {}
 
   async enrich(device: BootedDevice, pooled: PooledDevice | null): Promise<BootedDevice> {
     const formFactor = await this.resolve(device, pooled);
@@ -245,11 +252,27 @@ export class HeldDeviceFormFactorResolver {
       return cached.value;
     }
     // Unknown emulator metadata needs one host read, shared even by concurrent calls. Known
-    // phones above pay none. Cache absence too: optional host failures never turn into polling.
-    const value = enrichBootedDeviceFormFactor(
-      { ...device, name: pooled.avdName ?? device.name },
-      this.reader,
-    ).then((enriched) => enriched.formFactor);
+    // phones above pay none. Cache settled absence too: missing/unreadable config is not polled.
+    const name = pooled.avdName ?? device.name;
+    const value: Promise<BootedDevice["formFactor"]> = raceWithDeadline(
+      enrichBootedDeviceFormFactor({ ...device, name }, this.reader).then(
+        (enriched) => enriched.formFactor,
+      ),
+      {
+        timer: this.timer,
+        timeoutMs: this.timeoutMs,
+        label: `AVD form factor read for ${name}`,
+        onTimeout: () => {
+          // Optional host metadata is safe to retry; never evict a replacement read.
+          if (this.cache.get(pooled)?.value === value) {
+            this.cache.delete(pooled);
+          }
+        },
+      },
+    ).catch((error) => {
+      logger.debug(`AVD form factor unavailable for ${name}: ${errorMessage(error)}`);
+      return undefined;
+    });
     this.cache.set(pooled, { identity, value });
     return value;
   }

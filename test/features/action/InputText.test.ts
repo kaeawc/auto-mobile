@@ -461,12 +461,19 @@ describe("InputText", () => {
       const factory = new FakeAdbClientFactory();
       factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", sdk);
       const closeCalls: string[] = [];
-      const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-        close: async () => {
-          closeCalls.push("close");
-          return { success: true, open: false, message: "Keyboard closed" };
-        },
-      }));
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const inputText = new InputText(
+        androidDevice,
+        factory as AdbClientFactory,
+        () => ({
+          close: async () => {
+            closeCalls.push("close");
+            return { success: true, open: false, message: "Keyboard closed" };
+          },
+        }),
+        timer,
+      );
       stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
       const result = await inputText.testHooks.executeAndroidTextInput(text, "done", true, mode);

@@ -64,6 +64,7 @@ final class PrototypeLinksRuntimeTests: XCTestCase {
         let module = PrototypeLinksModule(opener: opener)
         let inApp = await open(module, "https://example.com", mode: "inApp")
         XCTAssertEqual(inApp, result("fallback", "https://example.com", "external"))
+        XCTAssertEqual(opener.external.map(\.absoluteString), ["https://example.com"])
         let auto = await open(module, "https://example.com")
         XCTAssertEqual(auto, result("opened", "https://example.com", "external"))
     }
@@ -86,6 +87,8 @@ final class PrototypeLinksRuntimeTests: XCTestCase {
         XCTAssertEqual(mode, .failure(.invalidArgs, "mode must be external, inApp or auto"))
         let unknown = await module.call(PlatformCall(callId: "c", call: "links.close", args: [:]))
         XCTAssertEqual(unknown, .failure(.unsupported, "Unknown call"))
+        let hostless = await open(module, "https:example.com")
+        XCTAssertEqual(hostless, .failure(.invalidArgs, "url must include a host for http or https links"))
         XCTAssertEqual(opener.external.count, 1)
     }
 }

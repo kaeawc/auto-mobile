@@ -36,6 +36,10 @@ final class PrototypeLinksModule: PrototypePlatformModule {
         }
         let scheme = text.prefix { $0 != ":" }
         let web = scheme == "http" || scheme == "https"
+        // SFSafariViewController and browsers need a host; `https:x` passes the scheme allowlist.
+        if web, (url.host ?? "").isEmpty {
+            return .failure(.invalidArgs, "url must include a host for http or https links")
+        }
         if web, mode != "external", opener.presentInApp(url) {
             return Self.success(text, outcome: "opened", mode: "inApp")
         }

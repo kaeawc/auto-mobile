@@ -159,7 +159,6 @@ export class IosH264Source implements H264CaptureSource {
         this.failIfCurrentHelper(helper, generation, error),
       describeHelperExit: (info, what) => this.describeHelperExit(info, what),
       encodedStartupError: (error) => this.encodedStartupError(error),
-      encodedCapabilityConfirmed: () => this.encodedCapabilityConfirmed,
     });
     this.resolver = new IosCaptureResolver({
       options: this.options,
@@ -496,9 +495,12 @@ export class IosH264Source implements H264CaptureSource {
    * source only relays the elementary-stream bytes.
    */
   private handleEncodedVideo(video: DecodedEncodedVideo): void {
-    if (!this.isActive() || !this.encodedCapabilityConfirmed) {
+    if (!this.isActive()) {
       return;
     }
+    // stdout (video) and stderr (capability) arrive on independent handlers, so a
+    // record may beat its capability line; a record is itself proof of capability.
+    this.encodedCapabilityConfirmed = true;
     this.reportLegacyIdleSupport();
     this.options.onSourceFrame?.();
     this.options.onData(video.payload);

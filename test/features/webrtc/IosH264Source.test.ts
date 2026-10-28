@@ -886,11 +886,9 @@ describe("IosH264Source encoded-only contract", () => {
     ["error", false],
     ["exit", false],
     ["timeout", false],
-    ["record", false],
     ["error", true],
     ["exit", true],
     ["timeout", true],
-    ["record", true],
   ] as const)(
     "fails an old helper at %s (audio=%s) with upgrade guidance and no fallback",
     async (failure, audioEnabled) => {
@@ -917,9 +915,6 @@ describe("IosH264Source encoded-only contract", () => {
           break;
         case "timeout":
           timer.advanceTime(20);
-          break;
-        case "record":
-          helpers[0].emitEncodedVideo(encodedRecord([0, 0, 0, 1, 0x65]));
           break;
       }
       const error = await started;
@@ -960,6 +955,16 @@ describe("IosH264Source encoded-only contract", () => {
     helpers[0].emitEncodedVideo(encodedRecord([0, 0, 0, 1, 0x65]));
     await started;
     expect(completed).toBe(true);
+    await source.stop();
+  });
+
+  test("starts when the first record arrives before the capability line", async () => {
+    const { source, helpers } = createEncodedHarness();
+    const started = source.start();
+    await flush();
+    helpers[0].emitEncodedVideo(encodedRecord([0, 0, 0, 1, 0x65]));
+    await started;
+    expect(source.requestKeyFrame()).toBe(true);
     await source.stop();
   });
 

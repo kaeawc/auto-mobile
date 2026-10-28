@@ -75,7 +75,6 @@ interface IosCaptureStartupContext {
     what: string,
   ): string;
   encodedStartupError(error: Error): Error;
-  encodedCapabilityConfirmed(): boolean;
 }
 export class IosCaptureStartup {
   cancelFirstFrameWait: (() => void) | null = null;
@@ -171,12 +170,6 @@ export class IosCaptureStartup {
 
       helper.on("encodedVideo", () => {
         if (!this.context.isCurrentHelper(helper, generation) || !this.context.isActive()) {
-          return;
-        }
-        if (!this.context.encodedCapabilityConfirmed()) {
-          rejectStartupFailure(
-            new Error("Received encoded video without the required capability handshake"),
-          );
           return;
         }
         firstRecordSeen = true;

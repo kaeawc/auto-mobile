@@ -5,11 +5,12 @@ import type { DeviceMutationInput, MutationValue } from "./mutations/types";
  * The raw settings rows behind the settings-backed `device-setting` journal keys that
  * displayConfig and changeLocalization record on Android. Multi-key fields journal their raw
  * values joined by commas in this order, with `null` for an unset row (see
- * AccessibilityDisplayPreferences).
+ * AccessibilityDisplayPreferences and LocalizationMutationPriorReader).
  */
 const SETTINGS_BACKED_KEYS: Readonly<Record<string, readonly string[]>> = {
   fontScale: ["system:font_scale"],
   timeFormat: ["system:time_12_24"],
+  textDirection: ["global:debug.force_rtl", "global:force_rtl"],
   increaseContrast: ["secure:high_text_contrast_enabled"],
   reduceMotion: ANDROID_ANIMATION_SCALE_KEYS.map((key) => `global:${key}`),
   boldText: ["secure:font_weight_adjustment"],

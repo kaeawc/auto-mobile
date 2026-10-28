@@ -28,6 +28,7 @@ import {
   isAndroidResetFile,
 } from "./androidMutationBaseline";
 import { settingsBackedRawMutations } from "./androidSettingsBackedRevert";
+import { appLocaleJournalAppId, appLocalePrior } from "./appLocaleJournalKey";
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationEntry, DeviceMutationInput } from "./mutations/types";
@@ -35,6 +36,7 @@ import {
   SCREEN_STATE_MUTATION_KEY,
   isRestorableScreenState,
 } from "./mutations/screenStateMutation";
+import { VOLUME_RESTORED_MARKER, volumeRevertScript } from "./mutations/volumeMutation";
 
 interface AndroidRevertCommand {
   command: string;
@@ -44,6 +46,8 @@ interface AndroidRevertCommand {
   wakeSleptScreen?: boolean;
 }
 
+/** A key-press volume revert runs one `cmd media_session` per stream set and per read-back. */
+const VOLUME_REVERT_TIMEOUT_MS = 10_000;
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
 type AndroidRevertAdapter = (mutation: DeviceMutationInput) => AndroidRevertCommand[] | null;
 
@@ -58,7 +62,9 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       this.displayOverrideCommands(mutation) ??
       this.nightModeCommands(mutation) ??
       this.screenStateCommands(mutation) ??
+      this.volumeCommands(mutation) ??
       this.settingsBackedCommands(mutation) ??
+      this.appLocaleCommands(mutation) ??
       deviceStateSettingCommands(mutation),
     clock: (mutation) =>
       this.timezoneCommands(mutation) ??
@@ -438,6 +444,33 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     return commands.every((command) => command !== null) ? commands.flat() : null;
   }
 
+  /**
+   * Puts back an app's locale list (`""` clears its override) for the user changeLocalization
+   * targeted, then reads it back: `cmd locale` exits 0 and prints nothing on success, and an
+   * unknown package is reported on stderr, which fails the command.
+   */
+  private appLocaleCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const appId = appLocaleJournalAppId(key);
+    const prior = appLocalePrior(priorValue);
+    if (appId === null || !PACKAGE_PATTERN.test(appId) || !prior) {
+      return null;
+    }
+    const { userId, locales } = prior;
+    return [
+      {
+        command: `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${userId} --locales ${shellQuote(locales)}`,
+        success: "",
+      },
+      {
+        command: `shell cmd locale get-app-locales ${shellQuote(appId)} --user ${userId}`,
+        success: `Locales for ${appId} for user ${userId} are [${locales}]`,
+      },
+    ];
+  }
+
   private connectivityCommands({
     key,
     priorValue,
@@ -498,6 +531,24 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           { command: "shell wm dismiss-keyguard" },
         ]
       : null;
+  }
+
+  /**
+   * Sets each stream a volume row covers back to its journaled level in one device shell, which
+   * prints the marker only when every stream reads its level back; any other output fails the
+   * revert. Unrestorable priors (unreadable, or a level of 0) have no command.
+   */
+  private volumeCommands({ key, priorValue }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const script = volumeRevertScript(key, priorValue);
+    return script === null
+      ? null
+      : [
+          {
+            command: `shell sh -c ${shellQuote(script)}`,
+            success: VOLUME_RESTORED_MARKER,
+            timeoutMs: VOLUME_REVERT_TIMEOUT_MS,
+          },
+        ];
   }
 
   private nightModeCommands({

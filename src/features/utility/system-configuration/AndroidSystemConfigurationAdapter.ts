@@ -25,6 +25,7 @@ import type {
   BroadcastOptions,
   SystemConfigurationAdapter,
 } from "../../../utils/interfaces/SystemConfigurationAdapter";
+import { MIN_APP_LOCALE_API_LEVEL } from "./AndroidLocalizationPriorSource";
 import {
   extractCalendarFromLocale,
   localeTagsEquivalent,
@@ -116,8 +117,6 @@ function timeZoneRestoreFailureText(
   }
   return ` (${failures.map(({ label, message }) => `${label}: ${message}`).join("; ")})`;
 }
-
-const MIN_APP_LOCALE_API_LEVEL = 33;
 
 // Bounds for waiting on the framework to come back after the legacy (<33)
 // `stop; start` restart. We poll `sys.boot_completed` rather than racing the

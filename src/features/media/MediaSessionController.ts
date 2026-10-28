@@ -132,7 +132,7 @@ function isCommandUnavailable(value: unknown): boolean {
 }
 
 /** `[v] volume is 7 in range [0..25]`, printed by the media shell's `volume --get`. */
-function parseVolume(output: string): { level: number; min: number; max: number } | null {
+export function parseVolume(output: string): { level: number; min: number; max: number } | null {
   const match = /volume is (\d+) in range \[(\d+)\.\.(\d+)\]/.exec(output);
   return match
     ? {

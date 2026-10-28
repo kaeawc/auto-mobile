@@ -34,6 +34,15 @@ export const ANDROID_BASELINE_FILE_ROOTS = [
   "/sdcard/Documents",
 ] as const;
 
+/** The Downloads root Android `user_files` namespaces live directly under for user 0. */
+export const ANDROID_USER_FILES_ROOT = "/sdcard/Download";
+
+/**
+ * `shared-file` observation listing every direct entry (any type) of the Downloads root, so
+ * cleaning can prove a `user_files` namespace path did not exist when the baseline was captured.
+ */
+export const ANDROID_DOWNLOAD_ENTRIES_KEY = "download-entries";
+
 export function isAndroidResetFile(path: string): boolean {
   return (
     path.startsWith("/sdcard/") &&
@@ -163,6 +172,7 @@ async function captureFiles(
     throw new ActionableError("Android baseline shared-storage root inventory is malformed");
   }
   observe("shared-file", "roots", createHash("sha256").update(JSON.stringify(paths)).digest("hex"));
+  await captureDownloadEntries(command, observe);
   for (const root of ANDROID_BASELINE_FILE_ROOTS) {
     const script = `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -type f -exec sha256sum {} \\;; elif [ -e ${shellQuote(root)} ]; then exit 1; fi`;
     const output = await command(`shell sh -c ${shellQuote(script)}`, 30_000);
@@ -175,6 +185,30 @@ async function captureFiles(
       observe("shared-file", path, match[1].toLowerCase());
     }
   }
+}
+
+async function captureDownloadEntries(
+  command: AndroidBaselineCommand,
+  observe: AndroidObservationSink,
+): Promise<void> {
+  const root = ANDROID_USER_FILES_ROOT;
+  const script = `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -mindepth 1 -maxdepth 1 -print; elif [ -e ${shellQuote(root)} ]; then exit 1; fi`;
+  const entries = (await command(`shell sh -c ${shellQuote(script)}`))
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  if (
+    new Set(entries).size !== entries.length ||
+    entries.some(
+      (path) =>
+        !path.startsWith(`${root}/`) ||
+        !isAndroidResetFile(path) ||
+        path.slice(root.length + 1).includes("/"),
+    )
+  ) {
+    throw new ActionableError("Android baseline Downloads entry inventory is malformed");
+  }
+  observe("shared-file", ANDROID_DOWNLOAD_ENTRIES_KEY, JSON.stringify(entries));
 }
 
 export async function captureAndroidUsers(command: AndroidBaselineCommand): Promise<number[]> {

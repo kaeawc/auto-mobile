@@ -112,9 +112,9 @@ export async function startDirectModeServices(
 }
 
 /**
- * Detect when the MCP client disconnects (stdin closes / stdout writes fail). This uses the shared
- * lifecycle handler so resources close before exit. The returned flag turns true once the server
- * is connecting, after which an EOF still answers what was received.
+ * Detect when the MCP client disconnects (stdin/stdout closes or stdout writes fail). This uses
+ * the shared lifecycle handler so resources close before exit. The returned flag turns true once
+ * the server is connecting, after which an EOF still answers what was received.
  */
 async function installStdioTransportShutdown(
   stdioTransport: StdioTransport,
@@ -130,7 +130,7 @@ async function installStdioTransportShutdown(
     MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
   );
   installStdoutShutdownHandler(process.stdout, () =>
-    stdioTransport.stopSending("stdout write failed"),
+    stdioTransport.stopSending("stdout closed or write failed"),
   );
   return connecting;
 }

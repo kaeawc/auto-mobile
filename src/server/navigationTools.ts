@@ -14,17 +14,14 @@ import {
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import {
-  throwIfAborted,
-  createJSONToolResponse,
-  createStructuredToolResponse,
-} from "../utils/toolUtils";
+import { throwIfAborted, createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
 import {
+  exploreResultSchema,
   getNavigationGraphResultSchema,
   navigateToResultSchema,
 } from "./navigationToolOutputSchemas";
@@ -330,7 +327,7 @@ export function registerNavigationTools({
       const result = await explore.execute(options, progress, signal);
 
       if ("dryRun" in result) {
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           message: `Exploration dry run completed: ${result.plannedInteractions.length} planned interactions`,
           ...result,
         });
@@ -339,7 +336,7 @@ export function registerNavigationTools({
       const completion = result.stopReason?.startsWith("Left target app (")
         ? `Exploration stopped: ${result.stopReason}.`
         : "Exploration completed:";
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `${completion} ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`,
         ...result,
       });
@@ -353,6 +350,11 @@ export function registerNavigationTools({
     "Automatically explore app to build navigation graph",
     exploreSchema,
     exploreHandler,
-    { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      embeddedSdkOnly: true,
+      outputSchema: exploreResultSchema,
+    },
   );
 }

@@ -33,3 +33,4 @@ export { tapOnResultSchema } from "./toolOutputSchemas/actions";
 export { displayObservationSchema } from "./toolOutputSchemas/observation";
 export { observeResultSchema } from "./toolOutputSchemas/observation";
 export { observeToolResultSchema } from "./toolOutputSchemas/observation";
+export { identifyInteractionsResultSchema } from "./toolOutputSchemas/interactions";

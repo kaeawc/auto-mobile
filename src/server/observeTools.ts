@@ -18,7 +18,7 @@ import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import { BootedDevice, ObserveResult } from "../models";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
@@ -41,7 +41,7 @@ import {
   scopeHierarchyForSelector,
   scopeObserveResultToLayer,
 } from "../features/observe/hierarchyLayer";
-import { observeToolResultSchema } from "./toolOutputSchemas";
+import { identifyInteractionsResultSchema, observeToolResultSchema } from "./toolOutputSchemas";
 import { defaultTimer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
@@ -495,7 +495,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       const analyzer = new IdentifyInteractions();
       const result = analyzer.analyze(scoped, args, currentScreen, navigationEdges);
 
-      return createJSONToolResponse(result);
+      return createStructuredToolResponse(result);
     } catch (error) {
       throw toActionableError(error, `Failed to execute identifyInteractions`);
     }
@@ -533,7 +533,12 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     identifyInteractionsHandler,
     // Suggests, never acts: a read (#10965). On a held device it reads through the observer
     // capture (`readWatchedObservationForInteractions`), never the holder's session pipeline.
-    { defaultEnabled: true, debugOnly: true, deviceReadOnly: true },
+    {
+      defaultEnabled: true,
+      debugOnly: true,
+      deviceReadOnly: true,
+      outputSchema: identifyInteractionsResultSchema,
+    },
   );
 }
 

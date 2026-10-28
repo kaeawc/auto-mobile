@@ -164,6 +164,26 @@ describe("Android unconditional keep-booted cleaning", () => {
     }
   });
 
+  test("displayConfig fontScale with a readable prior reverts in place and stays keep-booted", async () => {
+    let fallbacks = 0;
+    const { adb, journal, reset } = await rig([0], {
+      reset: async () => {
+        fallbacks++;
+        return { outcome: "clean", mode: "snapshot", phases: {} };
+      },
+    });
+    for (const row of deviceToolMutations("displayConfig", { fontScale: 1.3 }, "android")) {
+      await journal.record(SCOPE, {
+        ...row,
+        toolName: "displayConfig",
+        priorValue: { state: "present", value: "default" },
+      });
+    }
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(fallbacks).toBe(0);
+    expect(adb.getExecutedCommands()).toContain("shell settings --user 0 delete system font_scale");
+  });
+
   test.each([
     {
       tool: "displayConfig",

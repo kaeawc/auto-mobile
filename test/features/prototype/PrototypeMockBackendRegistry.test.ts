@@ -136,4 +136,30 @@ describe("PrototypeMockBackendRegistry", () => {
   ])("rejects %s", (_name, definition, message) => {
     expect(() => registry().define("a", definition)).toThrow(message);
   });
+
+  test("defineAll defines every entry, or none when any is invalid", async () => {
+    const r = registry();
+    r.define("a", { routes: [{ method: "GET", path: "/x", body: 1 }] });
+    r.defineAll({ a: { routes: [{ method: "GET", path: "/x", body: 2 }] }, b: {} });
+    expect(r.ids()).toEqual(["a", "b"]);
+    expect((await get(r, "a", "/x")).body).toBe(2);
+    expect(() =>
+      r.defineAll({ a: { routes: [{ method: "GET", path: "/x", body: 3 }] }, c: { seed: -1 } }),
+    ).toThrow(/c\.seed/);
+    expect(r.ids()).toEqual(["a", "b"]);
+    expect((await get(r, "a", "/x")).body).toBe(2);
+    expect(() => r.defineAll({ a: {}, "Bad Id": {} })).toThrow(/Bad Id/);
+    expect((await get(r, "a", "/x")).body).toBe(2);
+  });
+
+  test("defineAll counts only new ids against the cap, and refuses the whole batch past it", () => {
+    const r = registry();
+    for (let i = 0; i < MAX_MOCK_BACKENDS - 1; i++) {
+      r.define(`b${i}`, {});
+    }
+    expect(() => r.defineAll({ b0: {}, extra1: {} })).not.toThrow();
+    expect(() => r.defineAll({ b0: { routes: [] }, extra2: {}, extra3: {} })).toThrow(/At most 16/);
+    expect(r.ids()).toHaveLength(MAX_MOCK_BACKENDS);
+    expect(r.get("extra2")).toBeUndefined();
+  });
 });

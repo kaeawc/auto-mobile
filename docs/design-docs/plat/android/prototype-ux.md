@@ -2593,7 +2593,10 @@ names no defined backend fails as `network`. Backends live for the daemon sessio
 The `prototype` tool drives it with host-local actions that make no device request: `defineBackend
 {backendId, backend}` validates the definition and replaces the backend of that id (a failed
 definition leaves the old one), `clearBackend {backendId}` removes it, and `backendLog {backendId,
-since?}` returns the log. Their results report the origin a spec should call. A request that
+since?}` returns the log. Their results report the origin a spec should call. `show` takes `mock`
+(`{backendId: definition}`) or `mockPath` (an absolute file of the same, read like `specPath`, up to
+2 MiB): after the spec passes validation, every entry is validated and defined or none is, replacing
+backends of the same id. A saved prototype does not carry its mock backends. A request that
 carries a `timeoutMs` is bounded by it like any host request, and a request that times out or is
 cancelled while waiting on latency never writes to the backend.
 

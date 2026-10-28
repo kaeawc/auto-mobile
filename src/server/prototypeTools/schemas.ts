@@ -1,4 +1,7 @@
-import { MOCK_BACKEND_ID } from "../../features/prototype/prototypeMockSchema";
+import {
+  MAX_MOCK_DOCUMENT_BYTES,
+  MOCK_BACKEND_ID,
+} from "../../features/prototype/prototypeMockSchema";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
@@ -283,6 +286,19 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           "defineBackend only: {collections?:{name:[items with id]}, routes?:[{method,path,status?,headers?,body?,delayMs?}], faults?:[{path,method?,status,every|rate}], latencyMs?:{min,max}, seed?}. Replaces the backend of that id",
         ),
+      mock: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "show only: mock backends to define before the spec is sent, as {backendId: definition} (the defineBackend definition shape); replaces any backend of the same id. Use with request actions to https://<backendId>.mock.automobile.invalid. Not allowed with mockPath",
+        ),
+      mockPath: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          `show only: instead of mock, an absolute path of a local JSON file holding the same {backendId: definition} object (up to ${MAX_MOCK_DOCUMENT_BYTES} bytes), read by the daemon; the path is never sent to the device`,
+        ),
       since: z
         .number()
         .int()
@@ -495,6 +511,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "backendId",
     "backend",
     "since",
+    "mock",
+    "mockPath",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -507,6 +525,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       "replaceOthers",
       "locale",
       "pseudoLocale",
+      "mock",
+      "mockPath",
     ],
     patch: ["id", "ops", "baseRevision"],
     save: ["spec", "assets", "label", "icon", "pin", "autoConfirm", "restartLauncher"],
@@ -563,9 +583,22 @@ export const prototypeSchema = addDeviceTargetingToSchema(
 });
 
 function validateMockBackendInput(
-  value: { action: string; backendId?: string; backend?: unknown },
+  value: {
+    action: string;
+    backendId?: string;
+    backend?: unknown;
+    mock?: unknown;
+    mockPath?: string;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  if (value.mock !== undefined && value.mockPath !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["mock"],
+      message: "show takes either mock or mockPath, not both",
+    });
+  }
   const mock = ["defineBackend", "clearBackend", "backendLog"].includes(value.action);
   if (mock && value.backendId === undefined) {
     ctx.addIssue({

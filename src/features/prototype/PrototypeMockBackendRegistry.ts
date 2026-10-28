@@ -31,32 +31,47 @@ export class PrototypeMockBackendRegistry {
 
   /** Defines or replaces `backendId`; replacing resets its collections, faults and log. */
   define(backendId: string, definition: unknown): void {
-    if (!MOCK_BACKEND_ID.test(backendId)) {
-      throw new ActionableError(
-        `Mock backend id "${backendId}" must match ${MOCK_BACKEND_ID.source}.`,
-      );
-    }
-    const parsed = mockBackendDefinitionSchema.safeParse(definition);
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      throw new ActionableError(
-        `Invalid mock backend definition at ${issue?.path.join(".") || "(root)"}: ${issue?.message ?? "invalid"}`,
-      );
-    }
-    if (!this.backends.has(backendId) && this.backends.size >= MAX_MOCK_BACKENDS) {
+    this.defineAll({ [backendId]: definition });
+  }
+
+  /**
+   * Defines or replaces every entry of `{backendId: definition}`, or none: all ids and definitions
+   * are validated, and the backend cap checked for the ids that are new, before any is replaced.
+   */
+  defineAll(definitions: Record<string, unknown>): void {
+    const parsed = Object.entries(definitions).map(([backendId, definition]) => {
+      if (!MOCK_BACKEND_ID.test(backendId)) {
+        throw new ActionableError(
+          `Mock backend id "${backendId}" must match ${MOCK_BACKEND_ID.source}.`,
+        );
+      }
+      const result = mockBackendDefinitionSchema.safeParse(definition);
+      if (!result.success) {
+        const issue = result.error.issues[0];
+        const at = [backendId, ...(issue?.path ?? [])].join(".");
+        throw new ActionableError(
+          `Invalid mock backend definition at ${at}: ${issue?.message ?? "invalid"}`,
+        );
+      }
+      return [backendId, result.data] as const;
+    });
+    const added = parsed.filter(([backendId]) => !this.backends.has(backendId)).length;
+    if (this.backends.size + added > MAX_MOCK_BACKENDS) {
       throw new ActionableError(
         `At most ${MAX_MOCK_BACKENDS} mock backends may be defined; clear one first.`,
       );
     }
     const createRandom = this.deps.createRandom ?? defaultCreateRandom;
-    this.backends.set(
-      backendId,
-      new PrototypeMockBackend(parsed.data, {
-        random: createRandom(parsed.data.seed),
-        ids: this.deps.ids,
-        timer: this.deps.timer,
-      }),
-    );
+    for (const [backendId, definition] of parsed) {
+      this.backends.set(
+        backendId,
+        new PrototypeMockBackend(definition, {
+          random: createRandom(definition.seed),
+          ids: this.deps.ids,
+          timer: this.deps.timer,
+        }),
+      );
+    }
   }
 
   get(backendId: string): PrototypeMockBackend | undefined {

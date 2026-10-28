@@ -832,13 +832,12 @@ export class PressButton extends BaseVisualChange {
         ) {
           if (!this.holdRequest) {
             await awaitWhileRequestIsLive(
-              new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
-                undefined,
+              new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation({
                 frameContext,
                 timeoutMs,
                 signal,
                 onDispatch,
-              ),
+              }),
               signal,
             );
             return { success: true };
@@ -861,12 +860,11 @@ export class PressButton extends BaseVisualChange {
           };
           try {
             // Verification uses the caller signal; only the launch wait is fenced.
-            await new HomeScreen(this.device, null, this.timer, simctl).executeIosHomeNavigation(
-              undefined,
+            await new HomeScreen(this.device, null, this.timer, simctl).executeIosHomeNavigation({
               frameContext,
               timeoutMs,
               signal,
-            );
+            });
           } finally {
             // HomeScreen can stop on cancellation before simctl settles; retain the key until then.
             await launch;

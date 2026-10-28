@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join, resolve } from "node:path";
 import { parseCli } from "../../../scripts/persona-robustness/run";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 
@@ -23,7 +24,9 @@ describe("parseCli", () => {
     expect(options.harness.perturbations.length).toBeGreaterThan(3);
     expect(options.harness.repeats).toBe(1);
     expect(options.harness.ablate).toBe(false);
-    expect(options.outDir).toEndWith("scratch/persona-robustness/2026-10-28T12-34-56Z");
+    expect(options.outDir).toBe(
+      resolve(join("scratch", "persona-robustness", "2026-10-28T12-34-56Z")),
+    );
   });
 
   test("passes the selection, repeats, ablation, session and avd through", () => {
@@ -54,7 +57,7 @@ describe("parseCli", () => {
     expect(options.harness.repeats).toBe(3);
     expect(options.harness.ablate).toBe(true);
     expect(options.harness.acquireArgs).toEqual({ avdName: "Pixel_9" });
-    expect(options.outDir).toBe("/tmp/out");
+    expect(options.outDir).toBe(resolve("/tmp/out"));
   });
 
   test("rejects a missing plan, a missing app id and a bad repeat count", () => {

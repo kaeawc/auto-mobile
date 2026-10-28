@@ -32,6 +32,8 @@ export const prototypeMediaSchema = z
           })
           .strict(),
       )
+      // Keep every authored id: Zod 3 record output alone drops an own __proto__ key.
+      .and(z.unknown())
       .refine(
         (players) => Object.keys(players).length <= contract.limits.MAX_PROTOTYPE_MEDIA_PLAYERS,
       ),

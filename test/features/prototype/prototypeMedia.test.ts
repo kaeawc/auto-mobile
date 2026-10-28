@@ -87,3 +87,15 @@ describe("media players", () => {
     expect(required).toContain("prototype_platform_media_v1");
   });
 });
+
+test("a player declared as __proto__ survives validation with its own key", () => {
+  const authored = JSON.parse(
+    `{"id":"m","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["media"]},` +
+      `"media":{"players":{"__proto__":{"kind":"audio","source":{"sample":"silence"}}}},` +
+      `"root":{"type":"text","text":"{platform:/media/players/__proto__/status}"}}`,
+  );
+  const result = validatePrototypeSpec(authored);
+  expect(result.success).toBe(true);
+  const players = result.success ? result.data.media?.players : undefined;
+  expect(Object.hasOwn(players ?? {}, "__proto__")).toBe(true);
+});

@@ -26,9 +26,8 @@ const REMAINING_TOOL_NAME_CHECKS: Readonly<Record<string, number>> = {
   "src/server/pipeline/deviceCallDispatch.ts": 2,
   "src/server/pipeline/executionTarget.ts": 1,
   "src/server/pipeline/ingress/acquisition.ts": 3,
-  "src/server/pipeline/ingress/bindSession.ts": 3,
-  "src/server/pipeline/ingress/invoke.ts": 3,
-  "src/server/pipeline/ingress/routing.ts": 5,
+  "src/server/pipeline/ingress/bindSession.ts": 1,
+  "src/server/pipeline/ingress/invoke.ts": 2,
   "src/server/pipeline/navigationRecording.ts": 1,
   "src/server/pipeline/planLifecycle.ts": 3,
 };

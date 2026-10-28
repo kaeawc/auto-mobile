@@ -1,0 +1,50 @@
+{
+  "spec": {
+    "id": "a1",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "session": {}
+    },
+    "state": {
+      "signInStatus": "",
+      "expired": false
+    },
+    "requires": {
+      "platform": ["battery"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Sign in",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "auth.signIn",
+              "args": {
+                "style": {
+                  "value": "chooser"
+                }
+              },
+              "into": "/data/session",
+              "statusKey": "signInStatus",
+              "onSuccess": [
+                {
+                  "type": "setState",
+                  "key": "expired",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].call"
+}

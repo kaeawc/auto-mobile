@@ -1042,8 +1042,8 @@ describe("AppPermissions audio_input_unavailable (#13627)", () => {
     message: "No host audio input device; recordings on this device will contain no audio.",
     retryable: false as const,
   };
-  const noInput = () => diagnostic;
-  const hasInput = () => undefined;
+  const noInput = async () => diagnostic;
+  const hasInput = async () => undefined;
 
   test("a simulator microphone grant succeeds and carries the diagnostic", async () => {
     const simctl = new FakeSimctl();

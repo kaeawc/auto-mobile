@@ -2150,9 +2150,11 @@ event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, b
 exactly one `/<module>/<key>`: `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),
 `steps` (counted since the subscription started), `proximityNear` (boolean) and `lightLux` (whole lux, Android
 only; iOS has no public ambient-light API). A sensor the device lacks leaves its key absent, so it compares as
-missing. The root `sensors` subscription block (which sensors to listen to and their `rateHz`), the `motion`
-permission for `steps` and the shake-detector reference are not in the contract yet, and no production runtime
-advertises the module.
+missing. `prototypeSensorReference.ts` is the reference the runtimes copy: whole-unit rounding, per-key
+throttling at `1000 / rateHz` ms (`rateHz` 1 to 30), and a shake at 2.7 g or more with a 1000 ms cooldown,
+replayed from `test/fixtures/prototype-sensors/`. The root `sensors` subscription block (which sensors to listen
+to and their `rateHz`) and the `motion` permission for `steps` are not in the contract yet, and no production
+runtime advertises the module.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

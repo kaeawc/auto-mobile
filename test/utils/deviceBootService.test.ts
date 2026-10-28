@@ -24,6 +24,7 @@ import {
   type Platform,
 } from "../../src/models";
 import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/devices/deviceBootRecovery";
@@ -60,6 +61,7 @@ function service(
     | "onAndroidColdBootTrackingChanged"
     | "onIdentityResolved"
     | "invalidateAndroidDeviceList"
+    | "assertExplicitDeviceNotForeignOwned"
   >,
   displayInventory?: FakeDisplayInventoryProvider,
 ): DeviceBootService {
@@ -83,6 +85,95 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it.each([true, false])(
+    "reports a fresh foreign owner on an explicit-id miss (foreign placeholder=%s)",
+    async (placeholder) => {
+      const devices = new FakeDeviceUtils();
+      const deviceId = "emulator-5610";
+      if (placeholder) {
+        devices.setBootedDevices("android", [
+          { name: image.name, platform: "android", deviceId, foreignOwned: true },
+        ]);
+      }
+      const checked: Array<[string, Platform]> = [];
+      const boot = service(devices, undefined, undefined, undefined, undefined, {
+        assertExplicitDeviceNotForeignOwned: async (id, platform) => {
+          checked.push([id, platform]);
+          throw new DeviceOwnedByOtherDaemonError(id, 43210);
+        },
+      });
+      const failure = boot.boot({ platform: "android", deviceId });
+      await expect(failure).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      await expect(failure).rejects.toMatchObject({ code: "device_owned_by_other_daemon" });
+      await expect(failure).rejects.toThrow("PID 43210");
+      expect(checked).toEqual([[deviceId, "android"]]);
+      expect(devices.wasMethodCalled("listDeviceImages")).toBe(false);
+    },
+  );
+
+  it("keeps the not-found error when a fresh explicit-id check finds no owner", async () => {
+    const devices = new FakeDeviceUtils();
+    const checked: string[] = [];
+    const boot = service(devices, undefined, undefined, undefined, undefined, {
+      assertExplicitDeviceNotForeignOwned: async (id) => {
+        checked.push(id);
+      },
+    });
+    const failure = boot.boot({ platform: "android", deviceId: "missing-id" });
+    await expect(failure).rejects.toBeInstanceOf(ActionableError);
+    await expect(failure).rejects.toThrow("Device 'missing-id' not found");
+    expect(checked).toEqual(["missing-id"]);
+  });
+
+  it.each([
+    { deviceId: "emulator-5554" },
+    { name: image.name, matchExactName: true },
+    { formFactor: "phone" as const },
+  ])("checks ownership only on an explicit-id miss: %j", async (selector) => {
+    const devices = new FakeDeviceUtils();
+    devices.setBootedDevices("android", [
+      { name: image.name, platform: "android", deviceId: "emulator-5610", foreignOwned: true },
+      { name: image.name, platform: "android", deviceId: "emulator-5554", formFactor: "phone" },
+    ]);
+    devices.setDeviceImages("android", [{ ...image, formFactor: "phone" }]);
+    let checks = 0;
+    const boot = service(devices, new DefaultDeviceMatcher(), undefined, undefined, undefined, {
+      assertExplicitDeviceNotForeignOwned: async (id) => {
+        checks++;
+        throw new DeviceOwnedByOtherDaemonError(id, 43210);
+      },
+    });
+    const result = await boot.boot({ platform: "android", ...selector });
+    expect(result.device.deviceId).toBe("emulator-5554");
+    expect(checks).toBe(0);
+  });
+
+  it("checks an explicit AVD name literally instead of using a foreign serial", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [image]);
+    devices.setBootedDevices("android", [
+      {
+        name: "Unknown (emulator-5610)",
+        platform: "android",
+        deviceId: "emulator-5610",
+        foreignOwned: true,
+      },
+    ]);
+    const checked: string[] = [];
+    const boot = service(devices, new DefaultDeviceMatcher(), undefined, undefined, undefined, {
+      assertExplicitDeviceNotForeignOwned: async (id) => {
+        checked.push(id);
+        if (id === "emulator-5610") {
+          throw new DeviceOwnedByOtherDaemonError(id, 43210);
+        }
+      },
+    });
+    const result = await boot.boot({ platform: "android", deviceId: image.name });
+    expect(result.source).toBe("cold-boot");
+    expect(result.device.name).toBe(image.name);
+    expect(checked).toEqual([image.name]);
+  });
+
   it("hydrates a running foldable before matching panel requirements", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = { name: "Fold", platform: "android", deviceId: "emulator-5554" };

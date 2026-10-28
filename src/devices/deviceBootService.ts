@@ -226,6 +226,14 @@ export class DeviceBootService {
         progress,
       );
     }
+    // Discovery filters foreign devices using a potentially stale inventory snapshot.
+    // Check the literal ID afresh; an AVD name must not be mapped to a serial claim.
+    const assertNotForeignOwned = this.dependencies.assertExplicitDeviceNotForeignOwned;
+    if (assertNotForeignOwned) {
+      await this.execution.runPhase(context, "checking explicit device ownership", () =>
+        assertNotForeignOwned(request.deviceId, request.platform),
+      );
+    }
     const images = await this.execution.runPhase(context, "listing device images", () =>
       deviceManager.listDeviceImages(request.platform),
     );

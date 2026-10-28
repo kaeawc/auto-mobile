@@ -7,7 +7,8 @@ import Foundation
 enum PrototypeMedia {
     /// The ids of the players declared in the root `media.players` block.
     static func players(_ media: JSONValue?) -> Set<String> {
-        Set(media?.objectFields?["players"]?.objectFields?.keys.map { $0 } ?? [])
+        guard let declared = media?.objectFields?["players"]?.objectFields else { return [] }
+        return Set(declared.keys)
     }
 
     static func validate(_ media: JSONValue?, requires: JSONValue?) throws {

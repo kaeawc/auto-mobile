@@ -445,8 +445,11 @@ export class DaemonMcpProxy {
   /**
    * Read a resource from the daemon
    */
-  readResource(uri: string, { signal: callerSignal }: { signal?: AbortSignal } = {}): Promise<any> {
-    return this.discovery.readResource(uri, { signal: callerSignal });
+  readResource(
+    uri: string,
+    options: { signal?: AbortSignal; _meta?: Record<string, unknown> } = {},
+  ): Promise<any> {
+    return this.discovery.readResource(uri, options);
   }
 
   /**

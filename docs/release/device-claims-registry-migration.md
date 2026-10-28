@@ -26,6 +26,11 @@ Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs
 
 ## Known limits until the claim files stop deciding
 
+- A local daemon never creates the registry. If it starts without one, claim and release writes
+  probe for it on their retry ladder (1 s, 5 s, 30 s, 2 min, 5 min). Once the file appears, a
+  post-bind background open backfills held claims with their original claim time and owed releases.
+  A file created after the last step (about 7.6 minutes after the last write) is picked up by the next
+  claim or release, or at the next daemon start.
 - The table is read after a claim file is taken and written afterwards, so two daemons that use
   different claim directories can still both take a device in the same instant. Closing that needs an
   atomic insert-if-absent, which belongs to the step that makes the table the authority.

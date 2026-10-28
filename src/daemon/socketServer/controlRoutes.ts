@@ -68,7 +68,10 @@ export interface ForwardedCallOptions {
 export interface PassthroughClient {
   listTools(params: undefined, options: ForwardedCallOptions): Promise<unknown>;
   listResources(params: undefined, options: ForwardedCallOptions): Promise<unknown>;
-  readResource(params: { uri: string }, options: ForwardedCallOptions): Promise<unknown>;
+  readResource(
+    params: { uri: string; _meta?: Record<string, unknown> },
+    options: ForwardedCallOptions,
+  ): Promise<unknown>;
   listResourceTemplates(params: undefined, options: ForwardedCallOptions): Promise<unknown>;
   callTool(
     params: { name: string; arguments: Record<string, unknown> },
@@ -114,7 +117,13 @@ const PASSTHROUGH_ROUTES: ReadonlyMap<string, PassthroughRoute> = new Map<string
         }
         const uri = ctx.request.params.uri;
         return await ctx.admitted(ctx.readAdmissionArgs(ctx.request), () =>
-          ctx.mcpClient.readResource({ uri }, ctx.options),
+          ctx.mcpClient.readResource(
+            {
+              uri,
+              ...(ctx.request.params._meta !== undefined && { _meta: ctx.request.params._meta }),
+            },
+            ctx.options,
+          ),
         );
       },
     ],

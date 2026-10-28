@@ -2011,7 +2011,9 @@ Mode or Android Data Saver. `connectivity.changed` is debounced to one delivery 
 
 CtrlProxy registers the Android runtime and advertises the capability; the embedded renderer leaves the
 module to its host app. It reads the default network with `registerDefaultNetworkCallback`, registered on
-the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
+the first state read so an idle overlay holds no callback, and needs only `ACCESS_NETWORK_STATE`. The
+state is seeded from the active network before the callback registers, so the callback's first delivery
+is not a transition and a prototype does not see `connectivity.changed` just for starting. `online` is `NET_CAPABILITY_VALIDATED`, so a captive or unvalidated Wi-Fi is
 `online: false` with `transport: "wifi"`. With no default network the state is offline on `none` with
 `metered` and `constrained` false. `transport` takes the first of `vpn`, `wifi`, `cellular`, `ethernet`
 that the network carries, so a VPN reports `vpn` over its underlying transport, and anything else is

@@ -87,6 +87,18 @@ struct PrototypeContractValidator {
         return try (value, inspect(value))
     }
 
+    /// Accessory nodes are structurally checked but neither renderer draws them.
+    mutating func dropIgnoredAccessories() {
+        let ignored = locatedNodes.filter {
+            $0.value["ios"]?.objectFields?["bottomAccessory"]?.objectFields != nil
+        }.map { "\($0.path).ios.bottomAccessory" }
+        func ignoredEntry(_ entry: PrototypeLocatedValue) -> Bool {
+            ignored.contains { entry.path == $0 || entry.path.hasPrefix($0 + ".") || entry.path.hasPrefix($0 + "[") }
+        }
+        locatedNodes.removeAll(where: ignoredEntry)
+        actions.removeAll(where: ignoredEntry)
+    }
+
     /// Types of the actions in the contract's action slots. Arbitrary JSON, such as a channel route's
     /// equality literal, may carry the same type string, so a gate that must not over-match reads these.
     static func locatedActionTypes(_ spec: JSONValue) -> Set<String> {
@@ -94,6 +106,7 @@ struct PrototypeContractValidator {
         var validator = Self(definitions: contract.definitions, limits: contract.limits)
         // A spec the walk rejects fails validation anyway; the actions located before that still count.
         _ = try? validator.walk(spec, rule: rule, path: "", depth: 0)
+        validator.dropIgnoredAccessories()
         return Set(validator.actions.compactMap { $0.value["type"]?.stringValue })
     }
 
@@ -106,15 +119,7 @@ struct PrototypeContractValidator {
             try PrototypeLazyList.validateLimits(root: root, data: fields["data"]?.objectFields)
         }
         try validator.walk(value, rule: spec, path: "", depth: 0)
-        // Accessory nodes are structurally checked but neither renderer draws them.
-        let ignored = validator.locatedNodes.filter {
-            $0.value["ios"]?.objectFields?["bottomAccessory"]?.objectFields != nil
-        }.map { "\($0.path).ios.bottomAccessory" }
-        func ignoredEntry(_ entry: PrototypeLocatedValue) -> Bool {
-            ignored.contains { entry.path == $0 || entry.path.hasPrefix($0 + ".") || entry.path.hasPrefix($0 + "[") }
-        }
-        validator.locatedNodes.removeAll(where: ignoredEntry)
-        validator.actions.removeAll(where: ignoredEntry)
+        validator.dropIgnoredAccessories()
         try PrototypeKeyframes.validate(nodes: validator.locatedNodes, spec: value.objectFields ?? [:])
         return validator
     }

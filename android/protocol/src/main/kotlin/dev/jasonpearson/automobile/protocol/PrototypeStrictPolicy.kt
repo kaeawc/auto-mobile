@@ -620,5 +620,6 @@ private fun locatedActionTypes(spec: JsonObject): Set<String> {
     context,
     0,
   )
+  PrototypeSpecInput.excludeAccessoryReferences(context)
   return context.actions.mapNotNullTo(HashSet()) { it.value.text("type") }
 }

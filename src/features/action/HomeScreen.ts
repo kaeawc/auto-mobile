@@ -65,6 +65,15 @@ const SPOTLIGHT_BUNDLE_ID = "com.apple.Spotlight";
 /** The runner's one-shot foreground check failure; keep in sync with CommandHandler+TextInput.swift. */
 const RUNNER_HOME_NOT_FOREGROUND_ERROR = "Home press did not bring SpringBoard to the foreground";
 
+/** Named inputs for `HomeScreen.executeIosHomeNavigation`; replaces its positional tail (#11835). */
+export interface IosHomeNavigationOptions {
+  perf?: PerformanceTracker;
+  frameContext?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export class HomeScreen extends BaseVisualChange {
   /**
    * Deadline for the ADB `KEYCODE_HOME` fallback keyevent. Without a bound a
@@ -145,7 +154,7 @@ export class HomeScreen extends BaseVisualChange {
         }
         case "ios":
           await perf.track("iOSHomeNavigation", () =>
-            this.executeIosHomeNavigation(perf, undefined, undefined, signal),
+            this.executeIosHomeNavigation({ perf, signal }),
           );
           // A fallback can also be the real home screen. Navigation above verifies
           // SpringBoard foreground; compare the final tree before calling it already home.
@@ -339,37 +348,29 @@ export class HomeScreen extends BaseVisualChange {
     return launcherPackage;
   }
 
-  async executeIosHomeNavigation(
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<void> {
+  async executeIosHomeNavigation(options: IosHomeNavigationOptions = {}): Promise<void> {
+    const { perf, frameContext, timeoutMs, signal, onDispatch } = options;
     throwIfAborted(signal);
     const backend = resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl });
     if (backend.kind === "physical") {
       const client = this.iosClient();
       const pressError = await awaitWhileRequestIsLive(
-        this.tryIosRunnerHome(client, 5000, perf, frameContext, { signal, onDispatch }),
+        this.tryIosRunnerHome(client, 5000, { perf, frameContext, signal, onDispatch }),
         signal,
       );
       if (pressError) {
         throw new ActionableError(pressError);
       }
-      await this.verifyIosHomeForeground(client, perf, undefined, undefined, undefined, { signal });
+      await this.verifyIosHomeForeground(client, { perf, signal });
       return;
     }
 
     const budgetMs = timeoutMs ?? 5000;
     const deadline = this.timer.now() + budgetMs;
-    const attempts = await this.launchIosSpringboard(
-      backend,
-      deadline,
-      budgetMs,
+    const attempts = await this.launchIosSpringboard(backend, deadline, budgetMs, {
       signal,
       onDispatch,
-    );
+    });
     throwIfAborted(signal);
     if (deadline - this.timer.now() <= 0) {
       throw new IosHomeLaunchTimeoutError(
@@ -380,14 +381,14 @@ export class HomeScreen extends BaseVisualChange {
     try {
       const client = this.iosClient();
       try {
-        await this.verifyIosHomeForeground(
-          client,
+        await this.verifyIosHomeForeground(client, {
           perf,
-          HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
-          this.iosHomeRemainingMs(deadline),
-          HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
-          { pollUntilDeadline: true, signal },
-        );
+          retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+          timeoutMs: this.iosHomeRemainingMs(deadline),
+          readTimeoutMs: HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+          pollUntilDeadline: true,
+          signal,
+        });
       } catch (error) {
         // simctl's SpringBoard launch does not dismiss Spotlight on iOS 27 (#14827); the runner's
         // hardware Home press does, so retry once through it and verify again.
@@ -415,7 +416,7 @@ export class HomeScreen extends BaseVisualChange {
     onDispatch?: () => void,
   ): Promise<void> {
     const pressError = await awaitWhileRequestIsLive(
-      this.tryIosRunnerHome(client, 5000, perf, undefined, { signal, onDispatch }),
+      this.tryIosRunnerHome(client, 5000, { perf, signal, onDispatch }),
       signal,
     );
     // The runner checks the foreground once, right after the press, and SpringBoard can take
@@ -424,14 +425,13 @@ export class HomeScreen extends BaseVisualChange {
     if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
       throw new ActionableError(pressError);
     }
-    await this.verifyIosHomeForeground(
-      client,
+    await this.verifyIosHomeForeground(client, {
       perf,
-      HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
-      undefined,
-      HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
-      { pollUntilDeadline: true, signal },
-    );
+      retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+      readTimeoutMs: HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+      pollUntilDeadline: true,
+      signal,
+    });
   }
 
   /** The device's runner client, resolved at each use so a retired client is never reused. */
@@ -443,8 +443,7 @@ export class HomeScreen extends BaseVisualChange {
     backend: IosHomeBackend,
     deadline: number,
     budgetMs: number,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { signal, onDispatch }: { signal?: AbortSignal; onDispatch?: () => void },
   ): Promise<number> {
     const backoff = sequenceBackoff(HomeScreen.IOS_SIMCTL_LAUNCH_RETRY_DELAYS_MS);
     let attempts = 0;
@@ -492,10 +491,9 @@ export class HomeScreen extends BaseVisualChange {
   private async tryIosRunnerHome(
     client: IosCtrlProxy,
     timeoutMs: number,
-    perf: PerformanceTracker | undefined,
-    frameContext: string | undefined,
-    options: { signal?: AbortSignal; onDispatch?: () => void } = {},
+    options: Omit<IosHomeNavigationOptions, "timeoutMs"> = {},
   ): Promise<string | undefined> {
+    const { perf, frameContext } = options;
     try {
       const result = await client.requestPressHome(
         timeoutMs,
@@ -526,14 +524,23 @@ export class HomeScreen extends BaseVisualChange {
 
   private async verifyIosHomeForeground(
     client: IosCtrlProxy,
-    perf?: PerformanceTracker,
-    retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
-    timeoutMs: number = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
-    readTimeoutMs: number = HomeScreen.IOS_HOME_HIERARCHY_READ_TIMEOUT_MS,
-    options: { pollUntilDeadline?: boolean; signal?: AbortSignal } = {},
+    options: {
+      perf?: PerformanceTracker;
+      retryDelaysMs?: readonly number[];
+      timeoutMs?: number;
+      readTimeoutMs?: number;
+      pollUntilDeadline?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<void> {
+    const {
+      perf,
+      retryDelaysMs = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
+      timeoutMs = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
+      readTimeoutMs = HomeScreen.IOS_HOME_HIERARCHY_READ_TIMEOUT_MS,
+      signal,
+    } = options;
     const pollUntilDeadline = options.pollUntilDeadline === true;
-    const signal = options.signal;
     throwIfAborted(signal);
     const deadline = this.timer.now() + timeoutMs;
     const backoff = sequenceBackoff(retryDelaysMs);
@@ -561,10 +568,7 @@ export class HomeScreen extends BaseVisualChange {
       if (
         !(await this.waitForIosHomeRetry(
           attempt,
-          retryDelaysMs.length,
-          backoff,
-          deadline,
-          pollUntilDeadline,
+          { retryLimit: retryDelaysMs.length, backoff, deadline, pollUntilDeadline },
           signal,
         ))
       ) {
@@ -577,12 +581,15 @@ export class HomeScreen extends BaseVisualChange {
 
   private async waitForIosHomeRetry(
     attempt: number,
-    retryLimit: number,
-    backoff: BackoffPolicy,
-    deadline: number,
-    pollUntilDeadline: boolean,
+    policy: {
+      retryLimit: number;
+      backoff: BackoffPolicy;
+      deadline: number;
+      pollUntilDeadline: boolean;
+    },
     signal?: AbortSignal,
   ): Promise<boolean> {
+    const { retryLimit, backoff, deadline, pollUntilDeadline } = policy;
     throwIfAborted(signal);
     if (!pollUntilDeadline && attempt >= retryLimit) {
       return false;

@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "picked": [],
+        "photo": {}
+      }
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["camera"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "camera.capture",
+          "args": {
+            "media": {
+              "value": "video"
+            },
+            "maxDurationMs": {
+              "value": 15000
+            }
+          },
+          "into": "/data/draft/photo",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_data_model_v1, prototype_platform_camera_v1"
+}

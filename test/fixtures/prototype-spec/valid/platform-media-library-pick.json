@@ -1,0 +1,47 @@
+{
+  "id": "platform-media-library-pick",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "draft": {
+      "picked": [],
+      "photo": {}
+    }
+  },
+  "state": {
+    "pickStatus": ""
+  },
+  "requires": {
+    "platform": ["mediaLibrary"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "mediaLibrary.pick",
+        "args": {
+          "media": {
+            "value": "imagesAndVideos"
+          },
+          "maxItems": {
+            "value": 4
+          }
+        },
+        "into": "/data/draft/picked",
+        "statusKey": "pickStatus",
+        "onError": [
+          {
+            "type": "setState",
+            "key": "pickStatus",
+            "value": "cancelled"
+          }
+        ]
+      }
+    ]
+  }
+}

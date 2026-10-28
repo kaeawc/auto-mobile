@@ -363,6 +363,12 @@ export const prototypeOutputSchema = z.object({
     )
     .optional(),
   lastResult: lastResultSchema.optional(),
+  screenRound: z
+    .boolean()
+    .optional()
+    .describe(
+      "Wear OS show only: whether the watch display is round, so content in the corners is clipped; absent on other devices or when unreadable",
+    ),
   platformNotes: z
     .array(
       z.object({

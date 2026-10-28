@@ -186,6 +186,11 @@ internal object PrototypePlatformRules {
         ?.let {
           return it
         }
+    if (call == "links.open")
+      PrototypeLinks.argumentsError(action.member("args") ?: JsonObject(emptyMap()), "$path.args")
+        ?.let {
+          return it
+        }
     return action.text("into")?.let(::intoError)?.let { fail("$path.into", it) }
   }
 
@@ -277,9 +282,11 @@ object PrototypePlatformCalls {
       "platform",
       definition,
     )
-      ?: if (call == "share.open")
-        PrototypeShare.argumentsError(args, "platform.args", resolved = true)
-      else null
+      ?: when (call) {
+        "share.open" -> PrototypeShare.argumentsError(args, "platform.args", resolved = true)
+        "links.open" -> PrototypeLinks.argumentsError(args, "platform.args", resolved = true)
+        else -> null
+      }
   }
 }
 

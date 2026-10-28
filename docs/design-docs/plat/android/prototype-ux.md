@@ -2053,9 +2053,24 @@ with `url` (required, at most 2048 characters) and `mode` (optional: `external`,
 `openUrl` contract pattern is an allowlist: the URL must start with a lowercase `http`, `https`, `mailto`,
 `tel`, `sms`, `geo` or `maps` scheme and contain no whitespace or control characters. `intent:`, `file:`,
 `content:`, `javascript:`, `data:` and any custom scheme fail validation in all three validators, so a
-spec cannot name a component or an arbitrary handler. The validator does not yet reject a mode that a scheme
-cannot honour (`tel:` in `inApp`) or a URL that begins with a placeholder; the runtime reports those. The
-module has no events or `/platform` state. No production runtime advertises it yet.
+spec cannot name a component or an arbitrary handler, and a URL that begins with a placeholder has no literal
+scheme, so it fails the same pattern. `inApp` opens only `http` and `https` URLs, because Custom Tabs and
+`SFSafariViewController` load only web pages: all three validators refuse a literal non-web URL with
+`mode: inApp`, and the Android and iOS runtimes refuse the same pair as `invalid_args` once bound arguments
+resolve. The module has no events or `/platform` state. No production runtime advertises it yet.
+
+**Media actions: system picker and camera (#14197).** Two modules start platform UI that needs no app
+permission and write device media items (see "Device media items") to `into`.
+`mediaLibrary` (`prototype_platform_mediaLibrary_v1`) has `mediaLibrary.pick` with `media` (required:
+`images`, `videos` or `imagesAndVideos`) and `maxItems` (optional whole number 1-64, default 1; 1 writes one
+item, more writes an array; Android clamps it to `MediaStore.getPickImagesMaxLimit()`). `camera`
+(`prototype_platform_camera_v1`) has `camera.capture` with `media` (required: `image` or `video`) and
+`maxDurationMs` (optional whole number 1-600000, used only for video). They are separate modules, so a
+device that has a picker but no camera (an iOS Simulator) advertises only `mediaLibrary`. Both calls are
+`sensitive` and have no events or `/platform` state. A cancel leaves `into` untouched and runs `onError`
+with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usage_description` when the iOS
+plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
+system-UI call per prototype at a time). No production runtime advertises either module yet.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
@@ -2790,6 +2805,19 @@ into bottom/systemBars, plus ime when the keyboard should move content. Cutout
 padding is normally useful at top/start/end. Anchors stay in screen coordinates;
 inset padding does not reinterpret their coordinate origin.
 
+## Wear OS (not device-verified)
+
+Prototypes render on a watch with the same overlay and Material 3 components as on a phone; the
+spec has no round-aware nodes, Wear components or rotary input.
+
+- On a device whose `formFactor` is `watch`, a successful `show` reports `screenRound`, read from
+  `dumpsys display` like `observe`'s `isScreenRound`. Content in the corners of a round display is
+  clipped. Other devices pay no read; an unreadable display leaves the field absent.
+- The dismiss affordance keeps its phone placement; it is not moved into the round display's
+  inscribed area.
+- Wear launchers are not expected to support pinned shortcuts, so `save` with `pin:true` takes the
+  unsupported-launcher path: the save is kept and the result reports `pinned:"unsupported"`.
+
 ## Lifecycle and safety
 
 #12064 reverses the #9307 "non-removable dismiss control" default: chromeless fullscreen is the default on
@@ -2954,7 +2982,8 @@ wrapper, so links stay detectable. Stack screen and component names are never tr
 fields. Each show states the
 option afresh.
 
-The on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
+Every starter template passes this lint with zero findings, pinned by the template gallery test. The
+on-device audit of a shown prototype and the RTL check that #14126 also proposes are not
 implemented yet.
 
 ## Rejection paths and deterministic first error

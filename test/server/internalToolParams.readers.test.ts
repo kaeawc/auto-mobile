@@ -9,7 +9,11 @@ import {
   internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
+  internalSwipeAtRecordingContext,
+  internalTapAtContext,
 } from "../../src/server/internalToolParams";
+import type { SwipeAtRecordingContext } from "../../src/models/SwipeAtOptions";
+import type { TapAtPlanContext } from "../../src/models/TapAtGeometry";
 
 describe("internal call identity readers", () => {
   const args = { __executionId: "exec-1", __executionStartTime: 42, __mcpSessionId: "mcp-1" };
@@ -78,5 +82,29 @@ describe("provisioning handoff readers", () => {
     const empty: { __restartResumeSessionUuid?: string } = {};
     adoptRestartResumeSessionUuid(empty, "other");
     expect(empty.__restartResumeSessionUuid).toBe("other");
+  });
+});
+
+describe("coordinate gesture context readers", () => {
+  test("tapAt prefers the plan step's context over the recording one", () => {
+    const plan: TapAtPlanContext = {};
+    const recording: TapAtPlanContext = {};
+    expect(
+      internalTapAtContext({ __tapAtPlanContext: plan, __tapAtRecordingContext: recording }),
+    ).toBe(plan);
+  });
+
+  test("tapAt falls back to the recording context, by reference so the handler can fill it", () => {
+    const recording: TapAtPlanContext = {};
+    expect(internalTapAtContext({ __tapAtRecordingContext: recording })).toBe(recording);
+    expect(internalTapAtContext({})).toBeUndefined();
+  });
+
+  test("swipeAt reads its recording context by reference", () => {
+    const recording: SwipeAtRecordingContext = {};
+    expect(internalSwipeAtRecordingContext({ __swipeAtRecordingContext: recording })).toBe(
+      recording,
+    );
+    expect(internalSwipeAtRecordingContext({})).toBeUndefined();
   });
 });

@@ -24,7 +24,7 @@ vocabulary: the peer, the delivery receipts and the call are timers over literal
 
 `chat_row`, `unread_badge`, `conversation_bar`, `bubble_mine`, `bubble_theirs`, `bubble_sent`,
 `sent_text`, `sent_quote`, `tick_sending`, `tick_sent`, `tick_delivered`, `tick_read`, `reply_bar`,
-`reply_quote`, `reply_cancel`, `composer`, `send_button`, `mic_button`, `recording_bar`,
+`reply_quote`, `reply_cancel`, `composer`, `send_button`, `mic_button`, `mic_send`, `recording_bar`,
 `recording_time`, `call_ringing`, `call_connected`, `call_end`, `status_pager`,
 `status_progress`, `call_row`, `bottom_nav`.
 
@@ -40,7 +40,7 @@ vocabulary: the peer, the delivery receipts and the call are timers over literal
 | Workaround | `data.threads[*].when`                       | "Yesterday" and "09:41" are literal; rows are authored in pinned-then-recent order                                                                       | relative time from data (#14227), derived sort (#14228) |
 | Workaround | `chat_row`                                   | The time sits in `supporting`: a list item's `trailing` takes only a switch, checkbox or icon                                                            | trailing text on list items                             |
 | Workaround | `unread_badge`                               | A styled text stands in for `badge`, whose `text` does not bind repeat fields                                                                            | badge repeat binding                                    |
-| Workaround | `mic_button`                                 | Long press starts recording and a tap sends it: a release cannot be detected, and nothing is recorded or played                                          | recording (#14194), playback (#14253)                   |
+| Workaround | `mic_button`                                 | Long press on the mic starts recording and the send icon that replaces it finishes: a release cannot be detected, and nothing is recorded or played      | recording (#14194), playback (#14253)                   |
 | Dead end   | `call` screen                                | The call is a timer that "answers" after 2 s; no audio or video                                                                                          | WebRTC calls (#14275), permissions (#14297)             |
 | Dead end   | new chat                                     | There is no contact picker, so a chat cannot be started                                                                                                  | contacts (#14318, #14119)                               |
 | Dead end   | two devices                                  | Each device has its own copy of the threads                                                                                                              | multi-device demos (#14212)                             |

@@ -1292,7 +1292,7 @@
               {
                 "type": "text",
                 "testTag": "recording_time",
-                "text": "Recording {recSeconds} s, tap the mic to send",
+                "text": "Recording {recSeconds} s, tap send to finish",
                 "semantics": {
                   "liveRegion": "polite"
                 }
@@ -1513,7 +1513,11 @@
                 "type": "icon",
                 "testTag": "mic_button",
                 "name": "mic",
-                "contentDescription": "Voice note: hold to record, tap to send",
+                "contentDescription": "Voice note: hold to record",
+                "visibleWhen": {
+                  "key": "recording",
+                  "equals": false
+                },
                 "style": {
                   "width": {
                     "dp": 48
@@ -1547,7 +1551,26 @@
                       }
                     ]
                   }
-                ],
+                ]
+              },
+              {
+                "type": "icon",
+                "testTag": "mic_send",
+                "name": "send",
+                "contentDescription": "Send voice note",
+                "visibleWhen": {
+                  "key": "recording",
+                  "equals": true
+                },
+                "style": {
+                  "width": {
+                    "dp": 48
+                  },
+                  "height": {
+                    "dp": 48
+                  },
+                  "color": "error"
+                },
                 "onTap": [
                   {
                     "type": "cancelTimer",
@@ -1569,6 +1592,11 @@
                     "type": "setState",
                     "key": "recording",
                     "value": false
+                  },
+                  {
+                    "type": "setState",
+                    "key": "recSeconds",
+                    "value": 0
                   }
                 ]
               }

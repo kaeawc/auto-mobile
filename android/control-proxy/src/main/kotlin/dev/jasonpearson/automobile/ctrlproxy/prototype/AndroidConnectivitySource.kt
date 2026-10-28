@@ -30,6 +30,12 @@ internal class AndroidConnectivitySource(private val context: Context) :
 
   private val callback =
     object : ConnectivityManager.NetworkCallback() {
+      // API 24 and 25 announce the current default network with onAvailable alone, without a
+      // following onCapabilitiesChanged, so read its capabilities here too.
+      override fun onAvailable(network: Network) {
+        manager.getNetworkCapabilities(network)?.let { tracker.onNetwork(reading(it)) }
+      }
+
       override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
         tracker.onNetwork(reading(capabilities))
       }

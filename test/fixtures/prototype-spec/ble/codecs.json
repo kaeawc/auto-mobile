@@ -1,0 +1,345 @@
+{
+  "maxBytes": 512,
+  "codecs": [
+    "utf8",
+    "hex",
+    "base64",
+    "uint8",
+    "uint16le",
+    "int16le",
+    "uint32le",
+    "float32le",
+    "gatt.battery_level",
+    "gatt.heart_rate_measurement"
+  ],
+  "cases": [
+    {
+      "name": "utf8 decodes text",
+      "codec": "utf8",
+      "op": "decode",
+      "input": "68c3a9",
+      "expected": "hé"
+    },
+    {
+      "name": "utf8 refuses invalid bytes",
+      "codec": "utf8",
+      "op": "decode",
+      "input": "c328",
+      "error": "format"
+    },
+    {
+      "name": "utf8 encodes text",
+      "codec": "utf8",
+      "op": "encode",
+      "input": "hé",
+      "expected": "68c3a9"
+    },
+    {
+      "name": "utf8 encodes only strings",
+      "codec": "utf8",
+      "op": "encode",
+      "input": 7,
+      "error": "format"
+    },
+    {
+      "name": "hex decodes lowercase",
+      "codec": "hex",
+      "op": "decode",
+      "input": "00ff10",
+      "expected": "00ff10"
+    },
+    {
+      "name": "hex encodes either case",
+      "codec": "hex",
+      "op": "encode",
+      "input": "0A0b",
+      "expected": "0a0b"
+    },
+    {
+      "name": "hex refuses odd length",
+      "codec": "hex",
+      "op": "encode",
+      "input": "abc",
+      "error": "format"
+    },
+    {
+      "name": "hex refuses non-hex",
+      "codec": "hex",
+      "op": "encode",
+      "input": "zz",
+      "error": "format"
+    },
+    {
+      "name": "base64 decodes padded",
+      "codec": "base64",
+      "op": "decode",
+      "input": "68656c6c6f",
+      "expected": "aGVsbG8="
+    },
+    {
+      "name": "base64 encodes",
+      "codec": "base64",
+      "op": "encode",
+      "input": "aGk=",
+      "expected": "6869"
+    },
+    {
+      "name": "base64 refuses missing padding",
+      "codec": "base64",
+      "op": "encode",
+      "input": "aGk",
+      "error": "format"
+    },
+    {
+      "name": "uint8",
+      "codec": "uint8",
+      "op": "decode",
+      "input": "ff",
+      "expected": 255
+    },
+    {
+      "name": "uint8 wrong length",
+      "codec": "uint8",
+      "op": "decode",
+      "input": "0102",
+      "error": "length"
+    },
+    {
+      "name": "uint8 encodes",
+      "codec": "uint8",
+      "op": "encode",
+      "input": 42,
+      "expected": "2a"
+    },
+    {
+      "name": "uint8 over range",
+      "codec": "uint8",
+      "op": "encode",
+      "input": 256,
+      "error": "range"
+    },
+    {
+      "name": "uint8 fraction",
+      "codec": "uint8",
+      "op": "encode",
+      "input": 1.5,
+      "error": "range"
+    },
+    {
+      "name": "uint8 not a number",
+      "codec": "uint8",
+      "op": "encode",
+      "input": "1",
+      "error": "format"
+    },
+    {
+      "name": "uint16le",
+      "codec": "uint16le",
+      "op": "decode",
+      "input": "3412",
+      "expected": 4660
+    },
+    {
+      "name": "uint16le encodes",
+      "codec": "uint16le",
+      "op": "encode",
+      "input": 65535,
+      "expected": "ffff"
+    },
+    {
+      "name": "uint16le negative",
+      "codec": "uint16le",
+      "op": "encode",
+      "input": -1,
+      "error": "range"
+    },
+    {
+      "name": "int16le negative",
+      "codec": "int16le",
+      "op": "decode",
+      "input": "feff",
+      "expected": -2
+    },
+    {
+      "name": "int16le encodes minimum",
+      "codec": "int16le",
+      "op": "encode",
+      "input": -32768,
+      "expected": "0080"
+    },
+    {
+      "name": "int16le over range",
+      "codec": "int16le",
+      "op": "encode",
+      "input": 32768,
+      "error": "range"
+    },
+    {
+      "name": "uint32le",
+      "codec": "uint32le",
+      "op": "decode",
+      "input": "78563412",
+      "expected": 305419896
+    },
+    {
+      "name": "uint32le short",
+      "codec": "uint32le",
+      "op": "decode",
+      "input": "785634",
+      "error": "length"
+    },
+    {
+      "name": "uint32le maximum",
+      "codec": "uint32le",
+      "op": "encode",
+      "input": 4294967295,
+      "expected": "ffffffff"
+    },
+    {
+      "name": "float32le",
+      "codec": "float32le",
+      "op": "decode",
+      "input": "0000c03f",
+      "expected": 1.5
+    },
+    {
+      "name": "float32le negative",
+      "codec": "float32le",
+      "op": "decode",
+      "input": "000010c0",
+      "expected": -2.25
+    },
+    {
+      "name": "float32le NaN",
+      "codec": "float32le",
+      "op": "decode",
+      "input": "0000c07f",
+      "error": "range"
+    },
+    {
+      "name": "float32le encodes",
+      "codec": "float32le",
+      "op": "encode",
+      "input": -2.25,
+      "expected": "000010c0"
+    },
+    {
+      "name": "float32le over float range",
+      "codec": "float32le",
+      "op": "encode",
+      "input": 1e39,
+      "error": "range"
+    },
+    {
+      "name": "battery level",
+      "codec": "gatt.battery_level",
+      "op": "decode",
+      "input": "64",
+      "expected": 100
+    },
+    {
+      "name": "battery level over 100",
+      "codec": "gatt.battery_level",
+      "op": "decode",
+      "input": "65",
+      "error": "range"
+    },
+    {
+      "name": "battery level is decode only",
+      "codec": "gatt.battery_level",
+      "op": "encode",
+      "input": 50,
+      "error": "decodeOnly"
+    },
+    {
+      "name": "heart rate uint8, contact unsupported",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "decode",
+      "input": "0048",
+      "expected": {
+        "heartRate": 72,
+        "sensorContact": "unsupported"
+      }
+    },
+    {
+      "name": "heart rate uint16, contact detected, energy and RR",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "decode",
+      "input": "1f2c01e80300040402",
+      "expected": {
+        "heartRate": 300,
+        "sensorContact": "detected",
+        "energyExpended": 1000,
+        "rrIntervalsMs": [1000, 504]
+      }
+    },
+    {
+      "name": "heart rate contact supported but not detected",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "decode",
+      "input": "044b",
+      "expected": {
+        "heartRate": 75,
+        "sensorContact": "notDetected"
+      }
+    },
+    {
+      "name": "heart rate truncated uint16",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "decode",
+      "input": "0148",
+      "error": "length"
+    },
+    {
+      "name": "heart rate odd RR bytes",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "decode",
+      "input": "104b0004ff",
+      "error": "length"
+    },
+    {
+      "name": "heart rate trailing bytes",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "decode",
+      "input": "004b00",
+      "error": "length"
+    },
+    {
+      "name": "heart rate empty",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "decode",
+      "input": "",
+      "error": "length"
+    },
+    {
+      "name": "heart rate is decode only",
+      "codec": "gatt.heart_rate_measurement",
+      "op": "encode",
+      "input": {
+        "heartRate": 72
+      },
+      "error": "decodeOnly"
+    },
+    {
+      "name": "over the attribute limit",
+      "codec": "hex",
+      "op": "decode",
+      "input": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "error": "length"
+    },
+    {
+      "name": "encoded value over the attribute limit",
+      "codec": "utf8",
+      "op": "encode",
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "error": "length"
+    },
+    {
+      "name": "unknown codec",
+      "codec": "uint64le",
+      "op": "decode",
+      "input": "00",
+      "error": "unknown"
+    }
+  ]
+}

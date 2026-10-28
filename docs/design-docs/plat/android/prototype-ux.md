@@ -2538,6 +2538,33 @@ messages outside the Kotlin-mirrored wire manifest; what a spec sees stays on
   its connections without a `closed` frame, as a cancelled request sends no reply. A socket close
   ends only the connections it opened.
 
+### Mock backend
+
+A prototype can talk to a declarative backend with no server code (decisions in
+`docs/decisions/prototype-mock-backend.md`). A request whose URL host is
+`<backendId>.mock.automobile.invalid` is answered in process by the daemon's backend of that id,
+before the egress policy: no DNS lookup, socket or `adb reverse`. A host under that suffix that
+names no defined backend fails as `network`. Backends live for the daemon session and are bounded
+(16 backends, 16 collections, 64 routes, 1 MiB of collections and routes).
+
+- **Collections** are json-server style: `GET /<name>` filters by `?field=value`, `q` matches a
+  case-insensitive substring of any string or number member, `_sort=price|-price` sorts stably
+  (numbers numerically, strings by code point), `_page` and `_limit` page (default limit 10, at most 100) with an `x-total-count` header, and `after` and `size` cursor-page into `{items, next}`.
+  Every defined item needs an id (a number, or a non-empty string other than `.` and `..`, which URL
+  normalization would turn into path navigation) so a path and a cursor can both name it.
+  `GET /<name>/:id`, `POST` (201, id from the injected id generator when absent, 400 on an invalid id, 409 on a duplicate),
+  `PATCH` (shallow merge), `PUT` (replace) and `DELETE` complete the surface; an item's id never
+  changes, and a write that would exceed the size budget is refused with 413 and changes nothing.
+- **Routes** are canned responses `{method, path, status?, headers?, body?, delayMs?}` that win over
+  collections. A path is literal segments and `:name` parameters. Bodies bind `{params.x}`,
+  `{query.x}` and `{body:/pointer}`: a string that is exactly one placeholder takes the value's
+  type, a placeholder inside text interpolates, and an unbound one is `null` or empty.
+- **Latency and faults** draw from the backend's seeded random stream and wait on the injected
+  timer, so a run replays identically: `latencyMs {min, max}` delays every answer, and each fault
+  `{path, method?, status, every | rate}` fires on every nth matching request or with probability
+  `rate`, answering `{error: "mock fault"}`.
+- Every answered request is logged (latest 200, with a sequence number) for assertions.
+
 ## Data, storage and network (#12531)
 
 The three features compose: a `request` writes its response into `/data`, data actions edit `/data`

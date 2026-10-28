@@ -643,6 +643,16 @@
                     "name": "ride_cancelled"
                   },
                   {
+                    "type": "setState",
+                    "key": "rideId",
+                    "value": ""
+                  },
+                  {
+                    "type": "setState",
+                    "key": "rideName",
+                    "value": ""
+                  },
+                  {
                     "type": "popToRoot",
                     "stack": "nav"
                   }
@@ -861,6 +871,16 @@
                         "type": "setState",
                         "key": "rating",
                         "value": 0
+                      },
+                      {
+                        "type": "setState",
+                        "key": "rideId",
+                        "value": ""
+                      },
+                      {
+                        "type": "setState",
+                        "key": "rideName",
+                        "value": ""
                       },
                       {
                         "type": "popToRoot",

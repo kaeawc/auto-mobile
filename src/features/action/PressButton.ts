@@ -170,6 +170,14 @@ export function acceptAndroidHomeAlreadyOnLauncher(
   }
 }
 
+/** Per-press dispatch inputs threaded through the platform helpers (#11835). */
+interface PressDispatchOptions {
+  timeoutMs?: number;
+  frameContext?: string;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export class PressButton extends BaseVisualChange {
   private readonly globalActionClient?: PressButtonCtrlProxyOverrides["globalActionClient"];
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
@@ -223,8 +231,10 @@ export class PressButton extends BaseVisualChange {
   } {
     return {
       verifyAndroidHomeForeground: (options = {}) => this.verifyAndroidHomeForeground(options),
-      executeAndroidButtonPress: (...args) => this.executeAndroidButtonPress(...args),
-      executeiOSButtonPress: (...args) => this.executeiOSButtonPress(...args),
+      executeAndroidButtonPress: (button, timeoutMs, frameContext, signal, onDispatch) =>
+        this.executeAndroidButtonPress(button, { timeoutMs, frameContext, signal, onDispatch }),
+      executeiOSButtonPress: (button, timeoutMs, frameContext, signal, onDispatch) =>
+        this.executeiOSButtonPress(button, { timeoutMs, frameContext, signal, onDispatch }),
     };
   }
 
@@ -370,21 +380,19 @@ export class PressButton extends BaseVisualChange {
     try {
       switch (this.device.platform) {
         case "android":
-          return await this.executeAndroidButtonPress(
-            button,
+          return await this.executeAndroidButtonPress(button, {
             timeoutMs,
             frameContext,
             signal,
-            markDispatch,
-          );
+            onDispatch: markDispatch,
+          });
         case "ios":
-          return await this.executeiOSButtonPress(
-            button,
+          return await this.executeiOSButtonPress(button, {
             timeoutMs,
             frameContext,
             signal,
-            markDispatch,
-          );
+            onDispatch: markDispatch,
+          });
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
       }
@@ -432,11 +440,9 @@ export class PressButton extends BaseVisualChange {
 
   private async executeAndroidButtonPress(
     button: string,
-    timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
+    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
     const normalized = button.toLowerCase();
     if (IOS_OPTIONAL_HARDWARE_BUTTONS.has(normalized)) {
       return unsupportedIosButtonResult(
@@ -446,14 +452,7 @@ export class PressButton extends BaseVisualChange {
     }
     const systemAction = resolveAndroidSystemAction(normalized);
     if (systemAction) {
-      return this.executeAndroidSystemAction(
-        button,
-        systemAction,
-        timeoutMs,
-        frameContext,
-        signal,
-        onDispatch,
-      );
+      return this.executeAndroidSystemAction(button, systemAction, dispatch);
     }
     const keyCode = resolveAndroidKeyCode(normalized);
     if (keyCode === undefined) {
@@ -470,12 +469,9 @@ export class PressButton extends BaseVisualChange {
     // timeout is not exceeded by the sum of the two per-transport defaults.
     const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
     const globalActionResult = await this.tryAndroidGlobalAction(
-      button,
-      normalized,
-      keyCode,
+      { button, normalized, keyCode },
       deadlineMs,
-      frameContext,
-      { signal, onDispatch },
+      { frameContext, signal, onDispatch },
     );
     if (globalActionResult) {
       return globalActionResult;
@@ -518,8 +514,7 @@ export class PressButton extends BaseVisualChange {
                   button,
                   keyCode,
                   deadlineMs,
-                  frameContext,
-                  signal,
+                  { frameContext, signal },
                 );
                 throwIfAborted(dispatchSignal);
                 if (validationFailure) {
@@ -587,11 +582,9 @@ export class PressButton extends BaseVisualChange {
   private async executeAndroidSystemAction(
     button: string,
     action: AndroidSystemAction,
-    timeoutMs: number | undefined,
-    frameContext: string | undefined,
-    signal: AbortSignal | undefined,
-    onDispatch: (() => void) | undefined,
+    dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
+    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
     throwIfAborted(signal);
     const client = this.systemActionTransport();
     if (!(await client.supportsCommand(action.capability))) {
@@ -657,14 +650,12 @@ export class PressButton extends BaseVisualChange {
   }
 
   private async tryAndroidGlobalAction(
-    button: string,
-    normalized: string,
-    keyCode: number,
+    target: { button: string; normalized: string; keyCode: number },
     deadlineMs: number | undefined,
-    frameContext: string | undefined,
-    options: { signal?: AbortSignal; onDispatch?: () => void },
+    options: Omit<PressDispatchOptions, "timeoutMs">,
   ): Promise<PressButtonResult | undefined> {
-    const { signal, onDispatch } = options;
+    const { button, normalized, keyCode } = target;
+    const { frameContext, signal, onDispatch } = options;
     if (!PressButton.GLOBAL_ACTION_BUTTONS.has(normalized)) {
       return undefined;
     }
@@ -740,9 +731,9 @@ export class PressButton extends BaseVisualChange {
     button: string,
     keyCode: number,
     deadlineMs: number | undefined,
-    frameContext: string | undefined,
-    signal?: AbortSignal,
+    options: Pick<PressDispatchOptions, "frameContext" | "signal">,
   ): Promise<PressButtonResult | undefined> {
+    const { frameContext, signal } = options;
     if (frameContext === undefined) {
       return undefined;
     }
@@ -782,11 +773,9 @@ export class PressButton extends BaseVisualChange {
    */
   private async executeiOSButtonPress(
     button: string,
-    timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
+    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
     throwIfAborted(signal);
     const normalizedButton = button.toLowerCase();
     if (
@@ -795,14 +784,7 @@ export class PressButton extends BaseVisualChange {
     ) {
       const client = IOSCtrlProxyClient.getInstance(this.device);
       const result = PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)
-        ? await this.executeiOSNavigationButton(
-            client,
-            normalizedButton,
-            timeoutMs,
-            frameContext,
-            signal,
-            onDispatch,
-          )
+        ? await this.executeiOSNavigationButton(client, normalizedButton, dispatch)
         : await this.awaitDispatchedRequest(
             signal,
             timeoutMs,
@@ -839,11 +821,9 @@ export class PressButton extends BaseVisualChange {
   private async executeiOSNavigationButton(
     client: IosCtrlProxy,
     button: string,
-    timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    dispatch: PressDispatchOptions,
   ): Promise<IOSDispatchResult<{ success: boolean; error?: string }>> {
+    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
     throwIfAborted(signal);
     switch (button) {
       case "home":

@@ -27,6 +27,12 @@ import {
   CtrlProxyPerfTiming,
 } from "../../src/features/observe/ios";
 import type { SdkTriggerRequest } from "../../src/features/observe/ios/CtrlProxySdkTrigger";
+import type { IosObservationBridgeState } from "../../src/features/observe/ios/observationBridgeState";
+import type { IosSdkAction } from "../../src/features/observe/ios/sdkObservationBridge";
+import type {
+  CtrlProxySdkActionResult,
+  CtrlProxySdkObservationResult,
+} from "../../src/features/observe/ios/types";
 import type {
   CtrlProxyMagicTapResult,
   CtrlProxySdkTriggerResult,
@@ -1460,6 +1466,40 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
       action,
       totalTimeMs: 50,
     };
+  }
+
+  /** Scripted SDK observation-bridge state and replies (#5159); default: no bridge registered. */
+  observationBridgeState: IosObservationBridgeState = {
+    status: "unavailable",
+    reason: "NOT_REGISTERED",
+  };
+  sdkObservationReply: CtrlProxySdkObservationResult = {
+    success: false,
+    available: false,
+    failure: "bridge_unavailable",
+    totalTimeMs: 0,
+  };
+  sdkActionReplies: CtrlProxySdkActionResult[] = [];
+  readonly sdkActions: IosSdkAction[] = [];
+
+  async getObservationBridgeStateForIos(): Promise<IosObservationBridgeState> {
+    return this.observationBridgeState;
+  }
+
+  async requestSdkObservationForIos(): Promise<CtrlProxySdkObservationResult> {
+    return this.sdkObservationReply;
+  }
+
+  async requestSdkActionForIos(action: IosSdkAction): Promise<CtrlProxySdkActionResult> {
+    this.sdkActions.push(action);
+    return (
+      this.sdkActionReplies.shift() ?? {
+        success: false,
+        available: false,
+        failure: "bridge_unavailable",
+        totalTimeMs: 0,
+      }
+    );
   }
 
   /** Script the next `requestSdkTrigger` results (default: delivered, HTTP 200). */

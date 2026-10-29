@@ -158,13 +158,17 @@ nav:
       - "Session broker device reuse": design-docs/session-broker-device-reuse.md
       - "Session device requirements": design-docs/session-requirements.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
+      - "iOS SDK contract suite": design-docs/plat/ios/sdk-contract-suite.md
       - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "iOS WKWebView bridge actions": design-docs/plat/ios/webview-bridge-actions.md
+      - "iOS SDK observation bridge": design-docs/plat/ios/observation-bridge.md
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
+      - "iOS Keychain and shared-store capabilities": design-docs/plat/ios/keychain-and-shared-store-capabilities.md
       - "iOS Photos full access": design-docs/plat/ios/photos-full-access.md
       - "iOS simulator load reduction": design-docs/plat/ios/simulator-load-reduction.md
       - "iOS Simulator audio loopback": design-docs/plat/ios/simulator-audio-loopback.md
+      - "iOS SDK host-integration profile": design-docs/plat/ios/host-integration-profile.md
       - "iOS keep-booted reset": design-docs/ios-keep-booted-reset.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android emulator host cost": design-docs/android-emulator-host-cost.md

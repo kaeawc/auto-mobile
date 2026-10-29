@@ -22,6 +22,7 @@ describe("an input whose holder changed is a typed refusal", () => {
       holderSessionUuid: SESSION,
       sessionManager,
       execution: { executionId: "input-1", startTime: 0 },
+      signal: undefined,
     }).then(
       () => undefined,
       (error: unknown) => error,

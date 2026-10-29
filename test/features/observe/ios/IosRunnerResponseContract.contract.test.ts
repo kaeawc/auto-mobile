@@ -115,6 +115,25 @@ const typedResults: Record<string, Record<string, unknown>> = {
     error: "fixture failure",
     totalTimeMs: 17,
   },
+  sdk_observation_result: {
+    success: true,
+    available: true,
+    observation: {
+      captureIdentity: 41,
+      orientation: "portrait",
+      coordinateSpace: "screen",
+      bounds: { left: 0, top: 0, right: 390, bottom: 844 },
+      capabilities: [],
+    },
+    totalTimeMs: 17,
+  },
+  sdk_action_result: {
+    success: false,
+    available: true,
+    result: { status: "rejected", reason: "stale_observation", durationMs: 0 },
+    error: "stale_observation",
+    totalTimeMs: 17,
+  },
   voiceover_state_result: { success: true, enabled: true, totalTimeMs: 17 },
   voiceover_set_result: { success: false, error: "fixture failure", totalTimeMs: 17 },
   preference_files: {

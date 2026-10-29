@@ -43,6 +43,10 @@ import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { requestSdkTrigger } from "../../../../src/features/observe/ios/CtrlProxySdkTrigger";
+import {
+  requestSdkAction,
+  requestSdkObservation,
+} from "../../../../src/features/observe/ios/CtrlProxySdkObservation";
 import { requestAccessibilityAudit } from "../../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
@@ -200,6 +204,17 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_magic_tap",
     builder: "CtrlProxyVoiceOver.requestMagicTap",
     invoke: (h) => new CtrlProxyVoiceOver(h.context).requestMagicTap(),
+  },
+  {
+    name: "request_sdk_observation",
+    builder: "requestSdkObservation",
+    invoke: (h) => requestSdkObservation(h.context),
+  },
+  {
+    name: "request_sdk_action",
+    builder: "requestSdkAction",
+    invoke: (h) =>
+      requestSdkAction(h.context, { tap: { observationIdentity: 41, elementId: "submit" } }),
   },
   {
     name: "request_sdk_trigger",

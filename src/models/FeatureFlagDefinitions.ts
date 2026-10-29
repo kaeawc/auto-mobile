@@ -18,7 +18,8 @@ export type FeatureFlagKey =
   | "actions-diff-observe"
   | "actions-no-observe"
   | "actions-compact-metadata"
-  | "device-condition";
+  | "device-condition"
+  | "ios-sdk-observation-bridge";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -194,5 +195,12 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     description:
       "Opt-in: expose the session-scoped deviceCondition surface on setDeviceState for root/integrity/fault test fixtures (epic #14047). Off by default while the individual injectors land; conditions always restore to a clean state on release.",
     defaultValue: false,
+  },
+  {
+    key: "ios-sdk-observation-bridge",
+    label: "iOS SDK observation bridge",
+    description:
+      "On iOS, merge the app's registered AutoMobile SDK observation bridge into observe and route tapOn on its nodes through it, falling back to XCTest only when the bridge is unavailable or the action is unsupported. Disable to use XCTest alone.",
+    defaultValue: true,
   },
 ];

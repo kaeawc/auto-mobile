@@ -831,6 +831,25 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
+  test("sdk_capabilities_result keeps the observation-bridge state for the probe (#5159)", () => {
+    const observationBridge = {
+      schemaVersion: 1,
+      available: true,
+      supportedActions: ["tap"],
+    };
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "sdk_capabilities_result",
+        success: true,
+        available: true,
+        bundleId: "com.example.app",
+        observationBridge,
+        totalTimeMs: 4,
+      }),
+    );
+    expect(decoded?.result).toMatchObject({ observationBridge });
+  });
+
   test("sdk_capabilities_result with no SDK in the foreground app reports unavailable", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({ type: "sdk_capabilities_result", success: true, available: false, totalTimeMs: 3 }),
@@ -897,7 +916,9 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "reset_permissions_result",
   "rotate_result",
   "screenshot",
+  "sdk_action_result",
   "sdk_capabilities_result",
+  "sdk_observation_result",
   "sdk_trigger_result",
   "select_all_result",
   "set_network_error_simulation_result",
@@ -940,8 +961,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 56 rawValues", () => {
-    expect(rawValues.length).toBe(56);
+  test("Swift ResponseType declares exactly 58 rawValues", () => {
+    expect(rawValues.length).toBe(58);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -954,9 +975,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 51 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 53 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(51);
+    expect(reshaped.length).toBe(53);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1084,6 +1105,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
     { type: "sdk_trigger_result", expected: false },
+    { type: "sdk_observation_result", expected: false },
+    { type: "sdk_action_result", expected: false },
     { type: "screenshot", expected: true },
     { type: "pinch_result", expected: true },
     { type: "tap_coordinates_result", expected: true },
@@ -1227,8 +1250,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 50 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(50);
+  test("the passthrough set is the 52 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(52);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

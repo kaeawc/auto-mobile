@@ -28,10 +28,13 @@ export interface DiscoveryOperations {
       totalDeadlineMs?: number;
     },
   ): Promise<"no-entry" | "matched" | "replaced" | "unsettled">;
-  settleObservedRuntimeIdentities(devices: readonly BootedDevice[]): Promise<void>;
+  settleObservedRuntimeIdentities(
+    devices: readonly BootedDevice[],
+    signal: AbortSignal | undefined,
+  ): Promise<void>;
   settleObservedPooledRuntimeIdentity(
     observation: BootedDevice,
-    signal?: AbortSignal | undefined,
+    signal: AbortSignal | undefined,
     deadlineMs?: number,
   ): Promise<"no-entry" | "matched" | "replaced" | "unsettled">;
   reconcileDiscoveryObservation(
@@ -221,8 +224,14 @@ export class DevicePoolDiscovery {
     );
   }
 
-  /** Monitor-only membership pass over evidence already folded through FUNNEL 1. */
-  async settleObservedRuntimeIdentities(devices: readonly BootedDevice[]): Promise<void> {
+  /**
+   * Monitor-only membership pass over evidence already folded through FUNNEL 1. `signal` is the
+   * reconcile's own signal, passed explicitly rather than read ambiently (#15671).
+   */
+  async settleObservedRuntimeIdentities(
+    devices: readonly BootedDevice[],
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
     for (const observation of devices) {
       const pooled = this.state.devices.get(observation.deviceId);
       if (
@@ -232,14 +241,14 @@ export class DevicePoolDiscovery {
         !this.state.runtimeIdentity.hasUnresolvedEmulatorName(observation) &&
         !this.callbacks.matchesRuntimeIdentity(pooled, observation)
       ) {
-        await this.settleObservedPooledRuntimeIdentity(observation);
+        await this.settleObservedPooledRuntimeIdentity(observation, signal);
       }
     }
   }
 
   settleObservedPooledRuntimeIdentity(
     observation: BootedDevice,
-    signal = getAbortSignal(),
+    signal: AbortSignal | undefined,
     deadlineMs = Infinity,
   ): Promise<"no-entry" | "matched" | "replaced" | "unsettled"> {
     return this.state.assignmentMutex.runExclusive(async () => {
@@ -285,7 +294,7 @@ export class DevicePoolDiscovery {
       signal,
     });
     if (settleMembership === true && !signal?.aborted) {
-      await this.settleObservedRuntimeIdentities(devices);
+      await this.settleObservedRuntimeIdentities(devices, signal);
     }
   }
 

@@ -48,6 +48,8 @@ final class SdkHierarchyServerTests: XCTestCase {
             ("POST /db/table-structure", .dbTableStructure),
             ("POST /preferences", .preferences),
             ("POST /trigger", .trigger),
+            ("POST /observation/snapshot", .observationSnapshot),
+            ("POST /observation/action", .observationAction),
         ]
         for (request, route) in routes {
             XCTAssertEqual(SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"), .matched(route), request)

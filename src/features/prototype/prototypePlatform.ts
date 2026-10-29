@@ -5,6 +5,7 @@ import {
   prototypeRealtimeFields,
 } from "./prototypeChannels";
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
+import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
 import {
   prototypeMediaCallError,
   prototypeMediaError,
@@ -14,6 +15,10 @@ import {
 } from "./prototypeMedia";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import {
+  prototypeNotificationsBlockError,
+  prototypeNotificationsCallError,
+} from "./prototypeNotifications";
 import {
   prototypeSecureStorageEmitError,
   prototypeSecureStorageError,
@@ -585,7 +590,7 @@ export function prototypePlatformError(
 ): PrototypePlatformError | undefined {
   const root = record(spec) ?? {};
   const context = platformContext(root);
-  const error = rootBlockError(root);
+  const error = rootBlockError(root, check);
   if (error) {
     return error;
   }
@@ -608,14 +613,19 @@ export function prototypePlatformError(
  * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
  * the location block, then `requires`.
  */
-function rootBlockError(root: Raw): PrototypePlatformError | undefined {
+function rootBlockError(
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
   return (
     prototypeChannelsError(root) ??
     prototypeAuthBlockError(root) ??
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
+    prototypeNotificationsBlockError(root) ??
     prototypeMediaError(root) ??
     prototypeVideoPlayerError(root) ??
+    prototypeMediaCaptionsError(root, check) ??
     requiresError(root)
   );
 }
@@ -811,6 +821,7 @@ function channelUseError(
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
         prototypeAuthCallError(use.action, use.path, root) ??
+        prototypeNotificationsCallError(use.action, use.path, root) ??
         prototypeMediaCallError(use.action, use.path, players))
     : undefined;
 }

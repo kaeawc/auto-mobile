@@ -46,6 +46,10 @@ export interface StorageCapabilities {
     entities: string[];
   }>;
   unavailableStores: string[];
+  /** Keychain capability (#5161); absent from SDKs that predate it. See iosStorageDiscovery. */
+  keychain?: unknown;
+  /** App-group suite and Core Data store states (#5161); absent from older SDKs. */
+  stores?: unknown;
 }
 
 interface StorageCapabilitiesResult extends DatabaseResultBase {

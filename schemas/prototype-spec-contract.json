@@ -15518,6 +15518,19 @@
                 "kind": "key"
               },
               "optional": true
+            },
+            "captions": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "mediaCaption"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
             }
           }
         }
@@ -15738,6 +15751,13 @@
           "rule": {
             "kind": "ref",
             "name": "locationBlock"
+          },
+          "optional": true
+        },
+        "notifications": {
+          "rule": {
+            "kind": "ref",
+            "name": "notificationsBlock"
           },
           "optional": true
         },
@@ -21702,6 +21722,97 @@
         }
       ]
     },
+    "mediaCaptionCue": {
+      "kind": "object",
+      "fields": {
+        "startMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "endMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "text": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 512
+          },
+          "optional": false
+        }
+      }
+    },
+    "mediaCaption": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "language": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 35
+          },
+          "optional": false
+        },
+        "label": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "source": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string",
+                      "max": 128
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "data": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": false
+        }
+      }
+    },
     "mediaPlayer": {
       "kind": "object",
       "fields": {
@@ -21737,6 +21848,64 @@
             "item": {
               "kind": "ref",
               "name": "mediaPlayer"
+            }
+          },
+          "optional": false
+        }
+      }
+    },
+    "notificationChannel": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": false
+        },
+        "name": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "importance": {
+          "rule": {
+            "kind": "enum",
+            "values": ["min", "low", "default", "high"]
+          },
+          "optional": false
+        },
+        "description": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "showBadge": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "notificationsBlock": {
+      "kind": "object",
+      "fields": {
+        "channels": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 8,
+            "item": {
+              "kind": "ref",
+              "name": "notificationChannel"
             }
           },
           "optional": false
@@ -22378,7 +22547,10 @@
               "optional": true,
               "value": {
                 "kind": "array",
-                "item": { "kind": "enum", "values": ["name", "phone", "email"] },
+                "item": {
+                  "kind": "enum",
+                  "values": ["name", "phone", "email"]
+                },
                 "min": 1,
                 "max": 3,
                 "unique": true
@@ -23504,6 +23676,27 @@
           "permissions": [],
           "background": [],
           "sensitive": false
+        },
+        "setCaptions": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "track": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 192
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
         }
       },
       "events": {
@@ -23566,6 +23759,14 @@
               "unsupported_format",
               "blocked_egress"
             ]
+          }
+        },
+        "captionTrack": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 64
           }
         }
       }

@@ -1,0 +1,109 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "cues": {
+        "en": [
+          {
+            "startMs": 0,
+            "endMs": 1500,
+            "text": "Hello"
+          },
+          {
+            "startMs": 1500,
+            "endMs": 3000,
+            "text": "Welcome back"
+          }
+        ]
+      }
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "hero",
+          "player": "main",
+          "captions": [
+            {
+              "id": "en",
+              "language": "en",
+              "label": "English",
+              "source": {
+                "data": "/data/cues/en"
+              }
+            },
+            {
+              "id": "en",
+              "language": "es-MX",
+              "label": "Espa\u00f1ol",
+              "source": {
+                "asset": "trailerEs"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "{platform:/media/players/main/captionTrack}"
+        },
+        {
+          "type": "button",
+          "label": "Spanish",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setCaptions",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "track": {
+                  "value": "es"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Off",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setCaptions",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "track": {
+                  "value": ""
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].captions[1].id",
+  "expectedMessage": "Duplicate caption id"
+}

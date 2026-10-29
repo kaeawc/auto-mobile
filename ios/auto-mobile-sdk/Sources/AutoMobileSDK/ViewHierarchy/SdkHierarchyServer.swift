@@ -34,6 +34,8 @@
     /// - `POST /accessibility/magic-tap` -> invoke the app responder chain, returning handled
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
     /// - `POST /trigger` -> deliver a named host trigger to a registered SDK module (#1580)
+    /// - `POST /observation/snapshot` -> the registered observation bridge's snapshot (#5159)
+    /// - `POST /observation/action` -> perform one bridge action and return its result (#5159)
     final class SdkHierarchyServer: @unchecked Sendable {
         static let port: UInt16 = 8766
         static let bindFailureLogPrefix = "[AutoMobileSDK] SDK_SERVER_BIND_FAILED"
@@ -67,6 +69,8 @@
         let keychainDeletionRouteHandler = SdkKeychainDeletionRouteHandler()
         let preferenceRouteHandler = SdkPreferenceRouteHandler()
         private let triggerRouteHandler = SdkTriggerRouteHandler()
+        private let observationBridgeState: @Sendable () -> ObservationBridgeState
+        private let observationRouteHandler: SdkObservationRouteHandler
 
         init(
             tracker: any SdkHierarchyServing,
@@ -77,9 +81,15 @@
                 try SdkHierarchyServer.makeListener(port: $0)
             },
             warning: @escaping (String) -> Void = { InternalLogger.warning($0) },
-            error: @escaping (String) -> Void = { InternalLogger.error($0) }
+            error: @escaping (String) -> Void = { InternalLogger.error($0) },
+            observationBridgeState: @escaping @Sendable () -> ObservationBridgeState = {
+                AutoMobileObservationRegistry.shared.state
+            },
+            observationRegistry: AutoMobileObservationRegistry = .shared
         ) {
             self.tracker = tracker
+            self.observationBridgeState = observationBridgeState
+            observationRouteHandler = SdkObservationRouteHandler(registry: observationRegistry)
             self.identity = identity
             self.warning = warning
             self.error = error
@@ -374,7 +384,8 @@
                 status: "ok",
                 bundleId: tracker?.bundleId,
                 capabilities: Self.capabilities,
-                simulatorUdid: identity.udid
+                simulatorUdid: identity.udid,
+                observationBridge: observationBridgeState()
             )
             guard let data = try? JSONEncoder().encode(payload) else {
                 return SdkRouteResponse(statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
@@ -449,6 +460,26 @@
                 }
                 guard self.requireApplicationActive(connection) else { return }
                 execute(self, body)
+            }
+        }
+
+        /// `POST /observation/snapshot` (#5159). The body is ignored; the bridge runs on its own actor.
+        func handleObservationSnapshot(_ connection: NWConnection, initialData: Data) {
+            withRequestBody(connection, initialData: initialData) { server, _ in
+                let handler = server.observationRouteHandler
+                Task {
+                    server.sendRouteResponse(connection, await handler.observe())
+                }
+            }
+        }
+
+        /// `POST /observation/action` (#5159): the body is one JSON-encoded `AutoMobileAction`.
+        func handleObservationAction(_ connection: NWConnection, initialData: Data) {
+            withRequestBody(connection, initialData: initialData) { server, body in
+                let handler = server.observationRouteHandler
+                Task {
+                    server.sendRouteResponse(connection, await handler.perform(body: body))
+                }
             }
         }
 
@@ -570,6 +601,7 @@
         let bundleId: String?
         let capabilities: Set<String>
         let simulatorUdid: String?
+        let observationBridge: ObservationBridgeState
     }
 
     private struct SetMockRulesResponse: Encodable {

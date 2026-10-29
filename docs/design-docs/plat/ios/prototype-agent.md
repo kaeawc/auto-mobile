@@ -491,6 +491,16 @@ Fullscreen, floating and top sheets never move. Not yet verified on a simulator.
   moves with it; the anchor layer's clip uses the same lift (`PrototypeSheetFrame.rect(lift:)`).
 - **Motion.** Keyboard duration, ease-in-out (UIKit's keyboard curve is private); instant under
   `motion: "none"` or Reduce Motion (`PrototypeKeyboardLift.animationDuration`).
+- **Modal bottom sheet (`bottomSheet` node).** It draws in the top layer, but lays out and scrims
+  inside the window's frame for the placement, not the whole screen (`PrototypeModalSheetFrame`): the
+  `sheet` placement's frame (already above the keyboard), a `floating` root's reported frame, or the
+  window. Detents are fractions of that frame, and its scrim and `modal.N` touch rect stop at its edge,
+  so touches outside a partial-height window still reach the app. In a window that does not itself
+  move (floating, fullscreen, top sheet) the frame ends at the keyboard's top edge, so a field in the
+  sheet stays visible.
+- **Lazy `list` rows.** A modal declared in a lazy list's row template opens: `openModals` decodes the
+  rows of a list whose template declares a modal (`PrototypeLazyModalRows`, cached per row so view
+  identity survives re-renders) because the visible cells never draw modals in place.
 
 ## Light and dark values
 

@@ -1034,8 +1034,41 @@
         let model: PrototypeModel
         @State private var retainedDrawers: [PrototypeNode] = []
 
+        /// A bottom sheet lays out against the placement's window frame, so its scrim and detents stay
+        /// inside a `sheet` or `floating` window (as Android's) and it rises above the keyboard.
+        @ViewBuilder
+        private func sheet(_ node: PrototypeNode, index: Int) -> some View {
+            let box = model.modalSheetContainer
+            let rendererHeight = Double(model.keyboardContainerFrame?.height ?? model.windowSize.height)
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            let duration = PrototypeKeyboardLift.animationDuration(
+                keyboardDuration: model.keyboardDuration, motion: motion
+            )
+            let content = NodeView(node: node, model: model, presentedAsModal: true)
+            let type = model.spec?.window.placement.type
+            if box.width > 0, box.height > 0, type == "sheet" || type == "floating" {
+                content
+                    .frame(width: CGFloat(box.width), height: CGFloat(box.height))
+                    .clipped()
+                    .reportFrame(key: "modal.\(index)", model: model)
+                    .position(x: CGFloat(box.x + box.width / 2), y: CGFloat(box.y + box.height / 2))
+                    .animation(duration.map { .easeInOut(duration: $0) }, value: box)
+            } else {
+                // Fullscreen windows do not move: the sheet's room ends at the keyboard.
+                content
+                    .reportFrame(key: "modal.\(index)", model: model)
+                    .padding(.bottom, box.height > 0 ? CGFloat(max(rendererHeight - box.height, 0)) : 0)
+                    .animation(duration.map { .easeInOut(duration: $0) }, value: box)
+            }
+        }
+
         var body: some View {
-            let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks) ?? []
+            let modals = model.spec?.root.openModals(
+                state: model.state,
+                pages: model.pages,
+                stacks: model.stacks,
+                data: model.spec?.data
+            ) ?? []
             let displayed = modals + retainedDrawers.filter { old in !modals.contains { $0 === old } }
             ZStack {
                 ForEach(Array(displayed.enumerated()), id: \.element.identity) { index, node in
@@ -1054,8 +1087,7 @@
                         PrototypeMenuOverlay(node: node, model: model)
                             .reportFrame(key: "modal.\(index)", model: model)
                     } else if node.type == "bottomSheet" {
-                        NodeView(node: node, model: model, presentedAsModal: true)
-                            .reportFrame(key: "modal.\(index)", model: model)
+                        sheet(node, index: index)
                     } else if node.type == "dialog" {
                         ZStack {
                             colors.scrim

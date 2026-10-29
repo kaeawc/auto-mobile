@@ -131,6 +131,9 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🪪 <code>biometricAuth</code>               | Simulate biometric success or failure                                                |
 | 📳 <code>shake</code>                       | Shake the device (simulator/emulator)                                                |
 | 🧲 <code>setSensor</code>                   | Set an emulator sensor (accelerometer, gyro, …)                                      |
+| 🎙️ <code>injectAudioInput</code>            | Android emulator: play a WAV file or tone into the microphone. Off by default        |
+| ⏹️ <code>stopAudioInput</code>              | Stop an audio injection. Off by default                                              |
+| 🔊 <code>captureAudio</code>                | Android emulator: record audio output and report its level. Off by default           |
 | 📞 <code>phoneCall</code>                   | Simulate an incoming phone call                                                      |
 | 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                             |
 | 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                               |

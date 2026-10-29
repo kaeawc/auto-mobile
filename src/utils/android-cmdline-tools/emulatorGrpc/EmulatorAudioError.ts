@@ -8,13 +8,17 @@ export type EmulatorAudioErrorCode =
   | "audio_capture_unsupported"
   | "audio_grpc_failed";
 
+/**
+ * The generic tool-error path serializes only the message, so the message leads with the code in
+ * brackets (as `androidLaunchIntent` does) for clients that branch on it.
+ */
 export class EmulatorAudioError extends ActionableError {
   constructor(
     readonly code: EmulatorAudioErrorCode,
     message: string,
     readonly grpcStatus?: GrpcStatusResult,
   ) {
-    super(message);
+    super(`[${code}] ${message}`);
   }
 }
 

@@ -174,6 +174,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
 
   // Scoped clears/deletes and replacement values remain destructive even when idempotent.
   setSensor: entry("Set Emulator Sensor", clearDevice),
+  injectAudioInput: entry("Inject Emulator Microphone Audio", controlDevice),
+  stopAudioInput: entry("Stop Emulator Microphone Audio", setDevice),
+  captureAudio: entry("Capture Emulator Audio Output", captureDevice),
   statusBar: entry("Set Status Bar", clearDevice),
   clearKeyValueFile: entry("Clear Key Value File", clearDevice),
   clearMockNetwork: entry("Clear Mock Network Rules", clearDevice),

@@ -5,6 +5,7 @@ import { registerLocationRouteSessionCleanup } from "../features/utility/Locatio
 import { registerStatusBarSessionCleanup } from "./statusBarSessionCleanup";
 import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
 import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
+import { registerEmulatorAudioSessionCleanup } from "./emulatorAudioSessionCleanup";
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
 import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
@@ -130,6 +131,7 @@ export function wireSessionLifecycle(
   registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
   registerEmulatorSensorSessionCleanup(sessionManager);
+  registerEmulatorAudioSessionCleanup(sessionManager);
   registerDisplayProfileSessionCleanup(sessionManager);
   registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);

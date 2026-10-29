@@ -42,6 +42,8 @@ export type AudioSource =
 export interface StartInjectionRequest extends InjectAudioOptions {
   source: AudioSource;
   gainDb?: number;
+  /** The daemon session that started it; its release stops the injection. */
+  sessionId?: string;
 }
 
 export interface StartedInjection {
@@ -72,11 +74,14 @@ export interface CapturedAudio extends AudioLevels {
 /** Largest source file read into memory: about 4.5 minutes of 48 kHz stereo 16-bit audio. */
 export const MAX_AUDIO_SOURCE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_TONE_MS = 2_000;
+/** A looping injection with no limit of its own stops after this long. */
+export const DEFAULT_LOOP_MAX_DURATION_MS = 10 * 60 * 1000;
 /** Finished injections kept so a late or repeated stop still returns the result. */
 const FINISHED_INJECTIONS_KEPT = 64;
 
 interface ActiveInjection {
   deviceId: string;
+  sessionId?: string;
   injection: AudioInjection;
   result: Promise<StoppedInjection>;
 }
@@ -114,14 +119,19 @@ export class EmulatorAudioService {
     const session = this.deps.createSession(endpoint);
     let injection: AudioInjection;
     try {
-      injection = await session.injectAudio(pcm, request);
+      injection = await session.injectAudio(pcm, {
+        loop: request.loop,
+        startDelayMs: request.startDelayMs,
+        maxDurationMs:
+          request.maxDurationMs ?? (request.loop ? DEFAULT_LOOP_MAX_DURATION_MS : undefined),
+      });
     } catch (error) {
       await session.close();
       throw error;
     }
     const injectionId = this.deps.ids.next();
     const result = this.settle(injectionId, injection, session);
-    this.active.set(injectionId, { deviceId, injection, result });
+    this.active.set(injectionId, { deviceId, sessionId: request.sessionId, injection, result });
     const retire = () => {
       this.active.delete(injectionId);
       this.finished.set(injectionId, result);
@@ -162,17 +172,27 @@ export class EmulatorAudioService {
     return active.result;
   }
 
-  /** Stops every injection on a device, for session release. Never throws. */
-  async stopDevice(deviceId: string): Promise<number> {
-    const ids = [...this.active]
-      .filter(([, entry]) => entry.deviceId === deviceId)
-      .map(([id]) => id);
+  /** Stops every injection on a device. Never throws. */
+  stopDevice(deviceId: string): Promise<number> {
+    return this.stopMatching((entry) => entry.deviceId === deviceId);
+  }
+
+  /**
+   * Stops the injections a session started on a device, for session release. Undefined when it
+   * owns none, so release registers no cleanup.
+   */
+  stopOwnedBy(deviceId: string, sessionId: string): Promise<number> | undefined {
+    const owned = (entry: ActiveInjection) =>
+      entry.deviceId === deviceId && entry.sessionId === sessionId;
+    return [...this.active.values()].some(owned) ? this.stopMatching(owned) : undefined;
+  }
+
+  private async stopMatching(match: (entry: ActiveInjection) => boolean): Promise<number> {
+    const ids = [...this.active].filter(([, entry]) => match(entry)).map(([id]) => id);
     await Promise.all(
       ids.map((id) =>
         this.stopInjection(id).catch((error: unknown) => {
-          logger.warn(
-            `Failed to stop audio injection ${id} on ${deviceId}: ${errorMessage(error)}`,
-          );
+          logger.warn(`Failed to stop audio injection ${id}: ${errorMessage(error)}`);
         }),
       ),
     );

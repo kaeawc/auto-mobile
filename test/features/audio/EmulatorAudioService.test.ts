@@ -1,57 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_LOOP_MAX_DURATION_MS,
   EmulatorAudioService,
   MAX_AUDIO_SOURCE_BYTES,
-  type EmulatorAudioSession,
 } from "../../../src/features/audio/EmulatorAudioService";
-import type {
-  AudioInjection,
-  InjectionResult,
-} from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
+import { FakeEmulatorAudioSession as FakeSession } from "../../fakes/FakeEmulatorAudioSession";
 import { EmulatorAudioError } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import type { EmulatorGrpcEndpoint } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
-import { encodeWav, sineTone, type PcmAudio } from "../../../src/utils/audio/pcm";
+import { encodeWav, sineTone } from "../../../src/utils/audio/pcm";
 import { CountingIdGenerator } from "../../../src/utils/CountingIdGenerator";
-
-/** A scripted session: each injection settles when the test resolves or rejects it, or on stop. */
-class FakeSession implements EmulatorAudioSession {
-  closed = 0;
-  injected: PcmAudio[] = [];
-  settleInjection: ((result: InjectionResult) => void) | undefined;
-  failInjection: ((error: Error) => void) | undefined;
-  captureSamples = new Int16Array(0);
-  captureTimedOut = false;
-
-  constructor(readonly endpoint: EmulatorGrpcEndpoint) {}
-
-  async injectAudio(source: PcmAudio): Promise<AudioInjection> {
-    this.injected.push(source);
-    const done = new Promise<InjectionResult>((resolve, reject) => {
-      this.settleInjection = resolve;
-      this.failInjection = reject;
-    });
-    return {
-      durationMs: 100,
-      sampleRate: source.sampleRate,
-      done,
-      stop: async () => {
-        this.settleInjection?.({ framesSent: 7, reason: "stopped" });
-        return done;
-      },
-    };
-  }
-
-  async captureAudio(options: { durationMs: number; sampleRate?: number }) {
-    return {
-      pcm: { sampleRate: options.sampleRate ?? 48_000, channels: 1, samples: this.captureSamples },
-      timedOut: this.captureTimedOut,
-    };
-  }
-
-  async close(): Promise<void> {
-    this.closed++;
-  }
-}
 
 const ENDPOINT: EmulatorGrpcEndpoint = {
   pid: 1,
@@ -194,6 +151,40 @@ describe("EmulatorAudioService injection", () => {
     await expect(service.capture("emulator-5556", { durationMs: 100 })).rejects.toMatchObject({
       code: "audio_capture_unsupported",
     });
+  });
+});
+
+describe("EmulatorAudioService session ownership and limits", () => {
+  test("stopOwnedBy stops only the session's injections on that device", async () => {
+    const { service } = setup();
+    const mine = await service.startInjection("emulator-5554", {
+      source: { kind: "tone" },
+      sessionId: "s1",
+    });
+    const other = await service.startInjection("emulator-5554", {
+      source: { kind: "tone" },
+      sessionId: "s2",
+    });
+    expect(service.stopOwnedBy("emulator-5554", "s3")).toBeUndefined();
+    expect(await service.stopOwnedBy("emulator-5554", "s1")).toBe(1);
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([other.injectionId]);
+    expect(await service.stopInjection(mine.injectionId)).toMatchObject({ reason: "stopped" });
+  });
+
+  test("a loop without its own limit is capped; a single pass is not", async () => {
+    const { service, sessions } = setup();
+    await service.startInjection("emulator-5554", { source: { kind: "tone" }, loop: true });
+    await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    await service.startInjection("emulator-5554", {
+      source: { kind: "tone" },
+      loop: true,
+      maxDurationMs: 5_000,
+    });
+    expect(sessions.map((session) => session.injectOptions[0]?.maxDurationMs)).toEqual([
+      DEFAULT_LOOP_MAX_DURATION_MS,
+      undefined,
+      5_000,
+    ]);
   });
 });
 

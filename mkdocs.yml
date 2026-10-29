@@ -141,6 +141,7 @@ nav:
       - "Environment variables": using/environment-variables.md
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
+      - "Emulator audio": using/emulator-audio.md
       - "Device ownership": using/device-ownership.md
       - "Usage skill": using/usage-skill.md
       - "Managed Macs and CI runners": using/managed-macs.md

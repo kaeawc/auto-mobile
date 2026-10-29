@@ -12,20 +12,36 @@ import {
 import { HybridVideoCaptureBackend } from "./HybridVideoCaptureBackend";
 import { FfmpegAudioTrackMuxer } from "./FfmpegAudioTrackMuxer";
 
-/** Appends PCM to an owner-only file as it arrives. Closing is idempotent. */
+/**
+ * Appends PCM to an owner-only file as it arrives. Closing is idempotent, and rejects with the
+ * first open or write error, so a short file is never reported as complete.
+ */
 export function openFileBackedPcm(path: string): PcmFile {
   const stream = createWriteStream(path, { mode: 0o600 });
   let bytes = 0;
+  let failure: Error | undefined;
+  // Listening from the start keeps an async write error (e.g. ENOSPC) off the process-wide handler.
+  stream.on("error", (error) => {
+    failure ??= error;
+  });
   let closing: Promise<number> | undefined;
   return {
     write: (chunk) => {
+      if (failure) {
+        return;
+      }
       bytes += chunk.byteLength;
       stream.write(chunk);
     },
     close: () => {
       closing ??= new Promise<number>((resolve, reject) => {
-        stream.once("error", reject);
-        stream.end(() => resolve(bytes));
+        const settle = () => (failure ? reject(failure) : resolve(bytes));
+        if (stream.destroyed) {
+          settle();
+          return;
+        }
+        stream.once("close", settle);
+        stream.end();
       });
       return closing;
     },

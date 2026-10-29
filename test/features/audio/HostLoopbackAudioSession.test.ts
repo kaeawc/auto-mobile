@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { HostLoopbackAudioSession } from "../../../src/features/audio/HostLoopbackAudioSession";
+import {
+  CAPTURE_DRAIN_MS,
+  HostLoopbackAudioSession,
+} from "../../../src/features/audio/HostLoopbackAudioSession";
 import { LOOPBACK_READY_TIMEOUT_MS } from "../../../src/features/audio/loopbackHelperProcess";
 import { sineTone } from "../../../src/utils/audio/pcm";
 import { FakeLoopbackHelperProcess } from "../../fakes/FakeLoopbackHelperProcess";
@@ -216,6 +219,33 @@ describe("HostLoopbackAudioSession capture", () => {
     await stream.stop();
     expect(Array.from(new Int16Array(Uint8Array.from(received).buffer))).toEqual([7, 8, 9]);
     expect(helpers[0].signals).toEqual([]);
+  });
+
+  test("an open-ended capture the helper does not end on its own is killed and fails", async () => {
+    const { session, helpers, timer } = setup();
+    const stream = await session.streamCapture(() => {});
+    const stopping = stream.stop();
+    await turns(1);
+    timer.advanceTime(2_000);
+    await expect(stopping).rejects.toMatchObject({ code: "audio_loopback_failed" });
+    expect(helpers[0].signals).toEqual(["SIGTERM"]);
+  });
+
+  test("an open-ended capture whose helper crashed fails at stop", async () => {
+    const { session, helpers } = setup();
+    const stream = await session.streamCapture(() => {});
+    helpers[0].exit(null);
+    await expect(stream.stop()).rejects.toMatchObject({ code: "audio_loopback_failed" });
+  });
+
+  test("an open-ended capture whose output never ends after exit fails at stop", async () => {
+    const { session, helpers, timer } = setup();
+    const stream = await session.streamCapture(() => {});
+    helpers[0].stdin.on("finish", () => helpers[0].emit("exit", 0));
+    const stopping = stream.stop();
+    await turns(2);
+    timer.advanceTime(CAPTURE_DRAIN_MS);
+    await expect(stopping).rejects.toThrow("may be missing");
   });
 
   test("less audio than asked for is timedOut, not an error", async () => {

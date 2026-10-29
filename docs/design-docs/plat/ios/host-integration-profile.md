@@ -93,8 +93,8 @@ descriptor that is `DISABLED` / `HOST_OPT_IN` until registered.
 The navigation adapters share one hub. Registration must not reset a redactor another adapter
 installed.
 
-## Fixture
+## Fixture requirement
 
-The Playground app's SDK contract screens (#5164) register through this API. They are the
-reference integration and prove each registered transport emits exactly one ordered lifecycle
-stream.
+A reference integration must register every transport through this API, with no direct adapter
+construction, and must show that each registered transport emits exactly one ordered lifecycle
+stream. `HostTransportRegistryTests` covers registration and the capability matrix in-process.

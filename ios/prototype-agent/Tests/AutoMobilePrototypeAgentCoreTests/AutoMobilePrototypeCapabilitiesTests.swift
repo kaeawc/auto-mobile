@@ -61,6 +61,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_cast_v1",
             // Contract only; the media queue runtime is owed (#14249).
             "prototype_platform_media_queue_v1",
+            // Contract only; the photo library runtime is owed (#14195).
+            "prototype_platform_mediaLibrary_query_v1",
+            "prototype_platform_mediaLibrary_save_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
             // Contract only; the Keychain-backed secure storage runtime is owed (#14321).

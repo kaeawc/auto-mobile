@@ -186,6 +186,7 @@
     "platform-handler.json",
     "platform-location.json",
     "platform-media-library-pick.json",
+    "platform-media-library-query-save.json",
     "platform-media-queue.json",
     "platform-reads.json",
     "platform-repeat.json",
@@ -1256,6 +1257,12 @@
     "platform-location-unknown-arg.json",
     "platform-location-unknown-event.json",
     "platform-location-unknown-key.json",
+    "platform-media-library-query-limit-over-limit.json",
+    "platform-media-library-query-undeclared-permission.json",
+    "platform-media-library-query-unknown-media.json",
+    "platform-media-library-save-empty-album.json",
+    "platform-media-library-save-missing-media.json",
+    "platform-media-library-save-undeclared-permission.json",
     "platform-media-pick-into-outside-data.json",
     "platform-media-pick-max-items-fractional.json",
     "platform-media-pick-max-items-over-limit.json",
@@ -1889,6 +1896,8 @@
     "strict-gate-prototype_platform_links_v1.json",
     "strict-gate-prototype_platform_location_v1.json",
     "strict-gate-prototype_platform_map_v1.json",
+    "strict-gate-prototype_platform_mediaLibrary_query_v1.json",
+    "strict-gate-prototype_platform_mediaLibrary_save_v1.json",
     "strict-gate-prototype_platform_mediaLibrary_v1.json",
     "strict-gate-prototype_platform_media_items_v1.json",
     "strict-gate-prototype_platform_media_queue_v1.json",
@@ -3184,6 +3193,13 @@
       "prototype_data_model_v1",
       "prototype_platform_media_queue_v1",
       "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-media-library-query-save.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_mediaLibrary_query_v1",
+      "prototype_platform_mediaLibrary_save_v1",
+      "prototype_platform_mediaLibrary_v1",
       "prototype_platform_v1"
     ],
     "map-node.json": [

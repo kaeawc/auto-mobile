@@ -57,6 +57,7 @@ echo ""
 MACOS_PACKAGES=(
     "screen-capture"
     "network-filter"
+    "audio-loopback"
 )
 
 # iOS + macOS packages (have both platform support)

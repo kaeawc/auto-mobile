@@ -2133,6 +2133,21 @@ with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usag
 plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
 system-UI call per prototype at a time). No production runtime advertises either module yet.
 
+**Photo library (#14195, calls only).** Three more `mediaLibrary` calls read and write the library
+itself. `query` and `manageLimitedSelection` share `prototype_platform_mediaLibrary_query_v1`;
+`save` has its own capability, so a runtime can offer save without read:
+
+- `mediaLibrary.query` (`media` as for `pick`, optional `limit` 1-64) writes the newest items to
+  `into` as device media items; `mediaLibrary.manageLimitedSelection` (no arguments) re-opens the
+  partial-access selection. Both need `photos` in `requires.permissions` and
+  `prototype_platform_mediaLibrary_query_v1`; `query` is `sensitive`.
+- `mediaLibrary.save` (required `media`, an item usually bound from `/data`, and optional nonempty
+  `album`) adds an item to the library and writes its saved identifier to `into`. It needs
+  `photosAdd` in `requires.permissions` and `prototype_platform_mediaLibrary_save_v1`.
+
+All three also need the module's `prototype_platform_mediaLibrary_v1`; no production runtime
+advertises the per-call capabilities yet.
+
 **Fake sign-in (#14303).** The `auth` module (`prototype_platform_auth_v1`) has two calls. `auth.signIn` takes
 an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated sign-in" sheet and writes
 `{userId, name, email}` into `into`; it is `sensitive`, and a back-out is the typed error `cancelled`.

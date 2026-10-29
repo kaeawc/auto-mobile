@@ -126,8 +126,15 @@ function matchAll(source: string, pattern: RegExp): string[] {
 
 /** `add("name")` flags in WebSocketServer.supportedCommands(), conditional ones included. */
 export function parseAndroidAdvertised(kotlinSource: string): string[] {
+  // `addAll(listOf("a_v1", "b_v1"))` advertises each literal in the collection (#15816).
+  const collectionLiterals = [
+    ...kotlinSource.matchAll(
+      /\baddAll\(\s*(?:listOf|setOf|arrayOf|mutableListOf|mutableSetOf)\(([^()]*)\)\s*,?\s*\)/g,
+    ),
+  ].flatMap((call) => matchAll(call[1], new RegExp(`"(${CAPABILITY_NAME})"`, "g")));
   return uniqueSorted([
     ...matchAll(kotlinSource, new RegExp(`\\badd\\("(${CAPABILITY_NAME})"\\)`, "g")),
+    ...collectionLiterals,
     // SystemGlobalActions: `flagFor("lock_screen")` expands to `global_action_lock_screen_v1`.
     ...matchAll(kotlinSource, /\bflagFor\("([a-z][a-z0-9_]*)"\)/g).map(
       (name) => `global_action_${name}_v1`,

@@ -14,6 +14,9 @@ const cases: [Platform | undefined, SomePlatform | undefined, string, Platform][
   [undefined, "either", "a".repeat(40), "ios"],
   [undefined, "either", "emulator-5554", "android"],
   [undefined, undefined, "R5CT123ABCD", "android"],
+  // A watch is reached only when named; its UDID alone reads as an iOS simulator (#14908).
+  [undefined, "watchos", simulatorId, "watchos"],
+  ["watchos", undefined, simulatorId, "watchos"],
 ];
 test.each(cases)("pool %s request %s id %s -> %s", (pooled, requested, deviceId, expected) => {
   expect(resolveSessionDevicePlatform(pooled, requested, deviceId)).toBe(expected);

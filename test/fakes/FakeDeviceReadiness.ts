@@ -4,6 +4,7 @@ import {
   DeviceReadiness,
 } from "../../src/daemon/readiness/DeviceReadiness";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
+import { requireAndroidOrIosPlatform } from "../../src/models/Platform";
 import { DIRECT_DEVICE_CONNECTION_KEY } from "../../src/devices/ActiveDeviceSelection";
 import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 
@@ -384,6 +385,7 @@ export class FakeDeviceReadiness implements Pick<
     platform: Platform,
     options?: DeviceReadyOptions,
   ): Promise<void> {
+    requireAndroidOrIosPlatform(platform, "Device readiness verification");
     this.lastOptions = options;
     const attempts = (this.verificationAttempts.get(deviceId) || 0) + 1;
     this.verificationAttempts.set(deviceId, attempts);

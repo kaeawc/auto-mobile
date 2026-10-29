@@ -354,7 +354,7 @@ describe("verified guest capture guard", () => {
       const closed = new Promise<void>((resolve) => {
         guestCapture.onClose = resolve;
       });
-      sessions[0].settleInjection?.({ framesSent: 2, reason });
+      sessions[0].settleInjection?.({ framesQueued: 2, framesPlayed: 2, reason });
       await closed;
       expect(guestCapture.closed).toEqual(["emulator-5554"]);
       expect(await service.stopInjection(started.injectionId)).toMatchObject({ reason });
@@ -369,7 +369,8 @@ describe("verified guest capture guard", () => {
       session.injectAudio = async (pcm, options) => {
         const injection = await inject(pcm, options);
         timer.setTimeout(
-          () => session.settleInjection?.({ reason: "max_duration", framesSent: 1 }),
+          () =>
+            session.settleInjection?.({ framesQueued: 1, framesPlayed: 1, reason: "max_duration" }),
           options?.maxDurationMs ?? 0,
         );
         return injection;

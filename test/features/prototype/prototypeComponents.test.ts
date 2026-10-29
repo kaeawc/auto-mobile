@@ -31,6 +31,18 @@ describe("component expansion fixtures", () => {
     expect(validatePrototypeSpec(read("components/gallery.json")).success).toBe(true);
   });
 
+  for (const name of names("components/watch")) {
+    test(`watch mockup ${name} expands to its valid corpus copy`, () => {
+      const expansion = expandPrototypeComponents(read(`components/watch/${name}`));
+      expect(expansion.success && expansion.spec).toEqual(read(`valid/${name}`));
+    });
+
+    // Expansion substitutes props only in bindable fields; anything left would render literally.
+    test(`watch mockup ${name} leaves no component prop placeholder after expansion`, () => {
+      expect(JSON.stringify(read(`valid/${name}`))).not.toContain("{props.");
+    });
+  }
+
   for (const name of names("components/expand")) {
     test(`expands ${name}`, () => {
       const fixture = read(`components/expand/${name}`) as { spec: unknown; expanded: unknown };

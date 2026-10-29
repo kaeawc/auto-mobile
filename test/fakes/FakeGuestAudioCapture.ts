@@ -1,5 +1,7 @@
+import type { GuestAudioCapture } from "../../src/features/audio/GuestAudioCapture";
+
 /** A verified capture lease, with no device I/O. */
-export class FakeGuestAudioCapture {
+export class FakeGuestAudioCapture implements GuestAudioCapture {
   opened: string[] = [];
   closed: string[] = [];
   failure?: Error;

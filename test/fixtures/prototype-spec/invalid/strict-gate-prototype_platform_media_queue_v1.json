@@ -1,0 +1,58 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "podcast": {
+        "episodes": [
+          {
+            "id": "ep1",
+            "title": "Pilot",
+            "artist": "Host",
+            "album": "Season 1",
+            "artwork": "ep1Art",
+            "source": {
+              "sample": "tone440"
+            },
+            "durationMs": 60000
+          },
+          {
+            "id": "ep2",
+            "title": "Follow-up",
+            "source": {
+              "sample": "silence"
+            }
+          }
+        ]
+      }
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "pod": {
+          "kind": "audio",
+          "queue": "/data/podcast/episodes"
+        }
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "{platform:/media/players/pod/playing}"
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_platform_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_media_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_media_queue_v1"
+}

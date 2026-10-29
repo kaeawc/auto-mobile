@@ -27,7 +27,8 @@ export const prototypeMediaSchema = z
         z
           .object({
             kind: z.enum(["video", "audio"]),
-            source: prototypeMediaSourceSchema,
+            source: prototypeMediaSourceSchema.optional(),
+            queue: pointerSchema.optional(),
             loop: z.boolean().optional(),
           })
           .strict(),

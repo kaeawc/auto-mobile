@@ -21828,11 +21828,17 @@
             "kind": "ref",
             "name": "mediaSource"
           },
-          "optional": false
+          "optional": true
         },
         "loop": {
           "rule": {
             "kind": "boolean"
+          },
+          "optional": true
+        },
+        "queue": {
+          "rule": {
+            "kind": "pointer"
           },
           "optional": true
         }
@@ -21909,6 +21915,64 @@
             }
           },
           "optional": false
+        }
+      }
+    },
+    "mediaQueueItem": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 128
+          },
+          "optional": false
+        },
+        "title": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "artist": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "album": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "artwork": {
+          "rule": {
+            "kind": "string",
+            "max": 128
+          },
+          "optional": true
+        },
+        "source": {
+          "rule": {
+            "kind": "ref",
+            "name": "mediaSource"
+          },
+          "optional": false
+        },
+        "durationMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": true
         }
       }
     }
@@ -23697,6 +23761,144 @@
           "permissions": [],
           "background": [],
           "sensitive": false
+        },
+        "next": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "previous": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "skipTo": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "itemId": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": false,
+                "maxBytes": 384
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setShuffle": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "shuffle": {
+              "optional": false,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setRepeat": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "repeat": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["off", "one", "all"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setSleepTimer": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "timer": {
+              "optional": false,
+              "value": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "ms": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 86400000
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "endOfItem": {
+                        "rule": {
+                          "kind": "true"
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
         }
       },
       "events": {
@@ -23707,6 +23909,9 @@
           "sensitive": false
         },
         "error": {
+          "sensitive": false
+        },
+        "itemChanged": {
           "sensitive": false
         }
       },
@@ -23767,6 +23972,53 @@
             "kind": "string",
             "empty": true,
             "max": 64
+          }
+        },
+        "currentItemId": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 128
+          }
+        },
+        "currentIndex": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": -1,
+            "max": 4096
+          }
+        },
+        "rate": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "min": 0.25,
+            "max": 4
+          }
+        },
+        "sleepRemainingMs": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          }
+        },
+        "shuffle": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "repeat": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["off", "one", "all"]
           }
         }
       }

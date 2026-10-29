@@ -37534,11 +37534,14 @@
                           "source": {
                             "$ref": "#/properties/spec/properties/root/anyOf/30/properties/source"
                           },
+                          "queue": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                          },
                           "loop": {
                             "type": "boolean"
                           }
                         },
-                        "required": ["kind", "source"],
+                        "required": ["kind"],
                         "additionalProperties": false
                       },
                       "propertyNames": {

@@ -2298,6 +2298,14 @@ pointer to an array of `{startMs, endMs, text}` cues that each end after they st
 unique per player; `hls:` ids are reserved for in-band HLS tracks. `media.setCaptions` (`player`,
 `track`, `""` for off) selects a track and `/platform/media/players/<id>/captionTrack` reports it.
 The cue parser and caption overlay are separate slices.
+**Queues (#14249, contract only).** A declared player takes exactly one of `source` or `queue`, a
+`/data` pointer to an array of `{id, title, artist?, album?, artwork?, source, durationMs?}` items
+with unique ids; `appendData` and `removeData` edit the queue at runtime. A queued player, and the
+calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setShuffle`,
+`setRepeat` (`off`, `one`, `all`) and `setSleepTimer` (`timer` `{ms}`, 0 cancels, or
+`{endOfItem: true}`), need `prototype_platform_media_queue_v1`. Per-player state adds
+`currentItemId`, `currentIndex`, `rate`, `sleepRemainingMs`, `shuffle` and `repeat`, and
+`media.itemChanged` reports an item change. No runtime advertises the capability yet.
 
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and

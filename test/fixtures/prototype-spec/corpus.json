@@ -184,6 +184,7 @@
     "platform-handler.json",
     "platform-location.json",
     "platform-media-library-pick.json",
+    "platform-media-queue.json",
     "platform-reads.json",
     "platform-repeat.json",
     "platform-requires.json",
@@ -991,6 +992,13 @@
     "media-player-unknown-field.json",
     "media-player-unknown-kind.json",
     "media-players-over-limit.json",
+    "media-queue-duplicate-item-id.json",
+    "media-queue-item-blank-title.json",
+    "media-queue-item-missing-source.json",
+    "media-queue-item-unknown-field.json",
+    "media-queue-not-array.json",
+    "media-queue-source-and-queue.json",
+    "media-queue-undeclared.json",
     "media-read-flat-key.json",
     "media-read-unknown-key.json",
     "media-read-unknown-player.json",
@@ -1228,6 +1236,9 @@
     "platform-media-pick-missing-media.json",
     "platform-media-pick-undeclared-module.json",
     "platform-media-pick-unknown-media.json",
+    "platform-media-queue-negative-sleep.json",
+    "platform-media-queue-skip-to-missing-item.json",
+    "platform-media-queue-unknown-repeat.json",
     "platform-media-set-captions-missing-track.json",
     "platform-missing-argument.json",
     "platform-repeat-unknown-item.json",
@@ -1852,6 +1863,7 @@
     "strict-gate-prototype_platform_location_v1.json",
     "strict-gate-prototype_platform_mediaLibrary_v1.json",
     "strict-gate-prototype_platform_media_items_v1.json",
+    "strict-gate-prototype_platform_media_queue_v1.json",
     "strict-gate-prototype_platform_media_v1.json",
     "strict-gate-prototype_platform_namespace_v1.json",
     "strict-gate-prototype_platform_notifications_v1.json",
@@ -3137,6 +3149,12 @@
     "notify-channels-block.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
     "media-video-player-captions.json": [
       "prototype_data_model_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-media-queue.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_queue_v1",
       "prototype_platform_media_v1",
       "prototype_platform_v1"
     ]

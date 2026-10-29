@@ -14,7 +14,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
   injectOptions: Array<InjectAudioOptions | undefined> = [];
   settleInjection: ((result: InjectionResult) => void) | undefined;
   failInjection: ((error: Error) => void) | undefined;
-  captureSamples = new Int16Array(0);
+  captureSamples: Int16Array = new Int16Array(0);
   captureTimedOut = false;
 
   constructor(readonly endpoint: EmulatorGrpcEndpoint) {}

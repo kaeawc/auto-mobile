@@ -181,7 +181,12 @@ describe("DevicePool", () => {
       expect(secondEpoch?.deviceSessionUuid).not.toBe(firstEpoch.deviceSessionUuid);
       expect(registry.getByUuid(firstEpoch.deviceSessionUuid)).toBeUndefined();
       expect(transportAwareDeviceManager.discoveryOptions).toEqual([
-        { bypassAndroidDeviceListCache: true, bypassIosDeviceListCache: true },
+        {
+          bypassAndroidDeviceListCache: true,
+          bypassIosDeviceListCache: true,
+          // The pool's refresh also sweeps watches (#14908).
+          includeWatchOs: true,
+        },
       ]);
     });
 

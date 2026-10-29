@@ -11,6 +11,10 @@ Each emulator has its own audio channel, so emulators running side by side never
 other. The host needs no microphone, speaker or sound server, and this works the same in a
 container. Keep audio enabled on the emulator: do not set `AUTOMOBILE_EMULATOR_AUDIO=false`.
 
+AutoMobile starts each emulator it boots with a gRPC port (`-grpc`) on a free host port from 8554
+to 8653, held while that emulator runs, so no extra launch flags are needed. A `-grpc` flag you
+pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments is used as given.
+
 ## injectAudioInput
 
 Plays audio into the microphone and returns as soon as it starts.

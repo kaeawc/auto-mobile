@@ -70,8 +70,8 @@ internal object PrototypeMedia {
   }
 
   /**
-   * The first `castButton` node rule a spec breaks (#14239): it needs `cast` in
-   * `requires.platform` and its `player` names a declared or inline media player.
+   * The first `castButton` node rule a spec breaks (#14239): it needs `cast` in `requires.platform`
+   * and its `player` names a declared or inline media player.
    */
   fun castButtonError(root: JsonObject, nodes: List<Located>): PrototypeSpecError? {
     val cast =

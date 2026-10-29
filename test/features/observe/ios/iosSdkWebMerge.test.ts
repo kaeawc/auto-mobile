@@ -5,7 +5,9 @@ import {
   mergeIosSdkWebSnapshots,
 } from "../../../../src/features/observe/ios/iosSdkWebMerge";
 import type { IosSdkWebSnapshot } from "../../../../src/features/observe/ios/sdkWebViewBridge";
+import { hashHierarchyForSettle } from "../../../../src/features/observe/wait/WaitSettle";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
+import { hierarchyFingerprint } from "../../../../src/utils/hierarchyFingerprint";
 
 const webViewBounds = { left: 0, top: 100, right: 400, bottom: 800 };
 
@@ -139,5 +141,26 @@ describe("mergeIosSdkWebSnapshots (#5162)", () => {
 
   test("a web identity needs all three ids", () => {
     expect(iosSdkWebTarget({ "web-view-id": "w", "web-snapshot-id": "s" })).toBeNull();
+  });
+});
+
+describe("web snapshot identity and change detection (#5162)", () => {
+  test("an unchanged page hashes the same across snapshot ids", () => {
+    const first = screen(webView());
+    const second = screen(webView());
+    mergeIosSdkWebSnapshots(first, [
+      { webViewId: "checkout", snapshot: { ...snapshot([submit]), snapshotId: "s1" } },
+    ]);
+    mergeIosSdkWebSnapshots(second, [
+      { webViewId: "checkout", snapshot: { ...snapshot([submit]), snapshotId: "s2" } },
+    ]);
+    expect(hierarchyFingerprint(first)).toBe(hierarchyFingerprint(second));
+    expect(hashHierarchyForSettle(first)).toBe(hashHierarchyForSettle(second));
+
+    const moved = screen(webView());
+    mergeIosSdkWebSnapshots(moved, [
+      { webViewId: "checkout", snapshot: snapshot([{ ...submit, label: "Paid" }]) },
+    ]);
+    expect(hierarchyFingerprint(moved)).not.toBe(hierarchyFingerprint(first));
   });
 });

@@ -2,6 +2,7 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/Vie
 import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
 import { boundsKey, childrenOf, removeCoveredLeaves } from "./iosSdkObservationMerge";
 import type { IosSdkWebElement, IosSdkWebSnapshot } from "./sdkWebViewBridge";
+import { WEB_SNAPSHOT_ID_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 
 /**
  * Merges iOS SDK WKWebView snapshots into the XCTest hierarchy (#5162).
@@ -15,7 +16,7 @@ import type { IosSdkWebElement, IosSdkWebSnapshot } from "./sdkWebViewBridge";
 
 export const IOS_SDK_WEB_SOURCE = "sdkWebBridge";
 export const WEB_VIEW_ID_ATTRIBUTE = "web-view-id";
-export const WEB_SNAPSHOT_ID_ATTRIBUTE = "web-snapshot-id";
+export { WEB_SNAPSHOT_ID_ATTRIBUTE };
 export const WEB_ELEMENT_ID_ATTRIBUTE = "web-element-id";
 export const WEB_ORIGIN_ATTRIBUTE = "web-origin";
 

@@ -56,7 +56,8 @@ if [[ "$1" == -create ]]; then
   while [[ "$1" != -output ]]; do shift; done
   printf 'universal\n' > "$2"
 else
-  [[ "$2" == -verify_arch ]]
+  # Xcode 27.1 beta: one -verify_arch per invocation; several architectures after one flag fail.
+  [[ "$2" == -verify_arch && $# -eq 3 ]]
 fi
 SCRIPT
   cat > "${MOCK_BIN}/plutil" <<'SCRIPT'
@@ -73,7 +74,7 @@ SCRIPT
   chmod +x "${MOCK_BIN}/"{xcrun,lipo,plutil,codesign}
   export PATH="${MOCK_BIN}:${PATH}"
   mkdir -p "${FIXTURE}/scripts/lib"
-  cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${FIXTURE}/scripts/lib/"
+  cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${REPO_ROOT}/scripts/lib/lipo-verify-arch.sh" "${FIXTURE}/scripts/lib/"
   unset PROTOVIEWER_CLEARTEXT
   SCRIPT="${FIXTURE}/scripts/ios/protoviewer-build.sh"
   OUT="${BATS_TEST_TMPDIR}/out space"
@@ -91,7 +92,9 @@ SCRIPT
   run cat "$BUILD_LOG"
   [[ "$output" == *'arm64-apple-ios17.0-simulator'* ]]
   [[ "$output" == *'x86_64-apple-ios17.0-simulator'* ]]
-  [[ "$output" == *'-verify_arch arm64 x86_64'* ]]
+  [[ "$output" == *' -verify_arch arm64'* ]]
+  [[ "$output" == *' -verify_arch x86_64'* ]]
+  [[ "$output" != *'-verify_arch arm64 x86_64'* ]]
   [[ "$output" == *'--force --sign - '* ]]
 }
 

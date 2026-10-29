@@ -132,13 +132,18 @@
         let shape: PrototypeStyleShape
         let inner: Bool
 
+        private var margin: Double {
+            inner ? 0 : PrototypeStyleShadowLayer.outerMargin(layers)
+        }
+
         var body: some View {
-            if inner { canvas.clipShape(shape) } else { canvas }
+            // Negative padding expands only the background canvas, leaving the node's layout intact.
+            if inner { canvas.clipShape(shape) } else { canvas.padding(-margin) }
         }
 
         private var canvas: some View {
             Canvas { context, size in
-                let rect = CGRect(origin: .zero, size: size)
+                let rect = CGRect(origin: .zero, size: size).insetBy(dx: margin, dy: margin)
                 for layer in layers where layer.inner == inner {
                     guard let color = layer.color else { continue }
                     var sourceShape = shape

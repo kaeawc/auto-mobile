@@ -87,7 +87,57 @@ public enum AutoMobileWebAction: Codable, Sendable, Equatable {
     case insertText(snapshotId: String, elementId: String, text: String)
     case select(snapshotId: String, elementId: String, value: String)
     case scroll(snapshotId: String, elementId: String?, x: Double, y: Double)
+    /// Focus the element, set its value and dispatch `input` and `change` (#5162).
+    case setValue(snapshotId: String, elementId: String, text: String)
+    /// Set the element's value to `""` and dispatch `input` and `change` (#5162).
+    case clear(snapshotId: String, elementId: String)
+    /// Scroll the element into the center of the viewport (#5162).
+    case scrollIntoView(snapshotId: String, elementId: String)
+    /// Submit the element's enclosing form, as the IME `done` action does (#5162).
+    case submit(snapshotId: String, elementId: String)
     case evaluateJavaScript(String)
+}
+
+/// The JavaScript each bounded ``AutoMobileWebAction`` runs (#5162). An element id comes from the
+/// page, so it never becomes JavaScript source: it is a JSON string literal, matched through
+/// `CSS.escape`, and cannot break out of the selector or the script.
+enum AutoMobileWebActionScript {
+    /// The script for a bounded action; nil for ``AutoMobileWebAction/evaluateJavaScript(_:)``.
+    static func source(for action: AutoMobileWebAction) -> String? {
+        switch action {
+        case let .click(_, id): element(id, "e.click();")
+        case let .focus(_, id): element(id, "e.focus();")
+        case let .insertText(_, id, text): element(id, "e.value=\(json(text)); \(events("input"))")
+        case let .select(_, id, value): element(id, "e.value=\(json(value)); \(events("change"))")
+        case let .scroll(_, id, x, y):
+            id.map { element($0, "e.scrollBy(\(x),\(y));") } ?? "document.body.scrollBy(\(x),\(y));"
+        case let .setValue(_, id, text):
+            element(id, "e.focus(); e.value=\(json(text)); \(events("input", "change"))")
+        case let .clear(_, id): element(id, "e.value=''; \(events("input", "change"))")
+        case let .scrollIntoView(_, id): element(id, "e.scrollIntoView({block:'center',inline:'center'});")
+        case let .submit(_, id):
+            element(
+                id,
+                "const f=e.form||e.closest('form'); if (f) { f.requestSubmit ? f.requestSubmit() : f.submit(); }"
+            )
+        case .evaluateJavaScript: nil
+        }
+    }
+
+    /// Runs `body` with `e` bound to the element whose `data-automobile-id` is `id`, if present.
+    private static func element(_ id: String, _ body: String) -> String {
+        "(() => { const id=\(json(id)); "
+            + "const e=document.querySelector('[data-automobile-id=\"'+CSS.escape(id)+'\"]'); "
+            + "if (!e) { return; } \(body) })()"
+    }
+
+    private static func events(_ names: String...) -> String {
+        names.map { "e.dispatchEvent(new Event('\($0)',{bubbles:true}));" }.joined(separator: " ")
+    }
+
+    static func json(_ string: String) -> String {
+        (try? String(data: JSONEncoder().encode(string), encoding: .utf8)) ?? "\"\""
+    }
 }
 
 /// WebKit and DOM lifecycle event emitted by ``AutoMobileWebViewBridge``.
@@ -175,6 +225,10 @@ public final class AutoMobileWebViewPolicy: Sendable {
             case let .insertText(id, element, _): snapshotId = id; elementId = element
             case let .select(id, element, _): snapshotId = id; elementId = element
             case let .scroll(id, element, _, _): snapshotId = id; elementId = element
+            case let .setValue(id, element, _): snapshotId = id; elementId = element
+            case let .clear(id, element): snapshotId = id; elementId = element
+            case let .scrollIntoView(id, element): snapshotId = id; elementId = element
+            case let .submit(id, element): snapshotId = id; elementId = element
             case .evaluateJavaScript: return false
             }
             return lock.withLock { latestSnapshots in
@@ -364,29 +418,17 @@ public final class AutoMobileWebViewPolicy: Sendable {
                 return
             }
             let source: String
-            switch action {
-            case let .click(_, id): source = "document.querySelector('[data-automobile-id=\"\(id)\"]')?.click()"
-            case let .focus(_, id): source = "document.querySelector('[data-automobile-id=\"\(id)\"]')?.focus()"
-            case let .insertText(
-                _,
-                id,
-                text
-            ): source =
-                "(() => { const e=document.querySelector('[data-automobile-id=\"\(id)\"]'); e.value=\(Self.json(text)); e.dispatchEvent(new Event('input',{bubbles:true})); })()"
-            case let .select(
-                _,
-                id,
-                value
-            ): source =
-                "(() => { const e=document.querySelector('[data-automobile-id=\"\(id)\"]'); e.value=\(Self.json(value)); e.dispatchEvent(new Event('change',{bubbles:true})); })()"
-            case let .scroll(
-                _,
-                id,
-                x,
-                y
-            ): source =
-                "document.querySelector('\(id.map { "[data-automobile-id=\"\($0)\"]" } ?? "body")')?.scrollBy(\(x),\(y))"
-            case let .evaluateJavaScript(script): source = script
+            if case let .evaluateJavaScript(script) = action {
+                source = script
+            } else if let bounded = AutoMobileWebActionScript.source(for: action) {
+                source = bounded
+            } else {
+                completion(.failure(NSError(
+                    domain: "AutoMobileWebViewBridge",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Unsupported web action"]
+                )))
+                return
             }
             webView?.evaluateJavaScript(source) { _, error in
                 if let error { completion(.failure(error)) } else { completion(.success(())) }
@@ -434,9 +476,6 @@ public final class AutoMobileWebViewPolicy: Sendable {
             ))
         }
 
-        private static func json(_ string: String) -> String {
-            (try? String(data: JSONEncoder().encode(string), encoding: .utf8)) ?? "\"\""
-        }
 
         private static let script = #"""
         (() => {

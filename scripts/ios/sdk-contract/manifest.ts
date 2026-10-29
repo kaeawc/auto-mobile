@@ -5,7 +5,7 @@ import { z } from "zod";
  * (`ios/Playground/Sources/SdkContract/SdkContractManifest.swift`). Keep the two in step:
  * the Swift encoder omits nil optionals, so every optional here means "not asserted".
  */
-export const SDK_CONTRACT_MANIFEST_SCHEMA_VERSION = 2;
+export const SDK_CONTRACT_MANIFEST_SCHEMA_VERSION = 3;
 
 const expectedNetworkEventSchema = z.object({
   caseName: z.string().min(1),
@@ -51,6 +51,37 @@ const capabilityObservationSchema = z.object({
   afterRegistration: z.array(transportDescriptorSchema),
 });
 
+/** One action the observation scenario's contract bridge executed. */
+const observationHostActionSchema = z.object({
+  kind: z.string().min(1),
+  elementId: z.string().min(1).optional(),
+  observationIdentity: z.number().int().nonnegative(),
+  text: z.string().optional(),
+});
+
+const observationHostLogSchema = z.object({
+  captures: z.number().int().nonnegative(),
+  actions: z.array(observationHostActionSchema),
+});
+
+/** The storage registration a storage scenario applied. */
+const storageRegistrationSchema = z.object({
+  allowKeychainDeletion: z.boolean(),
+  keychainEntries: z.array(
+    z.object({ service: z.string(), account: z.string(), accessGroup: z.string() }),
+  ),
+  uncoordinatedSuites: z.array(z.string().min(1)),
+  hostCoordinatedSuites: z.array(z.string().min(1)),
+  coreDataStores: z.array(
+    z.object({
+      identifier: z.string().min(1),
+      appGroup: z.string().min(1).optional(),
+      coordination: z.string().min(1).optional(),
+    }),
+  ),
+  secretWritten: z.boolean(),
+});
+
 const sdkEnvelopeSchema = z.object({
   eventType: z.string().min(1),
   payload: z.string(),
@@ -66,6 +97,8 @@ const sdkContractManifestSchema = z.object({
   network: z.array(expectedNetworkEventSchema),
   faults: z.array(faultCaseObservationSchema),
   capabilities: capabilityObservationSchema.optional(),
+  observation: observationHostLogSchema.optional(),
+  storage: storageRegistrationSchema.optional(),
   events: z.array(sdkEnvelopeSchema),
   undecodableBatches: z.number().int().nonnegative(),
 });
@@ -74,6 +107,9 @@ export type ExpectedNetworkEvent = z.infer<typeof expectedNetworkEventSchema>;
 export type FaultCaseObservation = z.infer<typeof faultCaseObservationSchema>;
 export type TransportDescriptor = z.infer<typeof transportDescriptorSchema>;
 export type CapabilityObservation = z.infer<typeof capabilityObservationSchema>;
+export type ObservationHostAction = z.infer<typeof observationHostActionSchema>;
+export type ObservationHostLog = z.infer<typeof observationHostLogSchema>;
+export type StorageRegistration = z.infer<typeof storageRegistrationSchema>;
 export type SdkContractManifest = z.infer<typeof sdkContractManifestSchema>;
 
 export type ManifestParseResult =

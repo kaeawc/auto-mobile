@@ -25,7 +25,7 @@ function manifest(
   },
 ): SdkContractManifest {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     runId: "c1",
     scenario: "capabilities",
     status: "complete",

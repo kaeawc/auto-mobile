@@ -43,7 +43,7 @@ struct CapabilityObservation: Encodable, Sendable {
 /// What a contract scenario fed the SDK and what the SDK serialized for it. The TypeScript
 /// harness compares this with the MCP surface to name the boundary that disagreed.
 struct SdkContractManifest: Encodable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     enum Status: String, Encodable {
         /// The scenario ran to the end; the harness judges the captured events.
@@ -62,6 +62,10 @@ struct SdkContractManifest: Encodable {
     var network: [ExpectedNetworkEvent] = []
     var faults: [FaultCaseObservation] = []
     var capabilities: CapabilityObservation?
+    /// For the observation scenario, what the contract bridge's host captured and executed.
+    var observation: ObservationHostLog?
+    /// For the storage scenarios, the storage registration the host applied.
+    var storage: StorageRegistration?
     /// This run's SDK envelopes exactly as the SDK encoded them (payload is base64 JSON).
     var events: [SdkEventEnvelope] = []
     /// Batches the tap saw but could not decode with the public `SdkEventBatch` type.

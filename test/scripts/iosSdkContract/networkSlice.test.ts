@@ -143,6 +143,17 @@ describe("field helpers", () => {
     expect(recordDifferences({ id: 1, url: "a" }, { id: 2, url: "b" })).toHaveLength(1);
   });
 
+  test("treats header and metadata maps as equal whatever their key order", () => {
+    const reference = { responseHeaders: { Connection: "close", "Content-Length": "32" } };
+    const live = { responseHeaders: { "Content-Length": "32", Connection: "close" } };
+    expect(recordDifferences(reference, live)).toEqual([]);
+    expect(
+      recordDifferences(reference, {
+        responseHeaders: { Connection: "keep-alive", "Content-Length": "32" },
+      }),
+    ).toHaveLength(1);
+  });
+
   test("matches payloads by request id, or by frame identity when the SDK generated the id", () => {
     const sent = {
       url: "ws://x",
@@ -200,7 +211,7 @@ describe("field helpers", () => {
 
 describe("judgeManifest", () => {
   const manifest: SdkContractManifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     runId: "run-1",
     scenario: "network",
     status: "complete",
@@ -219,6 +230,30 @@ describe("judgeManifest", () => {
     expect(findings).toEqual([
       { slice: "network", caseName: "run", boundary: "fixture-host", message: "listener failed" },
     ]);
+  });
+
+  test("accepts the observation and storage scenarios' own output, not an empty manifest", () => {
+    const empty = { ...manifest, network: [] };
+    const storage = {
+      allowKeychainDeletion: false,
+      keychainEntries: [],
+      uncoordinatedSuites: [],
+      hostCoordinatedSuites: [],
+      coreDataStores: [],
+      secretWritten: false,
+    };
+    const complete: Array<[string, SdkContractManifest]> = [
+      ["observe", { ...empty, scenario: "observe", observation: { captures: 0, actions: [] } }],
+      ["storage-default", { ...empty, scenario: "storage-default", storage }],
+      ["storage", { ...empty, scenario: "storage", storage: { ...storage, secretWritten: true } }],
+    ];
+    for (const [slice, scenario] of complete) {
+      expect(judgeManifest(scenario, slice)).toEqual([]);
+      expect(judgeManifest({ ...empty, scenario: slice }, slice)[0]).toMatchObject({
+        slice,
+        boundary: "fixture-host",
+      });
+    }
   });
 
   test("needs recorded cases for the scenario that ran", () => {

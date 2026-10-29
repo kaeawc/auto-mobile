@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { ContractBoundary, ContractFinding } from "./boundaries";
 import type { ExpectedNetworkEvent, SdkContractManifest } from "./manifest";
 
@@ -86,9 +87,10 @@ export function networkFieldMismatches(
 export function recordDifferences(reference: JsonRecord, live: JsonRecord): string[] {
   const keys = new Set([...Object.keys(reference), ...Object.keys(live)]);
   keys.delete("id");
+  // Header and metadata maps are unordered, so compare values, not serialized text.
   return [...keys]
     .sort()
-    .filter((key) => JSON.stringify(reference[key]) !== JSON.stringify(live[key]))
+    .filter((key) => !isDeepStrictEqual(reference[key], live[key]))
     .map(
       (key) =>
         `${key}: SDK bytes replay to ${JSON.stringify(reference[key])}, live reports ${JSON.stringify(live[key])}`,
@@ -247,9 +249,17 @@ export function judgeManifest(
   return findings;
 }
 
+/** Each scenario records its cases in its own manifest field. */
 function hasScenarioOutput(manifest: SdkContractManifest, slice: string): boolean {
-  if (slice === NETWORK_SLICE) {
-    return manifest.network.length > 0;
+  switch (slice) {
+    case NETWORK_SLICE:
+      return manifest.network.length > 0;
+    case "observe":
+      return manifest.observation !== undefined;
+    case "storage":
+    case "storage-default":
+      return manifest.storage !== undefined;
+    default:
+      return manifest.faults.length > 0 || manifest.capabilities !== undefined;
   }
-  return manifest.faults.length > 0 || manifest.capabilities !== undefined;
 }

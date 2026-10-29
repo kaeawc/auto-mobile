@@ -19,7 +19,8 @@ CtrlProxy encode one definition. The daemon reduces the payload to these fields
   emit an audit event per read. Until then `inspection` is `unavailable` and the
   `secure_state` `read` operation stays unavailable.
 - **Deletion is exact.** `deletion` is `enabled` only when the host set
-  `allowKeychainDeletion` and allowlisted at least one entry; `deletionScopes` is that
+  `allowKeychainDeletion` and allowlisted at least one entry in
+  `allowedKeychainDeletionEntries`, both on its `StorageInspectionConfiguration`; `deletionScopes` is that
   allowlist, sorted. It is the same set `/keychain/delete` (the `deleteKeychainItem`
   tool) matches byte for byte. Reporting a scope does not authorize a call: each delete
   still passes the confirmation, app-id and storage mutation gates.
@@ -41,5 +42,8 @@ Each registered app-group UserDefaults suite and Core Data store becomes one
 | `user_defaults_suite` | always `app_group`                                                        | declared at `registerAppGroupSuite(_:coordination:)`                           | `supported`            |
 | `core_data`           | `app_group` when the registration names an `appGroup`, else `app_private` | `single_process` when app-private; otherwise declared, default `uncoordinated` | `unsupported` (#15692) |
 
+Hosts declare it at registration:
+`DatabaseInspector.shared.registerAppGroupSuite("group.example", coordination: .hostCoordinated)`
+for suites, and `CoreDataStoreRegistration(identifier:appGroup:coordination:)` for Core Data.
 Coordination is always the host's declaration. The SDK does not probe containers or
 file locks to infer it; re-registering a suite replaces the earlier declaration.

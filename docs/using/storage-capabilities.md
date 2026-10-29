@@ -27,9 +27,9 @@ See [Keystore test state](keystore-test-state.md) for the Android `secure_state`
 
 Deletion is the only Keychain change AutoMobile makes, so `read`, `write` and
 `namespace_reset` stay closed even when deletion is enabled. Each delete still needs
-storage mutation authorization (`--allow-storage-mutations`). To enable it, the app sets
-`allowKeychainDeletion` and lists each item in `allowedKeychainDeletionEntries` on its
-`StorageInspectionConfiguration`.
+storage mutation authorization (`--allow-storage-mutations`). If deletion is `disabled`,
+ask the app's developers to turn on Keychain deletion in the app's AutoMobile SDK
+configuration and allowlist the exact items.
 
 ## iOS shared stores
 
@@ -45,6 +45,5 @@ and `databases.stores` lists its registered Core Data stores. Each entry states:
 - `query`: `supported` for suites; `unsupported` for Core Data stores, which can be
   registered but not queried yet.
 
-The app declares coordination when it registers a store:
-`DatabaseInspector.shared.registerAppGroupSuite("group.example", coordination: .hostCoordinated)`,
-or `CoreDataStoreRegistration(identifier:appGroup:coordination:)` for Core Data.
+Coordination is whatever the app declared when it registered the store; AutoMobile does
+not infer it. Treat an `uncoordinated` shared store as one that can change between reads.

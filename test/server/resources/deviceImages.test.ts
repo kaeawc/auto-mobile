@@ -140,7 +140,7 @@ describe("Device Image Resources with Fakes", () => {
     }
   });
 
-  test("notifies both platform image resource URIs", async () => {
+  test("notifies every platform image resource URI", async () => {
     const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
     try {
       await notifyDeviceImageResourcesUpdated();
@@ -148,6 +148,7 @@ describe("Device Image Resources with Fakes", () => {
         "automobile:devices/images",
         "automobile:devices/images/android",
         "automobile:devices/images/ios",
+        "automobile:devices/images/watchos",
       ]);
     } finally {
       notify.mockRestore();

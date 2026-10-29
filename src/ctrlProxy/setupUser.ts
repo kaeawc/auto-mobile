@@ -30,10 +30,50 @@ export async function resolveSetupUser(
     );
   }
   const id = Number(user);
-  if (id === 0) {
-    logger.debug("[CTRL_PROXY] Automotive device reports foreground user 0; no user targeting");
+  if (id !== 0) {
+    return id;
   }
-  return id === 0 ? undefined : id;
+  await assertNotHeadlessSystemUser(adb);
+  logger.debug("[CTRL_PROXY] Automotive device reports foreground user 0; no user targeting");
+  return undefined;
+}
+
+/**
+ * The driver user is not in the foreground yet. On a headless-system-user build user 0 has no UI and
+ * the driver (often user 10) is switched to after `sys.boot_completed`, so CtrlProxy set up now would
+ * land on the wrong user. Runner readiness retries this within its setup budget (#15879).
+ */
+export class ForegroundUserPendingError extends ActionableError {}
+
+/** Whether `error`, or a cause it wraps, is a {@link ForegroundUserPendingError}. */
+export function isForegroundUserPending(error: unknown): boolean {
+  for (let current = error, depth = 0; current instanceof Error && depth < 8; depth++) {
+    if (current instanceof ForegroundUserPendingError) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+/**
+ * User 0 in the foreground is the driver only when the system user is not headless. The property is
+ * the one `UserManager.isHeadlessSystemUserMode()` reads; it is read only on an automotive device that
+ * reports user 0, so a running driver user costs nothing extra.
+ */
+async function assertNotHeadlessSystemUser(adb: Pick<AdbExecutor, "executeCommand">): Promise<void> {
+  const headless = await adb.executeCommand("shell getprop ro.fw.mu.headless_system_user", {
+    noRetry: true,
+  });
+  if (headless.stdout.trim() !== "true") {
+    return;
+  }
+  throw new ForegroundUserPendingError(
+    "This automotive device runs a headless system user (ro.fw.mu.headless_system_user=true) and " +
+      "`am get-current-user` still reports user 0, so the driver user is not in the foreground yet. " +
+      "Device readiness waits for the switch; if it never happens, start the driver user with " +
+      "`adb shell am switch-user <id>` and retry.",
+  );
 }
 
 /** ` --user <id>` for a resolved setup user, otherwise the empty string. */

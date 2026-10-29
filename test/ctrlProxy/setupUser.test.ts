@@ -7,6 +7,8 @@ import { AndroidCtrlProxyAccessibility } from "../../src/ctrlProxy/AndroidCtrlPr
 import { grantLocalNetworkPermission } from "../../src/ctrlProxy/grantLocalNetworkPermission";
 import {
   createSetupUserResolver,
+  ForegroundUserPendingError,
+  isForegroundUserPending,
   resolveSetupUser,
   settingsCommand,
   userFlag,
@@ -52,10 +54,60 @@ describe("resolveSetupUser (#14918)", () => {
     expect((error as Error).message).toContain("Current user not set");
   });
 
-  test("a reported user 0 means there is nothing to target", async () => {
-    expect(
-      await resolveSetupUser(automotiveWithForegroundUser("0"), { formFactor: "automotive" }),
-    ).toBeUndefined();
+  test("a reported user 0 on a build without a headless system user means nothing to target", async () => {
+    const adb = automotiveWithForegroundUser("0");
+    respond(adb, "getprop ro.fw.mu.headless_system_user", "false\n");
+    expect(await resolveSetupUser(adb, { formFactor: "automotive" })).toBeUndefined();
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell am get-current-user",
+      "shell getprop ro.fw.mu.headless_system_user",
+    ]);
+  });
+
+  test("a running driver user is resolved without reading the headless property", async () => {
+    const adb = automotiveWithForegroundUser("10");
+    respond(adb, "getprop ro.fw.mu.headless_system_user", "true\n");
+    expect(await resolveSetupUser(adb, { formFactor: "automotive" })).toBe(10);
+    expect(adb.getExecutedCommands()).toEqual(["shell am get-current-user"]);
+  });
+
+  test("user 0 on a headless build is a pending driver user, not a target (#15879)", async () => {
+    const adb = automotiveWithForegroundUser("0");
+    respond(adb, "getprop ro.fw.mu.headless_system_user", "true\n");
+    const error = await resolveSetupUser(adb, { formFactor: "automotive" }).catch(
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(ForegroundUserPendingError);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain("headless system user");
+    expect((error as Error).message).toContain("am switch-user");
+  });
+
+  test("the resolver does not cache a pending driver user and picks up the switch", async () => {
+    // Models the boot sequence: user 0 first, then the system switches to the driver user.
+    const adb = automotiveWithForegroundUser("0");
+    respond(adb, "getprop ro.fw.mu.headless_system_user", "true\n");
+    let userChanges = 0;
+    const resolve = createSetupUserResolver({
+      adb: () => adb,
+      device: () => ({ formFactor: "automotive" }),
+      timer: () => new FakeTimer(),
+      onUserChanged: () => {
+        userChanges++;
+      },
+    });
+    await expect(resolve()).rejects.toBeInstanceOf(ForegroundUserPendingError);
+    respond(adb, "am get-current-user", "10\n");
+    expect(await resolve()).toBe(10);
+    expect(userChanges).toBe(0);
+  });
+
+  test("isForegroundUserPending sees the error through a wrapping cause", () => {
+    const pending = new ForegroundUserPendingError("pending");
+    expect(isForegroundUserPending(pending)).toBe(true);
+    expect(isForegroundUserPending(new ActionableError("wrapped", { cause: pending }))).toBe(true);
+    expect(isForegroundUserPending(new ActionableError("pending"))).toBe(false);
+    expect(isForegroundUserPending("pending")).toBe(false);
   });
 
   test("command builders add --user only for a resolved user", () => {

@@ -11,6 +11,7 @@ import type {
   RunnerReadinessPhase,
 } from "./RunnerReadinessAttemptContext";
 import { RunnerReadinessError } from "./RunnerReadinessError";
+import { isForegroundUserPending } from "./setupUser";
 import { normalizeDiagnostic, phaseElapsedLabel } from "./runnerReadinessDiagnosticText";
 
 export const READINESS_PROBE_TIMEOUT_MS = 2_000;
@@ -265,7 +266,7 @@ export class ReadinessPhaseRunner {
         : `${readinessContext}: ${detailMessage}`,
       device.platform === "android" &&
         ReadinessPhaseRunner.isSetupPhase(phase) &&
-        isAndroidFrameworkUnavailable(detail),
+        (isAndroidFrameworkUnavailable(detail) || isForegroundUserPending(detail)),
       options.deadlineExhausted ?? false,
       phase,
       attempts,

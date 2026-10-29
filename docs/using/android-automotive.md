@@ -53,6 +53,11 @@ and targets that user when it installs, enables and rebinds CtrlProxy and grants
 when it reads the accessibility state to check the binding. Other devices issue exactly the commands they
 always did. If the foreground user cannot be read you get an error that names the user problem.
 
+Right after boot the system user can still be in the foreground for a moment before the driver user takes
+over. Device readiness waits for that switch before setting CtrlProxy up. If the driver user never comes
+to the foreground, readiness times out with an error naming the headless system user; start the driver
+user with `adb shell am switch-user <id>` and retry.
+
 The gate uses the AVD's form factor, so a physical head unit is not covered.
 
 ## Simulating driving and night mode

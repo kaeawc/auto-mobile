@@ -36,6 +36,7 @@ import {
 } from "./requestIdentity";
 import {
   destructionTicket,
+  drainableIdle,
   type BrokerExportIdentity,
   type BrokerExportRecord,
   type BrokerAbandonment,
@@ -624,14 +625,14 @@ export class SqliteSessionBrokerStore {
   }
 
   /**
-   * Operator drain of the idle pool. Every idle resource leaves the reusable set in one
-   * transaction, so no acquisition can reserve it while its destruction is pending.
+   * Drain of the idle pool (operator, or idle expiry with its observed revisions): each claimed
+   * resource leaves the reusable set in one transaction, so no acquisition can reserve it.
    */
-  async drainIdle(): Promise<DestructionTicket[]> {
+  async drainIdle(observed?: readonly DestructionTicket[]): Promise<DestructionTicket[]> {
     return this.db.transaction().execute(async (trx) => {
       const resources = await this.readResources(trx, true);
       const tickets: DestructionTicket[] = [];
-      for (const resource of resources.filter((entry) => entry.state === "idle")) {
+      for (const resource of resources.filter((entry) => drainableIdle(entry, observed))) {
         tickets.push(
           destructionTicket(await this.updateResource(trx, resource, { state: "destroying" })),
         );

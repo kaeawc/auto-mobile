@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { SdkWebSnapshotRequestOptions } from "../../../../src/features/observe/ios/CtrlProxySdkWebView";
 import {
   createIosSdkWebReader,
@@ -8,6 +8,7 @@ import {
 } from "../../../../src/features/observe/ios/IosSdkWebReader";
 import type { CtrlProxySdkWebSnapshotResult } from "../../../../src/features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../../../src/models";
+import { logger } from "../../../../src/utils/logger";
 
 const entry = (webViewId: string) => ({
   webViewId,
@@ -128,6 +129,39 @@ describe("mergeIosSdkWebInto (#5162)", () => {
       hierarchy: { node: { $: { class: "XCUIApplication" } } },
     };
     expect(await mergeIosSdkWebInto(hierarchy, reader(client))).toBeNull();
-    expect(client.requests).toEqual([]);
+    expect(client.requests).toHaveLength(0);
+  });
+
+  test("reads nothing for a screen with two WKWebViews, which never merge", async () => {
+    const client = new FakeWebClient({});
+    const webView = {
+      $: { class: "WKWebView", bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+    };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: { node: { $: { class: "XCUIApplication" }, node: [webView, webView] } },
+    };
+    expect(await mergeIosSdkWebInto(hierarchy, reader(client))).toBeNull();
+    expect(client.requests).toHaveLength(0);
+  });
+});
+
+describe("returned snapshot failures (#5162)", () => {
+  test("a bad_reply is logged before the read falls back to XCTest only", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      const client = new FakeWebClient({
+        first: {
+          success: false,
+          available: true,
+          totalTimeMs: 1,
+          failure: "bad_reply",
+          error: "garbled",
+        },
+      });
+      expect(await reader(client).snapshots()).toEqual([]);
+      expect(warn.mock.calls.some(([message]) => String(message).includes("garbled"))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

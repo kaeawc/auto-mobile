@@ -56,6 +56,15 @@ function attached(node: ViewHierarchyNode): Array<Record<string, unknown>> {
     .map((child) => child.$ ?? {});
 }
 
+/** Every merged DOM element anywhere under `node`. */
+function webElements(node: ViewHierarchyNode): Array<Record<string, unknown>> {
+  const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
+  return [
+    ...(node.extras?.["sdk.source"] === "sdkWebBridge" ? [node.$ ?? {}] : []),
+    ...children.flatMap(webElements),
+  ];
+}
+
 describe("mergeIosSdkWebSnapshots (#5162)", () => {
   test("attaches DOM elements under the outermost WKWebView with screen bounds and web identity", () => {
     const hierarchy = screen(webView());
@@ -230,7 +239,7 @@ describe("covered XCTest leaves (#5162)", () => {
       { webViewId: "checkout", snapshot: snapshot([submit]) },
     ]);
     expect(summary?.deduplicated).toBe(1);
-    const [element] = attached(findWebViewNodes(hierarchy)[0]);
+    const element = webElements(findWebViewNodes(hierarchy)[0])[0];
     expect(element).toMatchObject({
       "resource-id": "submit-order",
       class: "button",
@@ -238,5 +247,25 @@ describe("covered XCTest leaves (#5162)", () => {
       bounds: { left: 10, top: 120, right: 110, bottom: 160 },
       "web-element-id": "e0",
     });
+  });
+});
+
+describe("replacement in place (#5162)", () => {
+  test("a DOM element replaces its XCTest leaf inside the leaf's container", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        "resource-id": "submit-order",
+        "content-desc": "Submit",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const section: ViewHierarchyNode = { $: { "resource-id": "checkout-section" }, node: [native] };
+    const hierarchy = screen(webView([section]));
+    mergeIosSdkWebSnapshots(hierarchy, [{ webViewId: "checkout", snapshot: snapshot([submit]) }]);
+    const children = Array.isArray(section.node) ? section.node : [];
+    expect(children).toHaveLength(1);
+    expect(children[0].$).toMatchObject({ "resource-id": "submit-order", "web-element-id": "e0" });
+    // Not also appended under the web view.
+    expect(attached(findWebViewNodes(hierarchy)[0])).toEqual([]);
   });
 });

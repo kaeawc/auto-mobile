@@ -194,38 +194,42 @@ function signaturesOf(element: IosSdkWebElement, bounds: Box): string[] {
 }
 
 /**
- * Removes XCTest leaves a DOM element covers (same bounds and the same label, text or id) and
- * records each one's attributes against the covering element, so the replacement keeps what native
- * selectors and field detection read from it (its `resource-id`, input properties and the rest).
+ * Replaces each XCTest leaf a DOM element covers (same bounds and the same label, text or id) with
+ * that element, in the leaf's place, so container-scoped selectors still find it. The element
+ * inherits the leaf's attributes it does not set itself, so it keeps what native selectors and
+ * field detection read (its `resource-id`, input and toggle properties, fresh focus and the rest).
+ * A second leaf covered by an element already placed is removed as a duplicate.
  */
-function absorbCoveredLeaves(
+function replaceCoveredLeaves(
   node: ViewHierarchyNode,
   covering: ReadonlyMap<string, number>,
-  inherited: Map<number, Record<string, unknown>>,
+  build: (position: number, inherited: Record<string, unknown>) => ViewHierarchyNode,
+  placed: Set<number>,
 ): number {
   const children = childrenOf(node);
   if (children.length === 0) {
     return 0;
   }
-  let removed = 0;
-  const kept = children.filter((child) => {
+  let replaced = 0;
+  const next = children.flatMap((child): ViewHierarchyNode[] => {
     const position = childrenOf(child).length === 0 ? coveringElement(child, covering) : undefined;
     if (position === undefined) {
-      return true;
+      replaced += replaceCoveredLeaves(child, covering, build, placed);
+      return [child];
     }
+    replaced += 1;
+    if (placed.has(position)) {
+      return [];
+    }
+    placed.add(position);
     // The DOM element's own bounds replace the leaf's.
-    const attributes = Object.fromEntries(
+    const inherited = Object.fromEntries(
       Object.entries(nodeAttributes(child)).filter(([name]) => name !== "bounds"),
     );
-    inherited.set(position, { ...attributes, ...inherited.get(position) });
-    removed += 1;
-    return false;
+    return [build(position, inherited)];
   });
-  node.node = kept;
-  return kept.reduce(
-    (total, child) => total + absorbCoveredLeaves(child, covering, inherited),
-    removed,
-  );
+  node.node = next;
+  return replaced;
 }
 
 function coveringElement(
@@ -297,21 +301,18 @@ export function mergeIosSdkWebSnapshots(
         }
       }
     });
-    const inherited = new Map<number, Record<string, unknown>>();
-    summary.deduplicated += absorbCoveredLeaves(webViewNode, covering, inherited);
-    const nodes = converted.map(({ element, bounds }, position) =>
-      convertElement(
-        element,
-        bounds,
-        webViewId,
-        snapshot.snapshotId,
-        origin,
-        inherited.get(position),
-      ),
+    const build = (position: number, inherited: Record<string, unknown> = {}) => {
+      const { element, bounds } = converted[position];
+      return convertElement(element, bounds, webViewId, snapshot.snapshotId, origin, inherited);
+    };
+    const placed = new Set<number>();
+    summary.deduplicated += replaceCoveredLeaves(webViewNode, covering, build, placed);
+    const appended = converted.flatMap((_, position) =>
+      placed.has(position) ? [] : [build(position)],
     );
-    webViewNode.node = [...childrenOf(webViewNode), ...nodes];
+    webViewNode.node = [...childrenOf(webViewNode), ...appended];
     summary.webViews += 1;
-    summary.attached += nodes.length;
+    summary.attached += converted.length;
   });
   return summary.webViews > 0 ? summary : null;
 }

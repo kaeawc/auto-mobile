@@ -545,6 +545,8 @@ function readFields(payload: WirePayload): RefusalFields {
     ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
     ...(payload.heldDevices ? { heldDevices: payload.heldDevices } : {}),
+    ...(payload.dbPath ? { dbPath: payload.dbPath } : {}),
+    ...(payload.unknownMigrations ? { unknownMigrations: payload.unknownMigrations } : {}),
   };
 }
 

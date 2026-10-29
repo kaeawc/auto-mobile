@@ -254,6 +254,14 @@ control of it (an absent registry means no broker bindings); an unreadable one k
 the last good snapshot for reads and
 inventory. Taking a device requires a current snapshot; existing holders and a known
 binding's own execution or reconciler retain control during an unreadable registry.
+Unknown registry migrations instead put non-strict refreshes and generic allocation in
+`files_only` mode: allocation claim files decide ownership, managed bindings are not enforced,
+and DaemonBroker skips and latches off device_claims mirrors until restart. Strict ownership
+readers (`requireCurrent` or `refuseUpgradePending`) throw non-retryable
+`registry_schema_unsupported` with `dbPath` and `unknownMigrations`. Every snapshot load probes
+applied migration names through the cached connection before reading managed devices; an
+unsupported handle is closed and removed from both view and shared caches.
+Upgrade the daemons sharing managed devices to a release that includes these migrations.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.

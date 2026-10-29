@@ -74,6 +74,16 @@ export class FakeBindingRegistry implements BindingRegistry {
     return this.closed;
   }
 
+  schemaError: Error | undefined;
+  schemaProbes = 0;
+
+  async assertSupportedSchema(): Promise<void> {
+    this.schemaProbes++;
+    if (this.schemaError) {
+      throw this.schemaError;
+    }
+  }
+
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {
     const scopeKey = computeBindingScopeKey(identity);
     const nowMs = this.timer.now();

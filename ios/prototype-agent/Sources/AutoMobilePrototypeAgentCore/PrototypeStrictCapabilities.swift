@@ -157,6 +157,9 @@ enum PrototypeStrictCapabilities {
             if type == "platform" {
                 need("platform")
                 if fields["call"] == .string("share.open") { need("platform_share") }
+                if let capability = PrototypePlatformValidator.callCapability(fields["call"]?.stringValue) {
+                    result.insert(capability)
+                }
             }
             for (key, child) in fields where !["ios", "android"].contains(key) {
                 if key == "form", field == "body" {

@@ -180,6 +180,8 @@ internal object PrototypeBundleCapabilities {
           is PrototypePlatformUses.Use.Event -> null
         }
       module?.let { text(PrototypePlatformModules.module(it)?.get("capability")) }?.let(caps::add)
+      if (use is PrototypePlatformUses.Use.Call)
+        PrototypePlatformModules.callCapability(text(use.action["call"]))?.let(caps::add)
     }
   }
 }

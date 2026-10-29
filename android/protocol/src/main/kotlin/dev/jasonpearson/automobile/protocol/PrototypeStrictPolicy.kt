@@ -580,6 +580,8 @@ private fun polishFeatures(
   if (PrototypeChannels.needsRealtimeCapability(fields)) need("platform_realtime")
   if (fields.text("type") == "platform" && fields.text("call") == "share.open")
     need("platform_share")
+  if (fields.text("type") == "platform")
+    PrototypePlatformModules.callCapability(fields.text("call"))?.let(result::add)
 }
 
 /**

@@ -166,6 +166,7 @@
     "platform-calendar.json",
     "platform-call.json",
     "platform-camera-capture.json",
+    "platform-camera-live.json",
     "platform-commerce.json",
     "platform-connectivity.json",
     "platform-contacts-fields-pair.json",
@@ -1122,6 +1123,11 @@
     "platform-camera-capture-undeclared-module.json",
     "platform-camera-capture-unknown-arg.json",
     "platform-camera-capture-unknown-media.json",
+    "platform-camera-record-duration-zero.json",
+    "platform-camera-record-missing-preview.json",
+    "platform-camera-take-photo-undeclared-permission.json",
+    "platform-camera-unknown-event.json",
+    "platform-camera-unknown-state.json",
     "platform-commerce-amount-arg.json",
     "platform-commerce-missing-product.json",
     "platform-commerce-product-id-pattern.json",
@@ -1787,7 +1793,9 @@
     "strict-gate-prototype_platform_battery_v1.json",
     "strict-gate-prototype_platform_biometric_v1.json",
     "strict-gate-prototype_platform_calendar_v1.json",
+    "strict-gate-prototype_platform_camera_capture_v1.json",
     "strict-gate-prototype_platform_camera_v1.json",
+    "strict-gate-prototype_platform_camera_video_v1.json",
     "strict-gate-prototype_platform_clipboard_v1.json",
     "strict-gate-prototype_platform_commerce_v1.json",
     "strict-gate-prototype_platform_connectivity_v1.json",
@@ -3013,6 +3021,7 @@
     ],
     "platform-camera-capture.json": [
       "prototype_data_model_v1",
+      "prototype_platform_camera_capture_v1",
       "prototype_platform_camera_v1",
       "prototype_platform_v1"
     ],
@@ -3064,6 +3073,12 @@
     "media-players.json": [
       "prototype_data_model_v1",
       "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-camera-live.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_camera_v1",
+      "prototype_platform_camera_video_v1",
       "prototype_platform_v1"
     ]
   }

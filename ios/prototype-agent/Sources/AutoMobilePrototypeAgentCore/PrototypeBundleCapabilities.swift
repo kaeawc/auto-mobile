@@ -201,6 +201,7 @@ enum PrototypeBundleCapabilities {
             if let module = method.split(separator: ".").first,
                let capability = PrototypePlatformValidator.modules[String(module)]?
                .capability { names.insert(capability) }
+            if let capability = PrototypePlatformValidator.callCapability(method) { names.insert(capability) }
         }
         for (key, child) in fields where ![
             "ios",

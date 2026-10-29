@@ -163,6 +163,24 @@ describe("HostLoopbackAudioSession capture", () => {
     expect(result.pcm.samples.length).toBe(480);
   });
 
+  test("PCM delivered after the helper reports its exit is still captured", async () => {
+    const { session } = setup((helper) => {
+      helper.ready();
+      helper.stdout.write(pcmBytes(new Array(240).fill(1)));
+      // The exit arrives before the pipe has delivered the rest of the PCM.
+      setImmediate(() => {
+        helper.emit("exit", 0);
+        setImmediate(() => {
+          helper.stdout.write(pcmBytes(new Array(240).fill(2)));
+          helper.stdout.end();
+        });
+      });
+    });
+    const result = await session.captureAudio({ durationMs: 10 });
+    expect(result.pcm.samples.length).toBe(480);
+    expect(result.timedOut).toBe(false);
+  });
+
   test("less audio than asked for is timedOut, not an error", async () => {
     const { session } = setup((helper) => {
       helper.ready();

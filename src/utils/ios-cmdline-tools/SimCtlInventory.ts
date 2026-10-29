@@ -1,5 +1,6 @@
 import { SimCtlCreation } from "./SimCtlCreation";
 import { isTemplateSimName } from "./SimulatorTemplateKey";
+import { isWatchOsSimulatorRuntime } from "./simulatorRuntimeFamily";
 import {
   type SimCtlCatalog,
   AppleDevice,
@@ -471,7 +472,11 @@ export class SimCtlInventory {
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
-    const listedDevices = Object.values(simulatorList.devices).flat();
+    // Apple Watch simulators share this listing but are not iOS devices (#14901).
+    const iosRuntimes = Object.entries(simulatorList.devices).filter(
+      ([runtimeId]) => !isWatchOsSimulatorRuntime(runtimeId),
+    );
+    const listedDevices = iosRuntimes.flatMap(([, runtimeDevices]) => runtimeDevices);
     const signature = JSON.stringify(
       listedDevices
         .map(({ udid, state, isAvailable, name }): [string, string, boolean, string] => [
@@ -488,7 +493,7 @@ export class SimCtlInventory {
     }
     this.retireStoppedSimulatorDisplays(simulatorList);
     const devices = await Promise.all(
-      Object.entries(simulatorList.devices).flatMap(([runtimeId, runtimeDevices]) =>
+      iosRuntimes.flatMap(([runtimeId, runtimeDevices]) =>
         runtimeDevices
           .filter((device) => !isTemplateSimName(device.name))
           .map(async (device): Promise<DeviceInfo> => {

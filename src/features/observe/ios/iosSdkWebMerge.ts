@@ -3,6 +3,7 @@ import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult"
 import { boundsKey, childrenOf } from "./iosSdkObservationMerge";
 import type { IosSdkWebElement, IosSdkWebSnapshot } from "./sdkWebViewBridge";
 import { WEB_SNAPSHOT_ID_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
+import { VALUE_REDACTED_ATTRIBUTE } from "../../../models/Element";
 
 /**
  * Merges iOS SDK WKWebView snapshots into the XCTest hierarchy (#5162).
@@ -32,6 +33,9 @@ const EDITABLE_WEB_ROLES: ReadonlySet<string> = new Set([
   "searchbox",
   "combobox",
 ]);
+
+/** The value the SDK bridge reports in place of a DOM value when its policy redacts text. */
+const REDACTED_WEB_VALUE = "[REDACTED]";
 
 /** The class CtrlProxy reports for a WKWebView in the XCTest hierarchy. */
 const WEB_VIEW_CLASS = "WKWebView";
@@ -162,6 +166,7 @@ function convertElement(
 ): ViewHierarchyNode {
   const role = element.role ?? "element";
   const editable = EDITABLE_WEB_ROLES.has(role);
+  const redacted = element.value === REDACTED_WEB_VALUE;
   return {
     $: {
       class: role,
@@ -170,7 +175,9 @@ function convertElement(
       ...(editable ? { focusable: "true", "input-type": "text" } : {}),
       enabled: String(element.enabled),
       ...(element.label ? { "content-desc": element.label } : {}),
-      ...(element.value ? { text: element.value } : {}),
+      // A redacted value is not the page's text, so it is reported as present but unreadable.
+      ...(element.value && !redacted ? { text: element.value } : {}),
+      ...(redacted ? { [VALUE_REDACTED_ATTRIBUTE]: "true" } : {}),
       ...(element.enabled ? { clickable: "true" } : {}),
       // The snapshot's focus can be older than the fresh XCTest read, which reports focus by
       // omission, so a replaced leaf's focus is the leaf's alone.

@@ -367,3 +367,37 @@ describe("fresh native state on replacement (#5162)", () => {
     ]);
   });
 });
+
+describe("redacted DOM values (#5162)", () => {
+  test("a redacted input value is not reported as text, and text verification skips it", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "email", role: "input", label: "Email", value: "[REDACTED]" },
+        ]),
+      },
+    ]);
+    const [email] = attached(findWebViewNodes(hierarchy)[0]) as Element[];
+    expect(email.text).toBeUndefined();
+    const detector = new FieldTypeDetector();
+    expect(detector.shouldSkipVerification(email, detector.detect(email))).toBe(true);
+  });
+
+  test("an unredacted input value is still verified", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "email", role: "input", label: "Email", value: "a@b.c" },
+        ]),
+      },
+    ]);
+    const [email] = attached(findWebViewNodes(hierarchy)[0]) as Element[];
+    expect(email.text).toBe("a@b.c");
+    const detector = new FieldTypeDetector();
+    expect(detector.shouldSkipVerification(email, detector.detect(email))).toBe(false);
+  });
+});

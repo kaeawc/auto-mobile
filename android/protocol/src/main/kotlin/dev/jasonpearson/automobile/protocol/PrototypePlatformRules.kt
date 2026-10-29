@@ -55,6 +55,7 @@ internal object PrototypePlatformRules {
     val channels = root.member("channels") ?: JsonObject(emptyMap())
     val players = PrototypeMedia.players(root, nodes)
     val notificationChannels = PrototypeNotificationRules.channels(root)
+    val previews = PrototypeCameraPreview.ids(nodes)
     val background = requires.strings("background").toSet()
     val sensors = root.member("sensors")
   }
@@ -77,6 +78,7 @@ internal object PrototypePlatformRules {
       PrototypeMap::error,
       PrototypeMediaCaptions::error,
       PrototypeMedia::castButtonError,
+      PrototypeCameraPreview::error,
       { root, _ -> requiresError(root) },
     )
 
@@ -106,6 +108,13 @@ internal object PrototypePlatformRules {
           ?: (use as? Use.Call)?.let { call ->
             callChecks.firstNotNullOfOrNull { it(call.action, call.path, root, declared) }
           })
+          ?: (if (use is Use.Call)
+            PrototypeChannels.callError(use.action, use.path, root)
+              ?: PrototypeAuthRules.callError(use.action, use.path, root)
+              ?: PrototypeNotificationRules.callError(use.action, use.path, root)
+              ?: PrototypeMedia.callError(use.action, use.path, declared.players)
+              ?: PrototypeCameraPreview.callError(use.action, use.path, declared.previews)
+          else null))
         ?.let {
           return it
         }

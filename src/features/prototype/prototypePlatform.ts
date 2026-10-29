@@ -4,6 +4,11 @@ import {
   prototypeChannelCallError,
   prototypeRealtimeFields,
 } from "./prototypeChannels";
+import {
+  prototypeCameraCallError,
+  prototypeCameraPreviewError,
+  prototypeCameraPreviewIds,
+} from "./prototypeCameraPreview";
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
 import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
@@ -384,6 +389,7 @@ interface PlatformContext {
   channels: Raw;
   players: ReadonlySet<string>;
   root: Raw;
+  previews: ReadonlySet<string>;
 }
 
 function callError(
@@ -600,6 +606,7 @@ function platformContext(root: Raw): PlatformContext {
     channels: record(root.channels) ?? {},
     players: prototypeMediaPlayers(root),
     root,
+    previews: prototypeCameraPreviewIds(root),
     declared: strings(requires.platform),
     permissions: new Set(
       (Array.isArray(requires.permissions) ? requires.permissions : []).map(
@@ -626,7 +633,7 @@ export function prototypePlatformError(
     return error;
   }
   for (const use of prototypePlatformUses(root)) {
-    const found = useError(use, context, check) ?? channelUseError(use, root, context.players);
+    const found = useError(use, context, check) ?? channelUseError(use, root, context);
     if (found) {
       return found;
     }
@@ -677,6 +684,20 @@ function rootBlockError(
     }
   }
   return undefined;
+  return (
+    prototypeChannelsError(root) ??
+    prototypeAuthBlockError(root) ??
+    prototypeSecureStorageError(root) ??
+    prototypeLocationBlockError(root) ??
+    prototypeNotificationsBlockError(root) ??
+    prototypeMediaError(root) ??
+    prototypeMediaQueueError(root, check) ??
+    prototypeVideoPlayerError(root) ??
+    prototypeMediaCaptionsError(root, check) ??
+    prototypeCastButtonError(root) ??
+    prototypeCameraPreviewError(root) ??
+    requiresError(root)
+  );
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */
@@ -888,13 +909,14 @@ function argumentValueError(
 function channelUseError(
   use: PrototypePlatformUse,
   root: Raw,
-  players: ReadonlySet<string>,
+  context: PlatformContext,
 ): PrototypePlatformError | undefined {
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
         prototypeAuthCallError(use.action, use.path, root) ??
         prototypeCommerceCallError(use.action, use.path, root) ??
         prototypeNotificationsCallError(use.action, use.path, root) ??
-        prototypeMediaCallError(use.action, use.path, players))
+        prototypeMediaCallError(use.action, use.path, context.players) ??
+        prototypeCameraCallError(use.action, use.path, context.previews))
     : undefined;
 }

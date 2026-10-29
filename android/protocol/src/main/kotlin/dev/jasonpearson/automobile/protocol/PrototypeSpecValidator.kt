@@ -162,8 +162,9 @@ object PrototypeSpecValidator {
     }
     val value = checkNotNull(context.root).jsonObject
     val checked = checkNotNull(context.stateBindings)
-    // A state write can break a videoPlayer's number-typed positionKey.
+    // A state write can break a videoPlayer's number-typed positionKey or a cameraPreview's keys.
     val videoPlayers = context.nodes.filter { it.value.text("type") == "videoPlayer" }
+    val cameraPreviews = context.nodes.filter { it.value.text("type") == "cameraPreview" }
     // Only bindings can change their verdict. Static-only nodes/actions passed full validation.
     checked.nodes.removeAll {
       boundKeys(it.value).isEmpty() &&
@@ -203,10 +204,10 @@ object PrototypeSpecValidator {
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
           else
             storedStateError(stored, stateRule, value, checked, keyframeKeys)
-              ?: PrototypeMedia.videoPlayerError(
-                JsonObject(value + ("state" to stored)),
-                videoPlayers,
-              )
+              ?: JsonObject(value + ("state" to stored)).let {
+                PrototypeMedia.videoPlayerError(it, videoPlayers)
+                  ?: PrototypeCameraPreview.error(it, cameraPreviews)
+              }
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")
         }

@@ -1069,7 +1069,14 @@ describe("live camera calls and per-call capabilities", () => {
 
   test("a live call without the camera permission is refused", () => {
     expect(validatePrototypeSpec(spec([call("takePhoto")], [])).success).toBe(false);
-    expect(validatePrototypeSpec(spec([call("takePhoto")])).success).toBe(true);
+    const withPreview = {
+      ...spec([call("takePhoto")]),
+      root: {
+        type: "column",
+        children: [{ type: "cameraPreview", id: "vf" }, spec([call("takePhoto")]).root],
+      },
+    };
+    expect(validatePrototypeSpec(withPreview).success).toBe(true);
   });
 });
 

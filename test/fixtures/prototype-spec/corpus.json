@@ -16,6 +16,7 @@
     "bar-scroll-screen-local.json",
     "bounds-anchor-aligned.json",
     "bounds-at-limits.json",
+    "camera-preview.json",
     "carousel-hero-repeat.json",
     "carousel-multi-browse.json",
     "chart-variants.json",
@@ -518,6 +519,16 @@
     "button-empty-label.json",
     "button-unknown-icon.json",
     "button-unknown-variant.json",
+    "camera-preview-bad-aspect-ratio.json",
+    "camera-preview-bad-mode.json",
+    "camera-preview-id-not-key.json",
+    "camera-preview-lens-key-undeclared.json",
+    "camera-preview-permission-undeclared.json",
+    "camera-preview-requires-undeclared.json",
+    "camera-preview-two-previews.json",
+    "camera-preview-unknown-preview.json",
+    "camera-preview-without-id.json",
+    "camera-preview-zoom-key-not-number.json",
     "card-missing-children.json",
     "card-nested-bad-child.json",
     "card-unknown-variant.json",
@@ -1881,6 +1892,7 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-camera-preview.json",
     "strict-gate-media-cast-button.json",
     "strict-gate-media-video-player.json",
     "strict-gate-on-appear-prototype_timers_v1.json",
@@ -3274,6 +3286,7 @@
       "prototype_platform_cast_v1",
       "prototype_platform_media_v1",
       "prototype_platform_v1"
-    ]
+    ],
+    "camera-preview.json": ["prototype_platform_camera_v1", "prototype_platform_v1"]
   }
 }

@@ -90,6 +90,10 @@
               "into": "/data/draft/clip"
             }
           ]
+        },
+        {
+          "type": "cameraPreview",
+          "id": "vf"
         }
       ]
     }

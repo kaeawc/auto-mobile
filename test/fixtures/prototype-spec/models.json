@@ -533,6 +533,14 @@
   },
   "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
   "nodeCastButton": { "type": "castButton", "player": "main", "protocols": ["airplay"] },
+  "nodeCameraPreview": {
+    "type": "cameraPreview",
+    "id": "vf",
+    "lensKey": "text",
+    "zoomKey": "count",
+    "aspectRatio": "1:1",
+    "mode": "photo"
+  },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {

@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "lens": "back",
+      "flash": "auto",
+      "zoom": "wide"
+    },
+    "requires": {
+      "platform": ["camera"],
+      "permissions": [
+        {
+          "name": "camera",
+          "purpose": "Show the viewfinder"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "cameraPreview",
+          "id": "vf",
+          "lensKey": "lens",
+          "flashKey": "flash",
+          "zoomKey": "zoom",
+          "aspectRatio": "16:9",
+          "contentScale": "fit",
+          "mode": "video"
+        },
+        {
+          "type": "button",
+          "label": "Flip",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "lens",
+              "value": "front"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].zoomKey",
+  "expectedMessage": "zoomKey must name a declared number state key"
+}

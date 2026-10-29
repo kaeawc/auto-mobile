@@ -569,7 +569,10 @@ jobs:
           no_output_timeout: 15m
           environment:
             AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
-          command: ./scripts/ios/sdk-contract-integration.sh "${SIMULATOR_UDID}"
+          # Same 15-minute elapsed bound as the GitHub step's timeout-minutes.
+          command: |
+            source ./scripts/ios/run_with_timeout.sh
+            run_with_timeout 900 ./scripts/ios/sdk-contract-integration.sh "${SIMULATOR_UDID}"
       - run:
           name: "Run saved prototype smoke (advisory)"
           no_output_timeout: 12m

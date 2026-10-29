@@ -1,11 +1,9 @@
 # iOS SDK contract suite
 
-The contract suite (#5164) drives SDK capabilities inside a real host app on a simulator and
-follows each result through CtrlProxy, the daemon's iOS client and the MCP surface. Layer-local
-tests prove each side encodes and decodes its own fixtures; this suite proves the layers agree
-with each other on the shipped artifacts. It is the conformance backstop for #5157 and grows one
-slice per capability. The network slice exists today; observation, capability-matrix, storage,
-WKWebView and fault slices are added by #5159, #5160, #5161, #5162 and #5163.
+The contract suite drives SDK capabilities inside a real host app on a simulator and follows each
+result through CtrlProxy, the daemon's iOS client and the MCP surface. Layer-local tests prove each
+side encodes and decodes its own fixtures; this suite proves the layers agree with each other on the
+shipped artifacts. Each SDK capability is covered by one slice, described in the sections below.
 
 ## Parts
 

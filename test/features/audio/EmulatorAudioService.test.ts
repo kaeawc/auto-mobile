@@ -23,6 +23,7 @@ function setup(
   prepare: (session: FakeSession) => void = () => {},
   consolePorts: number[] = [5554],
   maxSourceBytes?: number,
+  hostLoopback = false,
 ) {
   const sessions: FakeSession[] = [];
   const lookups: number[] = [];
@@ -46,6 +47,14 @@ function setup(
       }
       return bytes;
     },
+    createHostLoopbackSession: hostLoopback
+      ? () => {
+          const session = new FakeSession({ ...ENDPOINT, consolePort: 0 });
+          prepare(session);
+          sessions.push(session);
+          return session;
+        }
+      : undefined,
     ids: new CountingIdGenerator("inj"),
     maxSourceBytes,
   });
@@ -284,5 +293,75 @@ describe("EmulatorAudioService capture", () => {
       timedOut: true,
       durationMs: 0,
     });
+  });
+});
+
+describe("EmulatorAudioService iOS Simulators over the host loopback", () => {
+  const SIM_A = "11111111-2222-3333-4444-555555555555";
+  const SIM_B = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
+
+  test("a simulator UDID injects and captures through the host loopback route", async () => {
+    const { service, lookups } = setup({}, () => {}, [5554], undefined, true);
+    const started = await service.startInjection(SIM_A, { source: { kind: "tone" } });
+    expect(started.route).toBe("host-loopback");
+    expect(lookups).toEqual([]);
+    expect((await service.capture(SIM_A, { durationMs: 10 })).route).toBe("host-loopback");
+  });
+
+  test("one host-loopback injection runs per host, across simulators", async () => {
+    const { service } = setup({}, () => {}, [5554], undefined, true);
+    const first = await service.startInjection(SIM_A, { source: { kind: "tone" } });
+    await expect(service.startInjection(SIM_B, { source: { kind: "tone" } })).rejects.toMatchObject(
+      { code: "audio_injection_busy" },
+    );
+    // An emulator has its own route and is unaffected.
+    expect(
+      (await service.startInjection("emulator-5554", { source: { kind: "tone" } })).route,
+    ).toBe("emulator-grpc");
+    await service.stopInjection(first.injectionId);
+    expect((await service.startInjection(SIM_B, { source: { kind: "tone" } })).route).toBe(
+      "host-loopback",
+    );
+  });
+
+  test("a second start racing the first's start is refused", async () => {
+    const { service } = setup({}, () => {}, [5554], undefined, true);
+    const [first, second] = await Promise.allSettled([
+      service.startInjection(SIM_A, { source: { kind: "tone" } }),
+      service.startInjection(SIM_B, { source: { kind: "tone" } }),
+    ]);
+    expect(first.status).toBe("fulfilled");
+    expect(second).toMatchObject({ status: "rejected", reason: { code: "audio_injection_busy" } });
+  });
+
+  test("a failed start frees the host loopback", async () => {
+    let fail = true;
+    const { service } = setup(
+      {},
+      (session) => {
+        if (fail) {
+          session.injectAudio = async () => {
+            throw new Error("no loopback");
+          };
+        }
+      },
+      [5554],
+      undefined,
+      true,
+    );
+    await expect(service.startInjection(SIM_A, { source: { kind: "tone" } })).rejects.toThrow(
+      "no loopback",
+    );
+    fail = false;
+    expect((await service.startInjection(SIM_A, { source: { kind: "tone" } })).route).toBe(
+      "host-loopback",
+    );
+  });
+
+  test("without a host loopback session a simulator is unsupported", async () => {
+    const { service } = setup();
+    await expect(service.startInjection(SIM_A, { source: { kind: "tone" } })).rejects.toMatchObject(
+      { code: "audio_injection_unsupported" },
+    );
   });
 });

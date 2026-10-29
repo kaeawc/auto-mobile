@@ -166,16 +166,17 @@ export interface IosSdkWebMergeSummary {
 }
 
 /**
- * Attaches each snapshot's elements under its WKWebView node, in place. The registered web views
- * pair with the outermost WKWebView nodes in order, and only when the counts match: with a mismatch
- * the pairing is ambiguous, so nothing is attached and the web views stay XCTest-only.
+ * Attaches the snapshot's elements under its WKWebView node, in place, when the app registered
+ * exactly one web view and the screen shows exactly one outermost WKWebView. Nothing ties a
+ * registration to its native view: the registry orders web views by registration, not by screen
+ * position, so with two or more the pairing is ambiguous and the web views stay XCTest-only.
  */
 export function mergeIosSdkWebSnapshots(
   hierarchy: ViewHierarchyResult,
   snapshots: readonly IosSdkWebViewSnapshot[],
 ): IosSdkWebMergeSummary | null {
   const webViewNodes = findWebViewNodes(hierarchy);
-  if (snapshots.length === 0 || webViewNodes.length !== snapshots.length) {
+  if (snapshots.length !== 1 || webViewNodes.length !== 1) {
     return null;
   }
   const summary: IosSdkWebMergeSummary = { webViews: 0, attached: 0, deduplicated: 0 };

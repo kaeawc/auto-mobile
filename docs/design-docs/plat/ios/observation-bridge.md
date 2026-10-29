@@ -149,9 +149,11 @@ reports neither.
 **Observe: web views.** When the projected hierarchy contains a `WKWebView` node, the collector
 also reads the app's opted-in web views: one unnamed snapshot read answers with the registered list
 and the first web view's snapshot, and each further web view is read by id (2 s budget each). A
-screen without a `WKWebView` makes no read. Registered web views pair with the outermost
-`WKWebView` nodes in tree order, and only when the counts match; otherwise the pairing is ambiguous
-and the web views stay XCTest-only. Each visible DOM element of a paired snapshot is attached as a
+screen without a `WKWebView` makes no read. A snapshot is merged only when the app registered
+exactly one web view and the screen shows exactly one outermost `WKWebView`: nothing ties a
+registration to its native view, and the registry orders web views by registration rather than by
+screen position, so with two or more the pairing is ambiguous and they stay XCTest-only. Each
+visible DOM element of the merged snapshot is attached as a
 child of its `WKWebView` node, offset by the web view's origin, clipped to it and rounded to whole
 points; one wholly outside the web view is dropped. Elements map onto the existing attributes
 (`label` → `content-desc`, `value` → `text`, `role` → `class`; `enabled` elements are `clickable`)

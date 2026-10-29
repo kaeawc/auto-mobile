@@ -95,22 +95,21 @@ describe("mergeIosSdkWebSnapshots (#5162)", () => {
     expect(elements[0].bounds).toEqual({ left: 0, top: 750, right: 50, bottom: 800 });
   });
 
-  test("pairs registered web views with WKWebView nodes in order, skipping one with no snapshot", () => {
+  test("two web views stay XCTest-only: registration order says nothing about screen order", () => {
     const hierarchy = screen(
       webView(),
       webView([], { left: 0, top: 800, right: 400, bottom: 900 }),
     );
-    const summary = mergeIosSdkWebSnapshots(hierarchy, [
-      { webViewId: "first" },
-      { webViewId: "second", snapshot: snapshot([{ ...submit, bounds: [0, 0, 40, 40] }]) },
+    const merged = mergeIosSdkWebSnapshots(hierarchy, [
+      { webViewId: "first", snapshot: snapshot([submit]) },
+      { webViewId: "second", snapshot: snapshot([submit]) },
     ]);
-    expect(summary?.webViews).toBe(1);
-    const [first, second] = findWebViewNodes(hierarchy);
-    expect(attached(first)).toEqual([]);
-    expect(attached(second)[0]).toMatchObject({
-      "web-view-id": "second",
-      bounds: { left: 0, top: 800, right: 40, bottom: 840 },
-    });
+    expect(merged).toBeNull();
+    expect(findWebViewNodes(hierarchy).flatMap(attached)).toEqual([]);
+  });
+
+  test("a single web view without a snapshot attaches nothing", () => {
+    expect(mergeIosSdkWebSnapshots(screen(webView()), [{ webViewId: "first" }])).toBeNull();
   });
 
   test("attaches nothing when the web-view count does not match the WKWebView count", () => {

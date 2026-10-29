@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { prototypeRequiredCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
+import { expandPrototypeComponents } from "../../../src/features/prototype/prototypeComponents";
 import { prototypeMapError } from "../../../src/features/prototype/prototypeMap";
 
 const map = (fields: Record<string, unknown> = {}) => ({ type: "map", ...fields });
@@ -51,4 +52,20 @@ test("the map gate names each map node as well as the declaration", () => {
     "requires.platform[0]",
     "root.children[0]",
   ]);
+});
+
+test("a component prop used in onMarkerTap binds like one in onTap", () => {
+  const expansion = expandPrototypeComponents({
+    requires: { platform: ["map"] },
+    components: {
+      stops: {
+        root: map({ onMarkerTap: [{ type: "emit", name: "{props.eventName}" }] }),
+      },
+    },
+    root: { type: "use", component: "stops", props: { eventName: "stop_tapped" } },
+  });
+  expect(expansion.success).toBe(true);
+  expect(expansion.success && expansion.spec).toMatchObject({
+    root: { type: "map", onMarkerTap: [{ type: "emit", name: "stop_tapped" }] },
+  });
 });

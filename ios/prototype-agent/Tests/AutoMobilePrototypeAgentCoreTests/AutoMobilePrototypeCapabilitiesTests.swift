@@ -61,6 +61,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_secureStorage_v1",
             // Contract only; the voice-note recorder runtimes are owed (#14194).
             "prototype_platform_audioRecorder_v1",
+            // Contract only; the Viewer notification runtime is owed (#14282).
+            "prototype_platform_notifications_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

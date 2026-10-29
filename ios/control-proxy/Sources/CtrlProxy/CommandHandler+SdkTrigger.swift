@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 extension CommandHandler {
@@ -44,5 +45,52 @@ extension CommandHandler {
             ? nil
             : "The in-app SDK rejected trigger \(module).\(trigger): \(reply.error ?? "HTTP \(reply.statusCode)")"
         return response(available: true, reply: reply, error: error)
+    }
+}
+
+extension CommandHandler {
+    func handleSdkObservation(_ request: RequestEnvelope, startTime: Date) async -> SdkObservationResponse {
+        let outcome = await bridgeReply(route: .observationSnapshot, body: Data("{}".utf8)).flatMap { data in
+            Result { try JSONDecoder().decode(AutoMobileObservationSnapshot.self, from: data) }
+                .mapError { _ in SdkBridgeFailure.badReply }
+        }
+        return SdkObservationResponse(
+            requestId: request.requestId, outcome: outcome, totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    func handleSdkAction(_ request: RequestSdkAction, startTime: Date) async -> SdkActionResponse {
+        let outcome: Result<AutoMobileActionResult, SdkBridgeFailure>
+        if let json = request.actionJson, let body = json.data(using: .utf8),
+           (try? JSONDecoder().decode(AutoMobileAction.self, from: body)) != nil
+        {
+            outcome = await bridgeReply(route: .observationAction, body: body).flatMap { data in
+                Result { try JSONDecoder().decode(AutoMobileActionResult.self, from: data) }
+                    .mapError { _ in SdkBridgeFailure.badReply }
+            }
+        } else {
+            outcome = .failure(.invalidAction)
+        }
+        return SdkActionResponse(
+            requestId: request.requestId, outcome: outcome, totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    /// Sends one observation-bridge request to the tracked foreground app's SDK, only when its
+    /// `/health` reports a registered bridge, and maps the SDK's status codes to typed failures.
+    private func bridgeReply(route: SdkRoute, body: Data) async -> Result<Data, SdkBridgeFailure> {
+        guard let info = await sdkServerInfoForTrackedForegroundApp(),
+              info.observationBridge?.available == true,
+              let client = sdkHierarchyClient,
+              let reply = await client.sendObservationRequest(route, body: body)
+        else {
+            return .failure(.bridgeUnavailable)
+        }
+        switch reply.statusCode {
+        case 200: return .success(reply.body)
+        case 409: return .failure(.appNotActive)
+        case 503: return .failure(.bridgeUnavailable)
+        default: return .failure(.badReply)
+        }
     }
 }

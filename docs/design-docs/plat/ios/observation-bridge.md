@@ -39,6 +39,41 @@ A failed probe throws `SdkCapabilityQueryError` instead of returning `unavailabl
 never mistaken for a missing bridge. CtrlProxy also drops a malformed bridge object rather than
 failing the whole capability reply.
 
+## Observation and action commands
+
+The SDK serves two routes, which CtrlProxy relays as commands:
+
+| SDK route                    | CtrlProxy command                                    | Reply                                                |
+| ---------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| `POST /observation/snapshot` | `request_sdk_observation` → `sdk_observation_result` | the bridge's `AutoMobileObservationSnapshot`         |
+| `POST /observation/action`   | `request_sdk_action` → `sdk_action_result`           | the bridge's `AutoMobileActionResult` for one action |
+
+The snapshot, action and result types live in `ios/sdk-wire`, so the SDK and CtrlProxy share one
+encoding. An action is Swift's synthesized enum shape, `{"tap":{"observationIdentity":41,"elementId":"submit"}}`;
+the daemon sends it as the string field `actionJson`. `captureIdentity` is a `UInt64`, and values
+above 2^53 lose precision in the daemon.
+
+CtrlProxy calls the SDK only when the foreground app's `/health` reports an available bridge.
+Otherwise the command fails with a typed `failure`:
+
+| `failure`            | Meaning                                                              |
+| -------------------- | -------------------------------------------------------------------- |
+| `bridge_unavailable` | no SDK in the foreground app, no registered bridge, or no SDK answer |
+| `app_not_active`     | the app resigned active before the SDK served the request            |
+| `invalid_action`     | `actionJson` is missing or is not an `AutoMobileAction`              |
+| `bad_reply`          | the SDK, or CtrlProxy's relayed value, does not match the contract   |
+
+`available` is false only for `bridge_unavailable`. A bridge rejection is a result, not a failure:
+the SDK checks the declared `supportedActions` first (`unsupported_action`), then the bridge checks
+`stale_observation`, `unknown_element`, `element_not_actionable` and `action_in_flight`, and the
+host executor can return `action_queue_overloaded` or `action_cancelled`. The result carries
+`success: false` and the reason. An accepted action carries `nextObservationIdentity`, the capture
+the bridge took after it.
+
+Bridge requests share the runner's SDK data budget (2 s per request, 5 s in total). A daemon-side
+timeout on `request_sdk_action` reports `available: true`, because the action may have run. Neither
+reply is stall evidence for runner recovery: a slow host executor is not a stalled runner.
+
 ## Backend selection
 
 Routing through the bridge must follow these rules:

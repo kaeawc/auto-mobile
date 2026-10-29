@@ -10,6 +10,11 @@
 import type { CtrlProxyPerfTiming, WebSocketMessage } from "./types";
 import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import type { KeyValueEntry } from "../../storage/storageTypes";
+import {
+  iosSdkActionResultSchema,
+  iosSdkBridgeFailure,
+  iosSdkObservationSchema,
+} from "./sdkObservationBridge";
 
 /**
  * Decoded request/response message. Exactly one of `result` / `errorMessage` is
@@ -506,6 +511,28 @@ function decodeTableStructureResult(message: WebSocketMessage): unknown {
   };
 }
 
+/**
+ * `sdk_observation_result` / `sdk_action_result` (#5159). The relayed bridge value is validated
+ * here; a reply whose value does not match the schema becomes a typed `bad_reply` failure.
+ */
+function decodeSdkBridgeResult(
+  message: WebSocketMessage,
+  key: "observation" | "result",
+  schema: typeof iosSdkObservationSchema | typeof iosSdkActionResultSchema,
+): unknown {
+  const raw = message[key];
+  const parsed = raw === undefined ? undefined : schema.safeParse(raw);
+  const invalid = parsed !== undefined && !parsed.success;
+  return {
+    success: invalid ? false : (message.success ?? false),
+    available: message.available ?? false,
+    [key]: parsed?.success ? parsed.data : undefined,
+    failure: invalid ? "bad_reply" : iosSdkBridgeFailure(message.failure),
+    error: invalid ? `The runner relayed a malformed SDK ${key}.` : message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
 function decodeSdkCapabilitiesResult(message: WebSocketMessage): unknown {
   // Foreground-app-scoped SDK availability (#6832). `available: false` is a
   // legitimate success reply — the foreground app simply embeds no SDK — so
@@ -589,6 +616,14 @@ const messageDecoders = new Map<
       error: message.error,
       totalTimeMs: message.totalTimeMs ?? 0,
     }),
+  ],
+  [
+    "sdk_observation_result",
+    (message) => decodeSdkBridgeResult(message, "observation", iosSdkObservationSchema),
+  ],
+  [
+    "sdk_action_result",
+    (message) => decodeSdkBridgeResult(message, "result", iosSdkActionResultSchema),
   ],
   ["voiceover_state_result", decodeVoiceoverStateResult],
   ["voiceover_set_result", decodeVoiceoverSetResult],

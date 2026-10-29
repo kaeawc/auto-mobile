@@ -73,6 +73,8 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "add_highlight",
   "request_magic_tap",
   "request_sdk_trigger",
+  "request_sdk_observation",
+  "request_sdk_action",
   "get_voiceover_state",
   "set_voiceover_state",
   "request_accessibility_audit",

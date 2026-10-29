@@ -49,6 +49,8 @@ public enum WebSocketRequest: Decodable, Sendable {
     case addHighlight(RequestAddHighlight)
     case magicTap(RequestEnvelope)
     case sdkTrigger(RequestSdkTrigger)
+    case sdkObservation(RequestEnvelope)
+    case sdkAction(RequestSdkAction)
     case getVoiceOverState(RequestEnvelope)
     case accessibilityAudit(RequestAccessibilityAudit)
     case setVoiceOverState(RequestSetVoiceOverState)
@@ -106,7 +108,7 @@ public enum WebSocketRequest: Decodable, Sendable {
              .requestRotate, .requestLocation, .setHingeAngle, .requestAppearance, .requestSiri, .requestClipboard:
             return try decodeAppAndDevice(requestType, from: decoder)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
-             .setVoiceOverState, .requestAccessibilityAudit:
+             .setVoiceOverState, .requestAccessibilityAudit, .sdkObservation, .sdkAction:
             return try decodeAccessibility(requestType, from: decoder)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
              .clearPreferences, .deleteKeychainItem:
@@ -231,6 +233,10 @@ public enum WebSocketRequest: Decodable, Sendable {
             return try .magicTap(RequestEnvelope(from: decoder))
         case .sdkTrigger:
             return try .sdkTrigger(RequestSdkTrigger(from: decoder))
+        case .sdkObservation:
+            return try .sdkObservation(RequestEnvelope(from: decoder))
+        case .sdkAction:
+            return try .sdkAction(RequestSdkAction(from: decoder))
         case .getVoiceOverState:
             return try .getVoiceOverState(RequestEnvelope(from: decoder))
         case .setVoiceOverState:
@@ -338,6 +344,8 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .addHighlight: return .addHighlight
         case .magicTap: return .magicTap
         case .sdkTrigger: return .sdkTrigger
+        case .sdkObservation: return .sdkObservation
+        case .sdkAction: return .sdkAction
         case .getVoiceOverState: return .getVoiceOverState
         case .setVoiceOverState: return .setVoiceOverState
         case .accessibilityAudit: return .requestAccessibilityAudit
@@ -388,6 +396,8 @@ public enum WebSocketRequest: Decodable, Sendable {
         case let .setVoiceOverState(payload): return payload
         case let .accessibilityAudit(payload): return payload
         case let .sdkTrigger(payload): return payload
+        case let .sdkObservation(payload): return payload
+        case let .sdkAction(payload): return payload
         case let .setHingeAngle(payload): return payload
         case let .appearance(payload): return payload
         case let .siri(payload): return payload

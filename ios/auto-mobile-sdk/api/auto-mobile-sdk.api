@@ -616,67 +616,8 @@ public final class AutoMobileNotifications: Sendable
   public func installActionHandler(on center: UNUserNotificationCenter = .current())
 
 // Observation/AutoMobileObservationBridge.swift
-public enum AutoMobileCoordinateSpace: String, Codable, Sendable
-  case screen
-  case window
-  case view
-public enum AutoMobileDeviceOrientation: String, Codable, Sendable
-  case portrait
-  case portraitUpsideDown
-  case landscapeLeft
-  case landscapeRight
-  case unknown
-public struct AutoMobileObservationNode: Codable, Sendable, Equatable
-  public let id: String
-  public let role: String
-  public let label: String?
-  public let value: String?
-  public let bounds: SdkBounds
-  public let enabled: Bool
-  public let visible: Bool
-  public let focused: Bool
-  public let children: [AutoMobileObservationNode]
-  public init( id: String, role: String, label: String? = nil, value: String? = nil, bounds: SdkBounds, enabled: Bool = true, visible: Bool = true, focused: Bool = false, children: [AutoMobileObservationNode] = [] )
-  public func contains(id: String) -> Bool
-  public func node(id: String) -> AutoMobileObservationNode?
-public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
-  public let captureIdentity: UInt64
-  public let orientation: AutoMobileDeviceOrientation
-  public let coordinateSpace: AutoMobileCoordinateSpace
-  public let bounds: SdkBounds
-  public let root: AutoMobileObservationNode?
-  public let focusedElementId: String?
-  public let capabilities: Set<String>
-  public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
-  public func containsElement(id: String) -> Bool
 public protocol AutoMobileObservationProvider: AnyObject, Sendable
   func captureObservation() async -> AutoMobileObservationSnapshot
-public enum AutoMobileAction: Codable, Sendable, Equatable
-  case tap(observationIdentity: UInt64, elementId: String)
-  case longPress(observationIdentity: UInt64, elementId: String, durationMs: Int)
-  case swipe(observationIdentity: UInt64, start: SdkPoint, end: SdkPoint, durationMs: Int)
-  case drag(observationIdentity: UInt64, elementId: String, end: SdkPoint, durationMs: Int)
-  case pinch(observationIdentity: UInt64, elementId: String, scale: Double, durationMs: Int)
-  case insertText(observationIdentity: UInt64, elementId: String, text: String)
-  case clearText(observationIdentity: UInt64, elementId: String)
-  case back(observationIdentity: UInt64)
-  case scroll(observationIdentity: UInt64, elementId: String?, delta: SdkPoint)
-  public var observationIdentity: UInt64
-  public var targetElementId: String?
-public struct SdkPoint: Codable, Sendable, Equatable
-  public let x: Double
-  public let y: Double
-  public init(x: Double, y: Double)
-public struct AutoMobileActionResult: Codable, Sendable, Equatable
-public enum Status: String, Codable, Sendable
-  case accepted
-  case rejected
-  case cancelled
-  public let status: Status
-  public let reason: String?
-  public let durationMs: Double
-  public let nextObservationIdentity: UInt64?
-  public init(status: Status, reason: String? = nil, durationMs: Double = 0, nextObservationIdentity: UInt64? = nil)
 public protocol AutoMobileActionExecutor: AnyObject, Sendable
   func execute(_ action: AutoMobileAction) async -> AutoMobileActionResult
   public actor AutoMobileSerialActionQueue: AutoMobileActionExecutor
@@ -1095,6 +1036,65 @@ public struct ObservationBridgeState: Codable, Equatable, Sendable
   public let supportedActions: [String]
   public init( schemaVersion: Int = ObservationBridgeState.currentSchemaVersion, available: Bool, reason: String? = nil, supportedActions: [String] = [] )
   public static let notRegistered = ObservationBridgeState(available: false, reason: notRegisteredReason)
+public enum AutoMobileCoordinateSpace: String, Codable, Sendable
+  case screen
+  case window
+  case view
+public enum AutoMobileDeviceOrientation: String, Codable, Sendable
+  case portrait
+  case portraitUpsideDown
+  case landscapeLeft
+  case landscapeRight
+  case unknown
+public struct AutoMobileObservationNode: Codable, Sendable, Equatable
+  public let id: String
+  public let role: String
+  public let label: String?
+  public let value: String?
+  public let bounds: SdkBounds
+  public let enabled: Bool
+  public let visible: Bool
+  public let focused: Bool
+  public let children: [AutoMobileObservationNode]
+  public init( id: String, role: String, label: String? = nil, value: String? = nil, bounds: SdkBounds, enabled: Bool = true, visible: Bool = true, focused: Bool = false, children: [AutoMobileObservationNode] = [] )
+  public func contains(id: String) -> Bool
+  public func node(id: String) -> AutoMobileObservationNode?
+public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
+  public let captureIdentity: UInt64
+  public let orientation: AutoMobileDeviceOrientation
+  public let coordinateSpace: AutoMobileCoordinateSpace
+  public let bounds: SdkBounds
+  public let root: AutoMobileObservationNode?
+  public let focusedElementId: String?
+  public let capabilities: Set<String>
+  public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
+  public func containsElement(id: String) -> Bool
+public enum AutoMobileAction: Codable, Sendable, Equatable
+  case tap(observationIdentity: UInt64, elementId: String)
+  case longPress(observationIdentity: UInt64, elementId: String, durationMs: Int)
+  case swipe(observationIdentity: UInt64, start: SdkPoint, end: SdkPoint, durationMs: Int)
+  case drag(observationIdentity: UInt64, elementId: String, end: SdkPoint, durationMs: Int)
+  case pinch(observationIdentity: UInt64, elementId: String, scale: Double, durationMs: Int)
+  case insertText(observationIdentity: UInt64, elementId: String, text: String)
+  case clearText(observationIdentity: UInt64, elementId: String)
+  case back(observationIdentity: UInt64)
+  case scroll(observationIdentity: UInt64, elementId: String?, delta: SdkPoint)
+  public var observationIdentity: UInt64
+  public var targetElementId: String?
+public struct SdkPoint: Codable, Sendable, Equatable
+  public let x: Double
+  public let y: Double
+  public init(x: Double, y: Double)
+public struct AutoMobileActionResult: Codable, Sendable, Equatable
+public enum Status: String, Codable, Sendable
+  case accepted
+  case rejected
+  case cancelled
+  public let status: Status
+  public let reason: String?
+  public let durationMs: Double
+  public let nextObservationIdentity: UInt64?
+  public init(status: Status, reason: String? = nil, durationMs: Double = 0, nextObservationIdentity: UInt64? = nil)
 
 // sdk-wire/SdkBounds.swift
 public enum BoundsArithmetic
@@ -1150,6 +1150,8 @@ public enum SdkRoute: String, CaseIterable, Sendable
   case keychainDelete = "/keychain/delete"
   case preferences = "/preferences"
   case trigger = "/trigger"
+  case observationSnapshot = "/observation/snapshot"
+  case observationAction = "/observation/action"
   public var path: String
   public var method: String
 

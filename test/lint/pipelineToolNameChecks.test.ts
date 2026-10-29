@@ -4,6 +4,7 @@ import {
   readGuardFile,
   parseGuardSource,
   GuardVisitor as Visitor,
+  guardTextMayMatch,
 } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
 
@@ -17,6 +18,7 @@ import path from "node:path";
  */
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const PIPELINE_DIR = path.join(REPO_ROOT, "src", "server", "pipeline");
+const SRC_DIR = path.join(REPO_ROOT, "src");
 const TOOL_LIST_NAME = /_TOOLS$/;
 // Parsing the pipeline tree can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
@@ -126,5 +128,59 @@ describe("pipeline tool-name check guard", () => {
 
   test("the remaining counts are tight, so moving a check must lower them", () => {
     expect(counts).toEqual(REMAINING_TOOL_NAME_CHECKS);
+  });
+});
+
+/**
+ * #15672: outside the pipeline, per-tool behaviour also belongs on the tool definition. These are the
+ * `*_TOOLS` declarations that stay, each for a stated reason; any other one fails. Lists naming the
+ * hidden `startDevice` cannot become `_meta` traits, because the generated definitions omit hidden
+ * tools.
+ */
+const EXEMPT_TOOL_LISTS: Readonly<Record<string, string>> = {
+  "src/daemon/deviceSessionResult.ts\tDEVICE_SESSION_ACQUISITION_TOOLS": "names hidden startDevice",
+  "src/daemon/sessionBroker/lifecycleTools.ts\tBROKER_LIFECYCLE_TOOLS": "names hidden startDevice",
+  "src/daemon/socketRequestAdmission.ts\tSOCKET_ROUTING_MUTATING_TOOLS": "names hidden startDevice",
+  "src/models/deviceSessionRecovery.ts\tDEVICE_SESSION_RECOVERY_TOOLS":
+    "what recovery guidance tells a client to call, pinned to the registry by a test",
+  "src/server/deviceMutationLifecycleAdapters.ts\tAPP_FALLBACK_TOOLS":
+    "the vocabulary of an opaque fallback key prefix, not a behaviour list",
+  "src/server/watchOsToolSupport.ts\tWATCHOS_SUPPORTED_TOOLS":
+    "a policy allow-list documented in docs/decisions/watchos-platform.md",
+  "src/utils/android-cmdline-tools/detection.ts\tANDROID_TOOLS":
+    "Android SDK command-line tools, not MCP tools",
+  "src/utils/plan/coordinationTools.ts\tCOORDINATION_TOOLS":
+    "plan code specific to barrier/criticalSection; src/utils cannot read the registry or schemas",
+  "src/utils/removedTools.ts\tREMOVED_TOOLS": "names of tools that no longer exist",
+};
+
+describe("tool-name lists outside the pipeline (#15672)", () => {
+  let toolLists: string[];
+  beforeAll(() => {
+    const tools = registeredToolNames();
+    toolLists = typeScriptFiles(SRC_DIR)
+      .filter((file) => !file.startsWith(PIPELINE_DIR + path.sep))
+      .flatMap((file) => {
+        const source = readGuardFile(file);
+        if (!guardTextMayMatch(source, "_TOOLS")) {
+          return [];
+        }
+        const relative = relativePosix(REPO_ROOT, file);
+        return scanToolNameChecks(relative, source, tools).toolLists.map(
+          (name) => `${relative}\t${name}`,
+        );
+      })
+      .sort();
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
+
+  test("every *_TOOLS declaration outside the pipeline is a named exemption", () => {
+    expect(
+      toolLists.filter((entry) => !Object.hasOwn(EXEMPT_TOOL_LISTS, entry)),
+      "Declare the behaviour as a ToolTraits field, or add a reasoned exemption.",
+    ).toEqual([]);
+  });
+
+  test("the exemption list is tight, so a removed list must leave it", () => {
+    expect(Object.keys(EXEMPT_TOOL_LISTS).sort()).toEqual(toolLists);
   });
 });

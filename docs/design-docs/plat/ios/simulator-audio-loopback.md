@@ -26,6 +26,8 @@ through `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER`; there is no released build yet.
   real-time playback. EOF drains the queue and exits 0. `SIGTERM` stops playback at once.
 - `capture --duration-ms N --sample-rate N`: writes the same format to stdout and exits 0 after
   the duration. Reading an input device needs Microphone permission for the helper's process.
+- `capture --until-stopped --sample-rate N`: the same, until stdin closes; the helper then writes
+  its last buffer and exits 0. Recordings with audio use this.
 - Stderr carries one marker per line: `audio-loopback-ready: <device name>` once the device is
   open, or `audio-loopback-error: <code> <message>` before a non-zero exit.
 

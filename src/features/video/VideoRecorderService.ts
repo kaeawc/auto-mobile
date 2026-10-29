@@ -67,6 +67,8 @@ export interface VideoCaptureConfig extends VideoRecordingConfig {
   display?: string;
   recordingPanel?: VideoRecordingPanel;
   physicalDisplayId?: string;
+  /** Record the device's audio beside the video and mux it in (#13629). */
+  audio?: boolean;
 }
 
 // Config parsing and the teardown descriptor live in src/models so src/db can use them without
@@ -106,6 +108,8 @@ export interface RecordingResult {
   recordedPanel?: VideoRecordingPanel;
   warnings?: string[];
   transitions?: VideoRecordingDisplayTransition[];
+  /** Set for a recording that asked for audio: whether the file got an audio track. */
+  hasAudioTrack?: boolean;
 }
 
 function recordingTransitions(
@@ -172,6 +176,7 @@ export interface StartVideoRecordingOptions {
   display?: string;
   recordingPanel?: VideoRecordingPanel;
   physicalDisplayId?: string;
+  audio?: boolean;
 }
 
 export interface ActiveVideoRecording {
@@ -259,6 +264,7 @@ export class VideoRecorderService {
       display: options.display,
       recordingPanel: options.recordingPanel,
       physicalDisplayId: options.physicalDisplayId,
+      audio: options.audio,
       ...config,
     };
     // Defer backend invocation by one microtask so provisional ownership is
@@ -401,6 +407,9 @@ export class VideoRecorderService {
       recordedPanel: stopResult.recordedPanel ?? active.recordedPanel,
       transitions: recordingTransitions(stopResult, active.recordedPanel),
       warnings: recordingWarnings(active, stopResult),
+      ...(stopResult.hasAudioTrack === undefined
+        ? {}
+        : { hasAudioTrack: stopResult.hasAudioTrack }),
     };
 
     this.activeRecordings.delete(recordingId);

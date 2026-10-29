@@ -96,6 +96,17 @@ are returned.
 Assert loosely, on `silent` and a rough duration, not on exact waveforms: a loaded host can
 glitch real-time audio.
 
+## Audio in video recordings
+
+Start `videoRecording` with `audio: true` to record the device's audio into the file as an AAC
+track. The stop result has `hasAudioTrack`: `true` when the file has the track, `false` with a
+warning when audio could not be added (the video is kept either way). A device that plays nothing
+gets a silent track.
+
+- It needs FFmpeg on the host; without it the start is refused.
+- On Android it supports recordings up to 180 s (one segment).
+- On an iOS Simulator it records the Mac's default output, so it hears every simulator on the Mac.
+
 ## Errors
 
 Errors start with a code in brackets:

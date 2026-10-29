@@ -13,6 +13,7 @@ import {
 import { captureError, injectionError } from "./EmulatorAudioError";
 import { GrpcStatus } from "./grpcFraming";
 import type { GrpcCall, GrpcTransport } from "./grpcTransport";
+import { SilenceFiller } from "./SilenceFiller";
 
 const SERVICE = "/android.emulation.control.EmulatorController";
 export const INJECT_AUDIO_METHOD = `${SERVICE}/injectAudio`;
@@ -22,7 +23,6 @@ export const STREAM_AUDIO_METHOD = `${SERVICE}/streamAudio`;
 const INJECT_PACKET_MS = 20;
 /** How long capture waits past the requested duration before reporting what it has. */
 const CAPTURE_GRACE_MS = 2_000;
-
 /** Mono 16-bit PCM at a rate the emulator accepts, the one format injection sends. */
 export function prepareForInjection(pcm: PcmAudio): PcmAudio {
   const mono = toMono(pcm);
@@ -117,6 +117,16 @@ export interface CaptureAudioOptions {
   sampleRate?: number;
 }
 
+/** An open-ended capture; PCM is 16-bit little-endian mono at `sampleRate`. */
+export interface AudioStream {
+  readonly sampleRate: number;
+  /**
+   * Ends the capture and resolves once the last PCM was delivered. Idempotent. Rejects when the
+   * capture delivered nothing because the device refused it.
+   */
+  stop(): Promise<void>;
+}
+
 export interface CaptureResult {
   pcm: PcmAudio;
   /** True when the guest produced fewer frames than requested before the deadline. */
@@ -206,6 +216,63 @@ export class EmulatorAudioClient {
       offset += take.length;
     }
     return { pcm: { sampleRate, channels: 1, samples }, timedOut: timedOut && collected < wanted };
+  }
+
+  /**
+   * Streams the emulator's audio output to `sink` until stopped, for recordings of any length. A
+   * silent guest sends no packets, so its quiet stretches are filled with silence to keep the PCM
+   * in step with the wall clock.
+   */
+  async streamCapture(
+    sink: (pcm: Uint8Array) => void,
+    options: { sampleRate?: number } = {},
+  ): Promise<AudioStream> {
+    const sampleRate = Math.min(
+      options.sampleRate ?? EMULATOR_MAX_SAMPLING_RATE,
+      EMULATOR_MAX_SAMPLING_RATE,
+    );
+    const call = await this.open(STREAM_AUDIO_METHOD);
+    await call.write(
+      encodeAudioFormat({ samplingRate: sampleRate, channels: "mono", format: "s16" }),
+    );
+    call.end();
+    const filler = new SilenceFiller(sampleRate, () => this.timer.now() * 1000);
+    let delivered = 0;
+    const pump = (async () => {
+      try {
+        for await (const message of call.messages()) {
+          const packet = decodeAudioPacket(message);
+          const silence = filler.before(packet);
+          if (silence) {
+            sink(silence);
+          }
+          delivered += packet.audio.byteLength;
+          sink(packet.audio);
+        }
+      } catch (error) {
+        // The call status, read at stop, says whether this was the cancel or a failure.
+        logger.debug(`audio stream ended: ${errorMessage(error)}`);
+      }
+    })();
+    let stopping: Promise<void> | undefined;
+    const stop = async (): Promise<void> => {
+      call.cancel();
+      await pump;
+      if (delivered > 0) {
+        return;
+      }
+      const status = await call.status();
+      if (status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
+        throw captureError(status);
+      }
+    };
+    return {
+      sampleRate,
+      stop: () => {
+        stopping ??= stop();
+        return stopping;
+      },
+    };
   }
 
   async close(): Promise<void> {

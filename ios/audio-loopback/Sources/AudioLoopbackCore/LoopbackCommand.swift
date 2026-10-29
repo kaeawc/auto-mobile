@@ -5,8 +5,9 @@ import Foundation
 public enum LoopbackCommand: Equatable {
     /// Play stdin into the loopback device the host's default input reads from, until stdin ends.
     case play(sampleRate: Int)
-    /// Record `durationMs` from the loopback device the host's default output writes to.
-    case capture(sampleRate: Int, durationMs: Int)
+    /// Record from the loopback device the host's default output writes to: `durationMs`, or with nil
+    /// (`--until-stopped`) until stdin closes.
+    case capture(sampleRate: Int, durationMs: Int?)
 
     public static let defaultSampleRate = 48000
     public static let maxSampleRate = 48000
@@ -29,8 +30,13 @@ public enum LoopbackCommand: Equatable {
         }
         var sampleRate = defaultSampleRate
         var durationMs: Int?
+        var untilStopped = false
         var iterator = arguments.dropFirst().makeIterator()
         while let flag = iterator.next() {
+            if flag == "--until-stopped", command == "capture" {
+                untilStopped = true
+                continue
+            }
             guard let value = iterator.next() else {
                 throw ParseError.missingValue(flag: flag)
             }
@@ -47,6 +53,12 @@ public enum LoopbackCommand: Equatable {
         case "play":
             return .play(sampleRate: sampleRate)
         case "capture":
+            if untilStopped {
+                guard durationMs == nil else {
+                    throw ParseError.unknownArgument("--duration-ms")
+                }
+                return .capture(sampleRate: sampleRate, durationMs: nil)
+            }
             guard let durationMs else {
                 throw ParseError.missingValue(flag: "--duration-ms")
             }

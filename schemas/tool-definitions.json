@@ -65168,6 +65168,10 @@
           "description": "Recording label",
           "type": "string"
         },
+        "audio": {
+          "description": "Also record the device's audio into the file (start only; local emulators and iOS Simulators; needs FFmpeg)",
+          "type": "boolean"
+        },
         "display": {
           "description": "Android panel key, role, or \"active\" (start only)",
           "type": "string"
@@ -65319,6 +65323,9 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "hasAudioTrack": {
+                "type": "boolean"
               }
             },
             "required": ["recordingId"],

@@ -69,9 +69,16 @@ is only worth building if some supported environment cannot reach the gRPC port.
 
 ## Discovery and auth
 
+- The launcher passes `-grpc <port>` to every emulator it spawns unless the arguments already
+  carry `-grpc` or `-grpc=`. The port is leased from `EmulatorPortReservations`
+  (`reserveEmulatorGrpcPort`) across 8554-8653: a port another launch holds, or one the host
+  cannot bind, is skipped. The lease is released with the child's launch reservation on exit.
+  Console and ADB ports (5554-5683) are outside that range.
 - The emulator writes `pid_<pid>.ini` under `<dir>/avd/running`, where `<dir>` is
   `~/Library/Caches/TemporaryItems` on macOS, `$XDG_RUNTIME_DIR` (else `/tmp/android-<user>`)
   on Linux, and the temp dir. These are the same directories the AVD launch guard reads.
+- The endpoint address comes from the file's `grpc.address` or `grpc.port`, which is the port the
+  launcher passed. `localhost:8554` is the fallback for a file with neither key.
 - The emulator for `emulator-<N>` is the file whose `port.serial` is `N`. Files whose pid is
   no longer running are skipped, because a crashed emulator leaves its file behind and a later
   emulator can reuse the port.

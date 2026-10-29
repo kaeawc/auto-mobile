@@ -39,9 +39,23 @@ Every simulator on the Mac shares these devices:
 - With one loopback device as both default input and output, a simulator's own playback also
   reaches its microphone.
 
+AutoMobile starts each emulator it boots with a gRPC port (`-grpc`) on a free host port from 8554
+to 8653, held while that emulator runs, so no extra launch flags are needed. A `-grpc` flag you
+pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments is used as given.
+
 ## injectAudioInput
 
-Plays audio into the microphone and returns as soon as it starts.
+Plays audio into the microphone and returns as soon as streaming starts. On Android, it first
+opens a guest microphone capture and verifies it is running for three seconds, so the app need
+not already be recording. The emulator image must provide `tinycap` to the ADB shell user and
+readable capture status under `/proc/asound`; AutoMobile does not enable `adb root`. If the capture cannot be
+verified within eight seconds, injection is refused. A competing app recording may prevent the
+recorder from opening; stop that recording and retry.
+
+Only one injection may start or run per device. On Android, AutoMobile closes only its own recorder when
+injection stops, finishes, reaches its duration limit, or fails, including on session release.
+Cleanup skips signaling a recorder if the emulator restarted or the recorder's identity cannot
+be verified.
 
 | Parameter       | Description                                                                     |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -63,7 +77,8 @@ takes the device. A relative `file` path is relative to the directory the server
 Stops an injection by `injectionId`, on the device it was started on. Stopping one that already
 ended is not an error: you get its result again, with `framesSent` and `reason` (`completed`,
 `stopped` or `max_duration`). The server keeps the last 64 ended injections; an older id, or any
-id after a server restart, is an error.
+id after a server restart, is an error. If the emulator exited during injection, stopping reports
+`[audio_emulator_exited]` with the device name; restart the emulator before injecting again.
 
 ## captureAudio
 
@@ -85,10 +100,12 @@ glitch real-time audio.
 
 Errors start with a code in brackets:
 
-| Code                          | Meaning and what to do                                                                                                                                                                                      |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `audio_injection_busy`        | Another injection already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                                            |
-| `audio_injection_unsupported` | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above. |
-| `audio_capture_unsupported`   | The same, for capture; a simulator needs a loopback default output.                                                                                                                                         |
-| `audio_grpc_failed`           | Any other emulator error; the message carries its detail.                                                                                                                                                   |
-| `audio_loopback_failed`       | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                              |
+| Code                              | Meaning and what to do                                                                                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audio_injection_busy`            | Another injection is starting or already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                             |
+| `audio_injection_unsupported`     | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above. |
+| `audio_capture_unsupported`       | The same, for capture; a simulator needs a loopback default output.                                                                                                                                         |
+| `audio_grpc_failed`               | Any other emulator error; the message carries its detail.                                                                                                                                                   |
+| `audio_loopback_failed`           | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                              |
+| `audio_guest_capture_unavailable` | A running guest capture could not be verified. Use an image with shell-accessible `tinycap` and readable `/proc/asound`, stop competing recordings, and retry.                                              |
+| `audio_emulator_exited`           | The emulator exited during injection. Restart the named emulator and start a new injection.                                                                                                                 |

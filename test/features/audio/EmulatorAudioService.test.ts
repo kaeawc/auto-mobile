@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeGuestAudioCapture } from "../../fakes/FakeGuestAudioCapture";
 import {
   DEFAULT_LOOP_MAX_DURATION_MS,
   EmulatorAudioService,
@@ -27,7 +29,9 @@ function setup(
 ) {
   const sessions: FakeSession[] = [];
   const lookups: number[] = [];
+  const guestCapture = new FakeGuestAudioCapture();
   const service = new EmulatorAudioService({
+    guestCapture,
     discovery: {
       findByConsolePort: async (port) => {
         lookups.push(port);
@@ -58,7 +62,7 @@ function setup(
     ids: new CountingIdGenerator("inj"),
     maxSourceBytes,
   });
-  return { service, sessions, lookups };
+  return { service, sessions, lookups, guestCapture, consolePorts };
 }
 
 describe("EmulatorAudioService injection", () => {
@@ -174,11 +178,11 @@ describe("EmulatorAudioService injection", () => {
   });
 
   test("stopDevice stops only that device's injections", async () => {
-    const { service } = setup({}, () => {}, [5554, 5556]);
-    await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    const { service, guestCapture } = setup({}, () => {}, [5554, 5556]);
     await service.startInjection("emulator-5554", { source: { kind: "tone" } });
     const other = await service.startInjection("emulator-5556", { source: { kind: "tone" } });
-    expect(await service.stopDevice("emulator-5554")).toBe(2);
+    expect(await service.stopDevice("emulator-5554")).toBe(1);
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
     expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
     expect(service.activeInjectionIds("emulator-5556")).toEqual([other.injectionId]);
   });
@@ -216,7 +220,7 @@ describe("EmulatorAudioService injection", () => {
 
 describe("EmulatorAudioService session ownership and limits", () => {
   test("stopOwnedBy stops only the session's injections on that device", async () => {
-    const { service } = setup({}, () => {}, [5554, 5556]);
+    const { service, guestCapture } = setup({}, () => {}, [5554, 5556]);
     const elsewhere = await service.startInjection("emulator-5556", {
       source: { kind: "tone" },
       sessionId: "s1",
@@ -225,33 +229,37 @@ describe("EmulatorAudioService session ownership and limits", () => {
       source: { kind: "tone" },
       sessionId: "s1",
     });
-    const other = await service.startInjection("emulator-5554", {
-      source: { kind: "tone" },
-      sessionId: "s2",
-    });
+
     expect(service.stopOwnedBy("emulator-5554", "s3")).toBeUndefined();
     expect(await service.stopOwnedBy("emulator-5554", "s1")).toBe(1);
-    expect(service.activeInjectionIds("emulator-5554")).toEqual([other.injectionId]);
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
     expect(service.activeInjectionIds("emulator-5556")).toEqual([elsewhere.injectionId]);
     expect(await service.stopInjection(mine.injectionId)).toMatchObject({ reason: "stopped" });
   });
 
-  test("stopOwnerless stops only sessionless injections on that device", async () => {
-    const { service } = setup();
-    const owned = await service.startInjection("emulator-5554", {
+  test("stopOwnerless closes its recorder and preserves another device's owned injection", async () => {
+    const { service, guestCapture } = setup({}, () => {}, [5554, 5556]);
+    const owned = await service.startInjection("emulator-5556", {
       source: { kind: "tone" },
       sessionId: "s1",
     });
-    expect(service.stopOwnerless("emulator-5554")).toBeUndefined();
+    expect(service.stopOwnerless("emulator-5556")).toBeUndefined();
     await service.startInjection("emulator-5554", { source: { kind: "tone" } });
     expect(await service.stopOwnerless("emulator-5554")).toBe(1);
-    expect(service.activeInjectionIds("emulator-5554")).toEqual([owned.injectionId]);
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
+    expect(service.activeInjectionIds("emulator-5556")).toEqual([owned.injectionId]);
   });
 
   test("a loop without its own limit is capped; a single pass is not", async () => {
     const { service, sessions } = setup();
-    await service.startInjection("emulator-5554", { source: { kind: "tone" }, loop: true });
-    await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    const first = await service.startInjection("emulator-5554", {
+      source: { kind: "tone" },
+      loop: true,
+    });
+    await service.stopInjection(first.injectionId);
+    const second = await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    await service.stopInjection(second.injectionId);
     await service.startInjection("emulator-5554", {
       source: { kind: "tone" },
       loop: true,
@@ -296,16 +304,189 @@ describe("EmulatorAudioService capture", () => {
   });
 });
 
+describe("verified guest capture guard", () => {
+  test("refuses an unverified capture without calling injectAudio", async () => {
+    const { service, sessions, guestCapture } = setup();
+    guestCapture.failure = new EmulatorAudioError(
+      "audio_guest_capture_unavailable",
+      "Cannot verify capture",
+    );
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone" } }),
+    ).rejects.toThrow("[audio_guest_capture_unavailable]");
+    expect(sessions.flatMap((session) => session.injected)).toEqual([]);
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
+  });
+
+  test("waits for capture verification before creating the gRPC session", async () => {
+    const { service, sessions, guestCapture } = setup();
+    let verified: (() => void) | undefined;
+    let entered: (() => void) | undefined;
+    const opening = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    guestCapture.onOpen = () => {
+      entered?.();
+      return new Promise<void>((resolve) => {
+        verified = resolve;
+      });
+    };
+    const starting = service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    await opening;
+    expect(guestCapture.opened).toEqual(["emulator-5554"]);
+    expect(sessions).toEqual([]);
+    verified?.();
+    const started = await starting;
+    expect(sessions[0].injected).toHaveLength(1);
+    await service.stopInjection(started.injectionId);
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
+  });
+
+  for (const reason of ["completed", "max_duration"] as const) {
+    test(`closes the recorder on ${reason}`, async () => {
+      const { service, sessions, guestCapture } = setup();
+      const started = await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+      const closed = new Promise<void>((resolve) => {
+        guestCapture.onClose = resolve;
+      });
+      sessions[0].settleInjection?.({ framesSent: 2, reason });
+      await closed;
+      expect(guestCapture.closed).toEqual(["emulator-5554"]);
+      expect(await service.stopInjection(started.injectionId)).toMatchObject({ reason });
+      expect(guestCapture.closed).toEqual(["emulator-5554"]);
+    });
+  }
+
+  test("maxDurationMs closes the capture without an explicit stop", async () => {
+    const timer = new FakeTimer();
+    const { service, guestCapture } = setup({}, (session) => {
+      const inject = session.injectAudio.bind(session);
+      session.injectAudio = async (pcm, options) => {
+        const injection = await inject(pcm, options);
+        timer.setTimeout(
+          () => session.settleInjection?.({ reason: "max_duration", framesSent: 1 }),
+          options?.maxDurationMs ?? 0,
+        );
+        return injection;
+      };
+    });
+    const started = await service.startInjection("emulator-5554", {
+      source: { kind: "tone" },
+      loop: true,
+      maxDurationMs: 100,
+    });
+    const closed = new Promise<void>((resolve) => {
+      guestCapture.onClose = resolve;
+    });
+    timer.advanceTime(99);
+    expect(guestCapture.closed).toEqual([]);
+    timer.advanceTime(1);
+    await closed;
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
+    expect(await service.stopInjection(started.injectionId)).toMatchObject({
+      reason: "max_duration",
+    });
+  });
+
+  test("a session factory failure after capture opens closes the recorder", async () => {
+    const { service, guestCapture } = setup({}, () => {
+      throw new Error("factory failed");
+    });
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone" } }),
+    ).rejects.toThrow("factory failed");
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
+  });
+
+  test("closes the recorder on failed start and allows retry", async () => {
+    const { service, guestCapture, sessions } = setup({}, (session) => {
+      session.injectAudio = async () => {
+        throw new Error("start failed");
+      };
+    });
+    for (let i = 0; i < 2; i++) {
+      await expect(
+        service.startInjection("emulator-5554", { source: { kind: "tone" } }),
+      ).rejects.toThrow("start failed");
+    }
+    expect(guestCapture.closed).toEqual(["emulator-5554", "emulator-5554"]);
+    expect(sessions.every((session) => session.closed === 1)).toBe(true);
+  });
+
+  for (const alive of [true, false]) {
+    test(`stop classifies gRPC failure when emulator alive=${alive}`, async () => {
+      const { service, guestCapture, sessions, consolePorts } = setup();
+      const started = await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+      if (!alive) {
+        consolePorts.length = 0;
+      }
+      const closed = new Promise<void>((resolve) => {
+        guestCapture.onClose = resolve;
+      });
+      sessions[0].failInjection?.(
+        new EmulatorAudioError("audio_injection_unsupported", "read ECONNRESET"),
+      );
+      await closed;
+      await expect(service.stopInjection(started.injectionId)).rejects.toMatchObject({
+        code: alive ? "audio_injection_unsupported" : "audio_emulator_exited",
+      });
+      if (!alive) {
+        await expect(service.stopInjection(started.injectionId)).rejects.toThrow(
+          "Emulator emulator-5554 exited during audio injection",
+        );
+      }
+      expect(guestCapture.closed).toEqual(["emulator-5554"]);
+      expect(sessions[0].closed).toBe(1);
+    });
+  }
+
+  test("rejects overlapping starts before opening a second recorder", async () => {
+    const { service, guestCapture } = setup();
+    const first = service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone" } }),
+    ).rejects.toMatchObject({ code: "audio_injection_busy" });
+    await service.stopInjection((await first).injectionId);
+    expect(guestCapture.opened).toHaveLength(1);
+  });
+});
+
 describe("EmulatorAudioService iOS Simulators over the host loopback", () => {
   const SIM_A = "11111111-2222-3333-4444-555555555555";
   const SIM_B = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 
   test("a simulator UDID injects and captures through the host loopback route", async () => {
-    const { service, lookups } = setup({}, () => {}, [5554], undefined, true);
+    const { service, lookups, guestCapture } = setup({}, () => {}, [5554], undefined, true);
+    guestCapture.failure = new Error("Android capture must not run for a simulator");
     const started = await service.startInjection(SIM_A, { source: { kind: "tone" } });
     expect(started.route).toBe("host-loopback");
     expect(lookups).toEqual([]);
     expect((await service.capture(SIM_A, { durationMs: 10 })).route).toBe("host-loopback");
+    await service.stopInjection(started.injectionId);
+    expect(guestCapture.opened).toEqual([]);
+    expect(guestCapture.closed).toEqual([]);
+    expect(lookups).toEqual([]);
+  });
+
+  test("a failed host-loopback injection preserves its error without checking an emulator PID", async () => {
+    const { service, sessions, lookups, guestCapture } = setup(
+      {},
+      () => {},
+      [5554],
+      undefined,
+      true,
+    );
+    const started = await service.startInjection(SIM_A, { source: { kind: "tone" } });
+    sessions[0].failInjection?.(new EmulatorAudioError("audio_loopback_failed", "helper exited"));
+    await expect(service.stopInjection(started.injectionId)).rejects.toMatchObject({
+      code: "audio_loopback_failed",
+    });
+    expect(sessions[0].closed).toBe(1);
+    expect(guestCapture.opened).toEqual([]);
+    expect(lookups).toEqual([]);
+    expect((await service.startInjection(SIM_B, { source: { kind: "tone" } })).route).toBe(
+      "host-loopback",
+    );
   });
 
   test("one host-loopback injection runs per host, across simulators", async () => {

@@ -29,6 +29,7 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeFailureAnalyticsRepository.ts:FakeFailureAnalyticsRepository": "FailureResourcesRepository",
   "FakeFailuresStreamRepository.ts:FakeFailuresStreamRepository": "FailuresStreamRepository",
   "FakeHighlightClient.ts:FakeHighlightClient": "VisualHighlightClient",
+  "FakeGuestAudioCapture.ts:FakeGuestAudioCapture": "GuestAudioCapture",
   "FakeHierarchyCollector.ts:FakeHierarchyCollector": "HierarchyCollector",
   "FakeMcpServer.ts:FakeMcpServer": "McpServer",
   "FakeNetServer.ts:FakeSocket": "Socket",

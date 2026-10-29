@@ -8,7 +8,10 @@ import {
   AndroidCommandOutputStreamRedactor,
   redactAndroidCommandOutput,
 } from "./redactAndroidCommandOutput";
-import type { EmulatorDeviceIdReservation } from "./EmulatorPortReservations";
+import type {
+  EmulatorDeviceIdReservation,
+  EmulatorGrpcPortLease,
+} from "./EmulatorPortReservations";
 
 import {
   EARLY_EXIT_DRAIN_TIMEOUT_MS,
@@ -27,6 +30,10 @@ import type {
   EmulatorLauncherHost,
 } from "./EmulatorLaunchSupport";
 import { EmulatorStartupValidation } from "./EmulatorStartupValidation";
+import {
+  handOffEmulatorGrpcLease,
+  leaseEmulatorGrpcPort,
+} from "./emulatorGrpc/emulatorGrpcLaunchLease";
 import { ENV, readEnvRaw } from "../../config/env";
 
 export * from "./EmulatorLaunchSupport";
@@ -149,10 +156,19 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       args.push(...requestedExtraArgs);
     }
     this.appendCameraPosterArguments(args, options.cameraPosterPath);
-    this.host.throwIfLaunchCancelled(avdName, isCancelled);
-    // Queue for capacity only now that this launch will spawn: every adoption
-    // path above returned first, and an invalid AVD has already failed fast.
-    return await this.spawnWithBootAdmission(avdName, perf, args, options);
+    let grpcLease: EmulatorGrpcPortLease | undefined;
+    try {
+      grpcLease = await leaseEmulatorGrpcPort(args, this.host.reservations());
+      this.host.throwIfLaunchCancelled(avdName, isCancelled);
+      // Queue for capacity only now that this launch will spawn: every adoption
+      // path above returned first, and an invalid AVD has already failed fast.
+      const launch = await this.spawnWithBootAdmission(avdName, perf, args, options);
+      handOffEmulatorGrpcLease(grpcLease, launch.process, this.host.reservations());
+      return launch;
+    } catch (error) {
+      grpcLease?.release();
+      throw error;
+    }
   }
 
   /**

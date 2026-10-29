@@ -147,10 +147,11 @@ sdkBridge` in `extras`. The result reports `backend: sdk`, or `backend: xctest` 
 `fallbackReason: unavailable` when a registered bridge did not answer. A failed discovery probe
 reports neither.
 
-**Observe: web views.** When the projected hierarchy contains a `WKWebView` node, the collector
-also reads the app's opted-in web views with one unnamed snapshot read (2 s budget), which answers
-with the registered list and the first web view's snapshot. A
-screen without a `WKWebView` makes no read. A snapshot is merged only when the app registered
+**Observe: web views.** When the projected hierarchy contains exactly one outermost `WKWebView`,
+the collector also reads the app's opted-in web views with one unnamed snapshot read (2 s budget),
+which answers with the registered list and the first web view's snapshot. Any other screen makes no
+read, since only that one can merge; a reply that cannot be read (`bad_reply`) is logged and the
+observation stays XCTest-only. A snapshot is merged only when the app registered
 exactly one web view and the screen shows exactly one outermost `WKWebView`: nothing ties a
 registration to its native view, and the registry orders web views by registration rather than by
 screen position, so with two or more the pairing is ambiguous and they stay XCTest-only. Each
@@ -160,7 +161,7 @@ points as the runner truncates XCTest frames; one wholly outside the web view is
 (`label` → `content-desc`, `value` → `text`, `role` → `class`; a redacted value is not reported as text but as `value-redacted: "true"`, which text verification treats as unverifiable (unless the replaced XCTest leaf reports a readable `value`); `enabled` elements are `clickable`;
 text entry roles such as `input` and `textarea` report `role: textfield`, so focus and `sendKeys`
 targeting treat them as editable) and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
-`web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with the same bounds and the same label, value or id as a DOM element are replaced by it in the leaf's place (so container-scoped selectors still find it), and every attribute the fresh leaf reports wins over the snapshot's (its `resource-id`, native `class`, input properties, focus and the rest), so native selectors, field detection and verification keep working; the DOM element adds its web identity and what the leaf does not report, but never its focus, since the snapshot can be older than the XCTest read. A leaf that two DOM elements both match (a wrapper and the control it wraps) is not replaced. A web view
+`web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with the same bounds and the same label, value or id as a DOM element are replaced by it in the leaf's place (so container-scoped selectors still find it), and every attribute the fresh leaf reports wins over the snapshot's (its `resource-id`, native `class`, input properties, focus and the rest), so native selectors, field detection and verification keep working; the DOM element adds its web identity and what the leaf does not report, but never its focus, since the snapshot can be older than the XCTest read. A leaf that two DOM elements both match (a wrapper and the control it wraps), or whose attributes match different DOM elements, is not replaced. A web view
 without a snapshot (none posted yet, a disallowed origin, a terminated process) keeps only its
 XCTest nodes. A merge reports `backend: sdk` unless the native bridge already set `backend`. The
 snapshot id is the DOM elements' capture identity: the web view rejects an action naming one that

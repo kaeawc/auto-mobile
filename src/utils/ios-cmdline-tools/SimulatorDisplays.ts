@@ -11,58 +11,119 @@ export interface SimulatorDisplay {
   uiOrientation?: "Portrait" | "Landscape" | null;
 }
 
-function readDisplayField(section: Partial<SimulatorDisplay>, line: string): void {
+/**
+ * A non-integrated screen (`CarPlay`, `TVOut`, `Scene`, ...). Its `name` is the
+ * `Device Name`, which `simctl io --display=` takes as the screen key.
+ */
+export interface SimulatorAuxiliaryScreen {
+  screenType: string;
+  id: string | null;
+  name: string | null;
+  width: number;
+  height: number;
+  uiScale: number | null;
+}
+
+/** Every sized screen in the Connected Screens block, split by screen type. */
+export interface SimulatorScreens {
+  integrated: SimulatorDisplay[];
+  auxiliary: SimulatorAuxiliaryScreen[];
+}
+
+/** A CarPlay screen with the `--display=` key needed to capture it. */
+export type SimulatorCarPlayScreen = SimulatorAuxiliaryScreen & { name: string };
+
+type ScreenSection = Partial<SimulatorDisplay> & { screenType?: string };
+
+const DISPLAY_FIELD_READERS = new Map<string, (section: ScreenSection, value: string) => void>([
+  [
+    "Screen ID",
+    (section, value) => {
+      section.id = value;
+    },
+  ],
+  [
+    "Device Name",
+    (section, value) => {
+      section.name = value;
+    },
+  ],
+  [
+    "Screen Type",
+    (section, value) => {
+      if (value) {
+        section.screenType = value;
+      }
+    },
+  ],
+  [
+    "Pixel Size",
+    (section, value) => {
+      const match = /^\{(\d+),\s*(\d+)\}$/.exec(value);
+      if (match) {
+        section.width = Number(match[1]);
+        section.height = Number(match[2]);
+      }
+    },
+  ],
+  [
+    "Preferred UI Scale",
+    (section, value) => {
+      const scale = Number(value);
+      if (Number.isFinite(scale) && scale > 0) {
+        section.uiScale = scale;
+      }
+    },
+  ],
+  [
+    "UI Orientation",
+    (section, value) => {
+      if (value === "Portrait" || value === "Landscape") {
+        section.uiOrientation = value;
+      }
+    },
+  ],
+]);
+
+function readDisplayField(section: ScreenSection, line: string): void {
   const separator = line.indexOf(":");
   if (separator < 0) {
     return;
   }
-  const key = line.slice(0, separator);
-  const value = line.slice(separator + 1).trim();
-  if (key === "Screen ID") {
-    section.id = value;
-  }
-  if (key === "Device Name") {
-    section.name = value;
-  }
-  if (key === "Pixel Size") {
-    const match = /^\{(\d+),\s*(\d+)\}$/.exec(value);
-    if (match) {
-      section.width = Number(match[1]);
-      section.height = Number(match[2]);
-    }
-  }
-  if (key === "Preferred UI Scale") {
-    const scale = Number(value);
-    if (Number.isFinite(scale) && scale > 0) {
-      section.uiScale = scale;
-    }
-  }
-  if (key === "UI Orientation" && (value === "Portrait" || value === "Landscape")) {
-    section.uiOrientation = value;
-  }
+  DISPLAY_FIELD_READERS.get(line.slice(0, separator))?.(section, line.slice(separator + 1).trim());
 }
 
-/** Read Integrated entries in the framebuffer server's Connected Screens block. */
-export function parseSimulatorDisplays(output: string): SimulatorDisplay[] {
-  const displays: SimulatorDisplay[] = [];
-  let section: Partial<SimulatorDisplay> | null = null;
-  let integrated = false;
+function addScreen(screens: SimulatorScreens, section: ScreenSection | null): void {
+  if (!section?.screenType || !section.width || !section.height) {
+    return;
+  }
+  const base = {
+    id: section.id ?? null,
+    name: section.name ?? null,
+    width: section.width,
+    height: section.height,
+    uiScale: section.uiScale ?? null,
+  };
+  if (section.screenType === "Integrated") {
+    screens.integrated.push({
+      ...base,
+      ...(section.uiOrientation ? { uiOrientation: section.uiOrientation } : {}),
+    });
+    return;
+  }
+  screens.auxiliary.push({ screenType: section.screenType, ...base });
+}
+
+/** Read every screen in the framebuffer server's Connected Screens block. */
+export function parseSimulatorScreens(output: string): SimulatorScreens {
+  const screens: SimulatorScreens = { integrated: [], auxiliary: [] };
+  let section: ScreenSection | null = null;
   let displayAdapter = false;
   let framebufferServer = false;
   let connectedScreens = false;
   const finish = (): void => {
-    if (integrated && section?.width && section.height) {
-      displays.push({
-        id: section.id ?? null,
-        name: section.name ?? null,
-        width: section.width,
-        height: section.height,
-        uiScale: section.uiScale ?? null,
-        ...(section.uiOrientation ? { uiOrientation: section.uiOrientation } : {}),
-      });
-    }
+    addScreen(screens, section);
     section = null;
-    integrated = false;
   };
   for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -91,16 +152,29 @@ export function parseSimulatorDisplays(output: string): SimulatorDisplay[] {
       section = {};
       continue;
     }
-    if (!section) {
-      continue;
+    if (section) {
+      readDisplayField(section, line);
     }
-    if (line.startsWith("Screen Type:")) {
-      integrated = line === "Screen Type: Integrated";
-    }
-    readDisplayField(section, line);
   }
   finish();
-  return displays;
+  return screens;
+}
+
+/** Read Integrated entries in the framebuffer server's Connected Screens block. */
+export function parseSimulatorDisplays(output: string): SimulatorDisplay[] {
+  return parseSimulatorScreens(output).integrated;
+}
+
+/** The single named CarPlay screen, or null when there is none or more than one. */
+export function findCarPlayScreen(
+  screens: readonly SimulatorAuxiliaryScreen[],
+): SimulatorCarPlayScreen | null {
+  const carPlay = screens.filter((screen) => screen.screenType === "CarPlay");
+  if (carPlay.length !== 1) {
+    return null;
+  }
+  const [screen] = carPlay;
+  return screen.name ? { ...screen, name: screen.name } : null;
 }
 
 /** The larger of the Duo's two Integrated screens is its inner panel. */

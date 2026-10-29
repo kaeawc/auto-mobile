@@ -62,6 +62,10 @@ export function createIosSdkWebReader(options: IosSdkWebReaderOptions): IosSdkWe
       // The first read names no web view: it answers with the registered list and the first one's
       // snapshot, which is all a single web view needs.
       const first = await readSnapshot(client, { signal });
+      if (first && !first.success && first.failure === "bad_reply") {
+        // The reply could not be read; observe keeps its XCTest-only result, with a trace of why.
+        logger.warn(`[iOS] SDK web-view snapshot failed: ${first.error ?? first.failure}`);
+      }
       const entries = first?.webViews ?? [];
       if (entries.length > 1) {
         // Two or more web views cannot be paired with their WKWebView nodes, so the merge leaves
@@ -89,15 +93,16 @@ export function deviceIosSdkWebReader(device: Pick<BootedDevice, "deviceId">): I
 }
 
 /**
- * Merges the app's web-view snapshots into `hierarchy` in place (#5162). Nothing is read for a
- * screen without a WKWebView, so most observations pay no extra round trip.
+ * Merges the app's web-view snapshots into `hierarchy` in place (#5162). Nothing is read unless the
+ * screen shows exactly one WKWebView, so most observations pay no extra round trip.
  */
 export async function mergeIosSdkWebInto(
   hierarchy: ViewHierarchyResult,
   reader: IosSdkWebReader,
   signal?: AbortSignal,
 ): Promise<IosSdkWebMergeSummary | null> {
-  if (findWebViewNodes(hierarchy).length === 0) {
+  // Only a screen with exactly one outermost WKWebView can merge, so no other screen pays a read.
+  if (findWebViewNodes(hierarchy).length !== 1) {
     return null;
   }
   const snapshots = await reader.snapshots(signal);

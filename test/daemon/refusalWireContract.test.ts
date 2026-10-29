@@ -262,7 +262,7 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
   "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":
     "Emulator launch refusal is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError":
-    "Emulator gRPC audio failure (#13635) from a client no tool calls yet; it is an ActionableError, so until injectAudioInput/captureAudio (#13628, #13629) classify it, only its message would reach the wire.",
+    "Emulator gRPC audio failures (#13628, #13629) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "features/deviceLifecycle/teardown/stuckEmulatorEscalation":
     "Emulator teardown failure (#14018) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "models/ResetCapacityWaitExceededError":

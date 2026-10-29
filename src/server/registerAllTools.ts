@@ -50,6 +50,7 @@ import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
 import { registerSensorTools } from "./sensorTools";
+import { registerAudioTools } from "./audioTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
@@ -137,6 +138,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerKillProfileTools();
   registerSystemAlertTools();
   registerSensorTools();
+  registerAudioTools();
   registerDisplayProfileTools();
   registerPersonaTools();
   if (options.includeToolSelection ?? true) {

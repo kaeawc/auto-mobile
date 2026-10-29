@@ -189,6 +189,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
+    ["injectAudioInput", "stopAudioInput"],
+    "Streams audio into the emulator microphone over its gRPC API; nothing persists on the device, and session release stops a stream still playing.",
+    "notJournaled",
+  ),
+  ...tools(
     ["barrier", "criticalSection", "explore", "navigateTo"],
     "Host-side coordination, or device steps that run through the recorded dispatcher or change no persistent state (input primitives).",
     "notJournaled",

@@ -114,6 +114,9 @@
     "killProfile",
     "systemAlerts",
     "setSensor",
+    "injectAudioInput",
+    "stopAudioInput",
+    "captureAudio",
     "displayProfile",
     "manufacturerProfile",
     "setToolEnabled"
@@ -230,6 +233,9 @@
     "killProfile",
     "systemAlerts",
     "setSensor",
+    "injectAudioInput",
+    "stopAudioInput",
+    "captureAudio",
     "displayProfile",
     "manufacturerProfile",
     "setToolEnabled"
@@ -350,7 +356,10 @@
     "resetAppLogs",
     "performanceTrace",
     "windowMode",
-    "rotaryScroll"
+    "rotaryScroll",
+    "injectAudioInput",
+    "stopAudioInput",
+    "captureAudio"
   ],
   "measurementScripts": [
     "observe",

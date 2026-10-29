@@ -69,6 +69,11 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   captureTrace:
     "Starts or stops a diagnostic Perfetto capture; not part of the replayed interaction",
   heapDump: "Pulls a diagnostic heap dump to the host; not part of the replayed interaction",
+  injectAudioInput:
+    "Streams host audio into the emulator microphone; a test environment input, not part of the replayed interaction",
+  stopAudioInput: "Stops an emulator microphone stream; not part of the replayed interaction",
+  captureAudio:
+    "Measures emulator audio output for an assertion; not part of the replayed interaction",
   explore: "Builds the navigation graph; an exploration run, not a scripted step",
   measureStartup: "Performance measurement run over repeated launches, not an interaction step",
   navigateTo: "Resolves through a host-local navigation graph, so the step is not portable",

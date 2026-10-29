@@ -1,4 +1,4 @@
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../models/describeUnknownError";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import type {
@@ -9,6 +9,7 @@ import type {
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import {
   EmulatorAudioError,
+  emulatorExitedDuringInjection,
   type EmulatorAudioErrorCode,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import type {
@@ -25,6 +26,7 @@ import {
 } from "../../utils/audio/pcm";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
+import type { GuestAudioCapture, GuestAudioCaptureHandle } from "./GuestAudioCapture";
 
 /** The client calls the service needs; one client per injection or capture. */
 export interface EmulatorAudioSession {
@@ -89,6 +91,7 @@ interface ActiveInjection {
 
 export interface EmulatorAudioServiceDeps {
   discovery: EmulatorGrpcDiscovery;
+  guestCapture: GuestAudioCapture;
   createSession: EmulatorAudioSessionFactory;
   /**
    * Reads a regular file, refusing it once it exceeds `maxBytes`. The cap must hold for the read
@@ -124,6 +127,7 @@ function unsupported(code: EmulatorAudioErrorCode, reason: string): EmulatorAudi
  * release can stop everything still playing into a device.
  */
 export class EmulatorAudioService {
+  private readonly reservedDevices = new Set<string>();
   private readonly active = new Map<string, ActiveInjection>();
   /** Settled results (success or failure) of ended injections, newest last. */
   private readonly finished = new Map<
@@ -137,11 +141,34 @@ export class EmulatorAudioService {
     deviceId: string,
     request: StartInjectionRequest,
   ): Promise<StartedInjection> {
+    if (this.reservedDevices.has(deviceId)) {
+      throw new EmulatorAudioError(
+        "audio_injection_busy",
+        `An audio injection is starting or active on ${deviceId}. Stop it before starting another.`,
+      );
+    }
+    this.reservedDevices.add(deviceId);
+    try {
+      return await this.startReservedInjection(deviceId, request);
+    } catch (error) {
+      this.reservedDevices.delete(deviceId);
+      throw toActionableError(error, `Cannot start audio injection on ${deviceId}`);
+    }
+  }
+
+  private async startReservedInjection(
+    deviceId: string,
+    request: StartInjectionRequest,
+  ): Promise<StartedInjection> {
     const endpoint = await this.endpointFor(deviceId, "audio_injection_unsupported");
     const pcm = applyGainDb(await this.loadSource(request.source), request.gainDb ?? 0);
-    const session = this.deps.createSession(endpoint);
+    const guestCapture = await this.deps.guestCapture.open(deviceId);
+    let session: EmulatorAudioSession | undefined;
     let injection: AudioInjection;
+    let injectionId: string;
     try {
+      session = this.deps.createSession(endpoint);
+      injectionId = this.deps.ids.next();
       injection = await session.injectAudio(pcm, {
         loop: request.loop,
         startDelayMs: request.startDelayMs,
@@ -149,14 +176,14 @@ export class EmulatorAudioService {
           request.maxDurationMs ?? (request.loop ? DEFAULT_LOOP_MAX_DURATION_MS : undefined),
       });
     } catch (error) {
-      await session.close();
-      throw error;
+      await this.closeInjectionResources(guestCapture, session);
+      throw await this.classifyInjectionError(deviceId, endpoint, error);
     }
-    const injectionId = this.deps.ids.next();
-    const result = this.settle(injectionId, injection, session);
+    const result = this.settle(injectionId, deviceId, endpoint, injection, session, guestCapture);
     this.active.set(injectionId, { deviceId, owner: request.sessionId, injection, result });
     const retire = () => {
       this.active.delete(injectionId);
+      this.reservedDevices.delete(deviceId);
       this.finished.set(injectionId, { deviceId, result });
       while (this.finished.size > FINISHED_INJECTIONS_KEPT) {
         this.finished.delete(this.finished.keys().next().value as string);
@@ -260,14 +287,54 @@ export class EmulatorAudioService {
 
   private async settle(
     injectionId: string,
+    deviceId: string,
+    endpoint: EmulatorGrpcEndpoint,
     injection: AudioInjection,
     session: EmulatorAudioSession,
+    guestCapture: GuestAudioCaptureHandle,
   ): Promise<StoppedInjection> {
     try {
       return { injectionId, ...(await injection.done) };
+    } catch (error) {
+      throw await this.classifyInjectionError(deviceId, endpoint, error);
     } finally {
-      await session.close();
+      await this.closeInjectionResources(guestCapture, session);
     }
+  }
+
+  private async closeInjectionResources(
+    guestCapture: GuestAudioCaptureHandle,
+    session?: EmulatorAudioSession,
+  ): Promise<boolean> {
+    // Always attempt both cleanups, preserving the injection's original result or error.
+    let closed = true;
+    for (const resource of [guestCapture, session]) {
+      try {
+        await resource?.close();
+      } catch (error) {
+        logger.warn(`Failed to close audio injection resource: ${errorMessage(error)}`);
+        closed = false;
+      }
+    }
+    return closed;
+  }
+
+  private async classifyInjectionError(
+    deviceId: string,
+    endpoint: EmulatorGrpcEndpoint,
+    error: unknown,
+  ): Promise<ActionableError> {
+    try {
+      const current = await this.deps.discovery.findByConsolePort(endpoint.consolePort);
+      if (!current || current.pid !== endpoint.pid) {
+        return emulatorExitedDuringInjection(deviceId);
+      }
+    } catch (discoveryError) {
+      logger.warn(
+        `Cannot check emulator ${deviceId} after audio injection failure: ${errorMessage(discoveryError)}`,
+      );
+    }
+    return toActionableError(error, `Audio injection on ${deviceId} failed`);
   }
 
   private async endpointFor(

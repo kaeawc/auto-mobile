@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { ActionableError } from "../../models/ActionableError";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
 import { FileEmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
@@ -8,6 +9,7 @@ import { Http2GrpcTransport } from "../../utils/android-cmdline-tools/emulatorGr
 import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { audioSourceTooLarge, EmulatorAudioService } from "./EmulatorAudioService";
+import { AdbGuestAudioCapture } from "./GuestAudioCapture";
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -55,6 +57,13 @@ export function createEmulatorAudioService(): EmulatorAudioService {
   const fs = new DefaultFileSystem();
   return new EmulatorAudioService({
     discovery: new FileEmulatorGrpcDiscovery(fs),
+    guestCapture: new AdbGuestAudioCapture((deviceId) =>
+      defaultAdbClientFactory.create({
+        deviceId,
+        platform: "android",
+        name: deviceId,
+      }),
+    ),
     createSession: (endpoint) =>
       new EmulatorAudioClient(
         new Http2GrpcTransport(endpoint.address),

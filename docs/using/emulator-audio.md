@@ -13,7 +13,15 @@ container. Keep audio enabled on the emulator: do not set `AUTOMOBILE_EMULATOR_A
 
 ## injectAudioInput
 
-Plays audio into the microphone and returns as soon as it starts.
+Opens a guest microphone capture, verifies it is running for three seconds, then plays audio
+into the microphone and returns as soon as streaming starts. The app need not already be
+recording. The emulator image must provide `tinycap` to the ADB shell user and readable capture
+status under `/proc/asound`; AutoMobile does not enable `adb root`. If the capture cannot be
+verified within eight seconds, injection is refused. A competing app recording may prevent the
+recorder from opening; stop that recording and retry.
+
+Only one injection may start or run per emulator. AutoMobile closes only its own recorder when
+injection stops, finishes, reaches its duration limit, or fails, including on session release.
 
 | Parameter       | Description                                                                     |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -35,7 +43,8 @@ takes the device. A relative `file` path is relative to the directory the server
 Stops an injection by `injectionId`, on the device it was started on. Stopping one that already
 ended is not an error: you get its result again, with `framesSent` and `reason` (`completed`,
 `stopped` or `max_duration`). The server keeps the last 64 ended injections; an older id, or any
-id after a server restart, is an error.
+id after a server restart, is an error. If the emulator exited during injection, stopping reports
+`[audio_emulator_exited]` with the device name; restart the emulator before injecting again.
 
 ## captureAudio
 
@@ -57,9 +66,11 @@ glitch real-time audio.
 
 Errors start with a code in brackets:
 
-| Code                          | Meaning and what to do                                                                                               |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `audio_injection_busy`        | Another injection already feeds this emulator's microphone. Stop it first.                                           |
-| `audio_injection_unsupported` | The device is not a local emulator, or its emulator build has no gRPC audio. Use a recent emulator on the same host. |
-| `audio_capture_unsupported`   | The same, for capture.                                                                                               |
-| `audio_grpc_failed`           | Any other emulator error; the message carries its detail.                                                            |
+| Code                              | Meaning and what to do                                                                                                                                         |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audio_injection_busy`            | Another injection is starting or already feeds this emulator's microphone. Stop it first.                                                                      |
+| `audio_injection_unsupported`     | The device is not a local emulator, or its emulator build has no gRPC audio. Use a recent emulator on the same host.                                           |
+| `audio_guest_capture_unavailable` | A running guest capture could not be verified. Use an image with shell-accessible `tinycap` and readable `/proc/asound`, stop competing recordings, and retry. |
+| `audio_emulator_exited`           | The emulator exited during injection. Restart the named emulator and start a new injection.                                                                    |
+| `audio_capture_unsupported`       | The device is not a local emulator, or its emulator build has no gRPC output capture. Use a recent emulator on the same host.                                  |
+| `audio_grpc_failed`               | Any other emulator error; the message carries its detail.                                                                                                      |

@@ -1,8 +1,10 @@
 import { ActionableError } from "../../../models/ActionableError";
 import { GrpcStatus, type GrpcStatusResult } from "./grpcFraming";
 
-/** Stable codes callers can branch on; each maps from a specific emulator gRPC outcome. */
+/** Stable codes callers can branch on for emulator audio and guest-capture failures. */
 export type EmulatorAudioErrorCode =
+  | "audio_emulator_exited"
+  | "audio_guest_capture_unavailable"
   | "audio_injection_busy"
   | "audio_injection_unsupported"
   | "audio_capture_unsupported"
@@ -54,5 +56,12 @@ export function captureError(status: GrpcStatusResult): EmulatorAudioError {
     unsupported ? "audio_capture_unsupported" : "audio_grpc_failed",
     `Emulator audio capture failed with gRPC status ${status.code}: ${status.message || "no detail"}`,
     status,
+  );
+}
+
+export function emulatorExitedDuringInjection(deviceId: string): EmulatorAudioError {
+  return new EmulatorAudioError(
+    "audio_emulator_exited",
+    `Emulator ${deviceId} exited during audio injection. Restart the emulator and start a new injection.`,
   );
 }

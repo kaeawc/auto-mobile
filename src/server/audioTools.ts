@@ -245,10 +245,13 @@ const injectAudioInputTool = defineDeviceTool({
     "Play a WAV file or a built-in tone into an Android emulator's microphone, so an app under test " +
     "records known audio (voice notes, voice search, calls). Streams through the emulator's own gRPC " +
     "audio API, so each emulator is isolated and no host audio device is needed. Returns an " +
-    "injectionId once streaming starts; stop it with stopAudioInput. Session release stops it. " +
+    "injectionId once streaming starts; stop it with stopAudioInput. AutoMobile opens and verifies " +
+    "a guest microphone capture before streaming and closes its recorder when injection ends. " +
+    "Session release stops it. " +
     "Errors lead with a code: [audio_injection_busy] another injection holds this emulator's " +
     "microphone; [audio_injection_unsupported] the device is not a local emulator with gRPC audio. " +
-    "Physical devices and iOS are refused.",
+    "[audio_guest_capture_unavailable] a safe guest capture could not be verified; " +
+    "[audio_emulator_exited] the emulator exited during injection. Physical devices and iOS are refused.",
   input: injectAudioInputInput,
   options: {
     defaultEnabled: false,
@@ -263,7 +266,8 @@ const stopAudioInputTool = defineDeviceTool({
   description:
     "Stop an audio injection started by injectAudioInput, on the device it runs on. Idempotent: an " +
     "injection that already ended returns its result (frames sent and why it ended); the last 64 " +
-    "ended injections are kept.",
+    "ended injections are kept. [audio_emulator_exited] means the emulator exited during injection; " +
+    "restart it before starting another injection.",
   input: stopAudioInputInput,
   options: {
     defaultEnabled: false,

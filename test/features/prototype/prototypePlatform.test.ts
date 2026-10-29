@@ -1016,3 +1016,46 @@ describe("live camera calls and per-call capabilities", () => {
     expect(validatePrototypeSpec(spec([call("takePhoto")])).success).toBe(true);
   });
 });
+
+describe("cast module contract", () => {
+  const cast = PROTOTYPE_PLATFORM_MODULES.cast;
+
+  test("remote-only controls: disconnect, stop and a 0-1 setVolume", () => {
+    expect(Object.keys(cast.calls)).toEqual(["disconnect", "stop", "setVolume"]);
+    expect(cast.calls.disconnect.args).toEqual({});
+    expect(cast.calls.stop.args).toEqual({});
+    expect(cast.calls.setVolume.args.volume).toEqual({
+      optional: false,
+      value: { kind: "number", min: 0, max: 1 },
+    });
+    for (const call of Object.values(cast.calls)) {
+      expect(call.permissions).toEqual([]);
+    }
+  });
+
+  test("session events and route state cover both cast protocols", () => {
+    expect(Object.keys(cast.events)).toEqual([
+      "routesChanged",
+      "sessionStarting",
+      "sessionStarted",
+      "sessionEnded",
+      "sessionFailed",
+      "remoteVolume",
+    ]);
+    expect(Object.keys(cast.state ?? {})).toEqual([
+      "state",
+      "deviceName",
+      "protocol",
+      "player",
+      "volume",
+    ]);
+    expect(cast.state?.state.value.values).toEqual([
+      "unavailable",
+      "noDevices",
+      "notConnected",
+      "connecting",
+      "connected",
+    ]);
+    expect(cast.state?.protocol.value.values).toEqual(["googleCast", "airplay"]);
+  });
+});

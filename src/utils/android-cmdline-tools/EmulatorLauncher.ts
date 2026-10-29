@@ -27,7 +27,10 @@ import type {
   EmulatorLauncherHost,
 } from "./EmulatorLaunchSupport";
 import { EmulatorStartupValidation } from "./EmulatorStartupValidation";
-import { hasEmulatorGrpcArgument } from "./emulatorGrpc/emulatorGrpcPorts";
+import {
+  handOffEmulatorGrpcLease,
+  leaseEmulatorGrpcPort,
+} from "./emulatorGrpc/emulatorGrpcLaunchLease";
 import { ENV, readEnvRaw } from "../../config/env";
 
 export * from "./EmulatorLaunchSupport";
@@ -150,29 +153,13 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       args.push(...requestedExtraArgs);
     }
     this.appendCameraPosterArguments(args, options.cameraPosterPath);
-    // Without `-grpc` the emulator advertises no gRPC endpoint, so audio tools cannot reach it.
-    // A caller-supplied `-grpc` wins; otherwise lease a free host port for this launch.
-    const grpcLease = hasEmulatorGrpcArgument(args)
-      ? undefined
-      : await this.host.reservations().reserveEmulatorGrpcPort();
-    if (grpcLease) {
-      args.push("-grpc", String(grpcLease.port));
-    }
+    const grpcLease = await leaseEmulatorGrpcPort(args, this.host.reservations());
     this.host.throwIfLaunchCancelled(avdName, isCancelled);
     // Queue for capacity only now that this launch will spawn: every adoption
     // path above returned first, and an invalid AVD has already failed fast.
     try {
       const launch = await this.spawnWithBootAdmission(avdName, perf, args, options);
-      // The emulator binds its gRPC port for as long as it runs, so the lease lasts with it and
-      // is released with the child's launch reservation on exit.
-      if (grpcLease) {
-        const child = launch.process;
-        if (child && child.exitCode === null && child.signalCode === null) {
-          this.host.reservations().trackEmulatorGrpcLease(child, grpcLease);
-        } else {
-          grpcLease.release();
-        }
-      }
+      handOffEmulatorGrpcLease(grpcLease, launch.process, this.host.reservations());
       return launch;
     } catch (error) {
       grpcLease?.release();

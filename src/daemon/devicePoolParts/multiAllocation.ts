@@ -12,22 +12,32 @@ import { ActionableError, Platform } from "../../models";
 import { assertPoolCapacity } from "../poolCapacityError";
 import { type DevicePoolRefreshResult } from "../devicePoolRefresh";
 import { DeviceAllocationRequest } from "../DeviceCriteriaMatcher";
-import { throwIfRequestAborted } from "../../utils/AbortContext";
+import { getAbortSignal } from "../../utils/AbortContext";
 import type { PooledDevice } from "../devicePoolTypes";
 import { refreshFailureContext, RollbackAssignment } from "./contracts";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
+
+/**
+ * Fences side effects on the allocation's caller signal, as `throwIfRequestAborted` does on the
+ * ambient one: throws the signal's reason once it aborted. `undefined` never throws.
+ */
+function throwIfAllocationAborted(signal: AbortSignal | undefined): void {
+  signal?.throwIfAborted();
+}
 
 export interface MultiAllocationOperations {
   assignMultipleDevices(
     sessionIds: string[],
     timeoutMs?: number,
     platform?: Platform,
+    signal?: AbortSignal,
   ): Promise<Map<string, string>>;
   assignMultipleDevicesInScope(
     sessionIds: string[],
     timeoutMs: number,
-    platform?: Platform,
+    platform: Platform | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<Map<string, string>>;
   startDevicesForPlatformShortfall(
     requiredCount: number,
@@ -42,10 +52,12 @@ export interface MultiAllocationOperations {
   assignMultipleDevicesByCriteria(
     requests: DeviceAllocationRequest[],
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<Map<string, string>>;
   assignMultipleDevicesByCriteriaInScope(
     requests: DeviceAllocationRequest[],
     timeoutMs: number,
+    signal: AbortSignal | undefined,
   ): Promise<Map<string, string>>;
   deviceHeldByExistingSession(sessionId: string): PooledDevice | undefined;
   heldDeviceDisqualification(
@@ -57,6 +69,7 @@ export interface MultiAllocationOperations {
   executeMultiDeviceAllocation<T>(
     ticket: MultiDeviceAllocationTicket,
     deadlineMs: number,
+    signal: AbortSignal | undefined,
     setRefreshFailure: (failure: string | undefined) => void,
     allocate: () => Promise<T>,
   ): Promise<MultiDeviceAllocationOutcome<T>>;
@@ -123,6 +136,9 @@ export class DevicePoolMultiAllocation {
    *
    * @param sessionIds Array of session IDs to assign devices to
    * @param timeoutMs Total timeout in milliseconds for allocating ALL devices (default: 5 minutes)
+   * @param signal The caller's cancellation (the plan's request signal). This entry point is the
+   *   allocation's only ambient read (#15671): a caller passing none falls back to the ambient
+   *   request signal, and the chosen signal is passed down to every wait and fence below.
    * @returns Map of sessionId -> deviceId for all assigned devices
    * @throws ActionableError if unable to allocate all devices within timeout
    */
@@ -130,16 +146,18 @@ export class DevicePoolMultiAllocation {
     sessionIds: string[],
     timeoutMs: number = 300000,
     platform?: Platform,
+    signal: AbortSignal | undefined = getAbortSignal(),
   ): Promise<Map<string, string>> {
     return withAllocationCancellationScope(this.state.sessionManager, () =>
-      this.assignMultipleDevicesInScope(sessionIds, timeoutMs, platform),
+      this.assignMultipleDevicesInScope(sessionIds, timeoutMs, platform, signal),
     );
   }
 
   async assignMultipleDevicesInScope(
     sessionIds: string[],
     timeoutMs: number,
-    platform?: Platform,
+    platform: Platform | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<Map<string, string>> {
     const ticket: MultiDeviceAllocationTicket = {
       requests: sessionIds.map((sessionId) => ({ sessionId, criteria: { platform } })),
@@ -184,11 +202,12 @@ export class DevicePoolMultiAllocation {
         this.executeMultiDeviceAllocation(
           ticket,
           startTime + timeoutMs,
+          signal,
           (failure) => {
             refreshFailure = failure;
           },
           async () => {
-            throwIfRequestAborted();
+            throwIfAllocationAborted(signal);
             // Try to assign all remaining sessions
             while (assigned.size < requiredCount) {
               const sessionId = sessionIds[assigned.size];
@@ -219,21 +238,7 @@ export class DevicePoolMultiAllocation {
                 );
               } else if (!assignResult.shouldWait) {
                 // No devices at all - non-retryable error
-                const currentStats = this.callbacks.getStatsForPlatform(platform);
-                throw new DevicePoolError(
-                  `Failed to allocate devices: no devices available.\n` +
-                    `Required: ${requiredCount} devices, allocated: ${assigned.size}\n` +
-                    `Device pool status:\n` +
-                    `  Total devices: ${currentStats.total}\n` +
-                    `  Idle: ${currentStats.idle}\n` +
-                    `  Assigned: ${currentStats.assigned}\n` +
-                    `  Error: ${currentStats.error}\n\n` +
-                    `Suggestions:\n` +
-                    `  - Start an emulator or simulator\n` +
-                    `  - Check device pool status: auto-mobile --cli listDevices\n` +
-                    `  - Verify device tooling is working for the selected platform`,
-                  false,
-                );
+                throw this.noDevicesAvailableError(platform, requiredCount, assigned.size);
               } else {
                 // Devices busy - throw retryable error to wait
                 if (!firstWaitLogged) {
@@ -262,7 +267,7 @@ export class DevicePoolMultiAllocation {
       }
       if (!result.success) {
         await this.rollbackAssignmentsIndependently(assignmentsToRollback);
-        throwIfRequestAborted();
+        throwIfAllocationAborted(signal);
         // Timeout case
         const elapsed = this.state.timer.now() - startTime;
         const currentStats = this.callbacks.getStatsForPlatform(platform);
@@ -292,6 +297,29 @@ export class DevicePoolMultiAllocation {
     } finally {
       this.state.multiDeviceAllocations.remove(ticket);
     }
+  }
+
+  /** The non-retryable refusal for a platform allocation the pool has no devices for. */
+  private noDevicesAvailableError(
+    platform: Platform | undefined,
+    requiredCount: number,
+    allocated: number,
+  ): DevicePoolError {
+    const currentStats = this.callbacks.getStatsForPlatform(platform);
+    return new DevicePoolError(
+      `Failed to allocate devices: no devices available.\n` +
+        `Required: ${requiredCount} devices, allocated: ${allocated}\n` +
+        `Device pool status:\n` +
+        `  Total devices: ${currentStats.total}\n` +
+        `  Idle: ${currentStats.idle}\n` +
+        `  Assigned: ${currentStats.assigned}\n` +
+        `  Error: ${currentStats.error}\n\n` +
+        `Suggestions:\n` +
+        `  - Start an emulator or simulator\n` +
+        `  - Check device pool status: auto-mobile --cli listDevices\n` +
+        `  - Verify device tooling is working for the selected platform`,
+      false,
+    );
   }
 
   /**
@@ -338,15 +366,41 @@ export class DevicePoolMultiAllocation {
   async assignMultipleDevicesByCriteria(
     requests: DeviceAllocationRequest[],
     timeoutMs: number = 300000,
+    // The allocation's only ambient read, as in assignMultipleDevices (#15671).
+    signal: AbortSignal | undefined = getAbortSignal(),
   ): Promise<Map<string, string>> {
     return withAllocationCancellationScope(this.state.sessionManager, () =>
-      this.assignMultipleDevicesByCriteriaInScope(requests, timeoutMs),
+      this.assignMultipleDevicesByCriteriaInScope(requests, timeoutMs, signal),
     );
+  }
+
+  /** Refuses a request no device matches and no pending recovery can still serve. */
+  private assertEveryCriteriaMatchable(
+    requests: DeviceAllocationRequest[],
+    refreshFailure: string | undefined,
+  ): void {
+    for (const request of requests) {
+      const candidates = this.callbacks.getDevicesMatchingCriteria(request.criteria);
+      if (
+        this.callbacks.isCriteriaUnavailableWithoutPendingRecovery(
+          candidates.length > 0,
+          request.criteria,
+        )
+      ) {
+        const summary = this.state.criteriaMatcher.formatCriteriaSummary(request.criteria);
+        throw new ActionableError(
+          `No devices match criteria for session ${request.sessionId}${summary}.\n` +
+            refreshFailureContext(refreshFailure) +
+            `Ensure the required devices are installed, startable, and available.`,
+        );
+      }
+    }
   }
 
   async assignMultipleDevicesByCriteriaInScope(
     requests: DeviceAllocationRequest[],
     timeoutMs: number,
+    signal: AbortSignal | undefined,
   ): Promise<Map<string, string>> {
     const ticket: MultiDeviceAllocationTicket = { requests };
     try {
@@ -386,22 +440,7 @@ export class DevicePoolMultiAllocation {
           `[DevicePool] Started ${started} additional device(s) for criteria-based allocation`,
         );
       }
-      for (const request of requests) {
-        const candidates = this.callbacks.getDevicesMatchingCriteria(request.criteria);
-        if (
-          this.callbacks.isCriteriaUnavailableWithoutPendingRecovery(
-            candidates.length > 0,
-            request.criteria,
-          )
-        ) {
-          const summary = this.state.criteriaMatcher.formatCriteriaSummary(request.criteria);
-          throw new ActionableError(
-            `No devices match criteria for session ${request.sessionId}${summary}.\n` +
-              refreshFailureContext(refreshFailure) +
-              `Ensure the required devices are installed, startable, and available.`,
-          );
-        }
-      }
+      this.assertEveryCriteriaMatchable(requests, refreshFailure);
       // There is no configured pool maximum. A short current inventory may
       // grow through another flow, so preserve waiting for additional devices.
       this.state.multiDeviceAllocations.enqueue(ticket);
@@ -411,6 +450,7 @@ export class DevicePoolMultiAllocation {
         const result = await this.executeMultiDeviceAllocation(
           ticket,
           startTime + timeoutMs,
+          signal,
           (failure) => {
             refreshFailure = failure;
           },
@@ -425,6 +465,7 @@ export class DevicePoolMultiAllocation {
               const result = await this.callbacks.tryAssignDeviceWithCriteria(
                 request.sessionId,
                 request.criteria,
+                signal,
               );
               if (result.refreshCompleted) {
                 refreshFailure = result.refreshFailure;
@@ -626,6 +667,7 @@ export class DevicePoolMultiAllocation {
   async executeMultiDeviceAllocation<T>(
     ticket: MultiDeviceAllocationTicket,
     deadlineMs: number,
+    signal: AbortSignal | undefined,
     setRefreshFailure: (failure: string | undefined) => void,
     allocate: () => Promise<T>,
   ): Promise<MultiDeviceAllocationOutcome<T>> {
@@ -634,13 +676,13 @@ export class DevicePoolMultiAllocation {
     let lastBlock: MultiDeviceAllocationBlock | undefined;
     while (true) {
       if (waited) {
-        await this.state.multiDeviceAllocations.waitForMultiDeviceRetry(deadlineMs);
+        await this.state.multiDeviceAllocations.waitForMultiDeviceRetry(deadlineMs, signal);
         const refreshed = await this.refreshMultiDeviceInventory(ticket);
         if (refreshed) {
           setRefreshFailure(refreshed.failure);
         }
       }
-      throwIfRequestAborted();
+      throwIfAllocationAborted(signal);
       if (this.state.timer.now() >= deadlineMs && waited) {
         return { success: false, attempts, lastBlock };
       }
@@ -756,10 +798,17 @@ export function connectMultiAllocation(
     executeMultiDeviceAllocation<T>(
       ticket: MultiDeviceAllocationTicket,
       deadlineMs: number,
+      signal: AbortSignal | undefined,
       setRefreshFailure: (failure: string | undefined) => void,
       allocate: () => Promise<T>,
     ): Promise<MultiDeviceAllocationOutcome<T>> {
-      return part().executeMultiDeviceAllocation(ticket, deadlineMs, setRefreshFailure, allocate);
+      return part().executeMultiDeviceAllocation(
+        ticket,
+        deadlineMs,
+        signal,
+        setRefreshFailure,
+        allocate,
+      );
     },
     refreshMultiDeviceInventory: (...args) => part().refreshMultiDeviceInventory(...args),
     isPotentialAllocationSupply: (...args) => part().isPotentialAllocationSupply(...args),

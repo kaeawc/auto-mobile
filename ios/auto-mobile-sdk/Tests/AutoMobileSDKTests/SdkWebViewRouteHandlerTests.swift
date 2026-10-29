@@ -250,6 +250,12 @@ final class AutoMobileWebViewPolicyRejectionTests: XCTestCase {
             XCTAssertNotNil(AutoMobileWebActionScript.source(for: AutoMobileWebAction(action)), "\(action)")
         }
     }
+
+    func testAnActionOnAMissingElementThrowsInsteadOfDoingNothing() throws {
+        let source = try XCTUnwrap(AutoMobileWebActionScript.source(for: .click(snapshotId: "s", elementId: "e0")))
+        XCTAssertTrue(source.contains("if (!e) { throw new Error("), source)
+        XCTAssertFalse(source.contains("if (!e) { return; }"), source)
+    }
 }
 
 #if canImport(WebKit)

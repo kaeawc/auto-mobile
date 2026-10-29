@@ -97,6 +97,16 @@ carries the registered web views from `/health`. The snapshot is the one the bri
 accepted when the page posted it, so it is already bounded to `maxElements` and its values are
 redacted when `redactText` is on; nothing unredacted leaves the bridge.
 
+The page script posts a snapshot on load, on every DOM mutation, and (coalesced to one per 100 ms)
+after a scroll or a focus change, so geometry and focus follow the page without a mutation. Only the
+main frame posts snapshots, and the bridge accepts only main-frame ones: element ids are per
+document and actions resolve them in the main frame, so a frame's element could otherwise answer
+for another. An element keeps its id for the life of the document; a new element gets the next id
+from a counter, so inserting one never reuses an existing id. `visible` requires a non-empty box
+and a rendered element (`checkVisibility`, or computed `visibility` where that is unavailable), so
+a control hidden by CSS is not visible. An action whose element is no longer in the document throws
+in the page, so it is reported as `javascript_error` rather than accepted with nothing done.
+
 An action request names a `webViewId` and sends `actionJson`, one `AutoMobileWebControlAction` in
 Swift's enum shape, such as `{"setValue":{"snapshotId":"s1","elementId":"q","text":"hi"}}`. The
 wire type holds only the bounded actions (`click`, `focus`, `insertText`, `select`, `scroll`,

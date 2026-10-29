@@ -2228,9 +2228,13 @@ exactly one `/<module>/<key>`: `pitchDeg` and `rollDeg` (whole degrees, -180 to 
 only; iOS has no public ambient-light API). A sensor the device lacks leaves its key absent, so it compares as
 missing. `prototypeSensorReference.ts` is the reference the runtimes copy: whole-unit rounding, per-key
 throttling at `1000 / rateHz` ms (`rateHz` 1 to 30), and a shake at 2.7 g or more with a 1000 ms cooldown,
-replayed from `test/fixtures/prototype-sensors/`. The root `sensors` subscription block (which sensors to listen
-to and their `rateHz`) and the `motion` permission for `steps` are outside this contract. No production
-runtime advertises the module.
+replayed from `test/fixtures/prototype-sensors/`.
+
+The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`:
+`shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
+`rateHz` of 1 to 30. `steps` also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
+read or a `sensors.shake` handler must name a sensor the block lists. No production runtime advertises the
+module.
 
 **Voice notes (#14194, contract only).** The `audioRecorder` module
 (`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`

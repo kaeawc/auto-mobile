@@ -843,9 +843,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: {
       ...base,
       requires: { platform: ["sensors"] },
+      sensors: { proximity: {} },
       root: {
         ...base.root,
-        children: [{ ...label, text: "{platform:/sensors/steps}" }],
+        children: [{ ...label, text: "{platform:/sensors/proximityNear}" }],
       },
     },
     ops: [],

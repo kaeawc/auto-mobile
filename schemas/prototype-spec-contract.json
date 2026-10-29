@@ -15754,6 +15754,13 @@
           },
           "optional": true
         },
+        "sensors": {
+          "rule": {
+            "kind": "ref",
+            "name": "sensorsBlock"
+          },
+          "optional": true
+        },
         "notifications": {
           "rule": {
             "kind": "ref",
@@ -21975,6 +21982,66 @@
           "optional": true
         }
       }
+    },
+    "sensorsBlock": {
+      "kind": "object",
+      "fields": {
+        "shake": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "orientation": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "rateHz": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 1,
+                  "max": 30
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "steps": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "proximity": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "light": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "rateHz": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 1,
+                  "max": 30
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        }
+      }
     }
   },
   "eventKinds": [
@@ -22611,7 +22678,10 @@
               "optional": true,
               "value": {
                 "kind": "array",
-                "item": { "kind": "enum", "values": ["name", "phone", "email"] },
+                "item": {
+                  "kind": "enum",
+                  "values": ["name", "phone", "email"]
+                },
                 "min": 1,
                 "max": 3,
                 "unique": true
@@ -23613,7 +23683,9 @@
         },
         "blocked": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "boolean" }
+          "value": {
+            "kind": "boolean"
+          }
         }
       }
     },

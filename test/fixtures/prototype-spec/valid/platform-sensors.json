@@ -9,7 +9,24 @@
     "shakes": 0
   },
   "requires": {
-    "platform": ["sensors"]
+    "platform": ["sensors"],
+    "permissions": [
+      {
+        "name": "motion",
+        "purpose": "Count your steps."
+      }
+    ]
+  },
+  "sensors": {
+    "shake": {},
+    "orientation": {
+      "rateHz": 10
+    },
+    "steps": {},
+    "proximity": {},
+    "light": {
+      "rateHz": 2
+    }
   },
   "platform": {
     "on": {

@@ -247,6 +247,8 @@
     "secure-storage.json",
     "select-dropdown.json",
     "selection-controls.json",
+    "sensors-block-minimal.json",
+    "sensors-block-rates.json",
     "set-state-matching-values.json",
     "set-state-repeat-templated-value.json",
     "set-state-unbound-key.json",
@@ -1617,6 +1619,16 @@
     "semantics-traits-max.json",
     "semantics-traits-unknown.json",
     "semantics-unknown.json",
+    "sensors-block-rate-fraction.json",
+    "sensors-block-rate-on-steps.json",
+    "sensors-block-rate-over.json",
+    "sensors-block-rate-zero.json",
+    "sensors-block-steps-without-motion.json",
+    "sensors-block-undeclared-module.json",
+    "sensors-block-unknown-sensor.json",
+    "sensors-read-undeclared.json",
+    "sensors-read-without-block.json",
+    "sensors-shake-undeclared.json",
     "set-state-checkbox-number.json",
     "set-state-date-picker-bad-date.json",
     "set-state-dialog-open-string.json",
@@ -3189,6 +3201,8 @@
     "notify-channel-blocked-read.json": [
       "prototype_platform_notifications_v1",
       "prototype_platform_v1"
-    ]
+    ],
+    "sensors-block-rates.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
+    "sensors-block-minimal.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"]
   }
 }

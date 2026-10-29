@@ -47,6 +47,107 @@ function repeatedSpecWith(
 }
 
 describe("sensitive data flow into network sinks (R2)", () => {
+  test("a library refuses a sensitive typed data binding in a request query", () => {
+    const spec = specWith({ query: { q: { data: "/code" } } });
+    expect(validatePrototypeSpec(spec).success).toBe(true);
+    expect(validatePrototypeSpec(spec, { library: true })).toEqual({
+      success: false,
+      error: {
+        path: "root.children[1].onTap[0].query.q",
+        message: "Sensitive value cannot be bound into a request",
+      },
+    });
+  });
+
+  test.each([
+    { sink: { headers: { Authorization: { data: "/code" } } }, path: "headers.Authorization" },
+    { sink: { method: "POST", body: { data: "/code" } }, path: "body" },
+    { sink: { method: "POST", body: { form: { q: { data: "/code" } } } }, path: "body.form.q" },
+    {
+      sink: { method: "POST", body: { multipart: [{ name: "q", value: { data: "/code" } }] } },
+      path: "body.multipart[0].value",
+    },
+  ])("a library refuses a sensitive typed binding at $path", ({ sink, path }) => {
+    const spec = specWith(sink);
+    const error = {
+      path: `root.children[1].onTap[0].${path}`,
+      message: "Sensitive value cannot be bound into a request",
+    };
+    expect(validatePrototypeSpec(spec).success).toBe(true);
+    expect(prototypeSensitiveSinkErrors(spec)).toEqual([error]);
+    expect(validatePrototypeSpec(spec, { library: true })).toEqual({ success: false, error });
+  });
+
+  test("a library accepts non-overlapping typed request bindings", () => {
+    const spec = specWith({
+      method: "POST",
+      headers: { Authorization: { data: "/other" } },
+      query: { q: { data: "/other" } },
+      body: { data: "/other" },
+    });
+    expect(prototypeSensitiveSinkErrors(spec)).toEqual([]);
+    expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
+  });
+
+  test.each([
+    { pointer: "/user", into: "/data/user/name", refused: true },
+    { pointer: "/user/name/first", into: "/data/user/name", refused: true },
+    { pointer: "/user/email", into: "/data/user/name", refused: false },
+    { pointer: "/codeword", into: "/data/code", refused: false },
+  ])(
+    "typed pointer $pointer uses segment-wise overlap with $into",
+    ({ pointer, into, refused }) => {
+      const spec = specWith({ query: { q: { data: pointer } } }, into);
+      expect(validatePrototypeSpec(spec).success).toBe(true);
+      expect(prototypeSensitiveSinkErrors(spec)).toEqual(
+        refused
+          ? [
+              {
+                path: "root.children[1].onTap[0].query.q",
+                message: "Sensitive value cannot be bound into a request",
+              },
+            ]
+          : [],
+      );
+      expect(validatePrototypeSpec(spec, { library: true }).success).toBe(!refused);
+    },
+  );
+
+  test("a library refuses a sensitive typed channel header", () => {
+    const spec = {
+      ...specWith({}),
+      requires: { platform: ["clipboard", "realtime"] },
+      channels: {
+        updates: {
+          kind: "sse",
+          via: "device",
+          url: "https://example.com/events",
+          headers: { Authorization: { data: "/code" } },
+        },
+      },
+    };
+    const error = {
+      path: "channels.updates.headers.Authorization",
+      message: "Sensitive value cannot be bound into a request",
+    };
+    expect(validatePrototypeSpec(spec).success).toBe(true);
+    expect(prototypeSensitiveSinkErrors(spec)).toEqual([error]);
+    expect(validatePrototypeSpec(spec, { library: true })).toEqual({ success: false, error });
+  });
+
+  test("sensitive typed data bindings outside request sinks remain accepted", () => {
+    const spec = specWith({});
+    const outside = {
+      ...spec,
+      root: {
+        ...spec.root,
+        onAppear: [{ type: "emit", name: "pasted", context: { code: { data: "/code" } } }],
+      },
+    };
+    expect(prototypeSensitiveSinkErrors(outside)).toEqual([]);
+    expect(validatePrototypeSpec(outside, { library: true }).success).toBe(true);
+  });
+
   test("a library spec refuses a sensitive /data pointer bound into a request query", () => {
     const spec = specWith({ query: { code: "{data:/code}" } });
     expect(validatePrototypeSpec(spec).success).toBe(true);

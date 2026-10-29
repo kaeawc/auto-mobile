@@ -6,7 +6,11 @@ import { object, type Located, type PrototypeValidationError } from "./prototype
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { mapBindableFields, visitPrototypeHandlerFields } from "./prototypeTemplate";
+import {
+  mapBindableFields,
+  visitPrototypeHandlerFields,
+  type FieldVisitor,
+} from "./prototypeTemplate";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -72,7 +76,7 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   }
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
-  const { requests, fields } = libraryFields(spec, nodes);
+  const { requests, fields } = libraryFields(spec, nodes, true);
   fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const sinkFields = fields.filter(
     // Key fields name state entries, which a `/data` pointer cannot reach.
@@ -87,7 +91,11 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
       return [budgetError];
     }
   }
-  const located = sinkFields.map((field) => ({ ...field, value: { stateKey: field.text } }));
+  // Typed data pointers stay literal at runtime, even inside repeat rows. Only text binds.
+  const located = sinkFields.map((field) => ({
+    ...field,
+    value: { stateKey: field.dataPointer ? "" : field.text },
+  }));
   const instances = validRepeats
     ? repeatKeyInstances(spec, located)
     : located.map((field) => ({ located: field, value: field.value }));
@@ -96,7 +104,10 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
     if (errors.has(field.path)) {
       continue;
     }
-    const reached = prototypeDataPlaceholders(String(value.stateKey)).some((pointer) =>
+    const pointers = field.dataPointer
+      ? [field.text]
+      : prototypeDataPlaceholders(String(value.stateKey));
+    const reached = pointers.some((pointer) =>
       tainted.some((taint) => pointersOverlap(taint, pointer)),
     );
     if (reached) {
@@ -282,38 +293,46 @@ interface LibraryField {
   text: string;
   path: string;
   key: boolean;
+  dataPointer?: boolean;
 }
 function libraryFields(
   spec: unknown,
   nodes: readonly Located[],
+  includeDataBindings = false,
 ): { requests: string[]; fields: LibraryField[] } {
   const requests: string[] = [];
-  const fields: { text: string; path: string; key: boolean }[] = [];
-  for (const { value, path } of nodes) {
-    mapBindableFields(value, path, (raw, at, kind) => {
-      if (kind === "request") {
-        requests.push(at);
-      }
-      if (typeof raw === "string" && (kind === "text" || kind === "key")) {
-        fields.push({ text: raw, path: at, key: kind === "key" });
-      }
-      return raw;
-    });
-  }
-  visitPrototypeHandlerFields(spec, (raw, at, kind) => {
+  const fields: LibraryField[] = [];
+  const collect: FieldVisitor = (raw, at, kind) => {
     if (kind === "request") {
       requests.push(at);
     }
     if (typeof raw === "string" && (kind === "text" || kind === "key")) {
       fields.push({ text: raw, path: at, key: kind === "key" });
     }
+    const binding = kind === "emitBinding" ? object(raw) : undefined;
+    if (
+      includeDataBindings &&
+      typeof binding?.data === "string" &&
+      !Object.hasOwn(binding, "state")
+    ) {
+      fields.push({ text: binding.data, path: at, key: false, dataPointer: true });
+    }
     return raw;
-  });
-  channelFields(spec, requests, fields);
+  };
+  for (const { value, path } of nodes) {
+    mapBindableFields(value, path, collect);
+  }
+  visitPrototypeHandlerFields(spec, collect);
+  channelFields(spec, requests, fields, collect);
   return { requests, fields };
 }
 
-function channelFields(spec: unknown, requests: string[], fields: LibraryField[]): void {
+function channelFields(
+  spec: unknown,
+  requests: string[],
+  fields: LibraryField[],
+  collect: FieldVisitor,
+): void {
   for (const [id, raw] of Object.entries(object(object(spec)?.channels) ?? {})) {
     const channel = object(raw)!;
     const at = prototypeContractPatterns.pathKey.test(id)
@@ -329,6 +348,8 @@ function channelFields(spec: unknown, requests: string[], fields: LibraryField[]
         fields.push({ text: value, path, key: false });
       } else if (typeof object(value)?.state === "string") {
         fields.push({ text: String(object(value)!.state), path: `${path}.state`, key: true });
+      } else {
+        collect(value, path, "emitBinding");
       }
     }
   }

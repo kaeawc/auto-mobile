@@ -57,6 +57,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_hide_keyboard_v1",
             // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
             "prototype_platform_cast_v1",
+            // Contract only; the media queue runtime is owed (#14249).
+            "prototype_platform_media_queue_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
             // Contract only; the Keychain-backed secure storage runtime is owed (#14321).

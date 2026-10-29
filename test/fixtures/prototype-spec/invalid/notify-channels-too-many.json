@@ -1,0 +1,93 @@
+{
+  "spec": {
+    "id": "nc",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "postStatus": ""
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Tell you about new messages"
+        }
+      ]
+    },
+    "root": {
+      "type": "button",
+      "label": "Notify",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "notifications.post",
+          "args": {
+            "id": {
+              "value": "msg-1"
+            },
+            "channel": {
+              "value": "c0"
+            },
+            "title": {
+              "value": "Ada"
+            }
+          }
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "c0",
+          "name": "C0",
+          "importance": "default"
+        },
+        {
+          "id": "c1",
+          "name": "C1",
+          "importance": "default"
+        },
+        {
+          "id": "c2",
+          "name": "C2",
+          "importance": "default"
+        },
+        {
+          "id": "c3",
+          "name": "C3",
+          "importance": "default"
+        },
+        {
+          "id": "c4",
+          "name": "C4",
+          "importance": "default"
+        },
+        {
+          "id": "c5",
+          "name": "C5",
+          "importance": "default"
+        },
+        {
+          "id": "c6",
+          "name": "C6",
+          "importance": "default"
+        },
+        {
+          "id": "c7",
+          "name": "C7",
+          "importance": "default"
+        },
+        {
+          "id": "c8",
+          "name": "C8",
+          "importance": "default"
+        }
+      ]
+    }
+  },
+  "expectedPath": "notifications.channels"
+}

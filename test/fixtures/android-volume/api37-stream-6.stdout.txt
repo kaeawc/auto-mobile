@@ -1,0 +1,4 @@
+[V] will control stream=6 (STREAM_BLUETOOTH_SCO)
+[V] will get volume
+[V] Connecting to AudioService
+[V] volume is 3 in range [1..15]

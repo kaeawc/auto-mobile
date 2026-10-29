@@ -359,11 +359,84 @@ describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
     ).toBe("unsupported");
   });
 
-  it("iOS secure_state read is unavailable pending the #5161 host policy, not unsupported", () => {
+  it("iOS secure_state read is unavailable without a host Keychain inspection adapter, not unsupported", () => {
     const report = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
     const read = findOperationCapability(report, "secure_state", "read")!;
     expect(read.state).toBe("unavailable");
-    expect(read.prerequisites?.some((p) => p.includes("5161"))).toBe(true);
+    expect(read.prerequisites?.some((p) => p.includes("Keychain inspection adapter"))).toBe(true);
+  });
+});
+
+describe("iOS Keychain and shared-store capabilities (#5161)", () => {
+  const keychain = {
+    schemaVersion: 1,
+    capability: "storage.keychain",
+    inspection: "unavailable",
+    deletion: "enabled",
+    reason: null,
+    deletionScopes: [
+      {
+        itemClass: "genericPassword",
+        service: "fixture.service",
+        account: "fixture.account",
+        accessGroup: "TEAMID.fixture",
+      },
+    ],
+  } as const;
+  const suite = {
+    kind: "user_defaults_suite",
+    identifier: "group.fixture",
+    sharing: "app_group",
+    appGroup: "group.fixture",
+    coordination: "uncoordinated",
+    query: "supported",
+  } as const;
+  const coreData = {
+    kind: "core_data",
+    identifier: "Main",
+    sharing: "app_private",
+    coordination: "single_process",
+    query: "unsupported",
+    reason: "core_data_query_unavailable",
+  } as const;
+  const iosCtx = () =>
+    ctx({
+      platform: "ios",
+      deviceType: "simulator",
+      iosStorage: {
+        keychain: { ...keychain, deletionScopes: [...keychain.deletionScopes] },
+        stores: [suite, coreData],
+      },
+    });
+
+  it("lists the discovered Keychain capability on secure_state", () => {
+    const secure = computeStorageCapabilities(iosCtx()).domains.find(
+      (d) => d.domain === "secure_state",
+    )!;
+    expect<unknown>(secure.capabilities).toEqual([keychain]);
+  });
+
+  it("keeps Keychain read, write and bulk reset closed even when exact deletion is enabled", () => {
+    const report = computeStorageCapabilities(iosCtx());
+    expect(findOperationCapability(report, "secure_state", "read")?.state).toBe("unavailable");
+    expect(findOperationCapability(report, "secure_state", "write")?.state).toBe("unsupported");
+    const reset = findOperationCapability(report, "secure_state", "namespace_reset")!;
+    expect(reset.state).toBe("unsupported");
+    expect(reset.reason).toContain("deleteKeychainItem");
+  });
+
+  it("states app-group sharing and coordination on the domain that owns each store", () => {
+    const report = computeStorageCapabilities(iosCtx());
+    expect<unknown>(report.domains.find((d) => d.domain === "key_value")?.stores).toEqual([suite]);
+    expect<unknown>(report.domains.find((d) => d.domain === "databases")?.stores).toEqual([
+      coreData,
+    ]);
+  });
+
+  it("reports no Keychain capability or stores when the SDK was not asked", () => {
+    const report = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
+    expect(report.domains.find((d) => d.domain === "secure_state")?.capabilities).toEqual([]);
+    expect(report.domains.find((d) => d.domain === "key_value")?.stores).toBeUndefined();
   });
 });
 

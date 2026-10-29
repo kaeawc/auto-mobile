@@ -1,4 +1,9 @@
 import { deadlineRequest, type TapOnCall } from "./ActionCall";
+import {
+  deviceIosSdkBridgeTapper,
+  type IosSdkBridgeTapper,
+  type IosSdkTapOutcome,
+} from "./IosSdkBridgeTapRouter";
 import type { AndroidOrIosPlatform, ElementSelectionResult } from "../../models";
 import { requireAndroidOrIosPlatform } from "../../models";
 import type { DisplayFence, ObservedActionResult } from "./BaseVisualChange";
@@ -118,6 +123,8 @@ export interface TapExecutionHost {
   resolveTapTargetElement: TapTargetResolver["resolveTapTargetElement"];
   rethrowKeyboardOcclusion: TapDisplayRouter["rethrowKeyboardOcclusion"];
   retryTapIfNoChange: TapGestureDispatcher["retryTapIfNoChange"];
+  /** Routes a tap on an SDK observation-bridge node (#5159); defaults to the device's runner. */
+  readonly iosSdkBridgeTapper?: () => IosSdkBridgeTapper;
   searchForElement: TapTargetResolver["searchForElement"];
   readonly selectionStateTracker: () => Pick<SelectionStateTracker, "prepare" | "finalize">;
   readonly strategy: () => TapStrategy;
@@ -167,6 +174,8 @@ interface TapTargetState extends TapHierarchyState {
   tapElement: Element;
   usedParent: boolean;
   screenReaderNavigation?: ScreenReaderNavigationResult;
+  /** Which backend tapped an iOS SDK bridge node, and why XCTest stood in (#5159). */
+  iosBackend?: IosSdkTapOutcome;
 }
 
 /** Executes one selector action while keeping its observation and verification state local. */
@@ -771,7 +780,12 @@ export class TapExecution {
       state.ensureCheckedTapTimestamp = this.host.timer().now();
     }
 
-    if (preTapHash && this.host.strategy().retryTapIfNoChange) {
+    // A tap the SDK bridge accepted is never repeated through XCTest.
+    if (
+      preTapHash &&
+      this.host.strategy().retryTapIfNoChange &&
+      target.iosBackend?.backend !== "sdk"
+    ) {
       await this.host.retryTapIfNoChange(
         preTapHash,
         tapPoint,
@@ -798,6 +812,7 @@ export class TapExecution {
         action: target.action,
         element: target.tapElement,
         selectedElement: target.selectedElementMetadata,
+        ...iosBackendFields(target.iosBackend),
         searchUntil: target.searchOutcome.stats,
         ...(target.screenReaderNavigation
           ? { screenReaderNavigation: target.screenReaderNavigation }
@@ -860,6 +875,19 @@ export class TapExecution {
         );
       },
       ios: async () => {
+        const tapper =
+          this.host.iosSdkBridgeTapper?.() ?? deviceIosSdkBridgeTapper(this.host.device());
+        target.iosBackend =
+          (await tapper.tap({
+            // A focus rewritten to a tap still belongs to sendKeys, which stays on XCTest.
+            action: state.requestedAction === "focus" ? "focus" : target.action,
+            element: target.tapElement,
+            longPressDurationMs: target.longPressDuration,
+            signal,
+          })) ?? undefined;
+        if (target.iosBackend?.backend === "sdk") {
+          return;
+        }
         await this.host.executeiOSTap(
           target.action,
           tapPoint.x,
@@ -1004,4 +1032,16 @@ export class TapExecution {
   ): LongPressMetadata {
     return this.host.longPressMetadataDetector().detect(previousObservation, currentObservation);
   }
+}
+
+/** `backend` and `fallbackReason` for a tap on an iOS SDK bridge node; nothing otherwise. */
+function iosBackendFields(
+  outcome: IosSdkTapOutcome | undefined,
+): Pick<TapOnElementResult, "backend" | "fallbackReason"> {
+  if (!outcome) {
+    return {};
+  }
+  return outcome.backend === "sdk"
+    ? { backend: "sdk" }
+    : { backend: "xctest", fallbackReason: outcome.fallbackReason };
 }

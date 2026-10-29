@@ -497,6 +497,10 @@ public final class AutoMobileNetwork: Sendable
   public func setMaxBodyBytes(_ bytes: Int)
   public func protocolClass() -> AnyClass
   public func captureRecorder() -> NetworkCaptureRecorder
+  @discardableResult public func registerURLSession(_ configuration: URLSessionConfiguration) -> URLSessionRegistration
+  public func registerWebSocket() -> WebSocketNetworkCaptureAdapter
+  public func registerNWConnection() -> NWConnectionNetworkCaptureAdapter
+  public func transportCapabilities() -> [SdkCapabilityDescriptor]
   public func recordRequest(_ record: NetworkRequestRecord)
   @available(*, deprecated, message: "Use recordRequest(_:) with NetworkRequestRecord instead") public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
   public func recordFromTask( _ task: URLSessionTask, startTime: Date, receivedData: Data?, error: Error? )
@@ -510,6 +514,21 @@ public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable
   public func urlSession( _: URLSession, dataTask _: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void )
   public func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive data: Data)
   public func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?)
+
+// Network/HostTransportRegistry.swift
+public enum HostTransport: String, CaseIterable, Sendable
+  case urlSession = "network.transport.urlsession"
+  case backgroundURLSession = "network.transport.urlsession.background"
+  case webSocket = "network.transport.websocket"
+  case nwConnection = "network.transport.nwconnection"
+  case other = "network.transport.other"
+public struct URLSessionRegistration: Sendable
+public enum Mode: String, Sendable
+  case urlProtocol
+  case delegateForwarding
+  public let transport: HostTransport
+  public let mode: Mode
+  public let adapter: URLSessionNetworkCaptureAdapter?
 
 // Network/NetworkCaptureRecorder.swift
 public enum NetworkCaptureDirection: String, Codable, Sendable
@@ -546,10 +565,13 @@ public final class URLSessionNetworkCaptureAdapter: Sendable
   public func didFail(requestId: String, error: Error)
 public final class WebSocketNetworkCaptureAdapter: Sendable
   public init(recorder: NetworkCaptureRecorder)
+  public func send( _ message: URLSessionWebSocketTask.Message, on task: URLSessionWebSocketTask, connectionId: String?, sessionId: String? = nil, completionHandler: @escaping @Sendable (Error?) -> Void )
+  public func receive( on task: URLSessionWebSocketTask, connectionId: String?, sessionId: String? = nil, completionHandler: @escaping @Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void )
   public func evaluateFault( url: String, connectionId: String?, direction: NetworkCaptureDirection, sessionId: String? = nil )
   public func recordFrame( url: String, connectionId: String?, direction: NetworkCaptureDirection, frameType: WebSocketFrameType, payloadSize: Int? )
 public final class NWConnectionNetworkCaptureAdapter: Sendable
   public init(recorder: NetworkCaptureRecorder)
+  public func start( _ connection: NWConnection, queue: DispatchQueue, endpoint: String, connectionId: String, requestId: String? = nil, sessionId: String? = nil, onFault: @escaping @Sendable (NWError) -> Void )
   public func evaluateFault( endpoint: String, connectionId: String, sessionId: String? = nil )
   @discardableResult public func begin( endpoint: String, connectionId: String )
   public func didSend(requestId: String, bytes: Int)
@@ -616,67 +638,8 @@ public final class AutoMobileNotifications: Sendable
   public func installActionHandler(on center: UNUserNotificationCenter = .current())
 
 // Observation/AutoMobileObservationBridge.swift
-public enum AutoMobileCoordinateSpace: String, Codable, Sendable
-  case screen
-  case window
-  case view
-public enum AutoMobileDeviceOrientation: String, Codable, Sendable
-  case portrait
-  case portraitUpsideDown
-  case landscapeLeft
-  case landscapeRight
-  case unknown
-public struct AutoMobileObservationNode: Codable, Sendable, Equatable
-  public let id: String
-  public let role: String
-  public let label: String?
-  public let value: String?
-  public let bounds: SdkBounds
-  public let enabled: Bool
-  public let visible: Bool
-  public let focused: Bool
-  public let children: [AutoMobileObservationNode]
-  public init( id: String, role: String, label: String? = nil, value: String? = nil, bounds: SdkBounds, enabled: Bool = true, visible: Bool = true, focused: Bool = false, children: [AutoMobileObservationNode] = [] )
-  public func contains(id: String) -> Bool
-  public func node(id: String) -> AutoMobileObservationNode?
-public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
-  public let captureIdentity: UInt64
-  public let orientation: AutoMobileDeviceOrientation
-  public let coordinateSpace: AutoMobileCoordinateSpace
-  public let bounds: SdkBounds
-  public let root: AutoMobileObservationNode?
-  public let focusedElementId: String?
-  public let capabilities: Set<String>
-  public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
-  public func containsElement(id: String) -> Bool
 public protocol AutoMobileObservationProvider: AnyObject, Sendable
   func captureObservation() async -> AutoMobileObservationSnapshot
-public enum AutoMobileAction: Codable, Sendable, Equatable
-  case tap(observationIdentity: UInt64, elementId: String)
-  case longPress(observationIdentity: UInt64, elementId: String, durationMs: Int)
-  case swipe(observationIdentity: UInt64, start: SdkPoint, end: SdkPoint, durationMs: Int)
-  case drag(observationIdentity: UInt64, elementId: String, end: SdkPoint, durationMs: Int)
-  case pinch(observationIdentity: UInt64, elementId: String, scale: Double, durationMs: Int)
-  case insertText(observationIdentity: UInt64, elementId: String, text: String)
-  case clearText(observationIdentity: UInt64, elementId: String)
-  case back(observationIdentity: UInt64)
-  case scroll(observationIdentity: UInt64, elementId: String?, delta: SdkPoint)
-  public var observationIdentity: UInt64
-  public var targetElementId: String?
-public struct SdkPoint: Codable, Sendable, Equatable
-  public let x: Double
-  public let y: Double
-  public init(x: Double, y: Double)
-public struct AutoMobileActionResult: Codable, Sendable, Equatable
-public enum Status: String, Codable, Sendable
-  case accepted
-  case rejected
-  case cancelled
-  public let status: Status
-  public let reason: String?
-  public let durationMs: Double
-  public let nextObservationIdentity: UInt64?
-  public init(status: Status, reason: String? = nil, durationMs: Double = 0, nextObservationIdentity: UInt64? = nil)
 public protocol AutoMobileActionExecutor: AnyObject, Sendable
   func execute(_ action: AutoMobileAction) async -> AutoMobileActionResult
   public actor AutoMobileSerialActionQueue: AutoMobileActionExecutor
@@ -794,7 +757,7 @@ public final class DatabaseInspector: Sendable
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
   public func configure(_ configuration: StorageInspectionConfiguration)
-  public func registerAppGroupSuite(_ suiteName: String)
+  public func registerAppGroupSuite(_ suiteName: String, coordination: StoreCoordination = .uncoordinated)
   public func registerCoreDataStore(_ store: CoreDataStoreRegistration)
   public func authorizeHostMutations(_ authorized: Bool)
   public func authorizeSessionMutations(sessionId: String?)
@@ -848,11 +811,16 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable
   public func closeAll()
 
 // Storage/StorageInspectionPolicy.swift
+public enum StoreCoordination: String, Codable, Sendable
+  case uncoordinated
+  case hostCoordinated = "host_coordinated"
 public struct CoreDataStoreRegistration: Sendable, Codable
   public let identifier: String
   public let modelVersion: String?
   public let entities: [String]
-  public init(identifier: String, modelVersion: String? = nil, entities: [String] = [])
+  public let appGroup: String?
+  public let coordination: StoreCoordination?
+  public init( identifier: String, modelVersion: String? = nil, entities: [String] = [], appGroup: String? = nil, coordination: StoreCoordination? = nil )
 public struct KeychainDeletionEntry: Hashable, Sendable
   public let service: String
   public let account: String
@@ -861,6 +829,7 @@ public struct KeychainDeletionEntry: Hashable, Sendable
 public struct StorageInspectionConfiguration: Sendable
   public var allowedDatabasePaths: Set<String>
   public var registeredAppGroupSuites: Set<String>
+  public var hostCoordinatedAppGroupSuites: Set<String>
   public var coreDataStores: [CoreDataStoreRegistration]
   public var sensitiveKeys: Set<String>
   public var maxRows: Int
@@ -868,7 +837,7 @@ public struct StorageInspectionConfiguration: Sendable
   public var allowKeychainDeletion: Bool
   public var allowedKeychainDeletionEntries: Set<KeychainDeletionEntry>
   public var allowMutations: Bool
-  public init( allowedDatabasePaths: Set<String> = [], registeredAppGroupSuites: Set<String> = [], coreDataStores: [CoreDataStoreRegistration] = [], sensitiveKeys: Set<String> = [], maxRows: Int = 500, maxBytes: Int = 512 * 1024, allowMutations: Bool = false, allowKeychainDeletion: Bool = false, allowedKeychainDeletionEntries: Set<KeychainDeletionEntry> = [] )
+  public init( allowedDatabasePaths: Set<String> = [], registeredAppGroupSuites: Set<String> = [], coreDataStores: [CoreDataStoreRegistration] = [], sensitiveKeys: Set<String> = [], maxRows: Int = 500, maxBytes: Int = 512 * 1024, allowMutations: Bool = false, allowKeychainDeletion: Bool = false, allowedKeychainDeletionEntries: Set<KeychainDeletionEntry> = [], hostCoordinatedAppGroupSuites: Set<String> = [] )
 
 // Storage/UserDefaultsInspector.swift
 public final class UserDefaultsInspector: @unchecked Sendable
@@ -1011,6 +980,27 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
   public func webView(_ webView: WKWebView, didCommit _: WKNavigation!)
   public func webViewWebContentProcessDidTerminate(_ webView: WKWebView)
 
+// sdk-wire/CapabilityWireModels.swift
+public enum SdkCapabilityState: String, Codable, Equatable, Sendable
+  case supported = "SUPPORTED"
+  case disabled = "DISABLED"
+  case unsupported = "UNSUPPORTED"
+  case permissionDenied = "PERMISSION_DENIED"
+  case notInitialized = "NOT_INITIALIZED"
+  case unknown = "UNKNOWN"
+  public init(from decoder: Decoder) throws
+public enum SdkFaultEnforcement: String, Codable, Equatable, Sendable
+  case enforced = "ENFORCED"
+  case evaluateOnly = "EVALUATE_ONLY"
+  case notEnforceable = "NONE"
+public struct SdkCapabilityDescriptor: Codable, Equatable, Sendable
+  public let id: String
+  public let state: SdkCapabilityState
+  public let reason: String?
+  public let faultEnforcement: SdkFaultEnforcement?
+  public let faultActions: [String]?
+  public init( id: String, state: SdkCapabilityState, reason: String? = nil, faultEnforcement: SdkFaultEnforcement? = nil, faultActions: [String]? = nil )
+
 // sdk-wire/NetworkWireModels.swift
 public struct NetworkMockRuleDTO: Codable, Sendable, Equatable
   public let mockId: String
@@ -1095,6 +1085,65 @@ public struct ObservationBridgeState: Codable, Equatable, Sendable
   public let supportedActions: [String]
   public init( schemaVersion: Int = ObservationBridgeState.currentSchemaVersion, available: Bool, reason: String? = nil, supportedActions: [String] = [] )
   public static let notRegistered = ObservationBridgeState(available: false, reason: notRegisteredReason)
+public enum AutoMobileCoordinateSpace: String, Codable, Sendable
+  case screen
+  case window
+  case view
+public enum AutoMobileDeviceOrientation: String, Codable, Sendable
+  case portrait
+  case portraitUpsideDown
+  case landscapeLeft
+  case landscapeRight
+  case unknown
+public struct AutoMobileObservationNode: Codable, Sendable, Equatable
+  public let id: String
+  public let role: String
+  public let label: String?
+  public let value: String?
+  public let bounds: SdkBounds
+  public let enabled: Bool
+  public let visible: Bool
+  public let focused: Bool
+  public let children: [AutoMobileObservationNode]
+  public init( id: String, role: String, label: String? = nil, value: String? = nil, bounds: SdkBounds, enabled: Bool = true, visible: Bool = true, focused: Bool = false, children: [AutoMobileObservationNode] = [] )
+  public func contains(id: String) -> Bool
+  public func node(id: String) -> AutoMobileObservationNode?
+public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
+  public let captureIdentity: UInt64
+  public let orientation: AutoMobileDeviceOrientation
+  public let coordinateSpace: AutoMobileCoordinateSpace
+  public let bounds: SdkBounds
+  public let root: AutoMobileObservationNode?
+  public let focusedElementId: String?
+  public let capabilities: Set<String>
+  public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
+  public func containsElement(id: String) -> Bool
+public enum AutoMobileAction: Codable, Sendable, Equatable
+  case tap(observationIdentity: UInt64, elementId: String)
+  case longPress(observationIdentity: UInt64, elementId: String, durationMs: Int)
+  case swipe(observationIdentity: UInt64, start: SdkPoint, end: SdkPoint, durationMs: Int)
+  case drag(observationIdentity: UInt64, elementId: String, end: SdkPoint, durationMs: Int)
+  case pinch(observationIdentity: UInt64, elementId: String, scale: Double, durationMs: Int)
+  case insertText(observationIdentity: UInt64, elementId: String, text: String)
+  case clearText(observationIdentity: UInt64, elementId: String)
+  case back(observationIdentity: UInt64)
+  case scroll(observationIdentity: UInt64, elementId: String?, delta: SdkPoint)
+  public var observationIdentity: UInt64
+  public var targetElementId: String?
+public struct SdkPoint: Codable, Sendable, Equatable
+  public let x: Double
+  public let y: Double
+  public init(x: Double, y: Double)
+public struct AutoMobileActionResult: Codable, Sendable, Equatable
+public enum Status: String, Codable, Sendable
+  case accepted
+  case rejected
+  case cancelled
+  public let status: Status
+  public let reason: String?
+  public let durationMs: Double
+  public let nextObservationIdentity: UInt64?
+  public init(status: Status, reason: String? = nil, durationMs: Double = 0, nextObservationIdentity: UInt64? = nil)
 
 // sdk-wire/SdkBounds.swift
 public enum BoundsArithmetic
@@ -1150,6 +1199,8 @@ public enum SdkRoute: String, CaseIterable, Sendable
   case keychainDelete = "/keychain/delete"
   case preferences = "/preferences"
   case trigger = "/trigger"
+  case observationSnapshot = "/observation/snapshot"
+  case observationAction = "/observation/action"
   public var path: String
   public var method: String
 
@@ -1236,3 +1287,20 @@ public struct KeychainDeleteOutcome: Codable, Equatable, Sendable
   public let outcome: String
   public let deletedScope: KeychainItemSelector?
   public init(outcome: String, deletedScope: KeychainItemSelector? = nil)
+public struct StorageStoreState: Codable, Equatable, Sendable
+  public let kind: String
+  public let identifier: String
+  public let sharing: String
+  public let appGroup: String?
+  public let coordination: String
+  public let query: String
+  public let reason: String?
+  public init( kind: String, identifier: String, sharing: String, appGroup: String?, coordination: String, query: String, reason: String? )
+public struct KeychainCapability: Codable, Equatable, Sendable
+  public let schemaVersion: Int
+  public let capability: String
+  public let inspection: String
+  public let deletion: String
+  public let reason: String?
+  public let deletionScopes: [KeychainItemSelector]
+  public init( schemaVersion: Int, capability: String, inspection: String, deletion: String, reason: String?, deletionScopes: [KeychainItemSelector] )

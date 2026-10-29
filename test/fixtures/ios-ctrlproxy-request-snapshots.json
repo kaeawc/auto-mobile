@@ -51,6 +51,23 @@
       }
     },
     {
+      "name": "request_sdk_observation",
+      "builder": "requestSdkObservation",
+      "wire": {
+        "type": "request_sdk_observation",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_sdk_action",
+      "builder": "requestSdkAction",
+      "wire": {
+        "type": "request_sdk_action",
+        "requestId": "fixture-request-id",
+        "actionJson": "{\"tap\":{\"observationIdentity\":41,\"elementId\":\"submit\"}}"
+      }
+    },
+    {
       "name": "request_sdk_trigger",
       "builder": "requestSdkTrigger",
       "wire": {

@@ -69,3 +69,69 @@ public struct KeychainDeleteOutcome: Codable, Equatable, Sendable {
         self.deletedScope = deletedScope
     }
 }
+
+/// Constraints of one registered store that a client must not guess (#5161): whether other
+/// processes share it, how the host coordinates that, and whether it can be queried.
+public struct StorageStoreState: Codable, Equatable, Sendable {
+    /// `user_defaults_suite` or `core_data`.
+    public let kind: String
+    public let identifier: String
+    /// `app_private` or `app_group`.
+    public let sharing: String
+    public let appGroup: String?
+    /// `single_process`, `uncoordinated` or `host_coordinated`.
+    public let coordination: String
+    /// `supported` or `unsupported`.
+    public let query: String
+    public let reason: String?
+
+    public init(
+        kind: String,
+        identifier: String,
+        sharing: String,
+        appGroup: String?,
+        coordination: String,
+        query: String,
+        reason: String?
+    ) {
+        self.kind = kind
+        self.identifier = identifier
+        self.sharing = sharing
+        self.appGroup = appGroup
+        self.coordination = coordination
+        self.query = query
+        self.reason = reason
+    }
+}
+
+/// The app-scoped Keychain policy as a capability (#5161). It never carries a value:
+/// inspection is unavailable until a host inspection adapter exists, and deletion lists
+/// exactly the allowlisted items the keychain delete route accepts.
+public struct KeychainCapability: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    /// Always `storage.keychain`.
+    public let capability: String
+    /// Always `unavailable` in this version.
+    public let inspection: String
+    /// `enabled` or `disabled`.
+    public let deletion: String
+    /// `DISABLED` or `NO_ALLOWLISTED_SCOPES` when deletion is disabled.
+    public let reason: String?
+    public let deletionScopes: [KeychainItemSelector]
+
+    public init(
+        schemaVersion: Int,
+        capability: String,
+        inspection: String,
+        deletion: String,
+        reason: String?,
+        deletionScopes: [KeychainItemSelector]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.capability = capability
+        self.inspection = inspection
+        self.deletion = deletion
+        self.reason = reason
+        self.deletionScopes = deletionScopes
+    }
+}

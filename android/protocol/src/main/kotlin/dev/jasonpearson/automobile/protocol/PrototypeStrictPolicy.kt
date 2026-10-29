@@ -533,6 +533,7 @@ internal object PrototypeEnvelopeFeatures {
         add("platform_realtime_device")
     }
     if (spec["data"] != null) add("data_model")
+    if (PrototypeMediaQueue.queued(spec)) add("platform_media_queue")
     if (spec["storage"] != null) add("storage")
     if ("derive" in spec) add("format")
   }

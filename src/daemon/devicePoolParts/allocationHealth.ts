@@ -14,7 +14,6 @@ import { ActionableError } from "../../models";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceAllocationCriteria, DeviceAllocationRequest } from "../DeviceCriteriaMatcher";
 import { type DiscoveryCompleteness } from "../../utils/discoverySource";
-import { getAbortSignal } from "../../utils/AbortContext";
 import type { PooledDevice } from "../devicePoolTypes";
 import {
   IOS_LIVENESS_UNVERIFIED_RETRY_AFTER_MS,
@@ -34,7 +33,8 @@ export interface AllocationHealthOperations {
   ): void;
   tryAssignDeviceWithCriteria(
     sessionId: string,
-    criteria?: DeviceAllocationCriteria,
+    criteria: DeviceAllocationCriteria | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -129,9 +129,11 @@ export class DevicePoolAllocationHealth {
     );
   }
 
+  /** `signal` is the multi-device allocation's caller signal, passed down explicitly (#15671). */
   tryAssignDeviceWithCriteria(
     sessionId: string,
-    criteria?: DeviceAllocationCriteria,
+    criteria: DeviceAllocationCriteria | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -143,11 +145,7 @@ export class DevicePoolAllocationHealth {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    return this.state.deviceAllocation.tryAssignDeviceWithCriteria(
-      sessionId,
-      criteria,
-      getAbortSignal(),
-    );
+    return this.state.deviceAllocation.tryAssignDeviceWithCriteria(sessionId, criteria, signal);
   }
 
   /**

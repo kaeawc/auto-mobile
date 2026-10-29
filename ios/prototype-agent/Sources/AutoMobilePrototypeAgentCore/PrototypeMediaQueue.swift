@@ -31,7 +31,7 @@ enum PrototypeMediaQueue {
               case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: String(queue.dropFirst(5)))
         else { throw PrototypeLimits.violation(path, "queue must point to a /data array") }
         let base = PrototypeDataPointer.tokens(String(queue.dropFirst(5)))
-            .reduce("data") { PrototypeContractValidator.keyPath($0, $1) }
+            .reduce(into: "data") { $0 = PrototypeContractValidator.keyPath($0, $1) }
         // Exact UTF-16 code units, as the host and Kotlin compare: a Swift String set would merge
         // canonically equivalent ids such as "\u{e9}" and "e\u{301}".
         var seen: Set<[UInt16]> = []

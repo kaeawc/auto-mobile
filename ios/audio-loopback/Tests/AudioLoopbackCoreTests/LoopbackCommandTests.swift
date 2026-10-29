@@ -59,4 +59,11 @@ final class LoopbackCommandTests: XCTestCase {
         XCTAssertEqual(Pcm16Mono.frames(inBytes: 9), 4)
         XCTAssertEqual(Pcm16Mono.bytes(durationMs: 1500, sampleRate: 16000), 48000)
     }
+
+    func testOnlyVirtualOrKnownLoopbackDevicesCount() {
+        XCTAssertTrue(LoopbackDeviceRule.isLoopback(isVirtualTransport: true, name: "Some Virtual Device"))
+        XCTAssertTrue(LoopbackDeviceRule.isLoopback(isVirtualTransport: false, name: "BlackHole 2ch"))
+        XCTAssertFalse(LoopbackDeviceRule.isLoopback(isVirtualTransport: false, name: "USB Headset"))
+        XCTAssertFalse(LoopbackDeviceRule.isLoopback(isVirtualTransport: false, name: "MacBook Pro Microphone"))
+    }
 }

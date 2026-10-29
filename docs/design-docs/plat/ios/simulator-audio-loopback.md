@@ -7,9 +7,12 @@ devices (#13628, #13629). The emulator route is in
 ## Route
 
 - A simulator records from the host default input and plays to the host default output.
-- Injection plays into the default input device's output side. That works only when the device is
-  a loopback (it has both an input and an output side), such as BlackHole 2ch.
-- Capture reads the default output device's input side, under the same loopback condition.
+- Injection plays into the default input device's output side; capture reads the default output
+  device's input side.
+- Both need a loopback device: a virtual transport, or a known loopback driver name (BlackHole,
+  Loopback, Soundflower, VB-Cable, Background Music), with streams in both directions. A duplex
+  headset has both directions but routes neither into the other, so it is refused. This is the
+  same rule the capability inventory uses for `audioOutputCapture`.
 - The helper resolves both devices by UID at each call, never by a cached numeric device id, since
   ids change across HAL restarts.
 

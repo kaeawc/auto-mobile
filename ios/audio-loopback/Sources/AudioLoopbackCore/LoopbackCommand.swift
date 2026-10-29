@@ -108,3 +108,18 @@ public enum Pcm16Mono {
         (durationMs * sampleRate / 1000) * bytesPerFrame
     }
 }
+
+/// Whether a device carries its output back into its input. Having both directions is not enough: a
+/// USB headset has both but routes neither into the other. Matches the daemon's capability check.
+public enum LoopbackDeviceRule {
+    /// Loopback drivers that report a non-virtual transport but exist to read the output back.
+    static let loopbackNames = ["blackhole", "loopback", "soundflower", "vb-cable", "vbcable", "background music"]
+
+    public static func isLoopback(isVirtualTransport: Bool, name: String) -> Bool {
+        if isVirtualTransport {
+            return true
+        }
+        let lowered = name.lowercased()
+        return loopbackNames.contains { lowered.contains($0) }
+    }
+}

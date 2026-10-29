@@ -43,7 +43,10 @@ enum CoreAudioDevices {
                 + "BlackHole 2ch and make it the \(role).")
         }
         let name = string(deviceID, selector: kAudioObjectPropertyName) ?? "unnamed device"
-        guard streamCount(deviceID, scope: scope) > 0 else {
+        let virtual = transportType(deviceID) == kAudioDeviceTransportTypeVirtual
+        guard streamCount(deviceID, scope: scope) > 0,
+              LoopbackDeviceRule.isLoopback(isVirtualTransport: virtual, name: name)
+        else {
             throw LoopbackError(failure, "The host \(role) '\(name)' is not a loopback device, so the "
                 + "simulator's audio cannot be routed through it. Make a loopback device such as BlackHole 2ch "
                 + "the \(role).")
@@ -77,6 +80,16 @@ enum CoreAudioDevices {
             return nil
         }
         return deviceID
+    }
+
+    private static func transportType(_ deviceID: AudioObjectID) -> UInt32? {
+        var property = address(kAudioDevicePropertyTransportType)
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &property, 0, nil, &size, &transport) == noErr else {
+            return nil
+        }
+        return transport
     }
 
     private static func streamCount(_ deviceID: AudioObjectID, scope: AudioObjectPropertyScope) -> Int {

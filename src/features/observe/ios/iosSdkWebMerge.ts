@@ -263,15 +263,16 @@ function coveringElement(
     return undefined;
   }
   const attributes = nodeAttributes(leaf);
-  for (const name of ["resource-id", "content-desc", "text"]) {
-    const value = attributes[name];
-    const position =
-      typeof value === "string" && value ? covering.get(`${key}|${value}`) : undefined;
-    if (position !== undefined) {
-      return position;
-    }
-  }
-  return undefined;
+  const positions = new Set(
+    ["resource-id", "content-desc", "text"].flatMap((name) => {
+      const value = attributes[name];
+      const position =
+        typeof value === "string" && value ? covering.get(`${key}|${value}`) : undefined;
+      return position === undefined ? [] : [position];
+    }),
+  );
+  // A leaf whose attributes match different DOM elements could be either one, so it is not replaced.
+  return positions.size === 1 ? [...positions][0] : undefined;
 }
 
 export interface IosSdkWebMergeSummary {

@@ -645,4 +645,17 @@ describe("DeviceAutolockManager", () => {
     expect(device.assignmentCount).toBe(0);
     sessions.stopCleanupTimer();
   });
+
+  test("a call that names no platform never resolves to a watch autolock (#14908)", async () => {
+    const { manager, sessions, device } = harness();
+    device.platform = "watchos";
+    const id = await manager.autolockDevice(device.id, "watchos", "mcp-1");
+
+    expect(manager.resolveAutolockSessionForMcpSession("mcp-1")).toBeUndefined();
+    expect(
+      manager.resolveAutolockSessionForMcpSession("mcp-1", undefined, undefined, device.id),
+    ).toBeUndefined();
+    expect(manager.resolveAutolockSessionForMcpSession("mcp-1", "watchos")).toBe(id);
+    sessions.stopCleanupTimer();
+  });
 });

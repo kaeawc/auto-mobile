@@ -14,6 +14,14 @@ virtual devices started outside AutoMobile keep unavailable image-only facts as 
 `null`. `runtime.orientation` comes from a bounded live orientation probe (Android) and remains
 `null` where no safe read signal exists (currently iOS).
 
+Apple Watch simulators are `platform: "watchos"` ([decision](../decisions/watchos-platform.md)).
+`simctl list devices` returns them beside iPhone simulators, so the iOS simulator listing skips
+watchOS runtimes and no iOS resource, tool or readiness path sees a watch. Watches, installed
+watchOS runtimes and Apple Watch device types appear only in
+`automobile:devices/images/watchos` (`watchosCount`, a `watchos` catalog and inventory
+observation); the iOS provisioning catalog excludes them. `automobile:devices/images` stays
+Android and iOS.
+
 Read-only Android inventory shares successful AVD-name and display probes, plus configured
 AVD listings, for `ANDROID_INVENTORY_ENRICHMENT_TTL_MS` (2,500 ms). Device enrichment keys
 include the serial and the ADB list observation; a fresh list or bypass cannot reuse a prior

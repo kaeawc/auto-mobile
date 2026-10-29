@@ -2,6 +2,7 @@ import {
   decodeSdkEventBatches,
   type SdkEventBatchWire,
 } from "../../../src/features/observe/ios/decodeSdkEventBatches";
+import { networkRecordKey } from "./networkSlice";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -63,27 +64,28 @@ export function parseResourceJson(result: unknown): JsonRecord {
   return parsed;
 }
 
-/** Maps SDK request id to database id for the traffic summaries that carry one. */
-export function trafficIdsByRequestId(traffic: JsonRecord): Map<string, number> {
+/** Maps each record's join key (see `networkRecordKey`) to its database id. */
+export function trafficIdsByKey(traffic: JsonRecord): Map<string, number> {
   const events = Array.isArray(traffic.events) ? traffic.events : [];
   const ids = new Map<string, number>();
   for (const event of events.map(asRecord)) {
-    if (typeof event?.requestId === "string" && typeof event.id === "number") {
-      ids.set(event.requestId, event.id);
+    const key = event && networkRecordKey(event);
+    if (key !== undefined && typeof event?.id === "number") {
+      ids.set(key, event.id);
     }
   }
   return ids;
 }
 
-/** Request ids of the network events in a CtrlProxy `GET /sdk-events` body. */
-export function queuedRequestIds(body: string, now: () => number): Set<string> {
+/** Join keys of the network events in a CtrlProxy `GET /sdk-events` body. */
+export function queuedRecordKeys(body: string, now: () => number): Set<string> {
   const parsed: unknown = JSON.parse(body);
   const batches = (Array.isArray(parsed) ? parsed : []).filter(
     (batch): batch is SdkEventBatchWire => asRecord(batch) !== undefined,
   );
-  const ids = decodeSdkEventBatches(batches, now)
+  const keys = decodeSdkEventBatches(batches, now)
     .events.filter((event) => event.eventType === "network_request")
-    .map((event) => event.payload.requestId)
-    .filter((id): id is string => typeof id === "string");
-  return new Set(ids);
+    .map((event) => networkRecordKey(event.payload))
+    .filter((key): key is string => key !== undefined);
+  return new Set(keys);
 }

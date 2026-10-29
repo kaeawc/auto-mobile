@@ -47,6 +47,7 @@ import {
   isScanAuthoritativeFor,
   lifecycleIdentityForDevice,
 } from "./readinessLifecycleIdentity";
+import { resolveBootedWatchForCall } from "./watchReadiness";
 import {
   explicitReadTargetPlatform,
   matchRunningReadTarget,
@@ -243,6 +244,15 @@ export class ReadinessSelection {
     logger.info(
       `[DeviceReadiness] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
+    if (platform === "watchos") {
+      const pin = this.dependencies.selection.getPin(options?.connectionId);
+      return resolveBootedWatchForCall(
+        this.dependencies.deviceUtils,
+        providedDeviceId,
+        pin,
+        options,
+      );
+    }
     providedDeviceId = await this.resolveProvidedReadinessId(providedDeviceId);
 
     // Detect all connected devices
@@ -814,9 +824,10 @@ export class ReadinessSelection {
         };
       }
     }
-    // With no matching deviceId, fall back to the platform setActiveDevice selected.
+    // With no matching deviceId, fall back to the platform setActiveDevice selected. A watch pin
+    // never decides a call that did not name watchOS (#14908).
     const pin = this.dependencies.selection.getPin(options?.connectionId);
-    const selectedPlatform = pin?.platform;
+    const selectedPlatform = pin?.platform === "watchos" ? undefined : pin?.platform;
     if (selectedPlatform) {
       return {
         platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,

@@ -301,6 +301,23 @@ the device really should be stopped out from under its holder.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 
+## Apple Watch simulators
+
+A watch is reached only by naming it: `platform: "watchos"`, or the
+`sessionUuid` of a watch session. A call without a platform never lands on a
+watch, even after one was selected.
+
+- `setActiveDevice` selects a watch only with `platform: "watchos"`; a bare
+  watch `deviceId` is not found. With a `sessionUuid` it binds the watch to that
+  session, otherwise it makes the watch the connection's active watch, which
+  only calls naming `platform: "watchos"` use.
+- `installApp`, `uninstallApp` and `listApps` work on a watch. `installApp`
+  takes a `.app` bundle built for the watchOS simulator; `.ipa`, `.apk` and the
+  Android-only options are refused by name. `uninstallApp` refuses
+  `keepData: true`, because uninstalling always removes the app's data.
+- Every other device tool refuses a watch with `<tool> does not support watchOS
+  yet`.
+
 ## A device that drops off
 
 An Android device that `adb` still lists as `offline` stays held for up to 60

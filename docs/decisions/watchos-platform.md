@@ -22,8 +22,20 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   `AndroidOrIosPlatform`. Bookkeeping that only records a device's platform (bindings,
   reservations, sessions) holds the full `Platform`.
 - **Schemas advertise watchOS only where it works.** MCP tool input and output schemas keep
-  `["android", "ios"]` until a tool supports watchOS, so `platform: "watchos"` fails schema
-  validation on every tool today and agents are not offered a value the tool rejects.
+  `["android", "ios"]` until a tool supports watchOS, so agents are not offered a value the tool
+  rejects. A tool that opts in gets its own platform enum (the shared `platformSchema` stays
+  Android/iOS).
+- **Allowlisted app tools.** `installApp`, `uninstallApp` and `listApps` route a watch to
+  `WatchAppManager` (`simctl install|uninstall|listapps` on the watch UDID) through their executor
+  factories; Android and iOS keep their executors. `installApp` takes only a `.app` (bundle id from
+  Info.plist; `upgrade` from a prior listing) and refuses Android-only options by name;
+  `uninstallApp` refuses `keepData: true`.
+- **Explicit resolution.** A watch session resolves through the pooled-session path (readiness
+  setup and keep-awake are Android-only). A sessionless call reaches a watch only with
+  `platform: "watchos"`: readiness then resolves a watch a fresh watchOS listing shows booted (by
+  deviceId, else the connection's watch pin, else the only booted watch) and runs no verification,
+  boot, CtrlProxy or settings step. A watch pin never decides a platform-less call.
+  `setActiveDevice` selects a pooled watch only when the call names `"watchos"`.
 - **Plain tools that look up a device themselves** (device management such as `killDevice`) are not
   behind the registry gate. They reach a watch only through watch inventory, so each decides
   watches explicitly. `startDevice` with `platform: "watchos"` takes an exact UDID or exact name

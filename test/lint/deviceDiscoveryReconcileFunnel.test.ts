@@ -243,6 +243,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "below the pool. resolveAndroidReadinessIdentity re-reads the AVD-name-aware listing so " +
         "provided/current readiness paths key the Window cache on the runtime (#7031).",
     },
+    "src/daemon/readiness/watchReadiness.ts": {
+      calls: 1,
+      reason:
+        "watchOS-only readiness (#14908) lists booted watches to resolve a call naming watchOS; " +
+        "it never lists Android and never consults pooled identity.",
+    },
     "src/devices/deviceBootRevalidation.ts": {
       calls: 1,
       reason:

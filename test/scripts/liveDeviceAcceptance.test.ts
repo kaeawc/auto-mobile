@@ -3404,19 +3404,65 @@ describe("private broker acceptance lane", () => {
     }
     return args;
   }
+  // The all-scenario lane run, captured in beforeAll and asserted by its own test below.
+  let fullLane:
+    | {
+        bytes: string;
+        key: Awaited<ReturnType<typeof laneFixture>>["key"];
+        ledgerSettled: boolean;
+        counters: ReturnType<Awaited<ReturnType<typeof laneFixture>>["counters"]>;
+      }
+    | undefined;
   beforeAll(async () => {
     const host = await createFakeBrokerDaemon();
     await host.close();
-    // Load the lane's lazily imported modules and warm the fake broker outside the timed tests.
+    // Loads the lane's lazily imported modules, warms the fake broker, and runs all six scenarios
+    // together in one lane outside the timed tests.
     const warm = await laneFixture();
     try {
-      await runBrokerAcceptance(
-        brokerArgs(["--confirm-live", "--test-owned-devices"]),
-        warm.dependencies,
-      );
+      const args = brokerArgs(["--confirm-live", "--test-owned-devices"]);
+      await runBrokerAcceptance(args, warm.dependencies);
+      fullLane = {
+        bytes: warm.files.get(args.evidencePath)!,
+        key: warm.key,
+        ledgerSettled: warm.context.ledger
+          .devices()
+          .every(
+            (d) =>
+              warm.context.ledger.hasEvent(d, "released") &&
+              warm.context.ledger.hasEvent(d, "absent"),
+          ),
+        counters: warm.counters(),
+      };
     } finally {
       await warm.close();
     }
+  });
+  test("runs all six live scenario contracts in one lane and signs one redacted broker evidence file", () => {
+    const run = fullLane!;
+    const evidence = JSON.parse(run.bytes);
+    expect(evidence).toMatchObject({
+      schemaVersion: 11,
+      scenario: "broker",
+      outcome: { passed: true },
+    });
+    expect(evidence.steps.map((s: { name: string }) => s.name)).toEqual([
+      "parallel-acquire",
+      "release-destroy-verification",
+      "multi-client-crash-isolation",
+      "cross-client-isolation-live",
+      "capacity-refusal-and-replay",
+      "daemon-restart-with-live-sessions",
+    ]);
+    expect(run.bytes).not.toContain("private-token-");
+    const { mac, ...authentication } = evidence.authentication;
+    expect(mac).toBe(
+      createHmac("sha256", run.key)
+        .update(stableStringify({ ...evidence, authentication }))
+        .digest("hex"),
+    );
+    expect(run.ledgerSettled).toBe(true);
+    expect(run.counters).toMatchObject({ stops: 1, starts: 1, crashes: 0 });
   });
   async function laneFixture() {
     const files = new Map<string, string>();

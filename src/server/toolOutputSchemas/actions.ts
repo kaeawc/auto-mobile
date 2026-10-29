@@ -90,7 +90,8 @@ export const sendKeysResultSchema = z
               })
               .optional(),
             imeTrace: z.array(z.string()).optional(),
-            backend: z.literal("autoMobileIme").optional(),
+            backend: z.enum(["autoMobileIme", "sdk", "xctest"]).optional(),
+            fallbackReason: z.enum(["unavailable", "unsupported"]).optional(),
             capability: z.literal("semanticText").optional(),
             keyboard: keyboardIdentitySchema.optional(),
           })

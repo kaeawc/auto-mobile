@@ -10,6 +10,7 @@ import type {
   DaemonStateAccess,
 } from "../../../src/daemon/daemonRequestHandlers";
 import { BrokerConnectionScopes } from "../../helpers/brokerHandlerFixtures";
+import { DEVICE_OUTSIDE_BROKER_GRANT_CODE } from "../../../src/daemon/sessionBroker/connectionRefusal";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import {
   BROKER_DAEMON_METHOD_HANDLERS,
@@ -287,6 +288,52 @@ describe("session broker daemon handlers", () => {
     ).toMatchObject({ success: false, code: "session_config_invalid" });
     expect(drainSpy).toHaveBeenCalledTimes(1);
     drainSpy.mockRestore();
+  });
+
+  test.each([
+    ["a granted session", [SESSION]],
+    ["an empty grant", []],
+  ] as const)("pool drain refuses a bound socket with %s", async (_description, sessionUuids) => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/drainBrokerPool",
+    )![1];
+    scopes.bind("bound-drain", { scopeKey: SCOPE, sessionUuids });
+    const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({ resources: [] });
+
+    expect(
+      await handler(request({}), state, undefined, undefined, { socketSessionId: "bound-drain" }),
+    ).toMatchObject({ success: false, code: DEVICE_OUTSIDE_BROKER_GRANT_CODE });
+    expect(drainSpy).not.toHaveBeenCalled();
+  });
+
+  test("pool drain refuses a bound socket before service lookup and parameter validation", async () => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/drainBrokerPool",
+    )![1];
+    scopes.bind("bound-drain", { scopeKey: SCOPE, sessionUuids: [SESSION] });
+    const serviceSpy = spyOn(state, "getSessionBrokerService").mockReturnValue(undefined);
+    const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({ resources: [] });
+
+    expect(
+      await handler(request({ resourceId: "x" }), state, undefined, undefined, {
+        socketSessionId: "bound-drain",
+      }),
+    ).toMatchObject({ success: false, code: DEVICE_OUTSIDE_BROKER_GRANT_CODE });
+    expect(serviceSpy).not.toHaveBeenCalled();
+    expect(drainSpy).not.toHaveBeenCalled();
+  });
+
+  test("pool drain allows a socket with no broker binding", async () => {
+    const handler = BROKER_DAEMON_METHOD_HANDLERS.find(
+      ([method]) => method === "daemon/drainBrokerPool",
+    )![1];
+    const drainSpy = spyOn(broker, "drainIdlePool").mockResolvedValue({ resources: [] });
+
+    expect(
+      await handler(request({}), state, undefined, undefined, { socketSessionId: "operator" }),
+    ).toEqual({ success: true, result: { resources: [] } });
+    expect(drainSpy).toHaveBeenCalledTimes(1);
+    expect(scopes.get("operator")).toBeUndefined();
   });
   const exportParams = { ...exportIdentity, livenessOwnerToken: TOKEN };
 

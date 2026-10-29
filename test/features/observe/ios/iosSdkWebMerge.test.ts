@@ -328,3 +328,42 @@ describe("native field semantics on replacement (#5162)", () => {
     expect(detector.shouldSkipVerification(element, detector.detect(element))).toBe(true);
   });
 });
+
+describe("fresh native state on replacement (#5162)", () => {
+  test("a replaced leaf keeps the device's current focus, not the snapshot's", () => {
+    // The snapshot saw Email focused; focus has since moved to Name without a DOM change.
+    const email: ViewHierarchyNode = {
+      $: {
+        class: "UITextField",
+        "content-desc": "Email",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const name: ViewHierarchyNode = {
+      $: {
+        class: "UITextField",
+        "content-desc": "Name",
+        focused: "true",
+        bounds: { left: 10, top: 170, right: 110, bottom: 210 },
+      },
+    };
+    const hierarchy = screen(webView([email, name]));
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "email", role: "input", label: "Email", focused: true },
+          { ...submit, id: "name", role: "input", label: "Name", bounds: [10, 70, 100, 40] },
+        ]),
+      },
+    ]);
+    const focused = webElements(findWebViewNodes(hierarchy)[0]).map((element) => [
+      element["web-element-id"],
+      element.focused,
+    ]);
+    expect(focused).toEqual([
+      ["email", undefined],
+      ["name", "true"],
+    ]);
+  });
+});

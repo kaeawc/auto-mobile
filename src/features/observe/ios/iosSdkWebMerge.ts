@@ -158,29 +158,31 @@ function convertElement(
   webViewId: string,
   snapshotId: string,
   origin: string | undefined,
-  inherited: Record<string, unknown> = {},
+  native?: Record<string, unknown>,
 ): ViewHierarchyNode {
   const role = element.role ?? "element";
   const editable = EDITABLE_WEB_ROLES.has(role);
   return {
     $: {
-      // A covered XCTest leaf's attributes fill in what the DOM element does not say itself.
-      ...inherited,
-      // A replaced XCTest leaf's native class wins: field detection and verification key on it.
-      class: typeof inherited["class"] === "string" ? inherited["class"] : role,
+      class: role,
       role: editable ? "textfield" : role,
       // The input properties the shared field detectors read, as a native text field reports them.
       ...(editable ? { focusable: "true", "input-type": "text" } : {}),
-      bounds,
       enabled: String(element.enabled),
+      ...(element.label ? { "content-desc": element.label } : {}),
+      ...(element.value ? { text: element.value } : {}),
+      ...(element.enabled ? { clickable: "true" } : {}),
+      // The snapshot's focus can be older than the fresh XCTest read, which reports focus by
+      // omission, so a replaced leaf's focus is the leaf's alone.
+      ...(element.focused && !native ? { focused: "true" } : {}),
+      // A replaced XCTest leaf's attributes are fresh and are what native selectors, field
+      // detection and verification read, so each one wins over the snapshot's.
+      ...native,
+      bounds,
       [WEB_VIEW_ID_ATTRIBUTE]: webViewId,
       [WEB_SNAPSHOT_ID_ATTRIBUTE]: snapshotId,
       [WEB_ELEMENT_ID_ATTRIBUTE]: element.id,
       ...(origin ? { [WEB_ORIGIN_ATTRIBUTE]: origin } : {}),
-      ...(element.label ? { "content-desc": element.label } : {}),
-      ...(element.value ? { text: element.value } : {}),
-      ...(element.enabled ? { clickable: "true" } : {}),
-      ...(element.focused ? { focused: "true" } : {}),
     },
     extras: { "sdk.source": IOS_SDK_WEB_SOURCE },
   };
@@ -196,15 +198,15 @@ function signaturesOf(element: IosSdkWebElement, bounds: Box): string[] {
 
 /**
  * Replaces each XCTest leaf a DOM element covers (same bounds and the same label, text or id) with
- * that element, in the leaf's place, so container-scoped selectors still find it. The element
- * inherits the leaf's attributes it does not set itself, so it keeps what native selectors and
- * field detection read (its `resource-id`, input and toggle properties, fresh focus and the rest).
+ * that element, in the leaf's place, so container-scoped selectors still find it. The leaf's own
+ * attributes all win (its class, `resource-id`, input and toggle properties, focus and the rest):
+ * the element adds only its web identity and what the leaf does not report.
  * A second leaf covered by an element already placed is removed as a duplicate.
  */
 function replaceCoveredLeaves(
   node: ViewHierarchyNode,
   covering: ReadonlyMap<string, number>,
-  build: (position: number, inherited: Record<string, unknown>) => ViewHierarchyNode,
+  build: (position: number, native: Record<string, unknown>) => ViewHierarchyNode,
   placed: Set<number>,
 ): number {
   const children = childrenOf(node);
@@ -224,10 +226,10 @@ function replaceCoveredLeaves(
     }
     placed.add(position);
     // The DOM element's own bounds replace the leaf's.
-    const inherited = Object.fromEntries(
+    const native = Object.fromEntries(
       Object.entries(nodeAttributes(child)).filter(([name]) => name !== "bounds"),
     );
-    return [build(position, inherited)];
+    return [build(position, native)];
   });
   node.node = next;
   return replaced;
@@ -309,9 +311,9 @@ export function mergeIosSdkWebSnapshots(
       }
     });
     shared.forEach((signature) => covering.delete(signature));
-    const build = (position: number, inherited: Record<string, unknown> = {}) => {
+    const build = (position: number, native?: Record<string, unknown>) => {
       const { element, bounds } = converted[position];
-      return convertElement(element, bounds, webViewId, snapshot.snapshotId, origin, inherited);
+      return convertElement(element, bounds, webViewId, snapshot.snapshotId, origin, native);
     };
     const placed = new Set<number>();
     summary.deduplicated += replaceCoveredLeaves(webViewNode, covering, build, placed);

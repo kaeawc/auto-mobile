@@ -8,7 +8,6 @@ import { DeviceAutoStart } from "../deviceAutoStart";
 import { DeviceReservations } from "../deviceReservations";
 import { waitForDeviceReadyOrCancel } from "../../devices/deviceUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal } from "../../utils/AbortContext";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
@@ -159,7 +158,6 @@ export class DevicePoolAllocationWiring {
       get timer() {
         return pool.timer;
       },
-      getAbortSignal,
       raceWithDeadline,
       get DEVICE_WAIT_INTERVAL_MS() {
         return pool.DEVICE_WAIT_INTERVAL_MS;

@@ -598,6 +598,7 @@ export class PlanExecutionOrchestrator {
         sessionIds,
         this.request.deviceAllocationTimeoutMs,
         this.request.platform,
+        this.signal,
       );
     }
 
@@ -624,6 +625,7 @@ export class PlanExecutionOrchestrator {
     return devicePool.assignMultipleDevicesByCriteria(
       requests,
       this.request.deviceAllocationTimeoutMs,
+      this.signal,
     );
   }
 

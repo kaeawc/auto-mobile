@@ -69,17 +69,25 @@ describe("stateless createMcpServer", () => {
     ResourceRegistry.untrackServer(server);
   });
 
-  test("repeated createMcpServer calls do not rebuild tool schemas", async () => {
-    ToolRegistry.getToolDefinitions();
-    const built = ToolRegistry.schemaBuildCountForTesting();
-    expect(built).toBeGreaterThan(0);
-
-    for (let i = 0; i < 3; i++) {
-      await createMcpServer({ stateless: true }).close();
+  describe("with the tool-schema cache warmed", () => {
+    // An earlier test's notifyToolListChanged() clears the schema cache; rebuilding every tool
+    // schema costs ~100 ms, so pay it outside the test it is only the baseline for.
+    beforeAll(() => {
       ToolRegistry.getToolDefinitions();
-    }
+    });
 
-    expect(ToolRegistry.schemaBuildCountForTesting()).toBe(built);
+    test("repeated createMcpServer calls do not rebuild tool schemas", async () => {
+      ToolRegistry.getToolDefinitions();
+      const built = ToolRegistry.schemaBuildCountForTesting();
+      expect(built).toBeGreaterThan(0);
+
+      for (let i = 0; i < 3; i++) {
+        await createMcpServer({ stateless: true }).close();
+        ToolRegistry.getToolDefinitions();
+      }
+
+      expect(ToolRegistry.schemaBuildCountForTesting()).toBe(built);
+    });
   });
 
   test("a removed tool is registered again by the next createMcpServer", async () => {

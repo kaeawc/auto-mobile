@@ -5,6 +5,7 @@ import { parseSdkContractManifest } from "../../../scripts/ios/sdk-contract/mani
 const swiftManifest = {
   bundleId: "dev.jasonpearson.automobile.Playground",
   events: [{ eventType: "network_request", payload: "e30=" }],
+  faults: [],
   network: [
     {
       caseName: "websocket-sent",
@@ -18,7 +19,7 @@ const swiftManifest = {
   ],
   runId: "run-1",
   scenario: "network",
-  schemaVersion: 1,
+  schemaVersion: 2,
   status: "complete",
   undecodableBatches: 0,
 };
@@ -32,8 +33,44 @@ test("parses the manifest the Swift writer emits", () => {
   }
 });
 
+test("parses URLProtocol records, fault observations and capability descriptors", () => {
+  const manifest = {
+    ...swiftManifest,
+    scenario: "faults",
+    network: [
+      { caseName: "urlsession", url: "http://127.0.0.1:5000/contract/run-1/x", method: "GET" },
+    ],
+    faults: [
+      {
+        caseName: "fault-urlsession-fail",
+        clientError: "NSURLErrorDomain:-1001",
+        elapsedMs: 3.5,
+        url: "http://127.0.0.1:5000/contract/run-1/fault-urlsession-fail",
+      },
+    ],
+    capabilities: {
+      afterRegistration: [
+        {
+          faultActions: ["closeConnection"],
+          faultEnforcement: "ENFORCED",
+          id: "network.transport.websocket",
+          state: "SUPPORTED",
+        },
+      ],
+      beforeRegistration: [],
+    },
+  };
+  const result = parseSdkContractManifest(JSON.stringify(manifest));
+  expect(result.success).toBe(true);
+  if (result.success) {
+    expect(result.manifest.network[0].protocolName).toBeUndefined();
+    expect(result.manifest.faults[0].clientError).toBe("NSURLErrorDomain:-1001");
+    expect(result.manifest.capabilities?.afterRegistration[0].reason).toBeUndefined();
+  }
+});
+
 test("rejects a manifest from a newer schema", () => {
-  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 2 }));
+  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 3 }));
   expect(result).toMatchObject({ success: false });
   if (!result.success) {
     expect(result.error).toContain("schemaVersion");

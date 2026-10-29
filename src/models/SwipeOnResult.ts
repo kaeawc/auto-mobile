@@ -52,6 +52,12 @@ export interface SwipeOnResult extends BaseActionResult {
   a11yTotalTimeMs?: number;
   a11yGestureTimeMs?: number;
   fallbackReason?: string;
+  /**
+   * iOS, when the swipe could go through the app's SDK observation bridge (#5159): `sdk` when the
+   * bridge performed it, `xctest` when XCTest stood in (`fallbackReason` is then `unavailable` or
+   * `unsupported`).
+   */
+  backend?: import("./ObserveResult").ObservationBackend;
 
   /**
    * Whether the swipe left the screen it started on (different app, activity, route, navigation

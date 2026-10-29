@@ -37,6 +37,8 @@ portable test/features/observe/ios/IosSdkBridgeReader.test.ts           # bridge
 portable test/features/observe/ios/iosSdkBridgeSnapshotRefresh.test.ts  # merge + snapshot/hash helpers over fixtures
 portable test/features/action/IosSdkBridgeTapRouter.test.ts             # tap routing over a fake client
 portable test/features/action/TapOnElement.iosSdkBridge.test.ts          # tapOn routing over FakeIOSCtrlProxy
+portable test/features/action/IosSdkBridgeSwipeRouter.test.ts           # swipe routing over a fake client
+portable test/features/action/swipeon/SwipeOn.iosSdkBridge.test.ts       # swipeOn routing over a fake client
 portable test/features/action/IosSdkBridgeTextRouter.test.ts            # text routing over a fake client
 portable test/features/action/sendkeys/IosSdkTextRouting.test.ts        # sendKeys bridge routing over a fake router
 portable test/features/action/SendKeys.iosSdkBridge.test.ts              # sendKeys executor over a fake router

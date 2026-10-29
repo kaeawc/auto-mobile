@@ -1,6 +1,6 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
-import { boundsKey, childrenOf, removeCoveredLeaves } from "./iosSdkObservationMerge";
+import { boundsKey, childrenOf } from "./iosSdkObservationMerge";
 import type { IosSdkWebElement, IosSdkWebSnapshot } from "./sdkWebViewBridge";
 import { WEB_SNAPSHOT_ID_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 
@@ -158,11 +158,14 @@ function convertElement(
   webViewId: string,
   snapshotId: string,
   origin: string | undefined,
+  inherited: Record<string, unknown> = {},
 ): ViewHierarchyNode {
   const role = element.role ?? "element";
   const editable = EDITABLE_WEB_ROLES.has(role);
   return {
     $: {
+      // A covered XCTest leaf's attributes fill in what the DOM element does not say itself.
+      ...inherited,
       class: role,
       role: editable ? "textfield" : role,
       // The input properties the shared field detectors read, as a native text field reports them.
@@ -180,6 +183,69 @@ function convertElement(
     },
     extras: { "sdk.source": IOS_SDK_WEB_SOURCE },
   };
+}
+
+/** Bounds plus the label or value a DOM element shows: what an XCTest duplicate would also show. */
+function signaturesOf(element: IosSdkWebElement, bounds: Box): string[] {
+  const key = boundsKey(bounds);
+  return key
+    ? [element.label, element.value].flatMap((name) => (name ? [`${key}|${name}`] : []))
+    : [];
+}
+
+/**
+ * Removes XCTest leaves a DOM element covers (same bounds and the same label, text or id) and
+ * records each one's attributes against the covering element, so the replacement keeps what native
+ * selectors and field detection read from it (its `resource-id`, input properties and the rest).
+ */
+function absorbCoveredLeaves(
+  node: ViewHierarchyNode,
+  covering: ReadonlyMap<string, number>,
+  inherited: Map<number, Record<string, unknown>>,
+): number {
+  const children = childrenOf(node);
+  if (children.length === 0) {
+    return 0;
+  }
+  let removed = 0;
+  const kept = children.filter((child) => {
+    const position = childrenOf(child).length === 0 ? coveringElement(child, covering) : undefined;
+    if (position === undefined) {
+      return true;
+    }
+    // The DOM element's own bounds replace the leaf's.
+    const attributes = Object.fromEntries(
+      Object.entries(nodeAttributes(child)).filter(([name]) => name !== "bounds"),
+    );
+    inherited.set(position, { ...attributes, ...inherited.get(position) });
+    removed += 1;
+    return false;
+  });
+  node.node = kept;
+  return kept.reduce(
+    (total, child) => total + absorbCoveredLeaves(child, covering, inherited),
+    removed,
+  );
+}
+
+function coveringElement(
+  leaf: ViewHierarchyNode,
+  covering: ReadonlyMap<string, number>,
+): number | undefined {
+  const key = boundsKey(nodeBounds(leaf));
+  if (!key) {
+    return undefined;
+  }
+  const attributes = nodeAttributes(leaf);
+  for (const name of ["resource-id", "content-desc", "text"]) {
+    const value = attributes[name];
+    const position =
+      typeof value === "string" && value ? covering.get(`${key}|${value}`) : undefined;
+    if (position !== undefined) {
+      return position;
+    }
+  }
+  return undefined;
 }
 
 export interface IosSdkWebMergeSummary {
@@ -223,18 +289,25 @@ export function mergeIosSdkWebSnapshots(
     if (converted.length === 0) {
       return;
     }
-    const signatures = new Set<string>();
-    for (const { element, bounds } of converted) {
-      const key = boundsKey(bounds);
-      for (const name of [element.label, element.value]) {
-        if (key && name) {
-          signatures.add(`${key}|${name}`);
+    const covering = new Map<string, number>();
+    converted.forEach(({ element, bounds }, position) => {
+      for (const signature of signaturesOf(element, bounds)) {
+        if (!covering.has(signature)) {
+          covering.set(signature, position);
         }
       }
-    }
-    summary.deduplicated += removeCoveredLeaves(webViewNode, signatures);
-    const nodes = converted.map(({ element, bounds }) =>
-      convertElement(element, bounds, webViewId, snapshot.snapshotId, origin),
+    });
+    const inherited = new Map<number, Record<string, unknown>>();
+    summary.deduplicated += absorbCoveredLeaves(webViewNode, covering, inherited);
+    const nodes = converted.map(({ element, bounds }, position) =>
+      convertElement(
+        element,
+        bounds,
+        webViewId,
+        snapshot.snapshotId,
+        origin,
+        inherited.get(position),
+      ),
     );
     webViewNode.node = [...childrenOf(webViewNode), ...nodes];
     summary.webViews += 1;

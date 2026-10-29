@@ -214,3 +214,29 @@ describe("ambiguous DOM element ids (#5162)", () => {
     ).toEqual(["Pay"]);
   });
 });
+
+describe("covered XCTest leaves (#5162)", () => {
+  test("a DOM element that replaces an XCTest leaf keeps its native identifier", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "XCUIElementTypeButton",
+        "resource-id": "submit-order",
+        "content-desc": "Submit",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    const summary = mergeIosSdkWebSnapshots(hierarchy, [
+      { webViewId: "checkout", snapshot: snapshot([submit]) },
+    ]);
+    expect(summary?.deduplicated).toBe(1);
+    const [element] = attached(findWebViewNodes(hierarchy)[0]);
+    expect(element).toMatchObject({
+      "resource-id": "submit-order",
+      class: "button",
+      "content-desc": "Submit",
+      bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      "web-element-id": "e0",
+    });
+  });
+});

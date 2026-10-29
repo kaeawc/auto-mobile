@@ -144,11 +144,8 @@ function isCoveredLeaf(node: ViewHierarchyNode, signatures: Set<string>): boolea
   });
 }
 
-/**
- * Removes XCTest leaves a bridge node already covers: same bounds and the same label or id. Each
- * signature is `boundsKey|name`.
- */
-export function removeCoveredLeaves(node: ViewHierarchyNode, signatures: Set<string>): number {
+/** Removes XCTest leaves a bridge node already covers: same bounds and the same label or id. */
+function removeCoveredLeaves(node: ViewHierarchyNode, signatures: Set<string>): number {
   const children = childrenOf(node);
   if (children.length === 0) {
     return 0;

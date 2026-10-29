@@ -159,8 +159,7 @@ points; one wholly outside the web view is dropped, as are elements whose id occ
 (`label` → `content-desc`, `value` → `text`, `role` → `class`; `enabled` elements are `clickable`;
 text entry roles such as `input` and `textarea` report `role: textfield`, so focus and `sendKeys`
 targeting treat them as editable) and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
-`web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with
-the same bounds and the same label or value as a DOM element are removed as duplicates. A web view
+`web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with the same bounds and the same label, value or id as a DOM element are replaced by it, and the DOM element inherits every attribute of the leaf it does not set itself (its `resource-id`, input properties and the rest), so native selectors keep matching. A web view
 without a snapshot (none posted yet, a disallowed origin, a terminated process) keeps only its
 XCTest nodes. A merge reports `backend: sdk` unless the native bridge already set `backend`. The
 snapshot id is the DOM elements' capture identity: the web view rejects an action naming one that

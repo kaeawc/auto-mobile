@@ -73,11 +73,13 @@ enum AutoMobileWebActionScript {
         }
     }
 
-    /// Runs `body` with `e` bound to the element whose `data-automobile-id` is `id`, if present.
+    /// Runs `body` with `e` bound to the element whose `data-automobile-id` is `id`. A missing
+    /// element throws, so the action is reported as `javascript_error` rather than accepted with
+    /// nothing done (#15877).
     private static func element(_ id: String, _ body: String) -> String {
         "(() => { const id=\(json(id)); "
             + "const e=document.querySelector('[data-automobile-id=\"'+CSS.escape(id)+'\"]'); "
-            + "if (!e) { return; } \(body) })()"
+            + "if (!e) { throw new Error('automobile element not found: '+id); } \(body) })()"
     }
 
     private static func events(_ names: String...) -> String {

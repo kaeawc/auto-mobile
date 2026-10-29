@@ -104,7 +104,8 @@ document and actions resolve them in the main frame, so a frame's element could 
 for another. An element keeps its id for the life of the document; a new element gets the next id
 from a counter, so inserting one never reuses an existing id. `visible` requires a non-empty box
 and a rendered element (`checkVisibility`, or computed `visibility` where that is unavailable), so
-a control hidden by CSS is not visible.
+a control hidden by CSS is not visible. An action whose element is no longer in the document throws
+in the page, so it is reported as `javascript_error` rather than accepted with nothing done.
 
 An action request names a `webViewId` and sends `actionJson`, one `AutoMobileWebControlAction` in
 Swift's enum shape, such as `{"setValue":{"snapshotId":"s1","elementId":"q","text":"hi"}}`. The

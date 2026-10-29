@@ -114,8 +114,13 @@
                     state: next.state, pages: next.pages, stacks: next.stacks, data: next.data
                 )
                 .last { $0.blocksUnderlyingPage }
-                if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
-                    (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
+                if root?.visibleSelect(selected, state: next.state, pages: next.pages, data: next.data) != true ||
+                    (blocker != nil && blocker?.visibleSelect(
+                        selected,
+                        state: next.state,
+                        pages: next.pages,
+                        data: next.data
+                    ) != true)
                 {
                     expandedSelect = nil
                 }

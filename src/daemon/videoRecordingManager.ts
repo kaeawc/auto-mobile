@@ -43,6 +43,7 @@ import {
   VideoRecordingRepository,
   type VideoRecordingRecord,
 } from "../db/videoRecordingRepository";
+import { completedRecordingUpdate, toMetadata } from "./videoRecordingRecordMapping";
 import {
   createVideoRecordingConfigRepository,
   type ConfigRepository,
@@ -1222,28 +1223,6 @@ function calculateDurationMs(startedAt: string, endedAt: string): number | undef
   return Math.max(0, end - start);
 }
 
-function toMetadata(record: VideoRecordingRecord): VideoRecordingMetadata {
-  return {
-    recordingId: record.recordingId,
-    fileName: record.fileName,
-    filePath: record.filePath,
-    format: record.format,
-    sizeBytes: record.sizeBytes,
-    durationMs: record.durationMs,
-    videoDurationMs: record.videoDurationMs,
-    codec: record.codec,
-    outputName: record.outputName,
-    createdAt: record.createdAt,
-    startedAt: record.startedAt,
-    endedAt: record.endedAt,
-    lastAccessedAt: record.lastAccessedAt,
-    config: record.config,
-    highlights: record.highlights,
-    recordedPanel: record.recordedPanel,
-    transitions: record.transitions,
-  };
-}
-
 async function notifyVideoRecordingResources(recordingIds: string[]): Promise<void> {
   const uris = new Set<string>([VIDEO_RESOURCE_URIS.LATEST, VIDEO_RESOURCE_URIS.ARCHIVE]);
 
@@ -1693,24 +1672,10 @@ async function stopActiveVideoRecording(
       metadata.highlights = finalizedHighlights;
     }
   }
-  await recordingRepository.updateRecording(resolvedId, {
-    status: "completed",
-    captureTeardown: undefined,
-    ownerSessionUuid: owner?.ownerSessionUuid,
-    outputName: metadata.outputName,
-    fileName: metadata.fileName,
-    filePath: metadata.filePath,
-    format: metadata.format,
-    sizeBytes: metadata.sizeBytes,
-    durationMs: metadata.durationMs,
-    codec: metadata.codec,
-    endedAt: metadata.endedAt,
-    lastAccessedAt: metadata.lastAccessedAt,
-    config: metadata.config,
-    highlights: metadata.highlights,
-    recordedPanel: metadata.recordedPanel,
-    transitions: metadata.transitions,
-  });
+  await recordingRepository.updateRecording(
+    resolvedId,
+    completedRecordingUpdate(metadata, owner?.ownerSessionUuid),
+  );
 
   const eviction = await enforceArchiveLimit(deps, metadata.config.maxArchiveSizeMb, resolvedId);
   if (eviction.maxSizeBytes > 0 && eviction.currentSizeBytes > eviction.maxSizeBytes) {

@@ -93,6 +93,10 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   force stop forgets that state.
 - The start reports the PCM file as an in-progress sidecar, so the recording's in-progress size
   cap (`maxArchiveSizeMb`) counts it with the video file.
+- The completed row stores `hasAudioTrack` and the stop's warnings (`has_audio_track`,
+  `warnings_json`), so a stop that finds the recording already finalized (duration limit, repeated
+  stop, daemon restart) returns what the finalizing stop produced. A recording that did not ask for
+  audio stores null and reads with no `hasAudioTrack`.
 - ffmpeg is probed at start, so a host without it is refused before anything is captured.
 - Segmented Android recordings (over 180 s) refuse `audio`: the track would need stitching across
   segments. The tool refuses before planning segments, and the capture backend refuses again for a

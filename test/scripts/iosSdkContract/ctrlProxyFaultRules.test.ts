@@ -9,7 +9,7 @@ import { faultRules } from "../../../scripts/ios/sdk-contract/faultSlice";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-/** A CtrlProxy socket that answers each request with the scripted `success` values in turn. */
+/** A CtrlProxy socket that answers each request with the scripted `ok` values in turn. */
 class FakeCtrlProxySocket implements CommandSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -46,11 +46,11 @@ function harness(successes: boolean[]) {
       const socket = new FakeCtrlProxySocket((request) => [
         "not json",
         JSON.stringify({ type: "hierarchy_update" }),
-        JSON.stringify({ type: "set_network_fault_rules_result", requestId: "other", success }),
+        JSON.stringify({ type: "set_network_fault_rules_result", requestId: "other", ok: success }),
         JSON.stringify({
           type: "set_network_fault_rules_result",
           requestId: request.requestId,
-          success,
+          ok: success,
         }),
       ]);
       sockets.push(socket);
@@ -71,6 +71,30 @@ describe("sendFaultRulesOnce", () => {
       { type: "set_network_fault_rules", requestId: "contractFaultRules-fake-1", rules },
     ]);
     expect(sockets[0].closed).toBe(true);
+  });
+
+  test("reads CtrlProxy's `ok` wire field, not the Swift property name", async () => {
+    const timer = new FakeTimer();
+    const reply = (fields: Record<string, unknown>) => () =>
+      new FakeCtrlProxySocket((request) => [
+        JSON.stringify({
+          type: "set_network_fault_rules_result",
+          requestId: request.requestId,
+          ...fields,
+        }),
+      ]);
+    const send = (open: () => FakeCtrlProxySocket) =>
+      sendFaultRulesOnce("ws://x", [], {
+        timer,
+        ids: new FakeIdGenerator(),
+        openSocket: () => {
+          const socket = open();
+          queueMicrotask(() => socket.onopen?.());
+          return socket;
+        },
+      });
+    expect(await send(reply({ ok: true, totalTimeMs: 3 }))).toEqual({ success: true });
+    expect((await send(reply({ success: true }))).success).toBe(false);
   });
 
   test("reports a socket closed before any answer", async () => {

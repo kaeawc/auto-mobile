@@ -76,9 +76,10 @@ function parseResult(data: unknown, requestId: string): FaultRuleDelivery | unde
   if (fields.type !== RESULT_TYPE || fields.requestId !== requestId) {
     return undefined;
   }
-  return fields.success === true
+  // CtrlProxy's SetNetworkFaultRulesResponse encodes `success` as `ok` on the wire.
+  return fields.ok === true
     ? { success: true }
-    : { success: false, error: "CtrlProxy reported success: false (no SDK server answered)" };
+    : { success: false, error: "CtrlProxy reported ok: false (no SDK server answered)" };
 }
 
 /** One request on a fresh socket; resolves on the matching result, a socket error or timeout. */

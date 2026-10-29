@@ -106,17 +106,18 @@ cannot be expressed: the runner rejects it as `invalid_action` and the SDK as `4
 CtrlProxy calls the SDK only when `/health` lists a web view (for an action, the named one).
 Failures add these to the observation commands' codes:
 
-| `failure`                 | Meaning                                                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `disallowed_origin`       | the page's origin is not allowed by the bridge's policy (each snapshot's frame was checked when posted) |
-| `web_process_unavailable` | the web content process terminated and the page has not loaded again; its snapshots are discarded       |
-| `message_too_large`       | the request or snapshot exceeds the bridge's `maxMessageBytes`                                          |
-| `no_snapshot`             | the page has not posted a snapshot yet                                                                  |
+| `failure`                 | Meaning                                                                                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disallowed_origin`       | the page's origin is not allowed by the bridge's policy (each snapshot's frame was checked when posted)                                        |
+| `web_process_unavailable` | the web content process terminated and the page has not loaded again; its snapshots are discarded                                              |
+| `message_too_large`       | the request or snapshot exceeds the bridge's `maxMessageBytes`                                                                                 |
+| `no_snapshot`             | the current document has not posted a snapshot yet; every committed navigation, including a reload, discards the previous document's snapshots |
 
 `invalid_action` also covers a missing `webViewId`. An action's own rejection is a result with
-`success: false`: `stale_snapshot` (the snapshot is not one of the web view's four most recent),
-`element_not_actionable` (missing, disabled or hidden in that snapshot), `disallowed_origin`,
-`web_process_unavailable`, or `javascript_error` when the bounded script raised. These commands do
+`success: false`: `stale_snapshot` (the snapshot is not one of the current document's four most
+recent), `element_not_actionable` (missing, disabled or hidden in that snapshot), `disallowed_origin`,
+`web_process_unavailable` (also when the web view has been deallocated or detached), or
+`javascript_error` when the bounded script raised. These commands do
 not yet feed `observe` or the action tools.
 
 ## Backend selection

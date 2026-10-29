@@ -204,7 +204,9 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
       ["capture", "--until-stopped", "--sample-rate", String(sampleRate)],
       sink,
     );
-    // Closing stdin asks the helper to write its last buffer and exit; a kill is the fallback.
+    // Closing stdin asks the helper to write its last buffer and exit; a kill is the fallback. Only
+    // a clean exit whose output has ended is a complete capture: a signal (the fallback kill or a
+    // crash) or a pipe still open after the drain wait means the tail may be missing (#15860).
     const stop = async (): Promise<void> => {
       helper.process.stdin.end();
       const kill = this.timer.setTimeout(
@@ -213,9 +215,16 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
       );
       const exitCode = await helper.exited;
       this.timer.clearTimeout(kill);
-      await this.untilOutputEnded(helper);
-      if (exitCode !== 0 && exitCode !== null) {
+      const ended = await this.untilOutputEnded(helper);
+      if (exitCode !== 0) {
         throw helper.failure();
+      }
+      if (!ended) {
+        throw new EmulatorAudioError(
+          "audio_loopback_failed",
+          `The audio-loopback helper's output did not finish within ${CAPTURE_DRAIN_MS} ms of ` +
+            "its exit, so the end of the capture may be missing.",
+        );
       }
     };
     let stopping: Promise<void> | undefined;
@@ -228,13 +237,16 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     };
   }
 
-  /** Waits for the last PCM after exit, bounded so a pipe that never closes cannot hang the call. */
-  private untilOutputEnded(helper: RunningLoopbackHelper): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const handle = this.timer.setTimeout(resolve, CAPTURE_DRAIN_MS);
+  /**
+   * Waits for the last PCM after exit, bounded so a pipe that never closes cannot hang the call.
+   * Resolves true when the output ended, false when the wait ran out.
+   */
+  private untilOutputEnded(helper: RunningLoopbackHelper): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const handle = this.timer.setTimeout(() => resolve(false), CAPTURE_DRAIN_MS);
       void helper.outputEnded.then(() => {
         this.timer.clearTimeout(handle);
-        resolve();
+        resolve(true);
       });
     });
   }

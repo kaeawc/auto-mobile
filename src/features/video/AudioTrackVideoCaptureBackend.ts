@@ -22,7 +22,7 @@ export interface AudioTrackSource {
 /** Where captured PCM goes while a recording runs, so a long recording never sits in memory. */
 export interface PcmFile {
   write(chunk: Uint8Array): void;
-  /** Flushes and closes; resolves with the bytes written. */
+  /** Flushes and closes; resolves with the bytes written, or rejects with a write error. Idempotent. */
   close(): Promise<number>;
 }
 
@@ -55,6 +55,8 @@ interface AudioTrack {
   file: PcmFile;
   pcmPath: string;
   leadMs: number;
+  /** Set once the track is abandoned; a stop still muxing then reports no audio track. */
+  discarded?: Promise<void>;
 }
 
 /**
@@ -119,15 +121,38 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     if (!track) {
       return this.inner.stop(handle);
     }
-    this.tracks.delete(handle.recordingId);
+    // The track stays registered until its teardown ends, so a force stop that arrives while the
+    // video is still finalizing can still stop the audio (#15859).
+    try {
+      return await this.stopWithTrack(handle, track);
+    } finally {
+      this.tracks.delete(handle.recordingId);
+    }
+  }
+
+  async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
+    const track = this.tracks.get(handle.recordingId);
+    if (track) {
+      this.tracks.delete(handle.recordingId);
+      await this.discardOnce(track);
+    }
+    await this.inner.forceStop?.(handle, options);
+  }
+
+  private async stopWithTrack(
+    handle: RecordingHandle,
+    track: AudioTrack,
+  ): Promise<RecordingResult> {
     let result: RecordingResult;
     try {
       result = await this.inner.stop(handle);
     } catch (error) {
-      await this.discard(track);
+      await this.discardOnce(track);
       throw error;
     }
-    const warning = await this.addTrack(track, result.outputPath);
+    const warning = track.discarded
+      ? "The recording has no audio track: it was force-stopped while stopping."
+      : await this.addTrack(track, result.outputPath);
     const warnings = [...(result.warnings ?? []), ...(warning ? [warning] : [])];
     return {
       ...result,
@@ -138,20 +163,13 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     };
   }
 
-  async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
-    const track = this.tracks.get(handle.recordingId);
-    if (track) {
-      this.tracks.delete(handle.recordingId);
-      await this.discard(track);
-    }
-    await this.inner.forceStop?.(handle, options);
-  }
-
   /** Ends the audio capture and muxes it into `videoPath`; returns a warning when it could not. */
   private async addTrack(track: AudioTrack, videoPath: string): Promise<string | undefined> {
+    let closing: Promise<number> | undefined;
     try {
       await track.stream.stop();
-      const pcmBytes = await track.file.close();
+      closing = track.file.close();
+      const pcmBytes = await closing;
       await this.deps.muxer.mux({
         videoPath,
         pcmPath: track.pcmPath,
@@ -164,8 +182,18 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
       logger.warn(`Recording audio track for ${videoPath} failed: ${errorMessage(error)}`);
       return `The recording has no audio track: ${errorMessage(error)}`;
     } finally {
-      await this.removeQuietly(track.pcmPath);
+      // A failed audio stop still releases the file before it is removed (#15859).
+      if (closing) {
+        await this.removeQuietly(track.pcmPath);
+      } else {
+        await this.discardFile(track.file, track.pcmPath);
+      }
     }
+  }
+
+  private discardOnce(track: AudioTrack): Promise<void> {
+    track.discarded ??= this.discard(track);
+    return track.discarded;
   }
 
   private async discard(track: AudioTrack): Promise<void> {

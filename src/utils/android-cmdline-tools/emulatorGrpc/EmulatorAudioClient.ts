@@ -122,7 +122,7 @@ export interface AudioStream {
   readonly sampleRate: number;
   /**
    * Ends the capture and resolves once the last PCM was delivered. Idempotent. Rejects when the
-   * capture delivered nothing because the device refused it.
+   * capture did not run to the stop: the device refused it, or it failed partway through.
    */
   stop(): Promise<void>;
 }
@@ -237,7 +237,6 @@ export class EmulatorAudioClient {
     );
     call.end();
     const filler = new SilenceFiller(sampleRate, () => this.timer.now() * 1000);
-    let delivered = 0;
     const pump = (async () => {
       try {
         for await (const message of call.messages()) {
@@ -246,7 +245,6 @@ export class EmulatorAudioClient {
           if (silence) {
             sink(silence);
           }
-          delivered += packet.audio.byteLength;
           sink(packet.audio);
         }
       } catch (error) {
@@ -258,9 +256,8 @@ export class EmulatorAudioClient {
     const stop = async (): Promise<void> => {
       call.cancel();
       await pump;
-      if (delivered > 0) {
-        return;
-      }
+      // A stream that failed before the cancel failed even after some audio: the track would end
+      // early and be padded with silence, so report it rather than keep it (#15860).
       const status = await call.status();
       if (status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
         throw captureError(status);

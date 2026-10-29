@@ -279,6 +279,23 @@ describe("EmulatorAudioClient.streamCapture", () => {
     const stream = await client.streamCapture(() => {});
     await expect(stream.stop()).rejects.toMatchObject({ code: "audio_capture_unsupported" });
   });
+
+  test("a stream that fails after some audio still fails at stop", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = undefined;
+      call.onWrite = () => {
+        call.respond(audioPacket([1, 0]));
+        call.finish({ code: GrpcStatus.UNAVAILABLE, message: "emulator went away" });
+      };
+    };
+    const received: number[] = [];
+    const stream = await client.streamCapture((pcm) => received.push(...pcm));
+    while (received.length < 2) {
+      await Promise.resolve();
+    }
+    await expect(stream.stop()).rejects.toBeInstanceOf(EmulatorAudioError);
+  });
 });
 
 describe("SilenceFiller", () => {

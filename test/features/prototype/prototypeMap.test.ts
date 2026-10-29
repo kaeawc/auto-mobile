@@ -69,3 +69,13 @@ test("a component prop used in onMarkerTap binds like one in onTap", () => {
     root: { type: "map", onMarkerTap: [{ type: "emit", name: "stop_tapped" }] },
   });
 });
+
+test("a map-shaped value outside a node position is not a map use", () => {
+  const request = {
+    type: "button",
+    label: "Go",
+    onTap: [{ type: "request", url: "https://example.com", via: "device", query: { type: "map" } }],
+  };
+  const gates = prototypeRequiredCapabilities({ root: { type: "column", children: [request] } });
+  expect(gates.map((gate) => gate.capability)).not.toContain("prototype_platform_map_v1");
+});

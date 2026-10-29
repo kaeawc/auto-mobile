@@ -210,10 +210,6 @@ function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypeP
       action: { type: "platform", call: "clipboard.paste", into: object.into },
     });
   }
-  if (object.type === "map") {
-    // A map node draws through the map module (#14309), so its gate names the node.
-    uses.push({ kind: "node", path, module: "map" });
-  }
   if (object.type === "platform" && typeof object.call === "string") {
     uses.push({ kind: "call", path, action: object });
   }
@@ -309,6 +305,13 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     scanValue(node, path, false, uses);
   }
   placeholderUses(root, uses);
+  // A map node draws through the map module (#14309), so its gate names the node. Only node
+  // positions count: a map-shaped value in a request field or payload is data.
+  walkPrototypeNodes(root, (node, path) => {
+    if (node.type === "map") {
+      uses.push({ kind: "node", path, module: "map" });
+    }
+  });
   return uses;
 }
 

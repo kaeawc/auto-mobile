@@ -28,6 +28,7 @@ import {
 } from "../../src/server/deviceTools";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { discoverySourceFor } from "../../src/utils/discoverySource";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";

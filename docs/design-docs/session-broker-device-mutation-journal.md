@@ -51,8 +51,9 @@ it does not say what the row held. changeLocalization's
 per-app locale row (`["app-locale", appId]`) journals `{ userId, locales }`, read with
 `cmd locale get-app-locales` for the user the tool resolves; the port writes the list
 back with `set-app-locales` (an empty list clears the override) and reads it back. Below
-Android 13, or when the user or list cannot be read, the prior is unobservable and the row
-forces fallback, as does the device-wide locale. A failed non-critical Android settings restore escalates
+Android 13, with more than one running user (successive calls could resolve different
+users under the one app-keyed row), or when the user or list cannot be read, the prior is
+unobservable and the row forces fallback, as does the device-wide locale. A failed non-critical Android settings restore escalates
 unless a single post-loop re-read of its namespace confirms the baseline value; any
 differing key forces fallback. Critical settings restore failures force fallback immediately.
 Preferences are skipped by replay and require fallback unless their JSON key

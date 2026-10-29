@@ -322,6 +322,7 @@ export class ToolRegistryClass {
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
       selectsActiveDevice: options.selectsActiveDevice,
+      hostInventory: options.hostInventory,
     });
   }
 

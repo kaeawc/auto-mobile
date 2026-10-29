@@ -19,7 +19,9 @@ join the matrix once #14056 has fixtures.
 ## Replay loop
 
 1. Acquire one device session (`getAndroid`, or `--session`) and hold it for the whole run, so
-   `executePlan` never releases it (#15333).
+   `executePlan` never releases it (#15333). The session enables the harness's tools
+   (`manufacturerProfile`, `displayProfile`, `killProfile`, `keyboard`, `executePlan`), several
+   of which are off by default.
 2. `manufacturerProfile` `reset` once, so a previous run's changes do not leak in.
 3. For each perturbation and repeat: apply, `executePlan`, then `manufacturerProfile` `reset`.
    That reset also undoes direct `displayProfile`, `keyboard` `setProfile` and `killProfile`
@@ -29,12 +31,12 @@ join the matrix once #14056 has fixtures.
 
 ## Scoring
 
-| Outcome     | Rule                                                                   |
-| ----------- | ---------------------------------------------------------------------- |
-| `pass`      | `executePlan` succeeded with no skipped optional steps and no warnings |
-| `recovered` | succeeded, but skipped optional steps or reported step warnings        |
-| `failed`    | `executePlan` failed; the report keeps `failedStep`                    |
-| `error`     | apply failed or no plan result came back; says nothing about the app   |
+| Outcome     | Rule                                                                                                                                                        |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pass`      | `executePlan` succeeded with no skipped optional steps and no warnings                                                                                      |
+| `recovered` | succeeded, but skipped optional steps or reported step warnings                                                                                             |
+| `failed`    | `executePlan` failed; the report keeps `failedStep`                                                                                                         |
+| `error`     | apply failed or reported a status other than `applied` (an unsupported overlay, a partial persona), or no plan result came back; says nothing about the app |
 
 Repeats aggregate into a verdict: a single outcome is the verdict, pass with recovered is
 `recovered`, any `error` is `error`, and failed mixed with success is `flaky`.
@@ -49,8 +51,10 @@ A perturbation that did not succeed is attributed against the baseline:
 - When the baseline did not succeed, nothing is attributable.
 - A display stressor or facet ablation changes one thing, so it is its own cause.
 - A persona changes several facets. With `--ablate`, each facet that differs from the baseline
-  replays alone; the facets that fail alone are the cause. A persona whose facets all pass alone
-  is reported as an interaction. Without `--ablate`, the report lists the candidate facets.
+  replays alone; the facets that fail alone are the cause. A persona is reported as an
+  interaction only when every facet replayed alone and passed; if none failed alone but a facet
+  replay errored or never ran (an aborted run), the attribution is inconclusive. Without
+  `--ablate`, the report lists the candidate facets.
 
 Every persona facet's evidence status is printed with the report, so a simulated effect is never
 read as behaviour measured on the OEM device.

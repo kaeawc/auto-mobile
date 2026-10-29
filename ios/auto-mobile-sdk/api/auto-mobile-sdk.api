@@ -958,6 +958,10 @@ public enum AutoMobileWebAction: Codable, Sendable, Equatable
   case insertText(snapshotId: String, elementId: String, text: String)
   case select(snapshotId: String, elementId: String, value: String)
   case scroll(snapshotId: String, elementId: String?, x: Double, y: Double)
+  case setValue(snapshotId: String, elementId: String, text: String)
+  case clear(snapshotId: String, elementId: String)
+  case scrollIntoView(snapshotId: String, elementId: String)
+  case submit(snapshotId: String, elementId: String)
   case evaluateJavaScript(String)
 public struct SdkWebViewEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .webView

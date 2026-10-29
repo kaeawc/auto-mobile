@@ -123,7 +123,8 @@ export function firstFailedStep(runs: readonly ReplayScore[]): FailedStepSummary
  * - not-attributable: the baseline did not succeed, or a replay hit a harness error.
  * - perturbation: a single-facet perturbation (display stressor or facet ablation) broke the plan.
  * - facets: these facets of a persona break the plan on their own.
- * - interaction: the persona fails, but no facet fails alone.
+ * - interaction: the persona fails, and every facet replayed alone and passed.
+ * - inconclusive: no facet failed alone, but a facet replay errored or never ran.
  * - not-ablated: the persona fails and ablation was not run.
  */
 export type Attribution =
@@ -132,6 +133,7 @@ export type Attribution =
   | { kind: "perturbation"; facets: string[] }
   | { kind: "facets"; facets: string[] }
   | { kind: "interaction"; facets: string[] }
+  | { kind: "inconclusive"; facets: string[] }
   | { kind: "not-ablated"; facets: string[] };
 
 export interface AttributionInput {
@@ -142,6 +144,8 @@ export interface AttributionInput {
   baselineVerdict: Verdict;
   /** Facet ablation verdicts, keyed by facet label; undefined when ablation did not run. */
   ablation?: ReadonlyArray<{ facets: string[]; verdict: Verdict }>;
+  /** How many facet replays ablation needs; fewer results (an aborted run) are inconclusive. */
+  expectedAblations?: number;
 }
 
 export function attribute(input: AttributionInput): Attribution {
@@ -166,9 +170,15 @@ export function attribute(input: AttributionInput): Attribution {
   const breaking = input.ablation
     .filter((entry) => !isSuccess(entry.verdict) && entry.verdict !== "error")
     .flatMap((entry) => entry.facets);
-  return breaking.length > 0
-    ? { kind: "facets", facets: breaking }
-    : { kind: "interaction", facets: input.facets };
+  if (breaking.length > 0) {
+    return { kind: "facets", facets: breaking };
+  }
+  const complete =
+    input.ablation.length >= (input.expectedAblations ?? input.ablation.length) &&
+    input.ablation.every((entry) => entry.verdict !== "error");
+  return complete
+    ? { kind: "interaction", facets: input.facets }
+    : { kind: "inconclusive", facets: input.facets };
 }
 
 export function describeAttribution(attribution: Attribution): string {
@@ -183,6 +193,8 @@ export function describeAttribution(attribution: Attribution): string {
       return `facet alone: ${attribution.facets.join(", ")}`;
     case "interaction":
       return `no facet fails alone (combination of ${attribution.facets.join(", ")})`;
+    case "inconclusive":
+      return `inconclusive: a facet replay of ${attribution.facets.join(", ")} errored or did not run`;
     case "not-ablated":
       return `one of ${attribution.facets.join(", ")} (run with --ablate to isolate)`;
   }

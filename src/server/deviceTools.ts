@@ -76,7 +76,12 @@ export function registerDeviceTools() {
     "List device images",
     listDeviceImagesSchema,
     listDeviceImagesHandler,
-    { defaultEnabled: true, outputSchema: listDeviceImagesOutputSchema, readOnly: true },
+    {
+      defaultEnabled: true,
+      outputSchema: listDeviceImagesOutputSchema,
+      readOnly: true,
+      hostInventory: true,
+    },
   );
 
   ToolRegistry.register(
@@ -84,7 +89,12 @@ export function registerDeviceTools() {
     "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     listDevicesSchema,
     listDevicesHandler,
-    { defaultEnabled: true, outputSchema: listDevicesOutputSchema, readOnly: true },
+    {
+      defaultEnabled: true,
+      outputSchema: listDevicesOutputSchema,
+      readOnly: true,
+      hostInventory: true,
+    },
   );
 
   // The acquiring tools are registered as the request-level race sees them: a call whose client

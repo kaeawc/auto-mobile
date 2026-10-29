@@ -146,6 +146,18 @@ object PrototypeSpecValidator {
         PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Invalid UTF-8"))
       }
 
+  private val specStateRule: JsonObject by lazy {
+    definitions
+      .getValue("spec")
+      .jsonObject
+      .getValue("fields")
+      .jsonObject
+      .getValue("state")
+      .jsonObject
+      .getValue("rule")
+      .jsonObject
+  }
+
   /** The caller supplies the same compact encoder it uses for full-spec writes. */
   fun prepareStateWrites(spec: PrototypeSpec, encoder: Json): PrototypeStateWriteValidator {
     val encoded =
@@ -183,16 +195,7 @@ object PrototypeSpecValidator {
     val fixedBytes =
       encoded.toByteArray(Charsets.UTF_8).size -
         (value["state"]?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: -",\"state\":".length)
-    val stateRule =
-      definitions
-        .getValue("spec")
-        .jsonObject
-        .getValue("fields")
-        .jsonObject
-        .getValue("state")
-        .jsonObject
-        .getValue("rule")
-        .jsonObject
+    val stateRule = specStateRule
     return PrototypeStateWriteValidator { state ->
       // Encoding first preserves serialization exceptions, including non-finite numbers.
       val encodedState = encoder.encodeToString(serializer, state)

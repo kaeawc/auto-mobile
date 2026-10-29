@@ -11,6 +11,7 @@ final class LoopbackPlayer: @unchecked Sendable {
     private let bufferBytes: Int
     private let finished: @Sendable (Int32) -> Void
     private var audioQueue: AudioQueueRef?
+    private var buffers: [AudioQueueBufferRef] = []
     private var inFlight = 0
     private var inputEnded = false
 
@@ -32,14 +33,19 @@ final class LoopbackPlayer: @unchecked Sendable {
         }
         audioQueue = created
         try AudioQueueSupport.use(device, on: created)
-        let buffers = try AudioQueueSupport.allocateBuffers(created, bytes: bufferBytes)
+        buffers = try AudioQueueSupport.allocateBuffers(created, bytes: bufferBytes)
         LoopbackMain.report(LoopbackMarker.ready(deviceName: device.name))
+        // The queue and buffers stay on `self`: they are not Sendable, and `self` is only touched
+        // on `callbackQueue` from here on.
         callbackQueue.async { [self] in
-            prime(created, buffers)
+            prime()
         }
     }
 
-    private func prime(_ queue: AudioQueueRef, _ buffers: [AudioQueueBufferRef]) {
+    private func prime() {
+        guard let queue = audioQueue else {
+            return
+        }
         inFlight = buffers.count
         for buffer in buffers {
             refill(buffer)

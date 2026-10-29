@@ -797,6 +797,56 @@ describe("system media picker and camera module contracts", () => {
   });
 });
 
+describe("photo library read and save contract", () => {
+  const library = PROTOTYPE_PLATFORM_MODULES.mediaLibrary;
+  const spec = (onTap: unknown[], permissions: string[]) => ({
+    id: "library",
+    window: { placement: { type: "fullscreen" } },
+    requires: {
+      platform: ["mediaLibrary"],
+      permissions: permissions.map((name) => ({ name, purpose: "Photos" })),
+    },
+    root: { type: "button", label: "Go", onTap },
+  });
+  const query = {
+    type: "platform",
+    call: "mediaLibrary.query",
+    args: { media: { value: "images" } },
+  };
+  const save = { type: "platform", call: "mediaLibrary.save", args: { media: { value: {} } } };
+
+  test("query and manageLimitedSelection read the library under photos; save adds under photosAdd", () => {
+    expect(Object.keys(library.calls)).toEqual(["pick", "query", "manageLimitedSelection", "save"]);
+    expect(library.calls.query.permissions).toEqual(["photos"]);
+    expect(library.calls.manageLimitedSelection.permissions).toEqual(["photos"]);
+    expect(library.calls.save.permissions).toEqual(["photosAdd"]);
+    expect(library.calls.query.args.limit.value).toEqual({
+      kind: "number",
+      integer: true,
+      min: 1,
+      max: 64,
+    });
+    expect(library.calls.save.args.media.optional).toBe(false);
+    expect(library.calls.query.sensitive).toBe(true);
+  });
+
+  test("read and save each add their own capability, so a device can offer save alone", () => {
+    const read = requiredPrototypeCapabilities(spec([query], ["photos"]));
+    expect(read).toContain("prototype_platform_mediaLibrary_query_v1");
+    expect(read).not.toContain("prototype_platform_mediaLibrary_save_v1");
+    const write = requiredPrototypeCapabilities(spec([save], ["photosAdd"]));
+    expect(write).toContain("prototype_platform_mediaLibrary_save_v1");
+    expect(write).not.toContain("prototype_platform_mediaLibrary_query_v1");
+  });
+
+  test("each call needs its declared permission", () => {
+    expect(validatePrototypeSpec(spec([query], ["photos"])).success).toBe(true);
+    expect(validatePrototypeSpec(spec([query], ["photosAdd"])).success).toBe(false);
+    expect(validatePrototypeSpec(spec([save], ["photosAdd"])).success).toBe(true);
+    expect(validatePrototypeSpec(spec([save], ["photos"])).success).toBe(false);
+  });
+});
+
 describe("auth module contract", () => {
   const auth = PROTOTYPE_PLATFORM_MODULES.auth;
 

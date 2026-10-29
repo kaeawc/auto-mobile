@@ -178,8 +178,9 @@ describe("EmulatorAudioService injection", () => {
     const { service } = setup();
     const ids: string[] = [];
     for (let index = 0; index <= FINISHED_INJECTIONS_KEPT; index++) {
+      // A 10 ms tone keeps 65 starts well inside the unit-test time budget.
       const { injectionId } = await service.startInjection("emulator-5554", {
-        source: { kind: "tone" },
+        source: { kind: "tone", durationMs: 10 },
       });
       await service.stopInjection(injectionId);
       ids.push(injectionId);

@@ -177,6 +177,25 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         }
     }
 
+    /// POST to an observation-bridge route (#5159). Any HTTP reply is returned with its body;
+    /// nil means the SDK was unreachable.
+    public func sendObservationRequest(_ route: SdkRoute, body: Data) async -> SdkBridgeReply? {
+        do {
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: route.path, body: body), transport: transport, resolver: endpointResolver
+            )
+            guard let http = response as? HTTPURLResponse else { return nil }
+            return SdkBridgeReply(statusCode: http.statusCode, body: data)
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return nil
+        } catch {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+                .debug("SDK observation bridge unavailable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     // MARK: - Private
 
     private func optionalHierarchy(path: String) async -> SdkViewHierarchy? {

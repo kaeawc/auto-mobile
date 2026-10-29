@@ -65,13 +65,17 @@ reach (AudioService persists `volume_*` rows but never reloads them), so they
 require their journal revert. `mediaSession` volume journals `volume:<stream>`
 (music, ring or alarm); a `pressButton` volume key journals `volume:key-press`,
 the levels of every stream a key can adjust (voice call, system, ring, music,
-alarm, notification, Bluetooth SCO, accessibility, assistant), because the
+alarm, notification, Bluetooth SCO, TTS (9), accessibility (10), assistant), because the
 adjusted stream follows audio focus and call state. Priors come from
 `cmd media_session volume --get` before the tool acts; any unreadable stream
-makes the row unobservable. The revert sets each stream back, aliasable streams
-before the stream they alias, in one device shell and succeeds only when every
-stream reads its level back. The accessibility stream is verified only: the
-shell cannot set it, so an independently changed accessibility level escalates.
+makes the row unobservable. Older key-press journals missing TTS are rejected;
+its prior level is never inferred. The revert attempts to set each stream back,
+including accessibility, aliasable streams before the stream they alias, in one
+device shell and succeeds only when every stream reads its level back. Sets use
+`cmd audio set-volume <stream> <index>`, falling back to
+`cmd media_session volume --set` only on an unsupported command, service or usage
+response; permission and transport failures are not retried. Android may deny
+the shell's accessibility write; its read-back must still match or the revert escalates.
 A prior level of 0 is not restorable, because a muted stream reads 0 and a ring
 level of 0 also changes the ringer mode; a positive ring level implies the normal
 ringer mode, which setting it restores. Settings cleaning afterwards writes the

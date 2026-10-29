@@ -81,7 +81,10 @@ import { registerDeviceSnapshotResources } from "./deviceSnapshotResources";
 import { registerDatabaseResources } from "./databaseResources";
 import { registerFailuresResources } from "./failuresResources";
 import { registerStorageResources } from "./storageResources";
-import { registerStorageCapabilityResources } from "./storageCapabilityResources";
+import {
+  registerStorageCapabilityResources,
+  runnerIosStorageDiscovery,
+} from "./storageCapabilityResources";
 import { registerSdkCapabilityResources } from "./sdkCapabilityResources";
 import { registerDataStoreResources } from "./dataStoreResources";
 import { registerAppFileResources } from "./appFileResources";
@@ -263,7 +266,10 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerDatabaseResources();
   registerFailuresResources();
   registerStorageResources();
-  registerStorageCapabilityResources();
+  registerStorageCapabilityResources({
+    createIosStorageDiscovery: (device) =>
+      runnerIosStorageDiscovery(IOSCtrlProxyClient.getInstance(device)),
+  });
   registerSdkCapabilityResources();
   registerDataStoreResources();
   registerAppFileResources();

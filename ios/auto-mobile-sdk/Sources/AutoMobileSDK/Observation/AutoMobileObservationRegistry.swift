@@ -38,12 +38,12 @@ extension AutoMobileAction {
 public final class AutoMobileObservationRegistry: Sendable {
     public static let shared = AutoMobileObservationRegistry()
 
-    private struct Registration: Sendable {
+    struct Registration: Sendable {
         let bridge: AutoMobileObservationBridge
         let supportedActions: Set<AutoMobileActionKind>
     }
 
-    private let registration = OSAllocatedUnfairLock<Registration?>(initialState: nil)
+    private let registrationLock = OSAllocatedUnfairLock<Registration?>(initialState: nil)
 
     init() {}
 
@@ -53,22 +53,27 @@ public final class AutoMobileObservationRegistry: Sendable {
         _ bridge: AutoMobileObservationBridge,
         supportedActions: Set<AutoMobileActionKind> = Set(AutoMobileActionKind.allCases)
     ) {
-        registration.withLock { $0 = Registration(bridge: bridge, supportedActions: supportedActions) }
+        registrationLock.withLock { $0 = Registration(bridge: bridge, supportedActions: supportedActions) }
     }
 
     /// Removes the registered bridge; discovery then reports `NOT_REGISTERED`.
     public func unregister() {
-        registration.withLock { $0 = nil }
+        registrationLock.withLock { $0 = nil }
+    }
+
+    /// The registered bridge and its declared action kinds, read together.
+    var registration: Registration? {
+        registrationLock.withLock { $0 }
     }
 
     /// The registered bridge, if any.
     public var bridge: AutoMobileObservationBridge? {
-        registration.withLock { $0?.bridge }
+        registrationLock.withLock { $0?.bridge }
     }
 
     /// The discovery state served in the SDK's `/health` payload.
     public var state: ObservationBridgeState {
-        guard let current = registration.withLock({ $0 }) else { return .notRegistered }
+        guard let current = registrationLock.withLock({ $0 }) else { return .notRegistered }
         return ObservationBridgeState(available: true, supportedActions: current.supportedActions.map(\.rawValue))
     }
 }

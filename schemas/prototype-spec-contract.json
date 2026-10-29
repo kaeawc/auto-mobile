@@ -15518,6 +15518,19 @@
                 "kind": "key"
               },
               "optional": true
+            },
+            "captions": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "mediaCaption"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
             }
           }
         }
@@ -15738,6 +15751,13 @@
           "rule": {
             "kind": "ref",
             "name": "locationBlock"
+          },
+          "optional": true
+        },
+        "notifications": {
+          "rule": {
+            "kind": "ref",
+            "name": "notificationsBlock"
           },
           "optional": true
         },
@@ -21702,6 +21722,97 @@
         }
       ]
     },
+    "mediaCaptionCue": {
+      "kind": "object",
+      "fields": {
+        "startMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "endMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "text": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 512
+          },
+          "optional": false
+        }
+      }
+    },
+    "mediaCaption": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "language": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 35
+          },
+          "optional": false
+        },
+        "label": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "source": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string",
+                      "max": 128
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "data": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": false
+        }
+      }
+    },
     "mediaPlayer": {
       "kind": "object",
       "fields": {
@@ -21717,11 +21828,17 @@
             "kind": "ref",
             "name": "mediaSource"
           },
-          "optional": false
+          "optional": true
         },
         "loop": {
           "rule": {
             "kind": "boolean"
+          },
+          "optional": true
+        },
+        "queue": {
+          "rule": {
+            "kind": "pointer"
           },
           "optional": true
         }
@@ -21740,6 +21857,122 @@
             }
           },
           "optional": false
+        }
+      }
+    },
+    "notificationChannel": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": false
+        },
+        "name": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "importance": {
+          "rule": {
+            "kind": "enum",
+            "values": ["min", "low", "default", "high"]
+          },
+          "optional": false
+        },
+        "description": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "showBadge": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "notificationsBlock": {
+      "kind": "object",
+      "fields": {
+        "channels": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 8,
+            "item": {
+              "kind": "ref",
+              "name": "notificationChannel"
+            }
+          },
+          "optional": false
+        }
+      }
+    },
+    "mediaQueueItem": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 128
+          },
+          "optional": false
+        },
+        "title": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "artist": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "album": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "artwork": {
+          "rule": {
+            "kind": "string",
+            "max": 128
+          },
+          "optional": true
+        },
+        "source": {
+          "rule": {
+            "kind": "ref",
+            "name": "mediaSource"
+          },
+          "optional": false
+        },
+        "durationMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": true
         }
       }
     }
@@ -22378,7 +22611,10 @@
               "optional": true,
               "value": {
                 "kind": "array",
-                "item": { "kind": "enum", "values": ["name", "phone", "email"] },
+                "item": {
+                  "kind": "enum",
+                  "values": ["name", "phone", "email"]
+                },
                 "min": 1,
                 "max": 3,
                 "unique": true
@@ -23504,6 +23740,165 @@
           "permissions": [],
           "background": [],
           "sensitive": false
+        },
+        "setCaptions": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "track": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 192
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "next": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "previous": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "skipTo": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "itemId": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": false,
+                "maxBytes": 384
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setShuffle": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "shuffle": {
+              "optional": false,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setRepeat": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "repeat": {
+              "optional": false,
+              "value": {
+                "kind": "enum",
+                "values": ["off", "one", "all"]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
+        },
+        "setSleepTimer": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "timer": {
+              "optional": false,
+              "value": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "ms": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 86400000
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "endOfItem": {
+                        "rule": {
+                          "kind": "true"
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_media_queue_v1"
         }
       },
       "events": {
@@ -23514,6 +23909,9 @@
           "sensitive": false
         },
         "error": {
+          "sensitive": false
+        },
+        "itemChanged": {
           "sensitive": false
         }
       },
@@ -23566,6 +23964,61 @@
               "unsupported_format",
               "blocked_egress"
             ]
+          }
+        },
+        "captionTrack": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 64
+          }
+        },
+        "currentItemId": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 128
+          }
+        },
+        "currentIndex": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": -1,
+            "max": 4096
+          }
+        },
+        "rate": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "min": 0.25,
+            "max": 4
+          }
+        },
+        "sleepRemainingMs": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          }
+        },
+        "shuffle": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "repeat": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["off", "one", "all"]
           }
         }
       }

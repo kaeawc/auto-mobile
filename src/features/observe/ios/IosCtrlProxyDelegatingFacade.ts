@@ -14,6 +14,11 @@ import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispat
 import type { CtrlProxySdkTriggerResult } from "./types";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
 import {
+  requestSdkAction,
+  requestSdkObservation,
+  type SdkBridgeRequestOptions,
+} from "./CtrlProxySdkObservation";
+import {
   requestAccessibilityAudit,
   type CtrlProxyAccessibilityAuditResult,
   type IosAccessibilityAuditRequest,
@@ -724,6 +729,21 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   /** Deliver a host trigger to a module in the foreground app's in-app SDK (#1580). */
   async requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult> {
     return requestSdkTrigger(this.createDelegateContext(), request);
+  }
+
+  /** The foreground app's SDK observation-bridge snapshot (#5159). */
+  async requestSdkObservationForIos(
+    options?: SdkBridgeRequestOptions,
+  ): Promise<import("./types").CtrlProxySdkObservationResult> {
+    return requestSdkObservation(this.createDelegateContext(), options);
+  }
+
+  /** Perform one SDK observation-bridge action (#5159). */
+  async requestSdkActionForIos(
+    action: import("./sdkObservationBridge").IosSdkAction,
+    options?: SdkBridgeRequestOptions,
+  ): Promise<import("./types").CtrlProxySdkActionResult> {
+    return requestSdkAction(this.createDelegateContext(), action, options);
   }
 
   /** Run XCUITest's own accessibility audit on the foreground app (#14086). */

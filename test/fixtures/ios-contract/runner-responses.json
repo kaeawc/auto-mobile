@@ -681,6 +681,48 @@
       }
     },
     {
+      "name" : "sdk_observation_result",
+      "wire" : {
+        "available" : true,
+        "observation" : {
+          "bounds" : {
+            "bottom" : 844,
+            "left" : 0,
+            "right" : 390,
+            "top" : 0
+          },
+          "capabilities" : [
+
+          ],
+          "captureIdentity" : 41,
+          "coordinateSpace" : "screen",
+          "orientation" : "portrait"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_observation_result"
+      }
+    },
+    {
+      "name" : "sdk_action_result",
+      "wire" : {
+        "available" : true,
+        "error" : "stale_observation",
+        "requestId" : "fixture-request-id",
+        "result" : {
+          "durationMs" : 0,
+          "reason" : "stale_observation",
+          "status" : "rejected"
+        },
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_action_result"
+      }
+    },
+    {
       "name" : "voiceover_state_result",
       "wire" : {
         "enabled" : true,
@@ -1354,7 +1396,9 @@
     "reset_permissions_result",
     "rotate_result",
     "screenshot",
+    "sdk_action_result",
     "sdk_capabilities_result",
+    "sdk_observation_result",
     "sdk_trigger_result",
     "select_all_result",
     "set_hierarchy_poll_interval_result",

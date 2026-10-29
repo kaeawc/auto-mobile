@@ -279,6 +279,17 @@ jobs:
         run: |
           ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
 
+      # Drives the SDK network adapters inside Playground and follows each event through
+      # CtrlProxy, the daemon and the MCP network resources (#5164). The report lands in
+      # AUTOMOBILE_LOG_DIR, which the daemon-log upload below collects on failure.
+      - name: "Run iOS SDK contract suite"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        timeout-minutes: 15
+        env:
+          AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+        run: |
+          ./scripts/ios/sdk-contract-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
+
       # Advisory #12259: skips until saved actions and the viewer template exist; never fails the job.
       - name: "Run saved prototype smoke (advisory)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}

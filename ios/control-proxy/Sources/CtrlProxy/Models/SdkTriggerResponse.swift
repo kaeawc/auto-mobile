@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 /// Result of `request_sdk_trigger`. `available` is false when the foreground app has no
@@ -51,5 +52,94 @@ public struct SdkTriggerReply: Equatable, Sendable {
         self.reason = reason
         self.registeredModules = registeredModules
         self.supportedTriggers = supportedTriggers
+    }
+}
+
+/// Why an observation-bridge command did not produce a result (#5159).
+public enum SdkBridgeFailure: String, Error, Sendable {
+    /// No SDK in the foreground app or no registered bridge; the request was never sent.
+    case bridgeUnavailable = "bridge_unavailable"
+    /// The app resigned active before the SDK could serve the request.
+    case appNotActive = "app_not_active"
+    /// `actionJson` is missing or is not an `AutoMobileAction`.
+    case invalidAction = "invalid_action"
+    /// A sent request got no answer, or the SDK replied with a status or body this runner does not
+    /// understand. The SDK may have acted.
+    case badReply = "bad_reply"
+
+    var message: String {
+        switch self {
+        case .bridgeUnavailable:
+            "The foreground app has no AutoMobile SDK observation bridge registered; nothing was sent."
+        case .appNotActive: "The foreground app resigned active before the SDK could serve the request."
+        case .invalidAction: "actionJson must be one JSON-encoded AutoMobileAction."
+        case .badReply: "The in-app SDK did not answer a sent request, or its reply could not be decoded."
+        }
+    }
+}
+
+/// `sdk_observation_result`: the registered bridge's observation, or a typed failure.
+public struct SdkObservationResponse: Encodable, Sendable {
+    public let type = ResponseType.sdkObservationResult.rawValue
+    public let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+    public let requestId: String?
+    public let success: Bool
+    public let available: Bool
+    public let observation: AutoMobileObservationSnapshot?
+    public let failure: String?
+    public let error: String?
+    public let totalTimeMs: Int64
+
+    init(requestId: String?, outcome: Result<AutoMobileObservationSnapshot, SdkBridgeFailure>, totalTimeMs: Int64) {
+        self.requestId = requestId
+        switch outcome {
+        case let .success(observation):
+            success = true
+            available = true
+            self.observation = observation
+            failure = nil
+            error = nil
+        case let .failure(reason):
+            success = false
+            available = reason != .bridgeUnavailable
+            observation = nil
+            failure = reason.rawValue
+            error = reason.message
+        }
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+/// `sdk_action_result`: the bridge's result for one action, or a typed failure. A bridge rejection
+/// (stale observation, element not actionable, unsupported action, overload, cancellation) is a
+/// result with `success: false`, not a failure.
+public struct SdkActionResponse: Encodable, Sendable {
+    public let type = ResponseType.sdkActionResult.rawValue
+    public let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+    public let requestId: String?
+    public let success: Bool
+    public let available: Bool
+    public let result: AutoMobileActionResult?
+    public let failure: String?
+    public let error: String?
+    public let totalTimeMs: Int64
+
+    init(requestId: String?, outcome: Result<AutoMobileActionResult, SdkBridgeFailure>, totalTimeMs: Int64) {
+        self.requestId = requestId
+        switch outcome {
+        case let .success(result):
+            success = result.status == .accepted
+            available = true
+            self.result = result
+            failure = nil
+            error = result.status == .accepted ? nil : result.reason
+        case let .failure(reason):
+            success = false
+            available = reason != .bridgeUnavailable
+            result = nil
+            failure = reason.rawValue
+            error = reason.message
+        }
+        self.totalTimeMs = totalTimeMs
     }
 }

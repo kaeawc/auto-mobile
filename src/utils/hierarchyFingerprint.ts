@@ -4,8 +4,20 @@ import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { STATUS_BAR_ROOT_IDS } from "./androidStatusBar";
 
-/** `JSON.stringify` replacer that omits status-bar subtrees; other nodes serialize unchanged. */
+/**
+ * Node attribute naming the iOS SDK bridge capture a node came from (#5159). It changes with every
+ * capture of an unchanged screen, so change detection and settling ignore it.
+ */
+export const SDK_CAPTURE_IDENTITY_ATTRIBUTE = "sdk-capture-identity";
+
+/**
+ * `JSON.stringify` replacer that omits status-bar subtrees and the per-capture SDK bridge identity;
+ * other nodes serialize unchanged.
+ */
 function omitStatusBar(key: string, value: unknown): unknown {
+  if (key === SDK_CAPTURE_IDENTITY_ATTRIBUTE) {
+    return undefined;
+  }
   // The root itself is never dropped: a replacer result of undefined there is no serialization.
   if (key !== "" && typeof value === "object" && value !== null && "resource-id" in value) {
     const resourceId = value["resource-id"];

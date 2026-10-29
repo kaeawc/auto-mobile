@@ -19,6 +19,7 @@ enum PrototypeBundleCapabilities {
         if spec["motion"] == .string("reduced") { need("reduced_motion") }
         if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         if spec["data"] != nil { need("data_model") }
+        if PrototypeMediaQueue.queued(spec) { need("platform_media_queue") }
         if spec["derive"] != nil { need("format") }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }

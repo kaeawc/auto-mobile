@@ -407,11 +407,216 @@ public final class URLSessionNetworkCaptureAdapter: Sendable {
 }
 
 /// Adapter for URLSessionWebSocketTask message and close callbacks.
+///
+/// ``send(_:on:connectionId:sessionId:completionHandler:)`` and
+/// ``receive(on:connectionId:sessionId:completionHandler:)`` also enforce matched fault rules
+/// (#5163): `latency` delays the frame, and `error` / `closeConnection` closes the task (a `reset`
+/// error type resets it) and completes with `URLError(.networkConnectionLost)`. Other actions are
+/// recorded as unsupported and not applied.
 public final class WebSocketNetworkCaptureAdapter: Sendable {
     private let recorder: NetworkCaptureRecorder
 
+    #if DEBUG
+        private let faultStore: NetworkMockRuleStore
+        private let faultScheduler: any FaultScheduling
+    #endif
+
     public init(recorder: NetworkCaptureRecorder) {
         self.recorder = recorder
+        #if DEBUG
+            faultStore = NetworkMockRuleStore.shared
+            faultScheduler = RealFaultScheduler()
+        #endif
+    }
+
+    #if DEBUG
+        init(recorder: NetworkCaptureRecorder, faultStore: NetworkMockRuleStore, faultScheduler: any FaultScheduling) {
+            self.recorder = recorder
+            self.faultStore = faultStore
+            self.faultScheduler = faultScheduler
+        }
+    #endif
+
+    private func schedule(_ delayMs: Int, _ work: @escaping @Sendable () -> Void) {
+        #if DEBUG
+            faultScheduler.schedule(delayMs: delayMs, work: work)
+        #else
+            work()
+        #endif
+    }
+
+    /// Records a delay or unsupported decision: as metadata on `requestId`, or as its own completed
+    /// record when there is none. A fail decision is recorded by ``recordAppliedFailure``.
+    private func recordDecision(
+        _ outcome: AdapterFaultOutcome,
+        requestId: String?,
+        url: String,
+        method: String,
+        connectionId: String?,
+        protocolName: String
+    ) {
+        if outcome == .proceed { return }
+        if case .fail = outcome, requestId == nil { return }
+        let id = requestId ?? recorder.beginRequest(
+            url: url, method: method, connectionId: connectionId, protocolName: protocolName
+        )
+        for (key, value) in outcome.metadata.sorted(by: { $0.key < $1.key }) {
+            recorder.recordMetadata(requestId: id, key: key, value: value)
+        }
+        if requestId == nil {
+            recorder.recordCompletion(requestId: id)
+        }
+    }
+
+    /// Records an applied fail rule as a failed exchange in the URLProtocol's `fault:<id>:<action>` form.
+    private func recordAppliedFailure(
+        _ outcome: AdapterFaultOutcome,
+        requestId: String?,
+        url: String,
+        method: String,
+        connectionId: String?,
+        protocolName: String
+    ) {
+        let id = requestId ?? recorder.beginRequest(
+            url: url, method: method, connectionId: connectionId, protocolName: protocolName
+        )
+        if requestId == nil {
+            for (key, value) in outcome.metadata.sorted(by: { $0.key < $1.key }) {
+                recorder.recordMetadata(requestId: id, key: key, value: value)
+            }
+        }
+        recorder.recordFailure(requestId: id, error: outcome.recordedError ?? "fault")
+    }
+
+    /// Sends `message` on `task`, applying a matched fault rule first, and records the sent frame.
+    public func send(
+        _ message: URLSessionWebSocketTask.Message,
+        on task: URLSessionWebSocketTask,
+        connectionId: String?,
+        sessionId: String? = nil,
+        completionHandler: @escaping @Sendable (Error?) -> Void
+    ) {
+        send(
+            WebSocketPayload(message), operations: WebSocketOperations(task: task),
+            connectionId: connectionId, sessionId: sessionId, completionHandler: completionHandler
+        )
+    }
+
+    /// Receives the next message from `task`, applying a matched fault rule before delivering it,
+    /// and records the received frame.
+    public func receive(
+        on task: URLSessionWebSocketTask,
+        connectionId: String?,
+        sessionId: String? = nil,
+        completionHandler: @escaping @Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void
+    ) {
+        receive(
+            operations: WebSocketOperations(task: task), connectionId: connectionId, sessionId: sessionId
+        ) { result in
+            completionHandler(result.map(\.message))
+        }
+    }
+
+    func send(
+        _ payload: WebSocketPayload,
+        operations: WebSocketOperations,
+        connectionId: String?,
+        sessionId: String?,
+        completionHandler: @escaping @Sendable (Error?) -> Void
+    ) {
+        let outcome = faultOutcome(
+            url: operations.url, connectionId: connectionId, direction: .sent, sessionId: sessionId
+        )
+        apply(outcome, operations: operations, connectionId: connectionId, method: "SEND", perform: { [self] in
+            operations.send(payload) { error in
+                if error == nil {
+                    self.recordFrame(
+                        url: operations.url, connectionId: connectionId, direction: .sent,
+                        frameType: payload.frameType, payloadSize: payload.payloadSize
+                    )
+                }
+                completionHandler(error)
+            }
+        }, fail: { completionHandler($0) })
+    }
+
+    func receive(
+        operations: WebSocketOperations,
+        connectionId: String?,
+        sessionId: String?,
+        completionHandler: @escaping @Sendable (Result<WebSocketPayload, Error>) -> Void
+    ) {
+        operations.receive { [self] result in
+            guard case let .success(payload) = result else {
+                completionHandler(result)
+                return
+            }
+            let outcome = faultOutcome(
+                url: operations.url, connectionId: connectionId, direction: .received, sessionId: sessionId
+            )
+            apply(outcome, operations: operations, connectionId: connectionId, method: "RECEIVE", perform: {
+                self.recordFrame(
+                    url: operations.url, connectionId: connectionId, direction: .received,
+                    frameType: payload.frameType, payloadSize: payload.payloadSize
+                )
+                completionHandler(.success(payload))
+            }, fail: { completionHandler(.failure($0)) })
+        }
+    }
+
+    private func apply(
+        _ outcome: AdapterFaultOutcome,
+        operations: WebSocketOperations,
+        connectionId: String?,
+        method: String,
+        perform: @escaping @Sendable () -> Void,
+        fail: @escaping @Sendable (Error) -> Void
+    ) {
+        recordDecision(
+            outcome, requestId: nil, url: operations.url, method: method,
+            connectionId: connectionId, protocolName: "websocket"
+        )
+        switch outcome {
+        case .proceed, .unsupported:
+            perform()
+        case let .delay(_, delayMs):
+            schedule(delayMs, perform)
+        case let .fail(_, _, errorType, delayMs):
+            let failNow: @Sendable () -> Void = { [self] in
+                let reset = errorType == "reset" || errorType == "connectionReset"
+                operations.close(reset, outcome.recordedError ?? "fault")
+                recordAppliedFailure(
+                    outcome, requestId: nil, url: operations.url, method: method,
+                    connectionId: connectionId, protocolName: "websocket"
+                )
+                fail(URLError(.networkConnectionLost))
+            }
+            if delayMs > 0 {
+                schedule(delayMs, failNow)
+            } else {
+                failNow()
+            }
+        }
+    }
+
+    private func faultOutcome(
+        url: String,
+        connectionId: String?,
+        direction: NetworkCaptureDirection,
+        sessionId: String?
+    )
+        -> AdapterFaultOutcome
+    {
+        #if DEBUG
+            guard AutoMobileSDK.shared.isEnabled, let parsed = URL(string: url) else { return .proceed }
+            return AdapterFaultOutcome(faultStore.evaluate(.init(
+                transport: .webSocket, host: parsed.host, port: parsed.port, scheme: parsed.scheme,
+                path: parsed.path, method: direction == .sent ? "SEND" : "RECEIVE",
+                headers: [:], origin: nil, connectionId: connectionId, sessionId: sessionId
+            )))
+        #else
+            return .proceed
+        #endif
     }
 
     #if DEBUG
@@ -450,11 +655,149 @@ public final class WebSocketNetworkCaptureAdapter: Sendable {
 }
 
 /// Adapter for Network.framework connection state and byte callbacks.
+///
+/// ``start(_:queue:endpoint:connectionId:requestId:sessionId:onFault:)`` also enforces matched
+/// fault rules (#5163): `latency` delays the start, and `error` / `closeConnection` never starts
+/// the connection, cancels it and reports `NWError.posix` to `onFault`. Other actions are recorded
+/// as unsupported and not applied.
 public final class NWConnectionNetworkCaptureAdapter: Sendable {
     private let recorder: NetworkCaptureRecorder
 
+    #if DEBUG
+        private let faultStore: NetworkMockRuleStore
+        private let faultScheduler: any FaultScheduling
+    #endif
+
     public init(recorder: NetworkCaptureRecorder) {
         self.recorder = recorder
+        #if DEBUG
+            faultStore = NetworkMockRuleStore.shared
+            faultScheduler = RealFaultScheduler()
+        #endif
+    }
+
+    #if DEBUG
+        init(recorder: NetworkCaptureRecorder, faultStore: NetworkMockRuleStore, faultScheduler: any FaultScheduling) {
+            self.recorder = recorder
+            self.faultStore = faultStore
+            self.faultScheduler = faultScheduler
+        }
+    #endif
+
+    private func schedule(_ delayMs: Int, _ work: @escaping @Sendable () -> Void) {
+        #if DEBUG
+            faultScheduler.schedule(delayMs: delayMs, work: work)
+        #else
+            work()
+        #endif
+    }
+
+    /// Records a delay or unsupported decision: as metadata on `requestId`, or as its own completed
+    /// record when there is none. A fail decision is recorded by ``recordAppliedFailure``.
+    private func recordDecision(
+        _ outcome: AdapterFaultOutcome,
+        requestId: String?,
+        url: String,
+        method: String,
+        connectionId: String?,
+        protocolName: String
+    ) {
+        if outcome == .proceed { return }
+        if case .fail = outcome, requestId == nil { return }
+        let id = requestId ?? recorder.beginRequest(
+            url: url, method: method, connectionId: connectionId, protocolName: protocolName
+        )
+        for (key, value) in outcome.metadata.sorted(by: { $0.key < $1.key }) {
+            recorder.recordMetadata(requestId: id, key: key, value: value)
+        }
+        if requestId == nil {
+            recorder.recordCompletion(requestId: id)
+        }
+    }
+
+    /// Records an applied fail rule as a failed exchange in the URLProtocol's `fault:<id>:<action>` form.
+    private func recordAppliedFailure(
+        _ outcome: AdapterFaultOutcome,
+        requestId: String?,
+        url: String,
+        method: String,
+        connectionId: String?,
+        protocolName: String
+    ) {
+        let id = requestId ?? recorder.beginRequest(
+            url: url, method: method, connectionId: connectionId, protocolName: protocolName
+        )
+        if requestId == nil {
+            for (key, value) in outcome.metadata.sorted(by: { $0.key < $1.key }) {
+                recorder.recordMetadata(requestId: id, key: key, value: value)
+            }
+        }
+        recorder.recordFailure(requestId: id, error: outcome.recordedError ?? "fault")
+    }
+
+    /// Starts `connection` on `queue`, applying a matched fault rule first. Pass the `requestId`
+    /// from ``begin(endpoint:connectionId:)`` so the decision is recorded on that request.
+    public func start(
+        _ connection: NWConnection,
+        queue: DispatchQueue,
+        endpoint: String,
+        connectionId: String,
+        requestId: String? = nil,
+        sessionId: String? = nil,
+        onFault: @escaping @Sendable (NWError) -> Void
+    ) {
+        start(
+            operations: ConnectionOperations(connection: connection, queue: queue), endpoint: endpoint,
+            connectionId: connectionId, requestId: requestId, sessionId: sessionId, onFault: onFault
+        )
+    }
+
+    func start(
+        operations: ConnectionOperations,
+        endpoint: String,
+        connectionId: String,
+        requestId: String?,
+        sessionId: String?,
+        onFault: @escaping @Sendable (NWError) -> Void
+    ) {
+        let outcome = faultOutcome(endpoint: endpoint, connectionId: connectionId, sessionId: sessionId)
+        recordDecision(
+            outcome, requestId: requestId, url: endpoint, method: "CONNECTION",
+            connectionId: connectionId, protocolName: "nwconnection"
+        )
+        switch outcome {
+        case .proceed, .unsupported:
+            operations.start()
+        case let .delay(_, delayMs):
+            schedule(delayMs, operations.start)
+        case let .fail(_, _, errorType, delayMs):
+            let failNow: @Sendable () -> Void = { [self] in
+                operations.cancel()
+                recordAppliedFailure(
+                    outcome, requestId: requestId, url: endpoint, method: "CONNECTION",
+                    connectionId: connectionId, protocolName: "nwconnection"
+                )
+                onFault(.posix(AdapterFaultOutcome.posixCode(for: errorType)))
+            }
+            if delayMs > 0 {
+                schedule(delayMs, failNow)
+            } else {
+                failNow()
+            }
+        }
+    }
+
+    private func faultOutcome(endpoint: String, connectionId: String, sessionId: String?) -> AdapterFaultOutcome {
+        #if DEBUG
+            guard AutoMobileSDK.shared.isEnabled, let parsed = URL(string: endpoint) else { return .proceed }
+            return AdapterFaultOutcome(faultStore.evaluate(.init(
+                transport: .nwConnection, host: parsed.host, port: parsed.port, scheme: parsed.scheme,
+                path: parsed.path, method: "CONNECTION", headers: [:], origin: nil,
+                connectionId: connectionId, sessionId: sessionId
+            )))
+        #else
+            return .proceed
+        #endif
     }
 
     #if DEBUG

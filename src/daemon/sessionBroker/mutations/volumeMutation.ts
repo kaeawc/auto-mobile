@@ -1,4 +1,5 @@
 import { parseVolume } from "../../../features/media/MediaSessionController";
+import { volumeSetScript } from "../../../features/media/AndroidVolume";
 import {
   MEDIA_VOLUME_STREAMS,
   type MediaVolumeStream,
@@ -15,6 +16,7 @@ const STREAM_CODES = {
   alarm: 4,
   notification: 5,
   bluetooth_sco: 6,
+  tts: 9,
   accessibility: 10,
   assistant: 11,
 } as const;
@@ -23,24 +25,26 @@ type VolumeStream = keyof typeof STREAM_CODES;
 
 /**
  * Streams a volume key press can change. Android picks the stream from audio focus and call state
- * (voice call, Bluetooth SCO, ring, notification, music, accessibility, assistant, with system
+ * (voice call, Bluetooth SCO, ring, notification, music, TTS, accessibility, assistant, with system
  * and alarm through their aliases), so the press journals every one. The set order puts each
  * stream that can be an alias (SCO and voice call, notification and system to ring, everything to
  * music on a television profile) before the stream it aliases, so the alias's own index is set
- * last and a rescaling round trip cannot leave it off by one. The shell cannot set the
- * accessibility stream (it needs an accessibility service's uid), so that stream is only verified.
+ * last and a rescaling round trip cannot leave it off by one. Accessibility is attempted too,
+ * but Android may deny a shell uid; its read-back must still match for the revert to succeed.
  */
 const KEY_PRESS_SET_ORDER = [
   "bluetooth_sco",
   "notification",
   "system",
   "assistant",
+  "tts",
+  "accessibility",
   "voice_call",
   "ring",
   "alarm",
   "music",
 ] as const satisfies readonly VolumeStream[];
-const KEY_PRESS_STREAMS: readonly VolumeStream[] = [...KEY_PRESS_SET_ORDER, "accessibility"];
+const KEY_PRESS_STREAMS: readonly VolumeStream[] = KEY_PRESS_SET_ORDER;
 
 /** Journal key of the stream levels a `pressButton` volume key press can change. */
 export const VOLUME_KEY_PRESS_MUTATION_KEY = "volume:key-press";
@@ -138,12 +142,9 @@ export function volumeRevertScript(key: string, prior: MutationValue): string | 
   if (!streams || !levels) {
     return null;
   }
-  const sets = streams
-    .filter((stream) => stream !== "accessibility")
-    .map(
-      (stream) =>
-        `cmd media_session volume --stream ${STREAM_CODES[stream]} --set ${levels[stream]} >/dev/null 2>&1`,
-    );
+  const sets = streams.map(
+    (stream) => `{ ${volumeSetScript(STREAM_CODES[stream], levels[stream]!)}; } >/dev/null 2>&1`,
+  );
   const checks = streams.map(
     (stream) =>
       `cmd media_session volume --stream ${STREAM_CODES[stream]} --get 2>/dev/null | grep -q "volume is ${levels[stream]} in range"`,

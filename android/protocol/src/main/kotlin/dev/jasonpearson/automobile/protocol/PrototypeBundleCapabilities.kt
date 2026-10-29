@@ -38,6 +38,7 @@ internal object PrototypeBundleCapabilities {
         caps.add("prototype_platform_realtime_device_v1")
     }
     if ("data" in spec) caps.add("prototype_data_model_v1")
+    if (PrototypeMediaQueue.queued(spec)) caps.add("prototype_platform_media_queue_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
     if ("derive" in spec) caps.add("prototype_format_v1")
   }

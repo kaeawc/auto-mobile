@@ -15,6 +15,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 const ios = (deviceId: string): BootedDevice => ({ deviceId, name: deviceId, platform: "ios" });
+const android = (deviceId: string, name: string): BootedDevice => ({
+  deviceId,
+  name,
+  platform: "android",
+});
 
 describe("listDevices reports ownership allocation enforces", () => {
   let timer: FakeTimer;
@@ -81,6 +86,44 @@ describe("listDevices reports ownership allocation enforces", () => {
 
     expect(unpooled.runtime.heldBy).toBe("session_broker");
     expect(free.runtime.heldBy).toBeUndefined();
+  });
+
+  test("a booted broker-bound emulator an adb server reset dropped is re-pooled held (#15794)", async () => {
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "android", "Pixel_AVD");
+    const emulator = android("emulator-5554", "Pixel_AVD");
+    const devices = [emulator, android("emulator-5556", "Free_AVD")];
+    const pool = await makePool(devices, {
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+    });
+    await pool.bindingStableIds("android");
+    const pooled = pool.getDevice(emulator.deviceId)!;
+    // The AVD identity the reset quarantine needs to treat the emulator as relaunch-eligible.
+    pooled.avdName = "Pixel_AVD";
+    pooled.androidImage = { name: "Pixel_AVD", platform: "android", isRunning: true };
+
+    // The disconnect monitor's reset sweep: detach the cohort, then release its reservations.
+    const detachment = await pool.detachAdbServerResetCohort([pooled]);
+    expect(detachment.devices.map(({ id }) => id)).toEqual([emulator.deviceId]);
+    await pool.releaseAdbServerResetCohortReservations(detachment.devices);
+    expect(pool.getDevice(emulator.deviceId)).toBeNull();
+    const [dropped] = listDevicePayloads(devices, pool, new Map());
+    expect(dropped.runtime.poolStatus).toBeNull();
+    // Unpooled, the binding still reads through the AVD name the binding is keyed by.
+    expect(dropped.runtime.heldBy).toBe("session_broker");
+    expect(dropped.identity.stableId).toBe("Pixel_AVD");
+
+    // The emulator stayed booted, so the next refresh pools it again, still broker-held.
+    expect(await pool.refreshDevices()).toBe(1);
+    expect(pool.getDevice(emulator.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+    expect(pool.genericAvailability(emulator.deviceId)).toBe("session_broker");
+    const [repooled, free] = listDevicePayloads(devices, pool, new Map());
+    expect(repooled.runtime.poolStatus).toBe("assigned");
+    expect(repooled.runtime.heldBy).toBe("session_broker");
+    expect(free.runtime.poolStatus).toBe("idle");
+    expect(pool.getStats()).toMatchObject({ total: 2, idle: 1, assigned: 1 });
+    // Re-pooled, it is still not generic capacity: allocation lends the free emulator instead.
+    expect(await pool.assignDeviceToSession("generic", "android")).toBe("emulator-5556");
   });
 
   test("a pooled entry that fails runtime identity lends no binding to the device on its id", async () => {

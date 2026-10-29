@@ -93,11 +93,14 @@ export interface AssignmentOperations {
     stats: ReturnType<DevicePoolOperations["getStats"]>;
     deviceIds: ReadonlySet<string>;
   }>;
-  readLiveInventoryDeviceIds(signal?: AbortSignal): Promise<Set<string>>;
-  readInventoryDiscovery(platform: Platform, signal?: AbortSignal): Promise<BootedDeviceDiscovery>;
+  readLiveInventoryDeviceIds(signal: AbortSignal | undefined): Promise<Set<string>>;
+  readInventoryDiscovery(
+    platform: Platform,
+    signal: AbortSignal | undefined,
+  ): Promise<BootedDeviceDiscovery>;
   assertEmptyInventoryIsKnown(
     read: ReadonlyMap<Platform, BootedDeviceDiscovery>,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
   ): Promise<void>;
   refreshForeignOwnership(requireCurrent?: boolean): Promise<void>;
   countForeignDrivenDevices(platform?: Platform): number;
@@ -318,14 +321,15 @@ export class DevicePoolAssignment {
 
   /**
    * {@link getRefreshedStats} plus the live pooled device ids it counted, so a surface that also
-   * lists devices lists exactly the ones the counts cover.
+   * lists devices lists exactly the ones the counts cover. This is the inventory read's entry
+   * point: it reads the ambient abort signal once and passes it down explicitly (#15671).
    */
   async getRefreshedInventory(): Promise<{
     stats: ReturnType<DevicePoolOperations["getStats"]>;
     deviceIds: ReadonlySet<string>;
   }> {
     await this.callbacks.refreshInventoryOwnership();
-    const deviceIds = await this.readLiveInventoryDeviceIds();
+    const deviceIds = await this.readLiveInventoryDeviceIds(getAbortSignal());
     return { stats: this.callbacks.getStats(deviceIds), deviceIds };
   }
 
@@ -340,8 +344,9 @@ export class DevicePoolAssignment {
    * listing throws {@link BootedDeviceDiscoveryIncompleteError}: the count is unknown, never the
    * stale pool tally and never zero. A source whose tooling is not installed on this host is not
    * incomplete (#11605) -- unless a pooled device depends on it, which proves the tooling existed.
+   * `signal` is the caller's cancellation, passed explicitly to every listing and probe (#15671).
    */
-  async readLiveInventoryDeviceIds(signal = getAbortSignal()): Promise<Set<string>> {
+  async readLiveInventoryDeviceIds(signal: AbortSignal | undefined): Promise<Set<string>> {
     const live = new Set<string>();
     const read = new Map<Platform, BootedDeviceDiscovery>();
     for (const platform of ["android", "ios"] as const) {
@@ -396,7 +401,7 @@ export class DevicePoolAssignment {
 
   async readInventoryDiscovery(
     platform: Platform,
-    signal = getAbortSignal(),
+    signal: AbortSignal | undefined,
   ): Promise<BootedDeviceDiscovery> {
     return expectingPooledSources(
       await this.state.deviceManager.getBootedDevicesDetailed(platform, {
@@ -414,7 +419,7 @@ export class DevicePoolAssignment {
    */
   async assertEmptyInventoryIsKnown(
     read: ReadonlyMap<Platform, BootedDeviceDiscovery>,
-    signal = getAbortSignal(),
+    signal: AbortSignal | undefined,
   ): Promise<void> {
     for (const platform of ["android", "ios"] as const) {
       const discovery = read.get(platform) ?? (await this.readInventoryDiscovery(platform, signal));

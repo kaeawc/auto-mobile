@@ -152,6 +152,20 @@ describe("AdbLocalizationPriorSource", () => {
     expect(await new AdbLocalizationPriorSource(missing).readAppLocales(APP)).toBeNull();
   });
 
+  test("with more than one running user there is no prior, so reset escalates", async () => {
+    const fake = adb(34);
+    fake.setUsers([
+      { userId: 0, name: "Owner", flags: 0x4000, running: true },
+      { userId: 10, name: "Work", flags: 0x1030, running: true },
+    ]);
+    fake.setCommandResponse(
+      "get-app-locales",
+      createExecResult(`Locales for ${APP} for user 0 are [fr-FR]\n`, ""),
+    );
+    expect(await new AdbLocalizationPriorSource(fake).readAppLocales(APP)).toBeNull();
+    expect(fake.getExecutedCommands().some((c) => c.includes("get-app-locales"))).toBe(false);
+  });
+
   test("a settings row reads as its raw value, null when unset, unreadable on stderr", async () => {
     const fake = adb(34);
     fake.setCommandResponse(

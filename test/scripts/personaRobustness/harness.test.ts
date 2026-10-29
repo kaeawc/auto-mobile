@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { DriveClient, DriveStep } from "../../../scripts/mcp-drive";
-import { runHarness, type HarnessOptions } from "../../../scripts/persona-robustness/harness";
+import {
+  HARNESS_TOOLS,
+  runHarness,
+  type HarnessOptions,
+} from "../../../scripts/persona-robustness/harness";
 import {
   BASELINE_PERSONA_ID,
   personaPerturbation,
@@ -38,7 +42,11 @@ class FakeDevice implements DriveClient {
   applied: DriveStep[] = [];
   constructor(
     private readonly breaks: (applied: DriveStep[]) => boolean,
-    private readonly failures: { apply?: string; reset?: number } = {},
+    private readonly failures: {
+      apply?: string;
+      reset?: number;
+      status?: Record<string, string>;
+    } = {},
   ) {}
 
   callTool(tool: string, args: Record<string, unknown>): Promise<unknown> {
@@ -61,6 +69,11 @@ class FakeDevice implements DriveClient {
     }
     if (this.failures.apply && JSON.stringify(args).includes(this.failures.apply)) {
       return Promise.resolve(envelope({ error: "overlay unsupported" }, true));
+    }
+    const status = this.failures.status?.[tool];
+    if (status) {
+      this.applied.push({ tool, args });
+      return Promise.resolve(envelope({ success: true, status }));
     }
     this.applied.push({ tool, args });
     return Promise.resolve(envelope({ success: true }));
@@ -121,11 +134,36 @@ describe("runHarness", () => {
     expect(report.results.map((r) => r.verdict)).toEqual(["pass", "pass"]);
   });
 
-  test("reuses a held session instead of calling getAndroid", async () => {
+  test("reuses a held session, enabling the harness tools on it first", async () => {
     const device = new FakeDevice(() => false);
     await runHarness(options({ session: "held" }), deps(device));
     expect(device.calls.some((c) => c.tool === "getAndroid")).toBe(false);
     expect(device.calls.every((c) => c.args.sessionUuid === "held")).toBe(true);
+    expect(device.calls[0]).toEqual({
+      tool: "setToolEnabled",
+      args: { toolNames: [...HARNESS_TOOLS], enabled: true, sessionUuid: "held" },
+    });
+  });
+
+  test("acquisition declares the harness tools and every replay names the platform", async () => {
+    const device = new FakeDevice(() => false);
+    await runHarness(options({ acquireArgs: { avdName: "Pixel_9" } }), deps(device));
+    expect(device.calls[0]).toEqual({
+      tool: "getAndroid",
+      args: { avdName: "Pixel_9", enableTools: [...HARNESS_TOOLS] },
+    });
+    const plans = device.calls.filter((c) => c.tool === "executePlan");
+    expect(plans.length).toBeGreaterThan(0);
+    expect(plans.every((c) => c.args.platform === "android")).toBe(true);
+  });
+
+  test("an apply that reports an unapplied effect is a harness error, not a pass", async () => {
+    const device = new FakeDevice(() => false, { status: { displayProfile: "unsupported" } });
+    const report = await runHarness(options(), deps(device));
+    const stressor = report.results.find((r) => r.id === "display:font-scale-1.3");
+    expect(stressor?.verdict).toBe("error");
+    expect(stressor?.runs[0]?.error).toContain("status unsupported");
+    expect(device.calls.filter((c) => c.tool === "executePlan")).toHaveLength(2);
   });
 
   test("ablation attributes a persona failure to the facet that fails alone", async () => {

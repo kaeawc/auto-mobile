@@ -81,6 +81,7 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
       defaultEnabled: false,
       outputSchema: setDeviceResourcesResultSchema,
       deviceResourceBudget: true,
+      changesHostSideState: true,
     },
   );
 

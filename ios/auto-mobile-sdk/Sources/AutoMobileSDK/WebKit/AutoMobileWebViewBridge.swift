@@ -411,7 +411,10 @@ extension AutoMobileWebAction {
             }
             metadata.removeValue(forKey: "name")
             let requestId = trackRequest(name: name, body: body, url: url, metadata: &metadata)
-            if name == "snapshot", let elements = body["elements"] as? [[String: Any]] {
+            // Only the main frame's document is snapshotted: element ids are per document, and the
+            // action script resolves them in the main frame, so a frame's `e0` could reach another
+            // element (#15877).
+            if name == "snapshot", message.frameInfo.isMainFrame, let elements = body["elements"] as? [[String: Any]] {
                 let decoded = elements.prefix(configuration.maxElements)
                     .compactMap { element -> AutoMobileWebElement? in
                         guard let id = element["id"] as? String else { return nil }
@@ -606,16 +609,23 @@ extension AutoMobileWebAction {
         private static let script = #"""
         (() => {
           const post = (name, extra = {}) => window.webkit?.messageHandlers?.automobile?.postMessage({name, frameId: location.href, ...extra});
+          let nextElementId = 0;
+          const rendered = e => e.checkVisibility ? e.checkVisibility({visibilityProperty: true, opacityProperty: true}) : getComputedStyle(e).visibility !== 'hidden';
           const snapshot = () => {
-            const elements = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].map((e, i) => {
-              const id = e.dataset.automobileId || (e.dataset.automobileId = `e${i}`);
+            if (window.top !== window) return;
+            const elements = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].map(e => {
+              const id = e.dataset.automobileId || (e.dataset.automobileId = `e${nextElementId++}`);
               const r = e.getBoundingClientRect();
-              return {id, role: e.getAttribute('role') || e.tagName.toLowerCase(), label: e.getAttribute('aria-label') || e.textContent?.trim().slice(0, 200), value: e.value || null, bounds: [r.x,r.y,r.width,r.height], enabled: !e.disabled, visible: r.width > 0 && r.height > 0, focused: document.activeElement === e};
+              return {id, role: e.getAttribute('role') || e.tagName.toLowerCase(), label: e.getAttribute('aria-label') || e.textContent?.trim().slice(0, 200), value: e.value || null, bounds: [r.x,r.y,r.width,r.height], enabled: !e.disabled, visible: r.width > 0 && r.height > 0 && rendered(e), focused: document.activeElement === e};
             });
             post('snapshot', {snapshotId: `${Date.now()}-${Math.random()}`, elements});
           };
+          let snapshotPending = false;
+          const scheduleSnapshot = () => { if (snapshotPending) return; snapshotPending = true; setTimeout(() => { snapshotPending = false; snapshot(); }, 100); };
           new MutationObserver(snapshot).observe(document, {subtree:true, childList:true, attributes:true});
-          addEventListener('load', snapshot); addEventListener('hashchange', () => post('spa_navigation')); addEventListener('popstate', () => post('history_navigation'));
+          addEventListener('load', snapshot);
+          addEventListener('scroll', scheduleSnapshot, {passive: true, capture: true});
+          addEventListener('focusin', scheduleSnapshot); addEventListener('focusout', scheduleSnapshot); addEventListener('hashchange', () => post('spa_navigation')); addEventListener('popstate', () => post('history_navigation'));
           const push = history.pushState, replace = history.replaceState;
           history.pushState = (...a) => { const r = push.apply(history, a); post('history_navigation'); return r; };
           history.replaceState = (...a) => { const r = replace.apply(history, a); post('history_navigation'); return r; };

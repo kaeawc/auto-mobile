@@ -498,7 +498,10 @@ extension AutoMobileWebAction {
 
         // MARK: AutoMobileWebViewControlling (#5162)
 
-        var bridgeEntry: WebViewBridgeEntry {
+        // The WebKit conformances make the bridge main-actor isolated, but the SDK route handler
+        // reads these off the main actor. Each one reads only lock-protected or Sendable state.
+
+        nonisolated var bridgeEntry: WebViewBridgeEntry {
             let page = pageState.withLock { $0 }
             return WebViewBridgeEntry(
                 webViewId: webViewId,
@@ -508,19 +511,19 @@ extension AutoMobileWebAction {
             )
         }
 
-        var latestSnapshot: AutoMobileWebSnapshot? { policy.latestSnapshot }
+        nonisolated var latestSnapshot: AutoMobileWebSnapshot? { policy.latestSnapshot }
 
-        var maxMessageBytes: Int { policy.maxMessageBytes }
+        nonisolated var maxMessageBytes: Int { policy.maxMessageBytes }
 
-        var originAllowed: Bool {
+        nonisolated var originAllowed: Bool {
             policy.allowsOrigin(url: pageState.withLock { $0.url })
         }
 
-        var contentProcessAvailable: Bool {
+        nonisolated var contentProcessAvailable: Bool {
             pageState.withLock { $0.contentProcessAvailable }
         }
 
-        func perform(_ action: AutoMobileWebControlAction) async -> AutoMobileWebActionResult {
+        nonisolated func perform(_ action: AutoMobileWebControlAction) async -> AutoMobileWebActionResult {
             if !contentProcessAvailable {
                 return .rejected(AutoMobileWebActionResult.webProcessUnavailableReason)
             }
@@ -532,7 +535,7 @@ extension AutoMobileWebAction {
             }
             let bridgeAction = AutoMobileWebAction(action)
             return await withCheckedContinuation { continuation in
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.perform(bridgeAction) { result in
                         switch result {
                         case .success: continuation.resume(returning: AutoMobileWebActionResult(status: .accepted))

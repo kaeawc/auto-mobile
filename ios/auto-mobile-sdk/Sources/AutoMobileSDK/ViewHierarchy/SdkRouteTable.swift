@@ -79,6 +79,8 @@
                 handler: .body { $0.handleObservationSnapshot($1, initialData: $2) }
             ),
             Entry(route: .observationAction, handler: .body { $0.handleObservationAction($1, initialData: $2) }),
+            Entry(route: .webViewSnapshot, handler: .body { $0.handleWebViewSnapshot($1, initialData: $2) }),
+            Entry(route: .webViewAction, handler: .body { $0.handleWebViewAction($1, initialData: $2) }),
         ]
     }
 #endif

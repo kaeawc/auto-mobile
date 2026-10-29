@@ -920,6 +920,8 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "sdk_capabilities_result",
   "sdk_observation_result",
   "sdk_trigger_result",
+  "sdk_web_action_result",
+  "sdk_web_snapshot_result",
   "select_all_result",
   "set_network_error_simulation_result",
   "set_network_fault_rules_result",
@@ -961,8 +963,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 58 rawValues", () => {
-    expect(rawValues.length).toBe(58);
+  test("Swift ResponseType declares exactly 60 rawValues", () => {
+    expect(rawValues.length).toBe(60);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -975,9 +977,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 53 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 55 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(53);
+    expect(reshaped.length).toBe(55);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1107,6 +1109,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "sdk_trigger_result", expected: false },
     { type: "sdk_observation_result", expected: false },
     { type: "sdk_action_result", expected: false },
+    { type: "sdk_web_snapshot_result", expected: false },
+    { type: "sdk_web_action_result", expected: false },
     { type: "screenshot", expected: true },
     { type: "pinch_result", expected: true },
     { type: "tap_coordinates_result", expected: true },
@@ -1250,8 +1254,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 52 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(52);
+  test("the passthrough set is the 54 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(54);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

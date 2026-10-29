@@ -74,6 +74,51 @@ Bridge requests share the runner's SDK data budget (2 s per request, 5 s in tota
 timeout on `request_sdk_action` reports `available: true`, because the action may have run. Neither
 reply is stall evidence for runner recovery: a slow host executor is not a stalled runner.
 
+## WKWebView snapshot and action commands
+
+A host opts each `AutoMobileWebViewBridge` in explicitly, and the SDK never registers one itself
+(#5162):
+
+```swift
+AutoMobileWebViewRegistry.shared.register(webViewBridge)
+```
+
+The registry's `WebViewBridgeState` is served in `/health` as `webViewBridge`: one entry per
+registered web view, in registration order, with its `webViewId`, last committed `url`, sorted
+`allowedOrigins` and `contentProcessAvailable`. The SDK serves two routes, which CtrlProxy relays:
+
+| SDK route                | CtrlProxy command                                      | Reply                                                     |
+| ------------------------ | ------------------------------------------------------ | --------------------------------------------------------- |
+| `POST /webview/snapshot` | `request_sdk_web_snapshot` → `sdk_web_snapshot_result` | the web view's latest `AutoMobileWebSnapshot` and its id  |
+| `POST /webview/action`   | `request_sdk_web_action` → `sdk_web_action_result`     | the web view's `AutoMobileWebActionResult` for one action |
+
+A snapshot request names a `webViewId`, or none for the first registered web view; the reply also
+carries the registered web views from `/health`. The snapshot is the one the bridge's policy
+accepted when the page posted it, so it is already bounded to `maxElements` and its values are
+redacted when `redactText` is on; nothing unredacted leaves the bridge.
+
+An action request names a `webViewId` and sends `actionJson`, one `AutoMobileWebControlAction` in
+Swift's enum shape, such as `{"setValue":{"snapshotId":"s1","elementId":"q","text":"hi"}}`. The
+wire type holds only the bounded actions (`click`, `focus`, `insertText`, `select`, `scroll`,
+`setValue`, `clear`, `scrollIntoView`, `submit`) and has no JavaScript case, so arbitrary script
+cannot be expressed: the runner rejects it as `invalid_action` and the SDK as `400 bad_request`.
+
+CtrlProxy calls the SDK only when `/health` lists a web view (for an action, the named one).
+Failures add these to the observation commands' codes:
+
+| `failure`                 | Meaning                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `disallowed_origin`       | the page's origin is not allowed by the bridge's policy (each snapshot's frame was checked when posted) |
+| `web_process_unavailable` | the web content process terminated and the page has not loaded again; its snapshots are discarded       |
+| `message_too_large`       | the request or snapshot exceeds the bridge's `maxMessageBytes`                                          |
+| `no_snapshot`             | the page has not posted a snapshot yet                                                                  |
+
+`invalid_action` also covers a missing `webViewId`. An action's own rejection is a result with
+`success: false`: `stale_snapshot` (the snapshot is not one of the web view's four most recent),
+`element_not_actionable` (missing, disabled or hidden in that snapshot), `disallowed_origin`,
+`web_process_unavailable`, or `javascript_error` when the bounded script raised. These commands do
+not yet feed `observe` or the action tools.
+
 ## Backend selection
 
 The `ios-sdk-observation-bridge` feature flag (default on) gates routing. With it off, or for an app

@@ -141,6 +141,35 @@ final class ResponseContractFixtureTests: XCTestCase {
             )
         )
         try append(
+            "sdk_web_snapshot_result",
+            SdkWebSnapshotResponse(
+                requestId: requestId,
+                outcome: .success(AutoMobileWebSnapshotReply(
+                    webViewId: "main",
+                    snapshot: AutoMobileWebSnapshot(
+                        snapshotId: "s1",
+                        url: "https://fixture.local/",
+                        elements: [AutoMobileWebElement(
+                            id: "submit", role: "button", label: "Submit", bounds: [10, 20, 80, 30]
+                        )]
+                    )
+                )),
+                webViews: [WebViewBridgeEntry(
+                    webViewId: "main", url: "https://fixture.local/", allowedOrigins: ["https://fixture.local"],
+                    contentProcessAvailable: true
+                )],
+                totalTimeMs: 17
+            )
+        )
+        try append(
+            "sdk_web_action_result",
+            SdkWebActionResponse(
+                requestId: requestId,
+                outcome: .success(.rejected(AutoMobileWebActionResult.staleSnapshotReason)),
+                totalTimeMs: 17
+            )
+        )
+        try append(
             "voiceover_state_result",
             VoiceOverStateResponse(requestId: requestId, enabled: true, totalTimeMs: 17)
         )

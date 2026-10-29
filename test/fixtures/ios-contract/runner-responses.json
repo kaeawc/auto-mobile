@@ -723,6 +723,64 @@
       }
     },
     {
+      "name" : "sdk_web_snapshot_result",
+      "wire" : {
+        "available" : true,
+        "requestId" : "fixture-request-id",
+        "snapshot" : {
+          "elements" : [
+            {
+              "bounds" : [
+                10,
+                20,
+                80,
+                30
+              ],
+              "enabled" : true,
+              "focused" : false,
+              "id" : "submit",
+              "label" : "Submit",
+              "role" : "button",
+              "visible" : true
+            }
+          ],
+          "snapshotId" : "s1",
+          "url" : "https:\/\/fixture.local\/"
+        },
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_web_snapshot_result",
+        "webViewId" : "main",
+        "webViews" : [
+          {
+            "allowedOrigins" : [
+              "https:\/\/fixture.local"
+            ],
+            "contentProcessAvailable" : true,
+            "url" : "https:\/\/fixture.local\/",
+            "webViewId" : "main"
+          }
+        ]
+      }
+    },
+    {
+      "name" : "sdk_web_action_result",
+      "wire" : {
+        "available" : true,
+        "error" : "stale_snapshot",
+        "requestId" : "fixture-request-id",
+        "result" : {
+          "reason" : "stale_snapshot",
+          "status" : "rejected"
+        },
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_web_action_result"
+      }
+    },
+    {
       "name" : "voiceover_state_result",
       "wire" : {
         "enabled" : true,
@@ -1400,6 +1458,8 @@
     "sdk_capabilities_result",
     "sdk_observation_result",
     "sdk_trigger_result",
+    "sdk_web_action_result",
+    "sdk_web_snapshot_result",
     "select_all_result",
     "set_hierarchy_poll_interval_result",
     "set_network_error_simulation_result",

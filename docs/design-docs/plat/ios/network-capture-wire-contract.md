@@ -2,7 +2,7 @@
 
 `SdkNetworkRequestEvent` is the network wire payload for #5158. The SDK JSON-encodes it into `SdkEventEnvelope.payload` (base64), wraps envelopes in `SdkEventBatch`, and sends batches to CtrlProxy. CtrlProxy stores and returns the envelopes through `/sdk-events` without projecting the network fields. `decodeSdkEventBatches` is the production TypeScript retrieval decoder; `DefaultIosSdkEventIngestor` validates the version before recording anything as network traffic.
 
-Capture requires host registration: install the URLProtocol on a URLSession configuration, forward URLSession delegate callbacks, or call the WebSocket/NWConnection adapters from the host's transport callbacks. Enabling capture does not instrument unregistered transports. Hosts must redact endpoint/query/metadata values before supplying them; no automatic URL or metadata sanitization is implied.
+Capture requires host registration through the [host-integration profile](host-integration-profile.md): register a URLSession configuration (the URLProtocol for default and custom sessions, delegate forwarding for background ones), or register and call the WebSocket/NWConnection adapters from the host's transport callbacks. Enabling capture does not instrument unregistered transports. Hosts must redact endpoint/query/metadata values before supplying them; no automatic URL or metadata sanitization is implied.
 
 ## Versions and diagnostics
 

@@ -497,6 +497,10 @@ public final class AutoMobileNetwork: Sendable
   public func setMaxBodyBytes(_ bytes: Int)
   public func protocolClass() -> AnyClass
   public func captureRecorder() -> NetworkCaptureRecorder
+  @discardableResult public func registerURLSession(_ configuration: URLSessionConfiguration) -> URLSessionRegistration
+  public func registerWebSocket() -> WebSocketNetworkCaptureAdapter
+  public func registerNWConnection() -> NWConnectionNetworkCaptureAdapter
+  public func transportCapabilities() -> [SdkCapabilityDescriptor]
   public func recordRequest(_ record: NetworkRequestRecord)
   @available(*, deprecated, message: "Use recordRequest(_:) with NetworkRequestRecord instead") public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
   public func recordFromTask( _ task: URLSessionTask, startTime: Date, receivedData: Data?, error: Error? )
@@ -510,6 +514,21 @@ public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable
   public func urlSession( _: URLSession, dataTask _: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void )
   public func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive data: Data)
   public func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?)
+
+// Network/HostTransportRegistry.swift
+public enum HostTransport: String, CaseIterable, Sendable
+  case urlSession = "network.transport.urlsession"
+  case backgroundURLSession = "network.transport.urlsession.background"
+  case webSocket = "network.transport.websocket"
+  case nwConnection = "network.transport.nwconnection"
+  case other = "network.transport.other"
+public struct URLSessionRegistration: Sendable
+public enum Mode: String, Sendable
+  case urlProtocol
+  case delegateForwarding
+  public let transport: HostTransport
+  public let mode: Mode
+  public let adapter: URLSessionNetworkCaptureAdapter?
 
 // Network/NetworkCaptureRecorder.swift
 public enum NetworkCaptureDirection: String, Codable, Sendable
@@ -957,6 +976,26 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
   public func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError error: Error)
   public func webView(_ webView: WKWebView, didCommit _: WKNavigation!)
   public func webViewWebContentProcessDidTerminate(_ webView: WKWebView)
+
+// sdk-wire/CapabilityWireModels.swift
+public enum SdkCapabilityState: String, Codable, Equatable, Sendable
+  case supported = "SUPPORTED"
+  case disabled = "DISABLED"
+  case unsupported = "UNSUPPORTED"
+  case permissionDenied = "PERMISSION_DENIED"
+  case notInitialized = "NOT_INITIALIZED"
+  case unknown = "UNKNOWN"
+  public init(from decoder: Decoder) throws
+public enum SdkFaultEnforcement: String, Codable, Equatable, Sendable
+  case enforced = "ENFORCED"
+  case evaluateOnly = "EVALUATE_ONLY"
+  case notEnforceable = "NONE"
+public struct SdkCapabilityDescriptor: Codable, Equatable, Sendable
+  public let id: String
+  public let state: SdkCapabilityState
+  public let reason: String?
+  public let faultEnforcement: SdkFaultEnforcement?
+  public init( id: String, state: SdkCapabilityState, reason: String? = nil, faultEnforcement: SdkFaultEnforcement? = nil )
 
 // sdk-wire/NetworkWireModels.swift
 public struct NetworkMockRuleDTO: Codable, Sendable, Equatable

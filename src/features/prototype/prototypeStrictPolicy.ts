@@ -1,10 +1,14 @@
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypePlatformCall, prototypePlatformUses } from "./prototypePlatform";
-import { prototypeDataPathPointer, prototypeDataPlaceholders } from "./prototypeData";
+import {
+  isPrototypeDataPointer,
+  prototypeDataPathPointer,
+  prototypeDataPlaceholders,
+} from "./prototypeData";
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-import { repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
+import { repeatErrors, repeatFieldReferences, repeatKeyInstances } from "./prototypeRepeat";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
   mapBindableFields,
@@ -99,25 +103,53 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   const instances = validRepeats
     ? repeatKeyInstances(spec, located)
     : located.map((field) => ({ located: field, value: field.value }));
-  const errors = new Map<string, PrototypeValidationError>();
+  const texts = new Map<string, string[]>();
   for (const { value, located: field } of instances) {
-    if (errors.has(field.path)) {
-      continue;
+    const at = texts.get(field.path);
+    const text = String(value.stateKey);
+    if (at) {
+      at.push(text);
+    } else {
+      texts.set(field.path, [text]);
     }
+  }
+  // Data-backed rows are rebuilt from live data. Authored row values cannot rule out a read
+  // of a sensitive write anywhere in the collection, including rows added after validation.
+  const taintedRepeats = nodes.flatMap(({ value, path }) => {
+    const repeat = object(value.repeat);
+    const pointer = object(repeat?.items)?.path;
+    return typeof repeat?.as === "string" &&
+      isPrototypeDataPointer(pointer) &&
+      tainted.some((taint) => pointersOverlap(taint, pointer, false))
+      ? [{ path, alias: repeat.as }]
+      : [];
+  });
+  const errors: PrototypeValidationError[] = [];
+  for (const field of sinkFields) {
+    const readsTaintedRow = taintedRepeats.some(
+      (scope) =>
+        field.path.startsWith(`${scope.path}.children[`) &&
+        (field.itemBinding ||
+          (!field.dataPointer && repeatFieldReferences(field.text, scope.alias).length > 0)),
+    );
+    // Derived fields have no host-side instances. Retain literal data placeholders in their
+    // authored text; the device still resolves those after formatting the derived value.
     const pointers = field.dataPointer
       ? [field.text]
-      : prototypeDataPlaceholders(String(value.stateKey));
-    const reached = pointers.some((pointer) =>
-      tainted.some((taint) => pointersOverlap(taint, pointer)),
-    );
+      : (texts.get(field.path) ?? [field.text]).flatMap(prototypeDataPlaceholders);
+    const reached =
+      readsTaintedRow ||
+      pointers.some((pointer) =>
+        tainted.some((taint) => pointersOverlap(taint, pointer, !field.dataPointer)),
+      );
     if (reached) {
-      errors.set(field.path, {
+      errors.push({
         path: field.path,
         message: "Sensitive value cannot be bound into a request",
       });
     }
   }
-  return [...errors.values()];
+  return errors;
 }
 
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
@@ -145,9 +177,10 @@ function sensitiveDataPointers(spec: unknown): string[] {
 /**
  * Whether two RFC 6901 pointers name overlapping data: one is a segment-wise prefix of the other
  * (a binding of a parent object carries its sensitive member). A `{index}` segment in an `into`
- * path stands for any repeat row, so it matches any segment.
+ * path stands for any repeat row, so it matches any segment. Typed sink pointers stay literal;
+ * text sinks conservatively retain index matching when a repeat cannot be expanded on the host.
  */
-function pointersOverlap(taint: string, pointer: string): boolean {
+function pointersOverlap(taint: string, pointer: string, pointerIndexWildcard: boolean): boolean {
   const left = taint.slice(1).split("/");
   const right = pointer.slice(1).split("/");
   return left.every(
@@ -155,7 +188,7 @@ function pointersOverlap(taint: string, pointer: string): boolean {
       index >= right.length ||
       segment === right[index] ||
       segment === "{index}" ||
-      right[index] === "{index}",
+      (pointerIndexWildcard && right[index] === "{index}"),
   );
 }
 
@@ -294,6 +327,7 @@ interface LibraryField {
   path: string;
   key: boolean;
   dataPointer?: boolean;
+  itemBinding?: boolean;
 }
 function libraryFields(
   spec: unknown,
@@ -310,12 +344,13 @@ function libraryFields(
       fields.push({ text: raw, path: at, key: kind === "key" });
     }
     const binding = kind === "emitBinding" ? object(raw) : undefined;
-    if (
-      includeDataBindings &&
-      typeof binding?.data === "string" &&
-      !Object.hasOwn(binding, "state")
-    ) {
-      fields.push({ text: binding.data, path: at, key: false, dataPointer: true });
+    if (includeDataBindings && binding && !Object.hasOwn(binding, "state")) {
+      if (typeof binding.data === "string") {
+        fields.push({ text: binding.data, path: at, key: false, dataPointer: true });
+      }
+      if (typeof binding.item === "string") {
+        fields.push({ text: "", path: at, key: false, itemBinding: true });
+      }
     }
     return raw;
   };

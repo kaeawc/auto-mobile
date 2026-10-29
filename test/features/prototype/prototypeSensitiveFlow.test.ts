@@ -188,6 +188,127 @@ describe("sensitive data flow into network sinks (R2)", () => {
     expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
   });
 
+  test.each([
+    { pointer: "/code", refused: true },
+    { pointer: "/other", refused: false },
+  ])("derived repeat text retains the authored data pointer $pointer", ({ pointer, refused }) => {
+    const spec = specWith({ query: { q: `{data:${pointer}}{row.suffix}` } });
+    const repeated = {
+      ...spec,
+      root: {
+        ...spec.root,
+        repeat: {
+          items: [{ n: 2 }],
+          as: "row",
+          derive: { suffix: { of: { item: "n" }, format: { number: {} } } },
+        },
+      },
+    };
+    const error = {
+      path: "root.children[1].onTap[0].query.q",
+      message: "Sensitive value cannot be bound into a request",
+    };
+    expect(validatePrototypeSpec(repeated).success).toBe(true);
+    expect(prototypeSensitiveSinkErrors(repeated)).toEqual(refused ? [error] : []);
+    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(!refused);
+  });
+
+  test.each([
+    { binding: "{row.code}", into: "/data/rows/0/code", refused: true },
+    { binding: { item: "code" }, into: "/data/rows/0/code", refused: true },
+    { binding: "{row.code}", into: "/data/rows", refused: true },
+    { binding: { item: "code" }, into: "/data/rows/{index}/code", refused: true },
+    { binding: "{row.code}", into: "/data/rowsOther/0/code", refused: false },
+    { binding: { item: "code" }, into: "/data/other/0/code", refused: false },
+    { binding: "static", into: "/data/rows/0/code", refused: false },
+    { binding: { value: "{row.code}" }, into: "/data/rows/0/code", refused: false },
+  ])(
+    "data-backed repeat sink $binding with sensitive write $into",
+    ({ binding, into, refused }) => {
+      const spec = specWith({ query: { q: binding } }, into);
+      const repeated = {
+        ...spec,
+        data: { rows: [{ code: "authored" }] },
+        root: { ...spec.root, repeat: { items: { path: "/rows" }, as: "row" } },
+      };
+      const error = {
+        path: "root.children[1].onTap[0].query.q",
+        message: "Sensitive value cannot be bound into a request",
+      };
+      expect(validatePrototypeSpec(repeated).success).toBe(true);
+      expect(prototypeSensitiveSinkErrors(repeated)).toEqual(refused ? [error] : []);
+      expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(!refused);
+    },
+  );
+
+  test("literal repeat rows do not read the overlapping data collection", () => {
+    const spec = specWith(
+      { query: { text: "{row.code}", typed: { item: "code" } } },
+      "/data/rows/0/code",
+    );
+    const repeated = {
+      ...spec,
+      root: { ...spec.root, repeat: { items: [{ code: "authored" }], as: "row" } },
+    };
+    expect(prototypeSensitiveSinkErrors(repeated)).toEqual([]);
+    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(true);
+  });
+
+  test.each(["{entry.code}", { item: "code" }])(
+    "data-backed repeats retain live row reads with no authored rows: %p",
+    (binding) => {
+      const spec = specWith({ query: { q: binding } }, "/data/rows/0/code");
+      const repeated = {
+        ...spec,
+        data: { rows: [] },
+        root: { ...spec.root, repeat: { items: { path: "/rows" }, as: "entry" } },
+      };
+      const error = {
+        path: "root.children[1].onTap[0].query.q",
+        message: "Sensitive value cannot be bound into a request",
+      };
+      expect(validatePrototypeSpec(repeated).success).toBe(true);
+      expect(prototypeSensitiveSinkErrors(repeated)).toEqual([error]);
+      expect(validatePrototypeSpec(repeated, { library: true })).toEqual({ success: false, error });
+    },
+  );
+
+  test("a live repeat row used only in a label is accepted", () => {
+    const spec = specWith({ query: { q: "static" } }, "/data/rows/0/code");
+    const repeated = {
+      ...spec,
+      data: { rows: [{ code: "authored" }] },
+      root: {
+        ...spec.root,
+        repeat: { items: { path: "/rows" }, as: "row" },
+        children: spec.root.children.map((node) =>
+          node.type === "button" ? { ...node, label: "{row.code}" } : node,
+        ),
+      },
+    };
+    expect(prototypeSensitiveSinkErrors(repeated)).toEqual([]);
+    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(true);
+  });
+
+  test.each([
+    { into: "/data/users/0/token", pointer: "/users/{index}", refused: false },
+    { into: "/data/users/{index}/token", pointer: "/users/0", refused: true },
+    { into: "/data/users/{index}/token", pointer: "/other/0", refused: false },
+  ])("typed sink pointer $pointer stays literal for $into", ({ into, pointer, refused }) => {
+    const spec = specWith({ query: { q: { data: pointer } } }, into);
+    const repeated = {
+      ...spec,
+      root: { ...spec.root, repeat: { items: [{ code: "authored" }], as: "row" } },
+    };
+    const error = {
+      path: "root.children[1].onTap[0].query.q",
+      message: "Sensitive value cannot be bound into a request",
+    };
+    expect(validatePrototypeSpec(repeated).success).toBe(true);
+    expect(prototypeSensitiveSinkErrors(repeated)).toEqual(refused ? [error] : []);
+    expect(validatePrototypeSpec(repeated, { library: true }).success).toBe(!refused);
+  });
+
   test("a sensitive sibling pointer written inside a repeat does not taint the expanded query", () => {
     const spec = specWith({ query: { code: "{data:/{row.key}}" } }, "/data/other");
     const repeated = {

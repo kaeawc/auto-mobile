@@ -25,6 +25,11 @@ struct PrototypeStyleShadowLayer: Equatable {
     /// Outer sources expand; inner holes shrink. An empty hole casts over the whole node.
     var sourceInset: Double { inner ? spread : -spread }
     var inverseExtent: Double { 4 * sigma + abs(x) + abs(y) + abs(spread) + 1 }
+
+    /// Space on every side of the node for outer shadow sources, offsets and Gaussian tails.
+    static func outerMargin(_ layers: [Self]) -> Double {
+        layers.lazy.filter { !$0.inner }.map(\.inverseExtent).max() ?? 0
+    }
 }
 
 /// Radius resolution shared by every paint, clip, and shadow source.

@@ -51,14 +51,16 @@ export const bindingRegistryMigrationProvider: MigrationProvider = {
   getMigrations: async () => ({ ...BINDING_REGISTRY_MIGRATIONS }),
 };
 
-/** Read only: refuse newer schemas before Kysely can create or update bookkeeping. */
-async function assertSupportedRegistrySchema<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
-  const table = await sql<{ name: string }>`
-    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kysely_migration'
-  `.execute(db);
-  if (table.rows.length === 0) {
-    return;
-  }
+/** One read-only probe, implemented on the already-open registry connection. */
+export interface BindingRegistrySchemaProbe {
+  assertSupportedSchema(): Promise<void>;
+}
+
+/** Shared by open-time guards and resident readers; never writes migration bookkeeping. */
+export async function assertSupportedRegistrySchema<DB>(
+  db: Kysely<DB>,
+  dbPath: string,
+): Promise<void> {
   const executed = await sql<{
     name: string;
   }>`SELECT name FROM kysely_migration ORDER BY name`.execute(db);
@@ -70,6 +72,17 @@ async function assertSupportedRegistrySchema<DB>(db: Kysely<DB>, dbPath: string)
   }
 }
 
+/** Fresh databases have no bookkeeping yet; resident handles always have the migration table. */
+async function assertSupportedRegistryOnOpen<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
+  const table = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kysely_migration'
+  `.execute(db);
+  if (table.rows.length === 0) {
+    return;
+  }
+  await assertSupportedRegistrySchema(db, dbPath);
+}
+
 /** Exclusion readers cannot perform an upgrade or bypass legacy retirement. */
 export class BindingRegistryUpgradePendingError extends ActionableError {}
 
@@ -77,7 +90,7 @@ export async function assertBindingRegistryCurrent<DB>(
   db: Kysely<DB>,
   dbPath: string,
 ): Promise<void> {
-  await assertSupportedRegistrySchema(db, dbPath);
+  await assertSupportedRegistryOnOpen(db, dbPath);
   const migrations = await new Migrator({
     db,
     provider: bindingRegistryMigrationProvider,
@@ -100,7 +113,7 @@ export async function migrateBindingRegistry<DB>(
   dbPath: string,
   beforeMigrate?: () => Promise<void>,
 ): Promise<void> {
-  await assertSupportedRegistrySchema(db, dbPath);
+  await assertSupportedRegistryOnOpen(db, dbPath);
   const migrator = new Migrator({ db, provider: bindingRegistryMigrationProvider });
   if ((await migrator.getMigrations()).every((migration) => migration.executedAt !== undefined)) {
     return;
@@ -108,7 +121,7 @@ export async function migrateBindingRegistry<DB>(
   const lock = selectMigrationLock(dbPath);
   await lock.acquire();
   try {
-    await assertSupportedRegistrySchema(db, dbPath);
+    await assertSupportedRegistryOnOpen(db, dbPath);
     const pending = (await migrator.getMigrations()).some(
       (migration) =>
         migration.name === "2026_10_16_008_retire_slot_features" &&

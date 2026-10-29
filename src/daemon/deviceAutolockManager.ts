@@ -56,7 +56,7 @@ interface AutolockAcquisitionOptions {
   collectCancellationSettlement?: (settlement: Promise<void>) => void;
   /** Records the session this acquisition minted (never a reused one) once it is committed. */
   receipt: AcquisitionReceipt;
-  /** The caller's cancel signal, threaded explicitly (#11817); DevicePool supplies it. */
+  /** The caller's cancel signal, threaded explicitly (#11817, #15671). */
   signal?: AbortSignal;
 }
 

@@ -1,15 +1,40 @@
-# Emulator audio
+# Emulator and simulator audio
 
-Feed known audio into an Android emulator's microphone and check whether an app played sound. Use
-these to test voice notes, voice search, calls, notification sounds and media playback on
-headless CI.
+Feed known audio into an Android emulator's or iOS Simulator's microphone and check whether an
+app played sound. Use these to test voice notes, voice search, calls, notification sounds and
+media playback on headless CI.
 
 All three tools are off by default; enable them with `setToolEnabled`. They work on local Android
-emulators only. Physical devices and iOS are refused.
+emulators and iOS Simulators. Physical devices are refused.
+
+## Android emulators
 
 Each emulator has its own audio channel, so emulators running side by side never hear each
 other. The host needs no microphone, speaker or sound server, and this works the same in a
 container. Keep audio enabled on the emulator: do not set `AUTOMOBILE_EMULATOR_AUDIO=false`.
+The result's `route` is `emulator-grpc`.
+
+## iOS Simulators
+
+A simulator records from the Mac's default input device and plays to its default output device,
+so audio goes through loopback devices on the Mac. The result's `route` is `host-loopback`.
+
+Set up the Mac once:
+
+1. Install a loopback audio driver such as BlackHole 2ch.
+2. Make the loopback device the default input (for `injectAudioInput`) and the default output
+   (for `captureAudio`).
+3. Set `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER` to the path of an `audio-loopback-helper`
+   executable.
+4. Give the process that runs AutoMobile Microphone permission, which `captureAudio` needs to read
+   the loopback device.
+
+Every simulator on the Mac shares these devices:
+
+- Only one simulator injection runs at a time per Mac; a second gets `audio_injection_busy`.
+- A capture hears every simulator on the Mac. Run audio tests on one simulator at a time.
+- With one loopback device as both default input and output, a simulator's own playback also
+  reaches its microphone.
 
 ## injectAudioInput
 
@@ -39,12 +64,12 @@ id after a server restart, is an error.
 
 ## captureAudio
 
-Records the emulator's audio output for `seconds` (at most 20) and reports:
+Records the device's audio output for `seconds` (at most 20) and reports:
 
 - `silent`: true when no 20 ms window reaches `silenceThresholdDbfs` (default -50).
 - `rmsDbfs`, `peakDbfs`: overall level; digital silence reports -120.
 - `activeRatio`: the share of windows with sound.
-- `timedOut`: true when the emulator produced less audio than asked for. A silent app gives
+- `timedOut`: true when the device produced less audio than asked for. A silent app gives
   `silent: true` and `timedOut: true`, not an error.
 
 With `saveArtifact: true` the capture is also written as a WAV file, and `path` and `sizeBytes`
@@ -57,9 +82,10 @@ glitch real-time audio.
 
 Errors start with a code in brackets:
 
-| Code                          | Meaning and what to do                                                                                               |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `audio_injection_busy`        | Another injection already feeds this emulator's microphone. Stop it first.                                           |
-| `audio_injection_unsupported` | The device is not a local emulator, or its emulator build has no gRPC audio. Use a recent emulator on the same host. |
-| `audio_capture_unsupported`   | The same, for capture.                                                                                               |
-| `audio_grpc_failed`           | Any other emulator error; the message carries its detail.                                                            |
+| Code                          | Meaning and what to do                                                                                                                                                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audio_injection_busy`        | Another injection already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                                            |
+| `audio_injection_unsupported` | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above. |
+| `audio_capture_unsupported`   | The same, for capture; a simulator needs a loopback default output.                                                                                                                                         |
+| `audio_grpc_failed`           | Any other emulator error; the message carries its detail.                                                                                                                                                   |
+| `audio_loopback_failed`       | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                              |

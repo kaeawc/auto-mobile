@@ -48,6 +48,77 @@ describe("artifact capability parsers", () => {
     ]);
   });
 
+  test("android: reads string literals passed to addAll(listOf(...)) and addAll(setOf(...))", () => {
+    const kotlin = `
+      addAll(listOf("prototype_gestures_v1", "prototype_swipe_actions_v1"))
+      addAll(setOf("prototype_carousel_v1"))
+      addAll( listOf ( "prototype_style_polish_v2" ) )
+    `;
+    expect(parseAndroidAdvertised(kotlin)).toEqual([
+      "prototype_carousel_v1",
+      "prototype_gestures_v1",
+      "prototype_style_polish_v2",
+      "prototype_swipe_actions_v1",
+    ]);
+  });
+
+  test("android: reads multi-line addAll(listOf(...)) arguments with a trailing comma", () => {
+    const kotlin = `
+      addAll(
+        listOf(
+          "prototype_stack_patterns_v1",
+          // a comment between entries
+          "prototype_zoom_transition_v1",
+        ),
+      )
+    `;
+    expect(parseAndroidAdvertised(kotlin)).toEqual([
+      "prototype_stack_patterns_v1",
+      "prototype_zoom_transition_v1",
+    ]);
+  });
+
+  test("android: ignores listOf/setOf literals that are not passed to addAll", () => {
+    const kotlin = `
+      private val prototypeAssetRequestTypes = setOf("put_prototype_asset", "remove_prototype_asset")
+      type in listOf("show_prototype", "dismiss_prototype")
+      addAll(registeredRequestTypes)
+      addAll(SystemGlobalActions.advertisedFlags(sdk))
+      addAll(listOf(compute("not_a_flag_v1")))
+      add("node_selector_actions")
+    `;
+    expect(parseAndroidAdvertised(kotlin)).toEqual(["node_selector_actions"]);
+  });
+
+  test("android: real WebSocketServer.kt yields its addAll(listOf(...)) capabilities (#15816)", () => {
+    const repoRoot = path.resolve(import.meta.dir, "../..");
+    const source = readFileSync(
+      path.join(
+        repoRoot,
+        "android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt",
+      ),
+      "utf8",
+    );
+    const parsed = parseAndroidAdvertised(source);
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        "prototype_gestures_v1",
+        "prototype_swipe_actions_v1",
+        "prototype_text_field_actions_v1",
+        "prototype_carousel_v1",
+        "prototype_loading_states_v1",
+        "prototype_style_polish_v2",
+        "prototype_stack_patterns_v1",
+        "prototype_platform_namespace_v1",
+        "prototype_zoom_transition_v1",
+      ]),
+    );
+    // setOf/listOf literals outside addAll (request-type sets) are not capabilities.
+    expect(parsed).not.toContain("put_prototype_asset");
+    expect(parsed).not.toContain("show_prototype");
+    expect(parsed).toHaveLength(90);
+  });
+
   test("android: expands SystemGlobalActions flagFor() names into global_action flags", () => {
     const kotlin = `
       private fun flagFor(wireName: String) = "global_action_\${wireName}_v1"

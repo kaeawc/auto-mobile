@@ -124,10 +124,29 @@ function matchAll(source: string, pattern: RegExp): string[] {
   return uniqueSorted([...source.matchAll(pattern)].map((match) => match[1]));
 }
 
-/** `add("name")` flags in WebSocketServer.supportedCommands(), conditional ones included. */
+/**
+ * `addAll(listOf(...))` / `addAll(setOf(...))` whose sole argument is a collection literal. The
+ * argument list may span lines and end in trailing commas; `[^()]*` keeps the match inside that one
+ * call, so a list holding a call (`listOf(f("x"))`) or a non-literal `addAll(...)` is never read.
+ */
+const ADD_ALL_COLLECTION_LITERAL = /\baddAll\(\s*(?:listOf|setOf)\s*\(([^()]*)\)\s*,?\s*\)/g;
+const QUOTED_CAPABILITY = new RegExp(`"(${CAPABILITY_NAME})"`, "g");
+const KOTLIN_COMMENT = /\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
+
+function addAllLiteralNames(kotlinSource: string): string[] {
+  return [...kotlinSource.matchAll(ADD_ALL_COLLECTION_LITERAL)].flatMap((call) =>
+    matchAll(call[1].replace(KOTLIN_COMMENT, ""), QUOTED_CAPABILITY),
+  );
+}
+
+/**
+ * Flags in WebSocketServer.supportedCommands(), conditional ones included: `add("name")` and the
+ * string literals of `addAll(listOf(...))` / `addAll(setOf(...))` (#15816).
+ */
 export function parseAndroidAdvertised(kotlinSource: string): string[] {
   return uniqueSorted([
     ...matchAll(kotlinSource, new RegExp(`\\badd\\("(${CAPABILITY_NAME})"\\)`, "g")),
+    ...addAllLiteralNames(kotlinSource),
     // SystemGlobalActions: `flagFor("lock_screen")` expands to `global_action_lock_screen_v1`.
     ...matchAll(kotlinSource, /\bflagFor\("([a-z][a-z0-9_]*)"\)/g).map(
       (name) => `global_action_${name}_v1`,

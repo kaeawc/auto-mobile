@@ -1600,7 +1600,6 @@ test/plan/planExecutorValidationError.test.ts
 test/plan/planStepSecretRedaction.test.ts
 test/planUtils.test.ts
 test/processLifecycle.test.ts
-test/release/artifactCapabilities.test.ts
 test/release/runtimePins.test.ts
 test/release/runtimeRoots.test.ts
 test/runtime/bunRuntimeGuard.test.ts

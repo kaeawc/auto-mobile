@@ -86,6 +86,20 @@ describe("createIosSdkWebReader (#5162)", () => {
     expect(client.requests).toEqual([undefined]);
   });
 
+  test("a snapshot naming a different web view than the registered one is not attached", async () => {
+    const client = new FakeWebClient({
+      first: {
+        success: true,
+        available: true,
+        totalTimeMs: 1,
+        webViewId: "other",
+        snapshot: snapshotOf("s9"),
+        webViews: [entry("a")],
+      },
+    });
+    expect(await reader(client).snapshots()).toEqual([{ webViewId: "a" }]);
+  });
+
   test("routing off, no client, no registered web view or a failed read yields nothing", async () => {
     const reply: CtrlProxySdkWebSnapshotResult = {
       success: false,

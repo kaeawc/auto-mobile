@@ -69,9 +69,13 @@ export function createIosSdkWebReader(options: IosSdkWebReaderOptions): IosSdkWe
         return entries.map(({ webViewId }) => ({ webViewId }));
       }
       // The unnamed read is the single web view's, even when it failed and so names no web view.
+      // The registered list and the snapshot come from separate SDK reads; a snapshot that names a
+      // different web view than the one registered is not attached to it.
       return entries.map(({ webViewId }) => ({
         webViewId,
-        ...(first?.success && first.snapshot ? { snapshot: first.snapshot } : {}),
+        ...(first?.success && first.snapshot && first.webViewId === webViewId
+          ? { snapshot: first.snapshot }
+          : {}),
       }));
     },
   };

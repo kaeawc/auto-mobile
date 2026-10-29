@@ -39,8 +39,29 @@ Keep-booted resets run baseline cleaning unconditionally when journal checks all
 it. Fallback-prefixed opaque rows force baseline fallback. Unrevertible journal
 rows also force fallback unless baseline cleaning already restores their effects.
 On Android this covers packages, clipboard, rotation, screen reader, keep-awake,
-raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`), transient
-opened URLs, and screen state via the next wakeAndUnlock. Settings-backed adapter
+raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`),
+opened URLs and launched preinstalled apps (below), and screen state via the next wakeAndUnlock.
+
+Package cleaning lists only `pm list packages -3`, so a preinstalled app keeps its data
+across a plain clean. Android `launchApp` and `measureStartup` therefore journal a
+non-fallback `opaque` launch row (`["launched-app", appId]`). Before it mutates anything,
+cleaning collects the session's started apps: every launch row's app, the target of a
+`package:` URL, and, per user, every activity `cmd package query-activities --components`
+lists for an `android.intent.action.VIEW` of any other opened URL (the handler that opened
+it is not journaled, so all candidates count; a browser is the usual one). Candidates the
+baseline holds for that user without a third-party package identity are preinstalled.
+Each is force-stopped and `pm clear --user`ed after package cleaning; anything but a
+`Success` reply fails cleaning. A preinstalled candidate on the unclearable list
+(`ANDROID_UNCLEARABLE_PACKAGES`: framework, SystemUI, content providers, telephony,
+Bluetooth, NFC, Google Play services and framework, Play Store, installer and permission
+UI, launchers, input methods, AutoMobile's own packages), unreadable handler output or a
+malformed launch row fails cleaning, which escalates to the baseline fallback. `pm clear`
+returns the app to its factory state, not to data the baseline image may have held for it.
+Session-installed apps are uninstalled instead, and third-party apps the baseline held keep
+their data. Apps started without a journaled launch (tapping a launcher icon or a
+notification, an intent a started app sends) are not seen. Data writes into any
+baseline-held app (preferences, key-value stores, app-container files, SQL) keep forcing
+fallback as described below. Settings-backed adapter
 keys (`fontScale`, `timeFormat`, `textDirection` and accessibility display preferences)
 require a journal revert or fallback; the Android port reverts them by writing back (or
 deleting) their raw settings rows when the journaled prior is readable. The Android

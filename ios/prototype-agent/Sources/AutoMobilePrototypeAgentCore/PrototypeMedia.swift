@@ -18,23 +18,20 @@ enum PrototypeMedia {
         }
     }
 
-    /// Ids of node-scoped players: every `videoPlayer` with an inline `source`, keyed by its id.
-    /// `{value}` literals and opaque fields (an emit `payload`, `data`, a request `body`) are not
-    /// walked, so a videoPlayer-shaped value an action carries never declares a player.
-    static func inlinePlayers(_ value: JSONValue) -> Set<String> {
-        switch value {
-        case let .array(items):
-            return items.reduce(into: Set<String>()) { $0.formUnion(inlinePlayers($1)) }
-        case let .object(fields):
-            if fields.count == 1, fields["value"] != nil { return [] }
-            var found = fields.filter { !PrototypeContractValidator.stringOpaqueFields.contains($0.key) }
-                .values.reduce(into: Set<String>()) { $0.formUnion(inlinePlayers($1)) }
-            if fields["type"] == .string("videoPlayer"), fields["source"] != nil,
-               let id = fields["id"]?.stringValue { found.insert(id) }
-            return found
-        default:
-            return []
-        }
+    /// Ids of node-scoped players: every `videoPlayer` with an inline `source`, keyed by its id. Only
+    /// node positions are walked (the host's `prototypeNodeChildren`), so a videoPlayer-shaped value
+    /// in an action payload never declares a player, and a screen of any name is still visited.
+    static func inlinePlayers(_ root: JSONValue) -> Set<String> {
+        guard let fields = root.objectFields else { return [] }
+        return nodePlayers(.init(value: fields, path: "root"))
+    }
+
+    private static func nodePlayers(_ node: PrototypeLocatedValue) -> Set<String> {
+        var found = PrototypeStrictRepeats.children(node.value, path: node.path)
+            .reduce(into: Set<String>()) { $0.formUnion(nodePlayers($1)) }
+        if node.value["type"] == .string("videoPlayer"), node.value["source"] != nil,
+           let id = node.value["id"]?.stringValue { found.insert(id) }
+        return found
     }
 
     /// Throws at the first `videoPlayer` node rule a spec breaks.

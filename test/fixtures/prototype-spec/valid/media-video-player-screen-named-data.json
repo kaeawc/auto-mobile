@@ -1,0 +1,30 @@
+{
+  "id": "screens",
+  "window": { "placement": { "type": "fullscreen" } },
+  "requires": { "platform": ["media"] },
+  "root": {
+    "type": "stack",
+    "id": "routes",
+    "start": "data",
+    "screens": {
+      "data": {
+        "type": "column",
+        "children": [
+          { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
+          { "type": "text", "text": "{platform:/media/players/clip/status}" },
+          {
+            "type": "button",
+            "label": "Play",
+            "onTap": [
+              {
+                "type": "platform",
+                "call": "media.play",
+                "args": { "player": { "value": "clip" } }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

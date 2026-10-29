@@ -98,7 +98,8 @@ accepted when the page posted it, so it is already bounded to `maxElements` and 
 redacted when `redactText` is on; nothing unredacted leaves the bridge.
 
 The page script posts a snapshot on load, on every DOM mutation, and (coalesced to one per 100 ms)
-after a scroll or a focus change, so geometry and focus follow the page without a mutation. Only the
+after a scroll, a focus change, or an `input` or `change` event, so geometry, focus and typed values
+follow the page without a mutation (assigning an input's value changes no DOM attribute). Only the
 main frame posts snapshots, and the bridge accepts only main-frame ones: element ids are per
 document and actions resolve them in the main frame, so a frame's element could otherwise answer
 for another. An element keeps its id for the life of the document; a new element gets the next id

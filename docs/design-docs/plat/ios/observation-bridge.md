@@ -119,4 +119,14 @@ one. So sendKeys keeps the field's element id, takes the capture identity of eve
 reads and of every accepted action, and reads the screen once before its first bridge action if
 nothing has been read since focus.
 
+**swipeOn.** A container (named or auto-targeted) that is a bridge node scrolls through the
+bridge's `scroll` with `delta` set to the change in content offset, in points: start minus end of
+the stroke XCTest would have run, so swiping up gives a positive `y`. A screen swipe on a screen
+that carries bridge nodes goes through the bridge's `swipe` with the same start, end and duration,
+naming the capture the swipe was resolved against. Edge swipes reach system UI the bridge cannot
+see and stay on XCTest without a `backend`. A boomerang has no bridge form, so XCTest runs it and
+reports `fallbackReason: unsupported`. Other fallbacks and fail-closed results follow `tapOn`. The
+bridge budget is the gesture's duration plus 3 s, and never less than 5 s. Scroll searches
+(`lookFor`) stay on XCTest.
+
 WKWebView DOM nodes (#5162) extend the same observation under their WKWebView node.

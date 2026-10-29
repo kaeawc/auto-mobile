@@ -135,8 +135,11 @@ it before writing the manifest with the host's action log.
 | `arm-stale`              | `backend: sdk`                                         | `tap` on `contract-arm-stale`  |
 | `stale-tap`              | a failure with the bridge's `stale_observation` reason | no second `contract-save` tap  |
 
-Arming the trap makes every later capture schedule one more, so the observation an action was
-resolved against is stale by the time the action arrives. The host log is the ground truth: a tap it
+Once the trap is armed, the host replaces every capture with a new one as soon as the bridge has
+committed it: it probes with an action naming an element no snapshot has, which the bridge rejects
+before the executor (`unknown_element` once the capture is current, `stale_observation` before),
+then recaptures. The observation an action was resolved against is therefore stale when the action
+arrives. The host log is the ground truth: a tap it
 ran that the tool misreported is `mcp-surface`, an SDK tap the tool reported that the host never ran
 is `ctrlproxy-command`, an unanswered bridge is `sdk-endpoint`, an undeclared action reaching the
 bridge is `sdk-adapter`, and a node that was not routed, or a stale target that did not fail

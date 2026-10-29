@@ -247,9 +247,17 @@ export function judgeManifest(
   return findings;
 }
 
+/** Each scenario records its cases in its own manifest field. */
 function hasScenarioOutput(manifest: SdkContractManifest, slice: string): boolean {
-  if (slice === NETWORK_SLICE) {
-    return manifest.network.length > 0;
+  switch (slice) {
+    case NETWORK_SLICE:
+      return manifest.network.length > 0;
+    case "observe":
+      return manifest.observation !== undefined;
+    case "storage":
+    case "storage-default":
+      return manifest.storage !== undefined;
+    default:
+      return manifest.faults.length > 0 || manifest.capabilities !== undefined;
   }
-  return manifest.faults.length > 0 || manifest.capabilities !== undefined;
 }

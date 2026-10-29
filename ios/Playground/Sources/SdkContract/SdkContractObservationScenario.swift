@@ -26,8 +26,9 @@ struct ObservationHostLog: Encodable, Equatable, Sendable {
 ///   whatever the bridge's `insertText` and `clearText` left.
 /// - `contract-hold` is placed over the status bar: the bridge does not support long press, so
 ///   XCTest presses there, which changes nothing.
-/// - Tapping `contract-arm-stale` arms the stale trap: from then on every capture is followed by
-///   another one, so an action the daemon resolved against the first is stale when it arrives.
+/// - Tapping `contract-arm-stale` arms the stale trap: from then on every capture is replaced by
+///   another one as soon as the bridge has committed it, so an action the daemon resolved against
+///   it is stale when it arrives.
 final class SdkContractObservationHost: AutoMobileObservationProvider, AutoMobileActionExecutor,
     @unchecked Sendable
 {
@@ -43,27 +44,46 @@ final class SdkContractObservationHost: AutoMobileObservationProvider, AutoMobil
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
-    private let trapping = OSAllocatedUnfairLock(initialState: false)
+    /// Marks the captures an invalidation makes itself, so they do not schedule another one.
+    @TaskLocal static var invalidating = false
+    /// No snapshot has this element, so a probe naming it never reaches the executor.
+    static let probeElementId = "contract-probe-absent"
+    static let invalidationAttempts = 100
+
     weak var bridge: AutoMobileObservationBridge?
 
     func captureObservation() async -> AutoMobileObservationSnapshot {
-        let snapshot = state.withLock { state -> (AutoMobileObservationSnapshot, Bool) in
+        let (snapshot, armed) = state.withLock { state -> (AutoMobileObservationSnapshot, Bool) in
             state.captureIdentity += 1
             state.captures += 1
             return (Self.snapshot(state), state.staleTrapArmed)
         }
-        if snapshot.1, trapping.withLock({ inTrap in
-            defer { inTrap = true }
-            return !inTrap
-        }) {
-            // Runs on the bridge actor after this capture returns, so it lands before the
-            // daemon's action for this capture can arrive.
+        if armed, !Self.invalidating {
+            let identity = snapshot.captureIdentity
             Task { [weak self] in
-                _ = await self?.bridge?.observe()
-                self?.trapping.withLock { $0 = false }
+                await Self.$invalidating.withValue(true) {
+                    await self?.invalidate(identity)
+                }
             }
         }
-        return snapshot.0
+        return snapshot
+    }
+
+    /// Replaces `identity` as the bridge's current observation, but only once the bridge has
+    /// committed it: a recapture that committed first would leave `identity` current. The probe
+    /// is rejected before the executor either way, `unknown_element` when `identity` is current
+    /// and `stale_observation` when it is not yet (or no longer, when a later capture's own
+    /// invalidation takes over).
+    private func invalidate(_ identity: UInt64) async {
+        guard let bridge else { return }
+        for _ in 0 ..< Self.invalidationAttempts {
+            let probe = await bridge.perform(.tap(observationIdentity: identity, elementId: Self.probeElementId))
+            if probe.reason == "unknown_element" {
+                _ = await bridge.observe()
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
 
     func execute(_ action: AutoMobileAction) async -> AutoMobileActionResult {

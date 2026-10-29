@@ -221,6 +221,30 @@ describe("judgeManifest", () => {
     ]);
   });
 
+  test("accepts the observation and storage scenarios' own output, not an empty manifest", () => {
+    const empty = { ...manifest, network: [] };
+    const storage = {
+      allowKeychainDeletion: false,
+      keychainEntries: [],
+      uncoordinatedSuites: [],
+      hostCoordinatedSuites: [],
+      coreDataStores: [],
+      secretWritten: false,
+    };
+    const complete: Array<[string, SdkContractManifest]> = [
+      ["observe", { ...empty, scenario: "observe", observation: { captures: 0, actions: [] } }],
+      ["storage-default", { ...empty, scenario: "storage-default", storage }],
+      ["storage", { ...empty, scenario: "storage", storage: { ...storage, secretWritten: true } }],
+    ];
+    for (const [slice, scenario] of complete) {
+      expect(judgeManifest(scenario, slice)).toEqual([]);
+      expect(judgeManifest({ ...empty, scenario: slice }, slice)[0]).toMatchObject({
+        slice,
+        boundary: "fixture-host",
+      });
+    }
+  });
+
   test("needs recorded cases for the scenario that ran", () => {
     expect(judgeManifest({ ...manifest, network: [] })[0].message).toContain("network scenario");
     const faults = { ...manifest, scenario: "faults", network: [] };

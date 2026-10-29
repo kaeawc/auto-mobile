@@ -126,19 +126,14 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         : this.timer.setTimeout(() => end("max_duration"), options.maxDurationMs);
     let framesQueued = 0;
     let playbackStartMs: number | undefined;
-    const feeding = this.feed(
-      helper,
-      pcm,
-      options,
-      ended,
-      () => halted,
-      () => {
+    const feeding = this.feed(helper, pcm, options, ended, () => halted, {
+      started: () => {
         playbackStartMs ??= this.timer.monotonicNow?.() ?? this.timer.now();
       },
-      (frames) => {
+      queued: (frames) => {
         framesQueued += frames;
       },
-    );
+    });
     const done = (async (): Promise<InjectionResult> => {
       const exitCode = await helper.exited;
       halt();
@@ -258,8 +253,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     options: InjectAudioOptions,
     ended: Promise<void>,
     isEnded: () => boolean,
-    started: () => void,
-    queued: (frames: number) => void,
+    progress: { started(): void; queued(frames: number): void },
   ): Promise<void> {
     const delayMs = options.startDelayMs;
     if (delayMs) {
@@ -284,9 +278,9 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         if (isEnded()) {
           return;
         }
-        started();
+        progress.started();
         await write(stdin, chunk, ended);
-        queued(chunk.byteLength / 2);
+        progress.queued(chunk.byteLength / 2);
       }
     } while (options.loop && !isEnded());
     if (!isEnded()) {

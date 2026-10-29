@@ -425,6 +425,8 @@ describe("confirmed plan device loss", () => {
         {
           bypassAndroidDeviceListCache: false,
           skipAndroidProfileEnrichment: true,
+          // The "either" loss sweep also tracks pooled watches (#14908).
+          includeWatchOs: true,
           iosDeviceListMaxAgeMs: 15_000,
           skipPhysicalIosDiscovery: true,
         },

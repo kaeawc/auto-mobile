@@ -23690,7 +23690,7 @@
               "value": {
                 "kind": "string",
                 "empty": true,
-                "maxBytes": 64
+                "maxBytes": 192
               }
             }
           },

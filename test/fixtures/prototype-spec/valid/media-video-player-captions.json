@@ -57,6 +57,30 @@
             "source": {
               "asset": "trailerEs"
             }
+          },
+          {
+            "id": "\u00e9",
+            "language": "fr",
+            "label": "Fran\u00e7ais",
+            "source": {
+              "asset": "trailerFr"
+            }
+          },
+          {
+            "id": "e\u0301",
+            "language": "fr-CA",
+            "label": "Fran\u00e7ais (CA)",
+            "source": {
+              "asset": "trailerFrCa"
+            }
+          },
+          {
+            "id": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+            "language": "fr",
+            "label": "Long",
+            "source": {
+              "asset": "trailerLong"
+            }
           }
         ]
       },
@@ -95,6 +119,24 @@
               },
               "track": {
                 "value": ""
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "Long",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "media.setCaptions",
+            "args": {
+              "player": {
+                "value": "main"
+              },
+              "track": {
+                "value": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
               }
             }
           }

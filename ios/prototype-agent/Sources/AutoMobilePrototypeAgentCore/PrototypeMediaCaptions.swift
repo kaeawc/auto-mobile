@@ -17,7 +17,9 @@ enum PrototypeMediaCaptions {
     }
 
     private static func validatePlayer(_ captions: [JSONValue], data: [String: JSONValue]?, path: String) throws {
-        var seen: Set<String> = []
+        // Exact UTF-16 code units, as the host and Kotlin compare; a String set merges canonically
+        // equivalent ids.
+        var seen: Set<[UInt16]> = []
         for (index, raw) in captions.enumerated() {
             guard let caption = raw.objectFields else { continue }
             let at = "\(path)[\(index)]"
@@ -25,7 +27,7 @@ enum PrototypeMediaCaptions {
             if id.hasPrefix("hls:") {
                 throw PrototypeLimits.violation("\(at).id", "Caption ids starting with hls: are reserved")
             }
-            if !seen.insert(id).inserted {
+            if !seen.insert(Array(id.utf16)).inserted {
                 throw PrototypeLimits.violation("\(at).id", "Duplicate caption id")
             }
             if let source = caption["source"]?.objectFields, let pointer = source["data"] {

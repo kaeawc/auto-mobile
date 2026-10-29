@@ -33,6 +33,8 @@ import {
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
+import { androidSystemImageTagsFor } from "../models/formFactor";
+import { BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY } from "../utils/provisionDeviceSpecSchemas";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
@@ -341,9 +343,112 @@ const HANDHELD_ANDROID_TAGS: ReadonlySet<string> = new Set([
   "aosp_atd",
 ]);
 
-function tagRank(tag: string): number {
-  const index = ANDROID_TAG_PREFERENCE.indexOf(tag);
-  return index === -1 ? ANDROID_TAG_PREFERENCE.length : index;
+/**
+ * Automotive image tags, best first. The Play variant comes first: it is the tag of the default
+ * car profile (`automotive_1024p_landscape`) in `avdmanager list device`. The set is exactly the
+ * tags inventory classifies as automotive, so a created car AVD is found again by a repeated
+ * request (#15879).
+ */
+const AUTOMOTIVE_ANDROID_TAG_PREFERENCE = ["android-automotive-playstore", "android-automotive"];
+
+/** API level named in the install hint when the request does not pin one (the AAOS baseline). */
+const AUTOMOTIVE_INSTALL_HINT_API_LEVEL = 34;
+
+/** Which images a request may create an AVD from, and how to rank them. */
+interface AndroidImageFamily {
+  kind: "handheld" | "automotive";
+  tags: ReadonlySet<string>;
+  preference: readonly string[];
+}
+
+interface ResolvedApiRange {
+  min: number;
+  max: number | undefined;
+  minDescription: string;
+  maxDescription: string;
+}
+
+const HANDHELD_IMAGE_FAMILY: AndroidImageFamily = {
+  kind: "handheld",
+  tags: HANDHELD_ANDROID_TAGS,
+  preference: ANDROID_TAG_PREFERENCE,
+};
+
+const AUTOMOTIVE_IMAGE_FAMILY: AndroidImageFamily = {
+  kind: "automotive",
+  tags: new Set(androidSystemImageTagsFor("automotive")),
+  preference: AUTOMOTIVE_ANDROID_TAG_PREFERENCE,
+};
+
+function throwNoHandheldImage(range: ResolvedApiRange, images: SystemImage[]): never {
+  const inRange = images.filter((image) => isInApiRange(image, range));
+  if (inRange.length === 0) {
+    throw new ActionableError(
+      "No installed Android system image matches the requested API range " +
+        `(min=${range.minDescription}, max=${range.maxDescription}). ` +
+        `Installed images: ${images.map((image) => image.packageName).join(", ") || "none"}. ` +
+        "Install one with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
+    );
+  }
+  throw new ActionableError(
+    "No installed handheld (phone) Android system image matches the requested API range " +
+      `(min=${range.minDescription}, max=${range.maxDescription}). ` +
+      "Only non-handheld images (Wear OS, TV, Automotive or similar) are installed in that range: " +
+      `${inRange.map((image) => image.packageName).join(", ")}. ` +
+      "Default provisioning never creates an AVD from them. " +
+      "Install a phone image with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
+  );
+}
+
+function throwNoAutomotiveImage(
+  range: ResolvedApiRange,
+  images: SystemImage[],
+  architecture: string,
+): never {
+  const hintApi = Math.min(
+    Math.max(range.min, AUTOMOTIVE_INSTALL_HINT_API_LEVEL),
+    range.max ?? Number.POSITIVE_INFINITY,
+  );
+  const hintPackage = `system-images;android-${hintApi};android-automotive;${preferredAbis(architecture)[0]}`;
+  throw new ActionableError(
+    "No installed Android Automotive system image matches the requested API range " +
+      `(min=${range.minDescription}, max=${range.maxDescription}). ` +
+      "An automotive AVD is created only from an android-automotive or " +
+      "android-automotive-playstore image. " +
+      `Installed images: ${images.map((image) => image.packageName).join(", ") || "none"}. ` +
+      "Install one with 'sdkmanager \"" +
+      hintPackage +
+      "\"', then retry.",
+  );
+}
+
+/**
+ * The image family a form factor creates from. Phone, tablet, foldable and an omitted form
+ * factor stay handheld-only (#14900): a car image is picked only when a car is asked for.
+ */
+function androidImageFamily(formFactor: FormFactor | undefined): AndroidImageFamily {
+  assertCreatableAndroidFormFactor(formFactor);
+  return formFactor === "automotive" ? AUTOMOTIVE_IMAGE_FAMILY : HANDHELD_IMAGE_FAMILY;
+}
+
+/** TV and watch images exist, but creating those AVDs is separate work. */
+function assertCreatableAndroidFormFactor(formFactor: FormFactor | undefined): void {
+  if (formFactor === "tv" || formFactor === "watch") {
+    throw new ActionableError(
+      `Creating a '${formFactor}' AVD is not supported yet; AutoMobile only creates ` +
+        "phone, tablet, foldable and automotive AVDs. Create the AVD with avdmanager and the " +
+        "matching system image, or use provisionDevice with an explicit runtime and deviceType.",
+    );
+  }
+}
+
+function tagRank(tag: string, preference: readonly string[]): number {
+  const index = preference.indexOf(tag);
+  return index === -1 ? preference.length : index;
+}
+
+function isInApiRange(image: SystemImage, range: Pick<ResolvedApiRange, "min" | "max">): boolean {
+  return image.apiLevel >= range.min && (range.max === undefined || image.apiLevel <= range.max);
 }
 
 /** ABIs that can run on the host, best first. */
@@ -430,16 +535,12 @@ function describeBound(bound: string | undefined, apiLevel: number | undefined):
 }
 
 /**
- * Choose an installed system image: newest exact API identifier within the
- * requested major-API range, preferring a host-runnable ABI and a Google APIs tag.
- * Only handheld (phone/tablet) images are candidates; Wear OS, TV and Automotive
- * images are never selected (#14900).
+ * Resolve the requested bounds to API levels, raised to the CtrlProxy runner floor, with the
+ * descriptions error messages use.
  */
-export function pickAndroidSystemImage(
-  images: SystemImage[],
+function resolveApiRange(
   criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion">,
-  architecture: string,
-): SystemImage {
+): ResolvedApiRange {
   const requestedMin = resolveApiLevelBound(criteria.minOsVersion, "min");
   const max = resolveApiLevelBound(criteria.maxOsVersion, "max");
 
@@ -459,48 +560,47 @@ export function pickAndroidSystemImage(
   // The runner-APK floor also raises the effective minimum, so a sub-24 image is
   // never selected even when no (or a lower) minOsVersion was requested (#6187).
   const min = Math.max(requestedMin ?? CTRL_PROXY_APK_MIN_SDK, CTRL_PROXY_APK_MIN_SDK);
+  // When the runner-APK floor (not an explicit minOsVersion) sets the minimum,
+  // describe the floor honestly rather than echoing a lower or absent requested bound.
+  const minDescription =
+    requestedMin !== undefined && requestedMin >= CTRL_PROXY_APK_MIN_SDK
+      ? describeBound(criteria.minOsVersion, min)
+      : `API ${CTRL_PROXY_APK_MIN_SDK} (CtrlProxy runner minSdk)`;
+  return {
+    min,
+    max,
+    minDescription,
+    maxDescription: describeBound(criteria.maxOsVersion, max),
+  };
+}
 
-  const inRange = images.filter((image) => {
-    if (image.apiLevel < min) {
-      return false;
+/**
+ * Choose an installed system image: newest exact API identifier within the
+ * requested major-API range, preferring a host-runnable ABI and the family's preferred tag.
+ * Only handheld (phone/tablet) images are candidates unless `formFactor` is `automotive`, which
+ * takes only automotive images; Wear OS, TV and Automotive images never satisfy a handheld
+ * request (#14900, #15879).
+ */
+export function pickAndroidSystemImage(
+  images: SystemImage[],
+  criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion" | "formFactor">,
+  architecture: string,
+): SystemImage {
+  const family = androidImageFamily(criteria.formFactor);
+  const range = resolveApiRange(criteria);
+  const matching = images.filter(
+    (image) => isInApiRange(image, range) && family.tags.has(image.tag),
+  );
+  if (matching.length === 0) {
+    if (family.kind === "automotive") {
+      throwNoAutomotiveImage(range, images, architecture);
     }
-    if (max !== undefined && image.apiLevel > max) {
-      return false;
-    }
-    return true;
-  });
-
-  if (inRange.length === 0) {
-    // When the runner-APK floor (not an explicit minOsVersion) is what excluded
-    // every image, describe the floor honestly rather than echoing a lower or
-    // absent requested bound.
-    const minDescription =
-      requestedMin !== undefined && requestedMin >= CTRL_PROXY_APK_MIN_SDK
-        ? describeBound(criteria.minOsVersion, min)
-        : `API ${CTRL_PROXY_APK_MIN_SDK} (CtrlProxy runner minSdk)`;
-    throw new ActionableError(
-      "No installed Android system image matches the requested API range " +
-        `(min=${minDescription}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
-        `Installed images: ${images.map((image) => image.packageName).join(", ") || "none"}. ` +
-        "Install one with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
-    );
-  }
-
-  const handheld = inRange.filter((image) => HANDHELD_ANDROID_TAGS.has(image.tag));
-  if (handheld.length === 0) {
-    throw new ActionableError(
-      "No installed handheld (phone) Android system image matches the requested API range " +
-        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
-        "Only non-handheld images (Wear OS, TV, Automotive or similar) are installed in that range: " +
-        `${inRange.map((image) => image.packageName).join(", ")}. ` +
-        "Default provisioning never creates an AVD from them. " +
-        "Install a phone image with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
-    );
+    throwNoHandheldImage(range, images);
   }
 
   const preferences = preferredAbis(architecture);
-  const runnable = handheld.filter((image) => preferences.includes(image.abi));
-  const candidates = runnable.length > 0 ? runnable : handheld;
+  const runnable = matching.filter((image) => preferences.includes(image.abi));
+  const candidates = runnable.length > 0 ? runnable : matching;
 
   // Precedence is major API > ABI > tag > minor > packageName; keep capability
   // and rootability preferences ahead of point-release freshness.
@@ -513,7 +613,7 @@ export function pickAndroidSystemImage(
     if (abiDelta !== 0) {
       return abiDelta;
     }
-    const tagDelta = tagRank(a.tag) - tagRank(b.tag);
+    const tagDelta = tagRank(a.tag, family.preference) - tagRank(b.tag, family.preference);
     if (tagDelta !== 0) {
       return tagDelta;
     }
@@ -664,19 +764,8 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     signal?: AbortSignal,
     identityHooks?: DeviceProvisioningIdentityHooks,
   ): Promise<ProvisionedDevice> {
-    if (
-      criteria.formFactor === "tv" ||
-      criteria.formFactor === "watch" ||
-      criteria.formFactor === "automotive"
-    ) {
-      // pickAndroidSystemImage selects handheld images only; creating one here would silently
-      // satisfy a TV/watch/car request with a phone.
-      throw new ActionableError(
-        `Creating a '${criteria.formFactor}' AVD is not supported yet; AutoMobile only creates ` +
-          "phone, tablet and foldable AVDs. Create the AVD with avdmanager and the matching " +
-          "system image, or use provisionDevice with an explicit runtime and deviceType.",
-      );
-    }
+    // Refuse before listing images: a TV/watch request must never be satisfied by a phone.
+    assertCreatableAndroidFormFactor(criteria.formFactor);
     const avdManager = this.dependencies.androidCreator();
 
     let installed: SystemImage[];
@@ -690,8 +779,9 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     }
 
     const image = pickAndroidSystemImage(installed, criteria, this.architecture);
+    const automotive = criteria.formFactor === "automotive";
     const name = buildCreatedDeviceName(
-      criteria.name ?? `android-${image.apiLevel}`,
+      criteria.name ?? `android-${automotive ? "automotive-" : ""}${image.apiLevel}`,
       this.idGenerator,
     );
     const identitySignal = await identityHooks?.reserveBeforeCreate({
@@ -706,7 +796,17 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
         ? AbortSignal.any([signal, identitySignal])
         : (signal ?? identitySignal);
 
-    const result = await avdManager.createAvd({ name, package: image.packageName }, creationSignal);
+    // A car image needs a car profile; handheld creation keeps avdmanager's default profile.
+    const result = await avdManager.createAvd(
+      {
+        name,
+        package: image.packageName,
+        ...(automotive
+          ? { device: BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY.automotive }
+          : {}),
+      },
+      creationSignal,
+    );
     if (!result.success) {
       // avdmanager exited cleanly without creating the AVD: nothing to roll back.
       throw new ProvisionDeviceCreateRejectedError(

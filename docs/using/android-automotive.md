@@ -9,17 +9,48 @@ what to expect, and what is out of scope.
 > against fakes. The baseline run on a real AAOS emulator (#14916) has not happened, so every behaviour
 > below that depends on the emulator is marked **unverified**. This page is updated as the matrix lands.
 
-## Create the emulator by hand
+## Create the emulator
 
-Automatic creation through `provisionDevice` is out of scope for now; create the AVD with the Android
-command-line tools.
+Install an automotive system image, then ask for an automotive device and let AutoMobile create it:
 
 ```bash
-# Pick an automotive system image. Use a current API level; the playstore variant adds Google Play.
-sdkmanager --list | grep android-automotive
 sdkmanager "system-images;android-34;android-automotive;x86_64"
+```
 
-# List device profiles and pick the automotive one.
+```json
+{ "platform": "android", "formFactor": "automotive", "createIfMissing": true }
+```
+
+Pass that to `startDevice`. AutoMobile picks only from installed `android-automotive-playstore` and
+`android-automotive` images (the Play image first, newest API level in your `minOsVersion` /
+`maxOsVersion` range, an ABI your machine can run) and creates the AVD with the
+`automotive_1024p_landscape` profile. A phone, tablet or foldable request never gets a car image. If no
+car image is installed in the range, the error names the `sdkmanager` command to run. Asking again
+reuses the car emulator instead of creating another. Creating and booting a car emulator this way is
+unverified on a device.
+
+To choose the exact image and profile yourself, call `provisionDevice` with an `android-automotive`
+system image as `runtime` and an automotive profile as `deviceType`:
+
+```json
+{
+  "device": {
+    "platform": "android",
+    "name": "aaos-34",
+    "spec": {
+      "runtime": "system-images;android-34;android-automotive;x86_64",
+      "deviceType": "automotive_1024p_landscape"
+    }
+  }
+}
+```
+
+### By hand
+
+You can still create the AVD with the Android command-line tools:
+
+```bash
+sdkmanager --list | grep android-automotive
 avdmanager list device | grep -i automotive
 
 avdmanager create avd \
@@ -31,7 +62,7 @@ emulator -avd aaos-34
 ```
 
 The exact image and profile ids vary by SDK version; take them from `sdkmanager --list` and
-`avdmanager list device` (unverified).
+`avdmanager list device`.
 
 AutoMobile classifies the device as `automotive` from the system-image tag (`android-automotive`) and the
 profile id, so `formFactor: "automotive"` appears in the device description and can be asked for in a

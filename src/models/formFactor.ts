@@ -26,6 +26,18 @@ const NON_GEOMETRIC_FORM_FACTORS: ReadonlyArray<{
   },
 ];
 
+/**
+ * The system-image tags that classify a device as `formFactor`. Provisioning creates a device of
+ * that form factor only from these tags, so inventory reports the created device as the requested
+ * form factor and a repeated request reuses it.
+ */
+export function androidSystemImageTagsFor(formFactor: NonGeometricFormFactor): readonly string[] {
+  return (
+    NON_GEOMETRIC_FORM_FACTORS.find((entry) => entry.formFactor === formFactor)?.systemImageTags ??
+    []
+  );
+}
+
 function nonGeometricFormFactor(input: {
   systemImageTag?: string | null;
   profileId?: string | null;

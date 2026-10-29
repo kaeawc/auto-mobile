@@ -15518,6 +15518,19 @@
                 "kind": "key"
               },
               "optional": true
+            },
+            "captions": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "mediaCaption"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
             }
           }
         }
@@ -21709,6 +21722,97 @@
         }
       ]
     },
+    "mediaCaptionCue": {
+      "kind": "object",
+      "fields": {
+        "startMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "endMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          },
+          "optional": false
+        },
+        "text": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 512
+          },
+          "optional": false
+        }
+      }
+    },
+    "mediaCaption": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "language": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 35
+          },
+          "optional": false
+        },
+        "label": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "source": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string",
+                      "max": 128
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "data": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": false
+        }
+      }
+    },
     "mediaPlayer": {
       "kind": "object",
       "fields": {
@@ -23572,6 +23676,27 @@
           "permissions": [],
           "background": [],
           "sensitive": false
+        },
+        "setCaptions": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "track": {
+              "optional": false,
+              "value": {
+                "kind": "string",
+                "empty": true,
+                "maxBytes": 64
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
         }
       },
       "events": {
@@ -23634,6 +23759,14 @@
               "unsupported_format",
               "blocked_egress"
             ]
+          }
+        },
+        "captionTrack": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 64
           }
         }
       }

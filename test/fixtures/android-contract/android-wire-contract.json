@@ -16115,6 +16115,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "captions",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ]
   }

@@ -41,6 +41,19 @@ export const prototypeMediaSchema = z
   .strict();
 export type PrototypeMedia = z.infer<typeof prototypeMediaSchema>;
 
+/** A `videoPlayer` caption track (#14259): an uploaded WebVTT asset or `/data` cues. */
+const prototypeMediaCaptionSchema = z
+  .object({
+    id: z.string().trim().min(1).max(64),
+    language: z.string().trim().min(1).max(35),
+    label: z.string().trim().min(1).max(64),
+    source: z.union([
+      z.object({ asset: z.string().min(1).max(128) }).strict(),
+      z.object({ data: pointerSchema }).strict(),
+    ]),
+  })
+  .strict();
+
 /**
  * The `videoPlayer` node's own fields (#14253): exactly one of a declared `player` or an inline
  * `source` (checked in `prototypeMedia.ts`), plus how it is drawn and started.
@@ -57,6 +70,7 @@ const videoPlayerShape = {
   loop: z.boolean().optional(),
   startMs: z.number().int().min(0).max(86_400_000).optional(),
   positionKey: keySchema.optional(),
+  captions: z.array(prototypeMediaCaptionSchema).min(1).max(8).optional(),
 };
 
 /** The `videoPlayer` node schema: the shared node fields plus its own. */

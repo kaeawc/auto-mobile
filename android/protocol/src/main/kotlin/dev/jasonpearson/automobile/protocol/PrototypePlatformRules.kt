@@ -69,6 +69,7 @@ internal object PrototypePlatformRules {
       { root, _ -> PrototypeNotificationRules.blockError(root) },
       { root, _ -> PrototypeMedia.error(root) },
       PrototypeMedia::videoPlayerError,
+      PrototypeMediaCaptions::error,
       { root, _ -> requiresError(root) },
     )
 

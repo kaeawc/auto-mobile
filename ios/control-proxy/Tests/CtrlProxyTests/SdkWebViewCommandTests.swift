@@ -26,7 +26,9 @@ final class SdkWebViewCommandTests: XCTestCase {
         info: SdkHierarchyServerInfo?,
         reply: SdkBridgeReply?,
         as _: T.Type
-    ) async throws -> (T, WebViewSdkFake) {
+    )
+        async throws -> (T, WebViewSdkFake)
+    {
         let sdk = WebViewSdkFake(info: info, reply: reply)
         let locator = FakeElementLocator()
         locator.foregroundBundleId = "com.example.app"
@@ -60,7 +62,10 @@ final class SdkWebViewCommandTests: XCTestCase {
         let routes = await sdk.routes
         XCTAssertEqual(routes, [.webViewSnapshot])
         let sent = await sdk.bodies
-        XCTAssertEqual(try JSONDecoder().decode(AutoMobileWebSnapshotRequest.self, from: XCTUnwrap(sent.first)), .init())
+        XCTAssertEqual(
+            try JSONDecoder().decode(AutoMobileWebSnapshotRequest.self, from: XCTUnwrap(sent.first)),
+            .init()
+        )
     }
 
     func testNoWebViewOrForeignAppNeverCallsTheSdk() async throws {
@@ -119,7 +124,10 @@ final class SdkWebViewCommandTests: XCTestCase {
         XCTAssertEqual(routes, [.webViewAction])
         let sent = await sdk.bodies
         let request = try JSONDecoder().decode(AutoMobileWebActionRequest.self, from: XCTUnwrap(sent.first))
-        XCTAssertEqual(request, AutoMobileWebActionRequest(webViewId: "main", action: .click(snapshotId: "s1", elementId: "submit")))
+        XCTAssertEqual(
+            request,
+            AutoMobileWebActionRequest(webViewId: "main", action: .click(snapshotId: "s1", elementId: "submit"))
+        )
 
         let stale = try JSONEncoder().encode(AutoMobileWebActionResult.rejected("stale_snapshot"))
         let (rejected, _) = try await handle(

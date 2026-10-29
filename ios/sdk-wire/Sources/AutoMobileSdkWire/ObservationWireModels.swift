@@ -133,12 +133,16 @@ public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable {
 public enum AutoMobileAction: Codable, Sendable, Equatable {
     case tap(observationIdentity: UInt64, elementId: String)
     case longPress(observationIdentity: UInt64, elementId: String, durationMs: Int)
+    /// A finger stroke from `start` to `end`, in screen points, over `durationMs`.
     case swipe(observationIdentity: UInt64, start: SdkPoint, end: SdkPoint, durationMs: Int)
     case drag(observationIdentity: UInt64, elementId: String, end: SdkPoint, durationMs: Int)
     case pinch(observationIdentity: UInt64, elementId: String, scale: Double, durationMs: Int)
     case insertText(observationIdentity: UInt64, elementId: String, text: String)
     case clearText(observationIdentity: UInt64, elementId: String)
     case back(observationIdentity: UInt64)
+    /// Scrolls `elementId` (or the host's primary scroll view) so its content offset changes by
+    /// `delta` points: positive `y` reveals content further down, the opposite of the finger's
+    /// motion for the equivalent swipe.
     case scroll(observationIdentity: UInt64, elementId: String?, delta: SdkPoint)
 
     public var observationIdentity: UInt64 {

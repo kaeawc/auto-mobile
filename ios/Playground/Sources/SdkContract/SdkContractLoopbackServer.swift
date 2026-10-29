@@ -7,6 +7,7 @@ enum SdkContractError: LocalizedError {
     case listenerFailed(String)
     case unexpectedResponse(String)
     case caseFailed(name: String, underlying: String)
+    case rulesNotInstalled(seconds: Double)
 
     /// Names the case and keeps the error domain and code, which a localized message loses.
     static func describe(_ error: Error) -> String {
@@ -29,6 +30,8 @@ enum SdkContractError: LocalizedError {
             "Loopback server returned an unexpected response: \(reason)"
         case let .caseFailed(name, underlying):
             "Case \(name) failed: \(underlying)"
+        case let .rulesNotInstalled(seconds):
+            "The harness did not install the fault rules within \(Int(seconds)) s"
         }
     }
 }

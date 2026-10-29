@@ -5,6 +5,8 @@
 export const CONTRACT_BOUNDARIES = {
   "fixture-host": "Playground could not run the scenario or write its manifest",
   "sdk-serialization": "the SDK encoded something other than what its adapter was given",
+  "sdk-adapter":
+    "the SDK reported or applied something other than what the host registered and the rule asked for",
   "sdk-endpoint": "the SDK encoded the event but it never reached CtrlProxy",
   "ctrlproxy-command": "the bytes the daemon received differ from the bytes the SDK encoded",
   "ios-client": "the iOS TypeScript client did not drain or persist the SDK's bytes correctly",

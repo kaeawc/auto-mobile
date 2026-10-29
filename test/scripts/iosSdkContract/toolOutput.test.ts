@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import {
   parseResourceJson,
   parseToolOutput,
-  queuedRequestIds,
+  queuedRecordKeys,
   readAcquisition,
-  trafficIdsByRequestId,
+  trafficIdsByKey,
 } from "../../../scripts/ios/sdk-contract/toolOutput";
 
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64");
@@ -28,20 +28,24 @@ test("reads the session and CtrlProxy port from either getApple shape", () => {
   expect(() => readAcquisition(port)).toThrow("session UUID");
 });
 
-test("parses resource text and indexes traffic by SDK request id", () => {
+test("parses resource text and indexes traffic by request id, else by method and URL", () => {
   const traffic = {
     events: [
-      { id: 4, requestId: "r-1" },
-      { id: 5, requestId: null },
+      { id: 4, requestId: "r-1", url: "http://h/a", method: "GET" },
+      { id: 5, requestId: null, url: "http://h/b", method: "GET" },
+      { id: 6, requestId: null },
     ],
-    count: 2,
+    count: 3,
   };
   const parsed = parseResourceJson({ contents: [{ text: JSON.stringify(traffic) }] });
-  expect([...trafficIdsByRequestId(parsed)]).toEqual([["r-1", 4]]);
+  expect([...trafficIdsByKey(parsed)]).toEqual([
+    ["r-1", 4],
+    ["url:GET http://h/b", 5],
+  ]);
   expect(() => parseResourceJson({ contents: [] })).toThrow("no text content");
 });
 
-test("finds network request ids still queued in CtrlProxy", () => {
+test("finds network record keys still queued in CtrlProxy", () => {
   const batch = {
     bundleId: "app",
     events: [
@@ -49,6 +53,6 @@ test("finds network request ids still queued in CtrlProxy", () => {
       { eventType: "log", payload: encode({ requestId: "not-network", timestamp: 1 }) },
     ],
   };
-  expect([...queuedRequestIds(JSON.stringify([batch]), () => 0)]).toEqual(["r-1"]);
-  expect(queuedRequestIds("[]", () => 0).size).toBe(0);
+  expect([...queuedRecordKeys(JSON.stringify([batch]), () => 0)]).toEqual(["r-1"]);
+  expect(queuedRecordKeys("[]", () => 0).size).toBe(0);
 });

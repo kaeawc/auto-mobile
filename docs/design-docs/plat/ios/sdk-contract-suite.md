@@ -17,8 +17,9 @@ shipped artifacts. Each SDK capability is covered by one slice, described in the
 Playground does nothing unless launched with `PLAYGROUND_SDK_CONTRACT=<scenario>` and
 `PLAYGROUND_SDK_CONTRACT_RUN_ID=<id>` (passed as `SIMCTL_CHILD_*`). The run id is limited to
 ASCII letters, digits and hyphens because it becomes a file name and a URL path segment. The
-harness runs the `network`, `capabilities` and `faults` scenarios in that order, each in a fresh
-Playground process, because host registration cannot be undone inside a process.
+harness runs the `network`, `capabilities`, `faults`, `observe`, `storage-default` and `storage`
+scenarios in that order, each in a fresh Playground process, because host registration cannot be
+undone inside a process.
 
 ## Manifest
 
@@ -35,7 +36,10 @@ a missing manifest means the host never ran. It records:
 - `faults`: for the fault scenario, what the client saw per case (URL, connection and request id,
   elapsed time, and the error as `<domain>:<code>` or `posix:<code>`);
 - `capabilities`: for the capability scenario, the transport descriptors before and after
-  registration.
+  registration;
+- `observation`: for the observation scenario, how many captures the contract bridge served and
+  every action its executor ran;
+- `storage`: for the storage scenarios, the storage registration the host applied.
 
 `scripts/ios/sdk-contract/manifest.ts` is the TypeScript schema; a newer `schemaVersion` is
 rejected rather than read.
@@ -113,6 +117,45 @@ before running any case. Each case runs through the transport the registration A
 The client outcome is judged first (`sdk-adapter`), then each record crosses the same boundaries as
 the network slice.
 
+## Observation slice
+
+Playground registers a contract `AutoMobileObservationBridge` that declares `tap`, `insertText`
+and `clearText` and publishes synthetic nodes: `contract-save` (counts taps into
+`contract-tap-count`), `contract-email` (always focused, so `sendKeys` needs no XCTest focus tap),
+`contract-arm-stale` and `contract-hold` (placed over the status bar). The harness runs these steps
+with the MCP tools, in order, then writes `<runId>.actions-done`; Playground waits up to 180 s for
+it before writing the manifest with the host's action log.
+
+| Step                     | Tool result must show                                  | Host log must show             |
+| ------------------------ | ------------------------------------------------------ | ------------------------------ |
+| `observe`                | `backend: sdk` and the bridge nodes                    | (not judged)                   |
+| `tap`                    | `backend: sdk`                                         | one `tap` on `contract-save`   |
+| `send-keys` (replace)    | the command's `backend: sdk`                           | `insertText` of the typed text |
+| `unsupported-long-press` | `backend: xctest`, `fallbackReason: unsupported`       | no `longPress`                 |
+| `arm-stale`              | `backend: sdk`                                         | `tap` on `contract-arm-stale`  |
+| `stale-tap`              | a failure with the bridge's `stale_observation` reason | no second `contract-save` tap  |
+
+Arming the trap makes every later capture schedule one more, so the observation an action was
+resolved against is stale by the time the action arrives. The host log is the ground truth: a tap it
+ran that the tool misreported is `mcp-surface`, an SDK tap the tool reported that the host never ran
+is `ctrlproxy-command`, an unanswered bridge is `sdk-endpoint`, an undeclared action reaching the
+bridge is `sdk-adapter`, and a node that was not routed, or a stale target that did not fail
+closed, is `ios-client`.
+
+## Storage slice
+
+`storage-default` applies the default storage configuration (nothing registered, Keychain deletion
+off). `storage` registers an uncoordinated and a host-coordinated app-group suite, an app-private
+and an app-group Core Data store, and Keychain deletion for one exact item, and writes a secret into
+the first suite. With the app running, the harness reads
+`automobile:devices/{udid}/storage/capabilities?appId=<Playground>` and compares the Keychain
+capability and the `key_value` and `databases` store states with the registration
+(`storageSlice.ts`). After `storage`, it terminates Playground and reads the resource again: the
+Keychain capability must be `unknown` with `BRIDGE_UNAVAILABLE` and no store state may remain. A
+reachable SDK reporting the wrong state is `sdk-adapter`; `BRIDGE_UNAVAILABLE` while the app runs is
+`sdk-endpoint`; `SDK_TOO_OLD` is `sdk-serialization`; the secret anywhere in the resource is
+`mcp-surface`.
+
 ## Failure modes
 
 - No CtrlProxy reachable from the app: the SDK keeps events pending and the cases report
@@ -123,3 +166,5 @@ the network slice.
   path, response sent, early close).
 - CtrlProxy never confirms the fault rules: `ctrlproxy-command`, and the harness skips the fault
   cases. Playground stops waiting for `<runId>.rules-ready` after 60 s.
+- The harness never writes `<runId>.actions-done`: Playground fails the observation scenario after
+  180 s, reported as `fixture-host`.

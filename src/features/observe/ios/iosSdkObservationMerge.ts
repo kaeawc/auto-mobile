@@ -1,6 +1,7 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
 import type { IosSdkObservation, IosSdkObservationNode } from "./sdkObservationBridge";
+import { SDK_CAPTURE_IDENTITY_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 
 /**
  * Merges an iOS SDK observation-bridge snapshot into the XCTest hierarchy (#5159).
@@ -15,7 +16,7 @@ import type { IosSdkObservation, IosSdkObservationNode } from "./sdkObservationB
 /** Marker shared with the runner's own SDK-walker nodes (`sdk.source` in `extras`). */
 export const IOS_SDK_BRIDGE_SOURCE = "sdkBridge";
 export const SDK_ELEMENT_ID_ATTRIBUTE = "sdk-element-id";
-export const SDK_CAPTURE_IDENTITY_ATTRIBUTE = "sdk-capture-identity";
+export { SDK_CAPTURE_IDENTITY_ATTRIBUTE };
 
 /** The bridge identity a node merged from an observation carries, if any. */
 export interface IosSdkBridgeTarget {

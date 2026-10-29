@@ -2,8 +2,10 @@ import { ViewHierarchyResult } from "../../../models";
 import { nodeAttributes, type ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
 import { NodeCryptoService } from "../../../utils/crypto";
+import { SDK_CAPTURE_IDENTITY_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 
 const SETTLE_VOLATILE_NODE_FIELDS = new Set([
+  SDK_CAPTURE_IDENTITY_ATTRIBUTE,
   "extras",
   "occlusionState",
   "occludedBy",

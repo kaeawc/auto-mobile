@@ -56,12 +56,12 @@ above 2^53 lose precision in the daemon.
 CtrlProxy calls the SDK only when the foreground app's `/health` reports an available bridge.
 Otherwise the command fails with a typed `failure`:
 
-| `failure`            | Meaning                                                              |
-| -------------------- | -------------------------------------------------------------------- |
-| `bridge_unavailable` | no SDK in the foreground app, no registered bridge, or no SDK answer |
-| `app_not_active`     | the app resigned active before the SDK served the request            |
-| `invalid_action`     | `actionJson` is missing or is not an `AutoMobileAction`              |
-| `bad_reply`          | the SDK, or CtrlProxy's relayed value, does not match the contract   |
+| `failure`            | Meaning                                                                |
+| -------------------- | ---------------------------------------------------------------------- |
+| `bridge_unavailable` | no SDK in the foreground app or no registered bridge; nothing was sent |
+| `app_not_active`     | the app resigned active before the SDK served the request              |
+| `invalid_action`     | `actionJson` is missing or is not an `AutoMobileAction`                |
+| `bad_reply`          | a sent request got no answer, or the reply does not match the contract |
 
 `available` is false only for `bridge_unavailable`. A bridge rejection is a result, not a failure:
 the SDK checks the declared `supportedActions` first (`unsupported_action`), then the bridge checks

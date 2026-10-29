@@ -34,6 +34,7 @@ portable test/features/observe/ios/observationBridgeState.test.ts        # pure 
 portable test/features/observe/ios/CtrlProxySdkObservation.test.ts      # delegate and decoder over the delegate harness
 portable test/features/observe/ios/iosSdkObservationMerge.test.ts       # pure hierarchy merge over fixtures
 portable test/features/observe/ios/IosSdkBridgeReader.test.ts           # bridge reader over a fake client
+portable test/features/observe/ios/iosSdkBridgeSnapshotRefresh.test.ts  # merge + snapshot/hash helpers over fixtures
 portable test/features/action/IosSdkBridgeTapRouter.test.ts             # tap routing over a fake client
 portable test/features/action/TapOnElement.iosSdkBridge.test.ts          # tapOn routing over FakeIOSCtrlProxy
 portable test/features/observe/collectors/IosObservationCollector.sdkBridge.test.ts # collector merge over fakes

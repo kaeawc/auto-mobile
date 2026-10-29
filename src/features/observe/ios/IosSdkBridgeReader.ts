@@ -9,6 +9,7 @@ import type { CtrlProxySdkActionResult, CtrlProxySdkObservationResult } from "./
 import type { ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import type { ObservationBackend, ObservationFallbackReason } from "../../../models/ObserveResult";
 import { mergeIosSdkObservation } from "./iosSdkObservationMerge";
+import { refreshHierarchySnapshot } from "../HierarchyCapture";
 import type { SdkBridgeRequestOptions } from "./CtrlProxySdkObservation";
 
 /** Budget for the bridge snapshot taken during observe; the XCTest hierarchy is already in hand. */
@@ -128,6 +129,8 @@ export async function mergeIosSdkBridgeInto(
   const merged =
     outcome.kind === "observation" ? mergeIosSdkObservation(hierarchy, outcome.observation) : null;
   if (merged) {
+    // A snapshot bound before the merge indexes the old tree; selectors must see the merged one.
+    refreshHierarchySnapshot(hierarchy);
     logger.debug(
       `[iOS] Merged ${merged.attached} SDK bridge nodes (${merged.deduplicated} XCTest duplicates removed)`,
     );

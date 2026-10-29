@@ -56721,7 +56721,7 @@
       "destructiveHint": false,
       "idempotentHint": true
     },
-    "description": "Stop an audio injection started by injectAudioInput. Idempotent: an injection that already ended returns its result (frames sent and why it ended).",
+    "description": "Stop an audio injection started by injectAudioInput, on the device it runs on. Idempotent: an injection that already ended returns its result (frames sent and why it ended); the last 64 ended injections are kept.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

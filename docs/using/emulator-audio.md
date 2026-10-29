@@ -27,12 +27,15 @@ Plays audio into the microphone and returns as soon as it starts.
 Pass `file` or `tone`, not both. With neither, a 2-second tone plays.
 
 The result has `injectionId`, `durationMs` (of one pass), `sampleRate` and `route`. In a session,
-releasing the session stops the injection.
+releasing the session stops the injection. Without a session, the injection stops when a session
+takes the device. A relative `file` path is relative to the directory the server was started in.
 
 ## stopAudioInput
 
-Stops an injection by `injectionId`. Stopping one that already ended is not an error: you get
-its result again, with `framesSent` and `reason` (`completed`, `stopped` or `max_duration`).
+Stops an injection by `injectionId`, on the device it was started on. Stopping one that already
+ended is not an error: you get its result again, with `framesSent` and `reason` (`completed`,
+`stopped` or `max_duration`). The server keeps the last 64 ended injections; an older id, or any
+id after a server restart, is an error.
 
 ## captureAudio
 

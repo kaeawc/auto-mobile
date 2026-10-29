@@ -10,6 +10,7 @@ import {
 import { runSessionSensorMutation, type SessionSensorHost } from "./sessionSensor";
 import { safeFilenameSegment } from "./toolOutputArtifactLedger";
 import { defaultDaemonContext } from "../daemon/daemonContext";
+import type { SessionManager } from "../daemon/sessionManager";
 import type { AudioSource, EmulatorAudioService } from "../features/audio/EmulatorAudioService";
 import { defaultEmulatorAudioService } from "../features/audio/defaultEmulatorAudioService";
 import { ActionableError } from "../models/ActionableError";
@@ -19,6 +20,9 @@ import { serverConfig } from "../utils/ServerConfig";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import { createStructuredToolResponse } from "../utils/toolUtils";
+import { errorMessage } from "../models/describeUnknownError";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { logger } from "../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 /** Capture stays well under the daemon's 30 s default request timeout, including its 2 s grace. */
@@ -71,9 +75,12 @@ const captureAudioInput = z.object({
   saveArtifact: z.boolean().optional().describe("Write the capture to a WAV file on the host."),
 });
 
+/** The session admission a start needs, plus a non-expiring read for the post-start check. */
+export type AudioSessionHost = SessionSensorHost & Pick<SessionManager, "findSession">;
+
 export interface AudioToolDependencies {
   service?: Pick<EmulatorAudioService, "startInjection" | "stopInjection" | "capture">;
-  sessionManager?: () => SessionSensorHost | undefined;
+  sessionManager?: () => AudioSessionHost | undefined;
   saveWav?: (deviceId: string, bytes: Uint8Array) => Promise<string>;
 }
 
@@ -102,17 +109,51 @@ function sourceFrom(args: {
 export function createToolOutputsWavSaver(
   timer: Pick<Timer, "now"> = defaultTimer,
   directory: () => string = () => serverConfig.getToolOutputsDir() ?? getDefaultToolOutputsDir(),
+  ids: IdGenerator = defaultIdGenerator,
 ): (deviceId: string, bytes: Uint8Array) => Promise<string> {
   return async (deviceId, bytes) => {
     const dir = directory();
     await mkdir(dir, { recursive: true });
     const file = path.join(
       dir,
-      `${Math.trunc(timer.now())}-captureAudio-${safeFilenameSegment(deviceId)}.wav`,
+      // The id keeps two captures saved in the same millisecond from overwriting each other.
+      `${Math.trunc(timer.now())}-captureAudio-${safeFilenameSegment(deviceId)}-${safeFilenameSegment(ids.next())}.wav`,
     );
     await writeFile(file, bytes);
     return file;
   };
+}
+
+/**
+ * A release can commit after its setup drain times out while the start is still connecting; its
+ * cleanup then found nothing to stop. Re-check once the injection exists, and stop it if the
+ * session no longer holds the device.
+ */
+async function stopIfSessionEnded(
+  sessionManager: AudioSessionHost | undefined,
+  sessionUuid: string | undefined,
+  deviceId: string,
+  started: { injectionId: string },
+  service: Pick<EmulatorAudioService, "stopInjection">,
+): Promise<void> {
+  if (!sessionManager || !sessionUuid) {
+    return;
+  }
+  const session = sessionManager.findSession(sessionUuid);
+  if (
+    session &&
+    sessionManager.isAdmittedForAutomation(session) &&
+    session.assignedDevice === deviceId
+  ) {
+    return;
+  }
+  await service.stopInjection(started.injectionId).catch((error: unknown) => {
+    // The injection is ended either way; the refusal below is what the caller needs.
+    logger.warn(`Failed to stop audio injection ${started.injectionId}: ${errorMessage(error)}`);
+  });
+  throw new ActionableError(
+    "The session was released while the audio injection was starting; the injection was stopped.",
+  );
 }
 
 export const createInjectAudioInputHandler =
@@ -139,6 +180,7 @@ export const createInjectAudioInputHandler =
         }),
       { action: "inject emulator audio", change: "audio injection" },
     );
+    await stopIfSessionEnded(sessionManager, args.sessionUuid, device.deviceId, started, service);
     return createStructuredToolResponse({
       success: true,
       message:
@@ -210,8 +252,9 @@ const injectAudioInputTool = defineDeviceTool({
 const stopAudioInputTool = defineDeviceTool({
   name: "stopAudioInput",
   description:
-    "Stop an audio injection started by injectAudioInput. Idempotent: an injection that already " +
-    "ended returns its result (frames sent and why it ended).",
+    "Stop an audio injection started by injectAudioInput, on the device it runs on. Idempotent: an " +
+    "injection that already ended returns its result (frames sent and why it ended); the last 64 " +
+    "ended injections are kept.",
   input: stopAudioInputInput,
   options: {
     defaultEnabled: false,

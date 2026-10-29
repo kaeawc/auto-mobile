@@ -12,6 +12,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
   closed = 0;
   injected: PcmAudio[] = [];
   injectOptions: Array<InjectAudioOptions | undefined> = [];
+  captureRequests: Array<{ durationMs: number; sampleRate?: number }> = [];
   settleInjection: ((result: InjectionResult) => void) | undefined;
   failInjection: ((error: Error) => void) | undefined;
   captureSamples: Int16Array = new Int16Array(0);
@@ -38,6 +39,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
   }
 
   async captureAudio(options: { durationMs: number; sampleRate?: number }) {
+    this.captureRequests.push(options);
     return {
       pcm: { sampleRate: options.sampleRate ?? 48_000, channels: 1, samples: this.captureSamples },
       timedOut: this.captureTimedOut,

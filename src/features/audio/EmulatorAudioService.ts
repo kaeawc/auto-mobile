@@ -76,8 +76,8 @@ export const MAX_AUDIO_SOURCE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_TONE_MS = 2_000;
 /** A looping injection with no limit of its own stops after this long. */
 export const DEFAULT_LOOP_MAX_DURATION_MS = 10 * 60 * 1000;
-/** Finished injections kept so a late or repeated stop still returns the result. */
-const FINISHED_INJECTIONS_KEPT = 64;
+/** Ended injections kept so a late or repeated stop still returns the result. */
+export const FINISHED_INJECTIONS_KEPT = 64;
 
 interface ActiveInjection {
   deviceId: string;
@@ -90,9 +90,14 @@ interface ActiveInjection {
 export interface EmulatorAudioServiceDeps {
   discovery: EmulatorGrpcDiscovery;
   createSession: EmulatorAudioSessionFactory;
-  readFile: (path: string) => Promise<Uint8Array>;
-  fileSize: (path: string) => Promise<number>;
+  /**
+   * Reads a regular file, refusing it once it exceeds `maxBytes`. The cap must hold for the read
+   * itself, not a prior size check: a device file such as /dev/zero reports size 0.
+   */
+  readFile: (path: string, maxBytes: number) => Promise<Uint8Array>;
   ids: IdGenerator;
+  /** Defaults to {@link MAX_AUDIO_SOURCE_BYTES}. */
+  maxSourceBytes?: number;
 }
 
 function assertSameDevice(injectionId: string, owner: string, requested: string | undefined): void {
@@ -101,6 +106,12 @@ function assertSameDevice(injectionId: string, owner: string, requested: string 
       `Audio injection '${injectionId}' is on ${owner}, not ${requested}. Stop it on ${owner}.`,
     );
   }
+}
+
+export function audioSourceTooLarge(path: string, maxBytes: number): ActionableError {
+  return new ActionableError(
+    `Audio file ${path} is larger than the ${maxBytes}-byte limit. Use a shorter clip.`,
+  );
 }
 
 function unsupported(code: EmulatorAudioErrorCode, reason: string): EmulatorAudioError {
@@ -179,7 +190,8 @@ export class EmulatorAudioService {
     const active = this.active.get(injectionId);
     if (!active) {
       throw new ActionableError(
-        `No audio injection '${injectionId}'. It may belong to a server that has since restarted; start a new injection.`,
+        `No audio injection '${injectionId}' on this server. Only the last ${FINISHED_INJECTIONS_KEPT} ` +
+          "ended injections are kept, and a server restart forgets them all; start a new injection.",
       );
     }
     assertSameDevice(injectionId, active.deviceId, deviceId);
@@ -203,6 +215,16 @@ export class EmulatorAudioService {
     const owned = (entry: ActiveInjection) =>
       entry.deviceId === deviceId && entry.owner === sessionId;
     return [...this.active.values()].some(owned) ? this.stopMatching(owned) : undefined;
+  }
+
+  /**
+   * Stops the injections no session owns on a device, for a session acquiring it: a sessionless
+   * feed must not reach the new holder's microphone. Undefined when there are none.
+   */
+  stopOwnerless(deviceId: string): Promise<number> | undefined {
+    const ownerless = (entry: ActiveInjection) =>
+      entry.deviceId === deviceId && entry.owner === undefined;
+    return [...this.active.values()].some(ownerless) ? this.stopMatching(ownerless) : undefined;
   }
 
   private async stopMatching(match: (entry: ActiveInjection) => boolean): Promise<number> {
@@ -277,12 +299,11 @@ export class EmulatorAudioService {
         durationMs: source.durationMs ?? DEFAULT_TONE_MS,
       });
     }
-    const size = await this.deps.fileSize(source.path);
-    if (size > MAX_AUDIO_SOURCE_BYTES) {
-      throw new ActionableError(
-        `Audio file ${source.path} is ${size} bytes; the limit is ${MAX_AUDIO_SOURCE_BYTES}. Use a shorter clip.`,
-      );
+    const maxBytes = this.deps.maxSourceBytes ?? MAX_AUDIO_SOURCE_BYTES;
+    const bytes = await this.deps.readFile(source.path, maxBytes);
+    if (bytes.byteLength > maxBytes) {
+      throw audioSourceTooLarge(source.path, maxBytes);
     }
-    return parseWav(await this.deps.readFile(source.path));
+    return parseWav(bytes);
   }
 }

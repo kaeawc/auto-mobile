@@ -5,7 +5,10 @@ import { registerLocationRouteSessionCleanup } from "../features/utility/Locatio
 import { registerStatusBarSessionCleanup } from "./statusBarSessionCleanup";
 import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
 import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
-import { registerEmulatorAudioSessionCleanup } from "./emulatorAudioSessionCleanup";
+import {
+  createOwnerlessAudioAcquisitionCleanup,
+  registerEmulatorAudioSessionCleanup,
+} from "./emulatorAudioSessionCleanup";
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
 import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
@@ -179,6 +182,8 @@ export function wireSessionLifecycle(
   const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(sessionManager, {
     timer: timer,
   });
+  // Sessionless emulator microphone feeds are stopped the same way.
+  const stopOwnerlessAudio = createOwnerlessAudioAcquisitionCleanup(sessionManager);
   // Display/system settings a previous session changed are reset to the recorded device
   // defaults when a different session acquires the device (#11145).
   const settingDefaults = new DeviceSettingDefaults(
@@ -202,6 +207,7 @@ export function wireSessionLifecycle(
     host.socketServer()?.liftSessionlessStrokesOn(deviceId);
     adoptOwnerlessRecordings(deviceId, sessionId);
     clearOwnerlessNetworkState(deviceId);
+    stopOwnerlessAudio(deviceId);
     resetSettingDefaults(deviceId, sessionId);
   });
   sessionManager.onSessionCreated((session) => {

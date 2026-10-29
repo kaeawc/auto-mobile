@@ -1,7 +1,13 @@
-import type { SessionManager, SessionReleaseOptions } from "./sessionManager";
+import {
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  type SessionManager,
+  type SessionReleaseOptions,
+} from "./sessionManager";
 import type { EmulatorAudioService } from "../features/audio/EmulatorAudioService";
 import { defaultEmulatorAudioService } from "../features/audio/defaultEmulatorAudioService";
 import { logger } from "../utils/logger";
+import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 /**
  * Stop every audio injection a session started with `injectAudioInput` when that session is
@@ -46,4 +52,27 @@ export function registerEmulatorAudioSessionCleanup(
     cleanup(sessionId, deviceId, releaseOptions);
   });
   manager.onSessionDeviceUnbound(cleanup);
+}
+
+/**
+ * A session acquiring a device stops the sessionless audio injections on it, so a microphone feed
+ * no session owns cannot reach the new holder's app (as network mocks are cleared, #11130).
+ * Returns the callback to run where acquisition cancels sessionless executions.
+ */
+export function createOwnerlessAudioAcquisitionCleanup(
+  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup">,
+  service: Pick<EmulatorAudioService, "stopOwnerless"> = defaultEmulatorAudioService,
+  timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
+): (deviceId: string) => void {
+  return (deviceId) => {
+    const stopping = service.stopOwnerless(deviceId);
+    if (!stopping) {
+      return;
+    }
+    registerBoundedAcquisitionCleanup(manager, deviceId, stopping, {
+      timer,
+      capMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
+      label: "stop sessionless emulator audio injection",
+    });
+  };
 }

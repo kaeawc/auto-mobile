@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { registerEmulatorAudioSessionCleanup } from "../../src/daemon/emulatorAudioSessionCleanup";
 import { EmulatorAudioService } from "../../src/features/audio/EmulatorAudioService";
@@ -7,6 +10,7 @@ import {
   createCaptureAudioHandler,
   createInjectAudioInputHandler,
   createStopAudioInputHandler,
+  createToolOutputsWavSaver,
   injectAudioInputSchema,
   MAX_CAPTURE_SECONDS,
 } from "../../src/server/audioTools";
@@ -17,7 +21,6 @@ import {
 } from "../../src/server/audioToolOutputSchemas";
 import type { BootedDevice } from "../../src/models";
 import { encodeWav, parseWav, sineTone } from "../../src/utils/audio/pcm";
-import { isAbsolute } from "node:path";
 import { CountingIdGenerator } from "../../src/utils/CountingIdGenerator";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -64,11 +67,10 @@ describe("audio tools (#13628, #13629)", () => {
         sessions.push(session);
         return session;
       },
-      readFile: async (path) => {
+      readFile: async (path: string) => {
         readPaths.push(path);
         return encodeWav({ sampleRate: 16_000, channels: 1, samples: new Int16Array(160) });
       },
-      fileSize: async () => 0,
       ids: new CountingIdGenerator("inj"),
     });
     registerEmulatorAudioSessionCleanup(manager, service);
@@ -122,7 +124,7 @@ describe("audio tools (#13628, #13629)", () => {
   test("a relative WAV path is resolved to an absolute launch-directory path", async () => {
     await createInjectAudioInputHandler(deps)(emulator, { file: "fixtures/voice.wav" });
     expect(readPaths).toHaveLength(1);
-    expect(isAbsolute(readPaths[0])).toBe(true);
+    expect(path.isAbsolute(readPaths[0])).toBe(true);
     expect(readPaths[0].replaceAll("\\", "/").endsWith("fixtures/voice.wav")).toBe(true);
   });
 
@@ -160,6 +162,20 @@ describe("audio tools (#13628, #13629)", () => {
     expect(service.activeInjectionIds(emulator.deviceId)).toEqual([]);
   });
 
+  test("an injection whose session is released while it starts is stopped", async () => {
+    await manager.createSession("session-1", emulator.deviceId, "android");
+    // Admitted when the start begins, released by the time it has connected.
+    spyOn(manager, "isAdmittedForAutomation").mockReturnValueOnce(true).mockReturnValue(false);
+    await expect(
+      createInjectAudioInputHandler(deps)(emulator, {
+        tone: {},
+        loop: true,
+        sessionUuid: "session-1",
+      }),
+    ).rejects.toThrow("released while the audio injection was starting");
+    expect(service.activeInjectionIds(emulator.deviceId)).toEqual([]);
+  });
+
   test("a released session cannot start an injection", async () => {
     await manager.createSession("session-1", emulator.deviceId, "android");
     await manager.releaseSession("session-1", "explicit-release");
@@ -183,5 +199,23 @@ describe("audio tools (#13628, #13629)", () => {
     );
     expect(withFile).toMatchObject({ path: "/outputs/emulator-5554.wav", sizeBytes: 48_044 });
     expect(parseWav(saved[0].bytes).samples.length).toBe(24_000);
+  });
+
+  test("the WAV saver gives captures in the same millisecond distinct files", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-audio-"));
+    try {
+      const save = createToolOutputsWavSaver(
+        { now: () => 1_700_000_000_123 },
+        () => dir,
+        new CountingIdGenerator("wav"),
+      );
+      const first = await save("emulator-5554", Uint8Array.from([1]));
+      const second = await save("emulator-5554", Uint8Array.from([2]));
+      expect(first).not.toBe(second);
+      expect(path.basename(first)).toBe("1700000000123-captureAudio-emulator-5554-wav-1.wav");
+      expect(existsSync(first) && existsSync(second)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

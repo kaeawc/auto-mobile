@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_LOOP_MAX_DURATION_MS,
   EmulatorAudioService,
-  MAX_AUDIO_SOURCE_BYTES,
+  FINISHED_INJECTIONS_KEPT,
 } from "../../../src/features/audio/EmulatorAudioService";
 import { FakeEmulatorAudioSession as FakeSession } from "../../fakes/FakeEmulatorAudioSession";
 import { EmulatorAudioError } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
@@ -21,6 +21,8 @@ const ENDPOINT: EmulatorGrpcEndpoint = {
 function setup(
   files: Record<string, Uint8Array> = {},
   prepare: (session: FakeSession) => void = () => {},
+  consolePorts: number[] = [5554],
+  maxSourceBytes?: number,
 ) {
   const sessions: FakeSession[] = [];
   const lookups: number[] = [];
@@ -28,7 +30,7 @@ function setup(
     discovery: {
       findByConsolePort: async (port) => {
         lookups.push(port);
-        return port === 5554 ? ENDPOINT : undefined;
+        return consolePorts.includes(port) ? { ...ENDPOINT, consolePort: port } : undefined;
       },
     },
     createSession: (endpoint) => {
@@ -44,8 +46,8 @@ function setup(
       }
       return bytes;
     },
-    fileSize: async (path) => files[path]?.byteLength ?? MAX_AUDIO_SOURCE_BYTES + 1,
     ids: new CountingIdGenerator("inj"),
+    maxSourceBytes,
   });
   return { service, sessions, lookups };
 }
@@ -76,12 +78,25 @@ describe("EmulatorAudioService injection", () => {
     expect(Array.from(sessions[0].injected[0].samples)).toEqual([1995]);
   });
 
-  test("rejects an oversized file before reading it", async () => {
-    const { service, sessions } = setup();
+  test("a read that comes back larger than the cap is refused before any device work", async () => {
+    const { service, sessions } = setup({ "/big.wav": new Uint8Array(100) }, () => {}, [5554], 50);
     await expect(
-      service.startInjection("emulator-5554", { source: { kind: "file", path: "/huge.wav" } }),
-    ).rejects.toThrow(/limit/);
+      service.startInjection("emulator-5554", { source: { kind: "file", path: "/big.wav" } }),
+    ).rejects.toThrow("larger than the 50-byte limit");
     expect(sessions).toHaveLength(0);
+  });
+
+  test("a failed start closes its session and leaves nothing active", async () => {
+    const { service, sessions } = setup({}, (session) => {
+      session.injectAudio = async () => {
+        throw new Error("start failed");
+      };
+    });
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone" } }),
+    ).rejects.toThrow("start failed");
+    expect(sessions[0].closed).toBe(1);
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
   });
 
   test("stop is idempotent and returns the same result after the injection ends", async () => {
@@ -150,12 +165,29 @@ describe("EmulatorAudioService injection", () => {
   });
 
   test("stopDevice stops only that device's injections", async () => {
-    const { service } = setup();
+    const { service } = setup({}, () => {}, [5554, 5556]);
     await service.startInjection("emulator-5554", { source: { kind: "tone" } });
     await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    const other = await service.startInjection("emulator-5556", { source: { kind: "tone" } });
     expect(await service.stopDevice("emulator-5554")).toBe(2);
-    expect(await service.stopDevice("emulator-5556")).toBe(0);
     expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
+    expect(service.activeInjectionIds("emulator-5556")).toEqual([other.injectionId]);
+  });
+
+  test("only the most recent ended injections stay stoppable", async () => {
+    const { service } = setup();
+    const ids: string[] = [];
+    for (let index = 0; index <= FINISHED_INJECTIONS_KEPT; index++) {
+      const { injectionId } = await service.startInjection("emulator-5554", {
+        source: { kind: "tone" },
+      });
+      await service.stopInjection(injectionId);
+      ids.push(injectionId);
+    }
+    await expect(service.stopInjection(ids[0])).rejects.toThrow(
+      `Only the last ${FINISHED_INJECTIONS_KEPT} ended injections are kept`,
+    );
+    expect(await service.stopInjection(ids[1])).toMatchObject({ reason: "stopped" });
   });
 
   test("physical devices and emulators without gRPC get typed unsupported errors", async () => {
@@ -174,7 +206,11 @@ describe("EmulatorAudioService injection", () => {
 
 describe("EmulatorAudioService session ownership and limits", () => {
   test("stopOwnedBy stops only the session's injections on that device", async () => {
-    const { service } = setup();
+    const { service } = setup({}, () => {}, [5554, 5556]);
+    const elsewhere = await service.startInjection("emulator-5556", {
+      source: { kind: "tone" },
+      sessionId: "s1",
+    });
     const mine = await service.startInjection("emulator-5554", {
       source: { kind: "tone" },
       sessionId: "s1",
@@ -186,7 +222,20 @@ describe("EmulatorAudioService session ownership and limits", () => {
     expect(service.stopOwnedBy("emulator-5554", "s3")).toBeUndefined();
     expect(await service.stopOwnedBy("emulator-5554", "s1")).toBe(1);
     expect(service.activeInjectionIds("emulator-5554")).toEqual([other.injectionId]);
+    expect(service.activeInjectionIds("emulator-5556")).toEqual([elsewhere.injectionId]);
     expect(await service.stopInjection(mine.injectionId)).toMatchObject({ reason: "stopped" });
+  });
+
+  test("stopOwnerless stops only sessionless injections on that device", async () => {
+    const { service } = setup();
+    const owned = await service.startInjection("emulator-5554", {
+      source: { kind: "tone" },
+      sessionId: "s1",
+    });
+    expect(service.stopOwnerless("emulator-5554")).toBeUndefined();
+    await service.startInjection("emulator-5554", { source: { kind: "tone" } });
+    expect(await service.stopOwnerless("emulator-5554")).toBe(1);
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([owned.injectionId]);
   });
 
   test("a loop without its own limit is capped; a single pass is not", async () => {
@@ -221,6 +270,7 @@ describe("EmulatorAudioService capture", () => {
       durationMs: 100,
       route: "emulator-grpc",
     });
+    expect(sessions[0].captureRequests).toEqual([{ durationMs: 100, sampleRate: undefined }]);
     expect(sessions[0].closed).toBe(1);
   });
 

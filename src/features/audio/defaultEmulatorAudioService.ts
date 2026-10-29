@@ -1,11 +1,44 @@
-import { readFile, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
+import { ActionableError } from "../../models/ActionableError";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
 import { FileEmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import { Http2GrpcTransport } from "../../utils/android-cmdline-tools/emulatorGrpc/grpcTransport";
 import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
-import { EmulatorAudioService } from "./EmulatorAudioService";
+import { audioSourceTooLarge, EmulatorAudioService } from "./EmulatorAudioService";
+
+const READ_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Reads a regular file of at most `maxBytes`. The cap applies to the bytes actually read, so a
+ * file that grows after it is opened cannot exceed it; device files are refused outright.
+ */
+export async function readRegularFileCapped(path: string, maxBytes: number): Promise<Uint8Array> {
+  const handle = await open(path, "r");
+  try {
+    if (!(await handle.stat()).isFile()) {
+      throw new ActionableError(`Audio file ${path} is not a regular file.`);
+    }
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    for (;;) {
+      const chunk = new Uint8Array(READ_CHUNK_BYTES);
+      const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+      if (bytesRead === 0) {
+        break;
+      }
+      length += bytesRead;
+      if (length > maxBytes) {
+        throw audioSourceTooLarge(path, maxBytes);
+      }
+      chunks.push(chunk.subarray(0, bytesRead));
+    }
+    return Buffer.concat(chunks, length);
+  } finally {
+    await handle.close();
+  }
+}
 
 /** The service over each emulator's real gRPC endpoint, as discovered on this host. */
 export function createEmulatorAudioService(): EmulatorAudioService {
@@ -17,8 +50,7 @@ export function createEmulatorAudioService(): EmulatorAudioService {
         new Http2GrpcTransport(endpoint.address),
         createGrpcAuthorizer(endpoint.auth, fs),
       ),
-    readFile: (path) => readFile(path),
-    fileSize: async (path) => (await stat(path)).size,
+    readFile: readRegularFileCapped,
     ids: defaultIdGenerator,
   });
 }

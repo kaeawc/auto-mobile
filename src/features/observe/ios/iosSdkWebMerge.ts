@@ -295,14 +295,20 @@ export function mergeIosSdkWebSnapshots(
     if (converted.length === 0) {
       return;
     }
+    // A signature two elements share (a wrapper and the control it wraps, say) cannot tell which
+    // one a native leaf is, so it matches no leaf: replacing it would give the leaf's id to either.
     const covering = new Map<string, number>();
+    const shared = new Set<string>();
     converted.forEach(({ element, bounds }, position) => {
-      for (const signature of signaturesOf(element, bounds)) {
-        if (!covering.has(signature)) {
+      for (const signature of new Set(signaturesOf(element, bounds))) {
+        if (covering.has(signature)) {
+          shared.add(signature);
+        } else {
           covering.set(signature, position);
         }
       }
     });
+    shared.forEach((signature) => covering.delete(signature));
     const build = (position: number, inherited: Record<string, unknown> = {}) => {
       const { element, bounds } = converted[position];
       return convertElement(element, bounds, webViewId, snapshot.snapshotId, origin, inherited);

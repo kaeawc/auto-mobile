@@ -264,6 +264,28 @@ describe("covered XCTest leaves (#5162)", () => {
       "web-element-id": "e0",
     });
   });
+
+  test("a native leaf two DOM elements both match is kept, so its id names neither", () => {
+    // <div role="group"><button>Pay</button></div>: the wrapper and the button share bounds and label.
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "XCUIElementTypeButton",
+        "resource-id": "pay",
+        "content-desc": "Pay",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    const group = { ...submit, id: "e0", role: "group", label: "Pay" };
+    const button = { ...submit, id: "e1", role: "button", label: "Pay" };
+    const summary = mergeIosSdkWebSnapshots(hierarchy, [
+      { webViewId: "checkout", snapshot: snapshot([group, button]) },
+    ]);
+    expect(summary?.deduplicated).toBe(0);
+    const elements = webElements(findWebViewNodes(hierarchy)[0]);
+    expect(elements.map((element) => element["web-element-id"])).toEqual(["e0", "e1"]);
+    expect(elements.some((element) => element["resource-id"] === "pay")).toBe(false);
+  });
 });
 
 describe("replacement in place (#5162)", () => {

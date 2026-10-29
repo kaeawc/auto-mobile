@@ -10,6 +10,7 @@ import {
   getStaticToolDefinitions,
   getConnectedStaticToolDefinitions,
   staticToolDeclaresDeviceResourceBudget,
+  staticToolDeclaresHostInventory,
   staticToolDeclaresInput,
 } from "../../src/daemon/staticToolDefinitions";
 import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
@@ -59,6 +60,7 @@ describe("getStaticToolDefinitions", () => {
       delete meta["automobile/embeddedSdkOnly"];
       delete meta["automobile/planOnly"];
       delete meta["automobile/deviceResourceBudget"];
+      delete meta["automobile/hostInventory"];
       if (Object.keys(meta).length) {
         definition._meta = meta;
       } else {
@@ -266,6 +268,29 @@ describe("staticToolDeclaresDeviceResourceBudget (#15672)", () => {
     for (const tools of [getStaticToolDefinitions(), getConnectedStaticToolDefinitions()]) {
       for (const tool of tools) {
         expect(Object.hasOwn(tool._meta ?? {}, "automobile/deviceResourceBudget")).toBe(false);
+      }
+    }
+  });
+});
+
+describe("staticToolDeclaresHostInventory (#15672)", () => {
+  test("the host inventory tools declare the trait in the committed definitions", () => {
+    expect(staticToolDeclaresHostInventory("listDevices")).toBe(true);
+    expect(staticToolDeclaresHostInventory("listDeviceImages")).toBe(true);
+  });
+
+  test("device and acquisition tools, unknown names and non-strings do not declare it", () => {
+    for (const name of ["getAndroid", "setActiveDevice", "observe", "noSuchTool"]) {
+      expect(staticToolDeclaresHostInventory(name)).toBe(false);
+    }
+    expect(staticToolDeclaresHostInventory(undefined)).toBe(false);
+    expect(staticToolDeclaresHostInventory(42)).toBe(false);
+  });
+
+  test("the trait key is internal and never leaves the cold wire payload", () => {
+    for (const tools of [getStaticToolDefinitions(), getConnectedStaticToolDefinitions()]) {
+      for (const tool of tools) {
+        expect(Object.hasOwn(tool._meta ?? {}, "automobile/hostInventory")).toBe(false);
       }
     }
   });

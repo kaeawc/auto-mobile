@@ -2133,7 +2133,8 @@ plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_
 system-UI call per prototype at a time). No production runtime advertises either module yet.
 
 **Photo library (#14195, calls only).** Three more `mediaLibrary` calls read and write the library
-itself, each behind its own per-call capability so a runtime can offer save without read:
+itself. `query` and `manageLimitedSelection` share `prototype_platform_mediaLibrary_query_v1`;
+`save` has its own capability, so a runtime can offer save without read:
 
 - `mediaLibrary.query` (`media` as for `pick`, optional `limit` 1-64) writes the newest items to
   `into` as device media items; `mediaLibrary.manageLimitedSelection` (no arguments) re-opens the

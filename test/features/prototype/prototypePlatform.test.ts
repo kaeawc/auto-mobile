@@ -837,6 +837,10 @@ describe("photo library read and save contract", () => {
     const write = requiredPrototypeCapabilities(spec([save], ["photosAdd"]));
     expect(write).toContain("prototype_platform_mediaLibrary_save_v1");
     expect(write).not.toContain("prototype_platform_mediaLibrary_query_v1");
+    const manage = { type: "platform", call: "mediaLibrary.manageLimitedSelection", args: {} };
+    const limited = requiredPrototypeCapabilities(spec([manage], ["photos"]));
+    expect(limited).toContain("prototype_platform_mediaLibrary_query_v1");
+    expect(limited).not.toContain("prototype_platform_mediaLibrary_save_v1");
   });
 
   test("each call needs its declared permission", () => {

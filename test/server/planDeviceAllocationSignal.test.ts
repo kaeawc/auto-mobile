@@ -3,6 +3,7 @@ import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
 import { PlanExecutionOrchestrator } from "../../src/server/planExecutionOrchestrator";
 import { normalizePlanDevices } from "../../src/utils/plan/PlanDevices";
+import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -41,7 +42,7 @@ function orchestrator(signal: AbortSignal | undefined): PlanExecutionOrchestrato
         deviceAllocationTimeoutMs: 5_000,
       },
     },
-    { timer: new FakeTimer() },
+    { timer: new FakeTimer(), videoRecorder: new FakePlanVideoRecorder() },
   );
 }
 

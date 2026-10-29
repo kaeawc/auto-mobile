@@ -84,6 +84,7 @@ export class TransportAwareFakeDeviceManager extends FakeDeviceManager {
     | {
         bypassAndroidDeviceListCache?: boolean;
         bypassIosDeviceListCache?: boolean;
+        includeWatchOs?: boolean;
       }
     | undefined
   > = [];
@@ -93,6 +94,7 @@ export class TransportAwareFakeDeviceManager extends FakeDeviceManager {
     options?: {
       bypassAndroidDeviceListCache?: boolean;
       bypassIosDeviceListCache?: boolean;
+      includeWatchOs?: boolean;
     },
   ) {
     this.discoveryOptions.push(options);

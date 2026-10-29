@@ -213,6 +213,35 @@
     }
   },
   {
+    "name": "a settled pager scrolled entirely out of view releases every player",
+    "input": {
+      "mode": "pager",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0
+        }
+      ],
+      "settledIndex": 0,
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": ["a", "b"]
+    },
+    "expected": {
+      "play": null,
+      "preload": [],
+      "release": ["a", "b"]
+    }
+  },
+  {
     "name": "list plays the most visible player at or above the threshold",
     "input": {
       "mode": "list",

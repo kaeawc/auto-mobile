@@ -11,7 +11,8 @@ import kotlinx.serialization.json.jsonPrimitive
  * The window is the anchor, the next item and the previous item, at most
  * [MAX_PROTOTYPE_ACTIVE_DECODERS]. The anchor plays only in the foreground, and only when its page
  * has settled (pager) or it is at least `visibleThreshold` visible (list). Window players that do
- * not play are preloaded; held players outside the window are released.
+ * not play are preloaded; held players outside the window are released. When nothing is visible,
+ * not even a settled page, every player is released.
  */
 object PrototypeMediaPool {
   val MAX_PROTOTYPE_ACTIVE_DECODERS: Int =
@@ -43,8 +44,13 @@ object PrototypeMediaPool {
 
   fun allocate(input: Input): Allocation {
     val items = input.items
-    val settled = input.settledIndex?.takeIf { input.mode == Mode.PAGER && it in items.indices }
-    val anchor = settled ?: mostVisible(items)
+    val visible = mostVisible(items)
+    // A pager scrolled entirely out of view has no anchor, even with a settled page.
+    val settled =
+      input.settledIndex?.takeIf {
+        input.mode == Mode.PAGER && it in items.indices && visible != null
+      }
+    val anchor = settled ?: visible
     val window =
       if (anchor == null) emptyList()
       else

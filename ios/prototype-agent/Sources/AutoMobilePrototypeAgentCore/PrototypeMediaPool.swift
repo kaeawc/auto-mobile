@@ -7,7 +7,8 @@ import Foundation
 /// The window is the anchor, the next item and the previous item, at most `maxActiveDecoders`. The
 /// anchor plays only in the foreground, and only when its page has settled (pager) or it is at least
 /// `visibleThreshold` visible (list). Window players that do not play are preloaded; held players
-/// outside the window are released.
+/// outside the window are released. When nothing is visible, not even a settled page, every player is
+/// released.
 enum PrototypeMediaPool {
     static let maxActiveDecoders = PrototypeContractValidator.limit("MAX_PROTOTYPE_ACTIVE_DECODERS")
     /// The visible fraction a list player needs to play when its node omits `visibleThreshold`.
@@ -56,10 +57,12 @@ enum PrototypeMediaPool {
 
     static func allocate(_ input: Input) -> Allocation {
         let items = input.items
+        let visible = mostVisible(items)
+        // A pager scrolled entirely out of view has no anchor, even with a settled page.
         let settled = input.settledIndex.flatMap { index in
-            input.mode == .pager && items.indices.contains(index) ? index : nil
+            input.mode == .pager && items.indices.contains(index) && visible != nil ? index : nil
         }
-        let anchor = settled ?? mostVisible(items)
+        let anchor = settled ?? visible
         let window = anchor.map { anchor in
             [anchor, anchor + 1, anchor - 1].filter(items.indices.contains)
                 .prefix(maxActiveDecoders).map { items[$0].id }

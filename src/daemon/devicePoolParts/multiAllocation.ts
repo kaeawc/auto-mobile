@@ -9,6 +9,7 @@ import {
 import { withAllocationCancellationScope } from "../allocationCancellationScope";
 import { logger } from "../../utils/logger";
 import { ActionableError, Platform } from "../../models";
+import { matchesPlatformSelector } from "../../models/Platform";
 import { assertPoolCapacity } from "../poolCapacityError";
 import { type DevicePoolRefreshResult } from "../devicePoolRefresh";
 import { DeviceAllocationRequest } from "../DeviceCriteriaMatcher";
@@ -157,8 +158,8 @@ export class DevicePoolMultiAllocation {
       let refreshFailure = await this.callbacks.ensurePoolRefreshed();
       const preallocationCandidates = this.callbacks.getDevicesByPlatform(platform);
       await this.callbacks.pruneStaleIdleIosDevices(preallocationCandidates);
-      await this.callbacks.evictUnavailableIdleDevicesMatching(
-        (device) => !platform || device.platform === platform,
+      await this.callbacks.evictUnavailableIdleDevicesMatching((device) =>
+        matchesPlatformSelector(device.platform, platform),
       );
       const shortfall = await this.startDevicesForPlatformShortfall(
         requiredCount,

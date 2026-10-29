@@ -134,6 +134,42 @@ const typedResults: Record<string, Record<string, unknown>> = {
     error: "stale_observation",
     totalTimeMs: 17,
   },
+  sdk_web_snapshot_result: {
+    success: true,
+    available: true,
+    webViewId: "main",
+    snapshot: {
+      snapshotId: "s1",
+      url: "https://fixture.local/",
+      elements: [
+        {
+          id: "submit",
+          role: "button",
+          label: "Submit",
+          bounds: [10, 20, 80, 30],
+          enabled: true,
+          visible: true,
+          focused: false,
+        },
+      ],
+    },
+    webViews: [
+      {
+        webViewId: "main",
+        url: "https://fixture.local/",
+        allowedOrigins: ["https://fixture.local"],
+        contentProcessAvailable: true,
+      },
+    ],
+    totalTimeMs: 17,
+  },
+  sdk_web_action_result: {
+    success: false,
+    available: true,
+    result: { status: "rejected", reason: "stale_snapshot" },
+    error: "stale_snapshot",
+    totalTimeMs: 17,
+  },
   voiceover_state_result: { success: true, enabled: true, totalTimeMs: 17 },
   voiceover_set_result: { success: false, error: "fixture failure", totalTimeMs: 17 },
   preference_files: {

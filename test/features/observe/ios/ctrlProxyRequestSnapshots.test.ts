@@ -47,6 +47,10 @@ import {
   requestSdkAction,
   requestSdkObservation,
 } from "../../../../src/features/observe/ios/CtrlProxySdkObservation";
+import {
+  requestSdkWebAction,
+  requestSdkWebSnapshot,
+} from "../../../../src/features/observe/ios/CtrlProxySdkWebView";
 import { requestAccessibilityAudit } from "../../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
@@ -215,6 +219,17 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     builder: "requestSdkAction",
     invoke: (h) =>
       requestSdkAction(h.context, { tap: { observationIdentity: 41, elementId: "submit" } }),
+  },
+  {
+    name: "request_sdk_web_snapshot",
+    builder: "requestSdkWebSnapshot",
+    invoke: (h) => requestSdkWebSnapshot(h.context, { webViewId: "main" }),
+  },
+  {
+    name: "request_sdk_web_action",
+    builder: "requestSdkWebAction",
+    invoke: (h) =>
+      requestSdkWebAction(h.context, "main", { click: { snapshotId: "s1", elementId: "submit" } }),
   },
   {
     name: "request_sdk_trigger",

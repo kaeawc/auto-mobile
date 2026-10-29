@@ -29,9 +29,12 @@ import {
 import type { SdkTriggerRequest } from "../../src/features/observe/ios/CtrlProxySdkTrigger";
 import type { IosObservationBridgeState } from "../../src/features/observe/ios/observationBridgeState";
 import type { IosSdkAction } from "../../src/features/observe/ios/sdkObservationBridge";
+import type { IosSdkWebAction } from "../../src/features/observe/ios/sdkWebViewBridge";
 import type {
   CtrlProxySdkActionResult,
   CtrlProxySdkObservationResult,
+  CtrlProxySdkWebActionResult,
+  CtrlProxySdkWebSnapshotResult,
 } from "../../src/features/observe/ios/types";
 import type {
   CtrlProxyMagicTapResult,
@@ -1494,6 +1497,35 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     this.sdkActions.push(action);
     return (
       this.sdkActionReplies.shift() ?? {
+        success: false,
+        available: false,
+        failure: "bridge_unavailable",
+        totalTimeMs: 0,
+      }
+    );
+  }
+
+  /** Scripted SDK web-view replies (#5162); default: no web view registered. */
+  sdkWebSnapshotReply: CtrlProxySdkWebSnapshotResult = {
+    success: false,
+    available: false,
+    failure: "bridge_unavailable",
+    totalTimeMs: 0,
+  };
+  sdkWebActionReplies: CtrlProxySdkWebActionResult[] = [];
+  readonly sdkWebActions: Array<{ webViewId: string; action: IosSdkWebAction }> = [];
+
+  async requestSdkWebSnapshotForIos(): Promise<CtrlProxySdkWebSnapshotResult> {
+    return this.sdkWebSnapshotReply;
+  }
+
+  async requestSdkWebActionForIos(
+    webViewId: string,
+    action: IosSdkWebAction,
+  ): Promise<CtrlProxySdkWebActionResult> {
+    this.sdkWebActions.push({ webViewId, action });
+    return (
+      this.sdkWebActionReplies.shift() ?? {
         success: false,
         available: false,
         failure: "bridge_unavailable",

@@ -36,6 +36,8 @@
     /// - `POST /trigger` -> deliver a named host trigger to a registered SDK module (#1580)
     /// - `POST /observation/snapshot` -> the registered observation bridge's snapshot (#5159)
     /// - `POST /observation/action` -> perform one bridge action and return its result (#5159)
+    /// - `POST /webview/snapshot` -> a registered web view's latest bounded snapshot (#5162)
+    /// - `POST /webview/action` -> perform one bounded web action and return its result (#5162)
     final class SdkHierarchyServer: @unchecked Sendable {
         static let port: UInt16 = 8766
         static let bindFailureLogPrefix = "[AutoMobileSDK] SDK_SERVER_BIND_FAILED"
@@ -71,6 +73,7 @@
         private let triggerRouteHandler = SdkTriggerRouteHandler()
         private let observationBridgeState: @Sendable () -> ObservationBridgeState
         private let observationRouteHandler: SdkObservationRouteHandler
+        private let webViewRouteHandler: SdkWebViewRouteHandler
 
         init(
             tracker: any SdkHierarchyServing,
@@ -85,11 +88,13 @@
             observationBridgeState: @escaping @Sendable () -> ObservationBridgeState = {
                 AutoMobileObservationRegistry.shared.state
             },
-            observationRegistry: AutoMobileObservationRegistry = .shared
+            observationRegistry: AutoMobileObservationRegistry = .shared,
+            webViewRegistry: AutoMobileWebViewRegistry = .shared
         ) {
             self.tracker = tracker
             self.observationBridgeState = observationBridgeState
             observationRouteHandler = SdkObservationRouteHandler(registry: observationRegistry)
+            webViewRouteHandler = SdkWebViewRouteHandler(registry: webViewRegistry)
             self.identity = identity
             self.warning = warning
             self.error = error
@@ -385,7 +390,8 @@
                 bundleId: tracker?.bundleId,
                 capabilities: Self.capabilities,
                 simulatorUdid: identity.udid,
-                observationBridge: observationBridgeState()
+                observationBridge: observationBridgeState(),
+                webViewBridge: webViewRouteHandler.registry.state
             )
             guard let data = try? JSONEncoder().encode(payload) else {
                 return SdkRouteResponse(statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
@@ -477,6 +483,23 @@
         func handleObservationAction(_ connection: NWConnection, initialData: Data) {
             withRequestBody(connection, initialData: initialData) { server, body in
                 let handler = server.observationRouteHandler
+                Task {
+                    server.sendRouteResponse(connection, await handler.perform(body: body))
+                }
+            }
+        }
+
+        /// `POST /webview/snapshot` (#5162): the body optionally names the web view.
+        func handleWebViewSnapshot(_ connection: NWConnection, initialData: Data) {
+            withRequestBody(connection, initialData: initialData) { server, body in
+                server.sendRouteResponse(connection, server.webViewRouteHandler.snapshot(body: body))
+            }
+        }
+
+        /// `POST /webview/action` (#5162): the body is one JSON-encoded `AutoMobileWebActionRequest`.
+        func handleWebViewAction(_ connection: NWConnection, initialData: Data) {
+            withRequestBody(connection, initialData: initialData) { server, body in
+                let handler = server.webViewRouteHandler
                 Task {
                     server.sendRouteResponse(connection, await handler.perform(body: body))
                 }
@@ -602,6 +625,7 @@
         let capabilities: Set<String>
         let simulatorUdid: String?
         let observationBridge: ObservationBridgeState
+        let webViewBridge: WebViewBridgeState
     }
 
     private struct SetMockRulesResponse: Encodable {

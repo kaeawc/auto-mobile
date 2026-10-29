@@ -1,57 +1,6 @@
+import AutoMobileSdkWire
 import Foundation
 import os
-
-/// A stable description of an interactive element in a web document.
-public struct AutoMobileWebElement: Codable, Sendable, Equatable {
-    public let id: String
-    public let role: String?
-    public let label: String?
-    public let value: String?
-    public let bounds: [Double]
-    public let enabled: Bool
-    public let visible: Bool
-    public let focused: Bool
-
-    public init(
-        id: String,
-        role: String? = nil,
-        label: String? = nil,
-        value: String? = nil,
-        bounds: [Double] = [],
-        enabled: Bool = true,
-        visible: Bool = true,
-        focused: Bool = false
-    ) {
-        self.id = id
-        self.role = role
-        self.label = label
-        self.value = value
-        self.bounds = bounds
-        self.enabled = enabled
-        self.visible = visible
-        self.focused = focused
-    }
-}
-
-/// A bounded DOM snapshot. Element IDs are valid only for this snapshot.
-public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
-    public let snapshotId: String
-    public let url: String?
-    public let title: String?
-    public let elements: [AutoMobileWebElement]
-
-    public init(
-        snapshotId: String = UUID().uuidString,
-        url: String? = nil,
-        title: String? = nil,
-        elements: [AutoMobileWebElement] = []
-    ) {
-        self.snapshotId = snapshotId
-        self.url = url
-        self.title = title
-        self.elements = elements
-    }
-}
 
 /// Policy for attaching the bridge to a web view.
 public struct AutoMobileWebViewConfiguration: Sendable {
@@ -174,6 +123,7 @@ public struct SdkWebViewEvent: SdkEvent {
 public final class AutoMobileWebViewPolicy: Sendable {
     private let configuration: AutoMobileWebViewConfiguration
     private let lock = OSAllocatedUnfairLock<[String: AutoMobileWebSnapshot]>(initialState: [:])
+    private let latest = OSAllocatedUnfairLock<AutoMobileWebSnapshot?>(initialState: nil)
 
     public init(configuration: AutoMobileWebViewConfiguration = .init()) {
         self.configuration = configuration
@@ -212,7 +162,35 @@ public final class AutoMobileWebViewPolicy: Sendable {
                 latestSnapshots.removeValue(forKey: first)
             }
         }
+        latest.withLock { $0 = bounded }
         return bounded
+    }
+
+    /// The most recent snapshot this policy accepted, already bounded and redacted (#5162).
+    var latestSnapshot: AutoMobileWebSnapshot? {
+        latest.withLock { $0 }
+    }
+
+    /// The largest message the bridge accepts or serves, in bytes.
+    var maxMessageBytes: Int {
+        configuration.maxMessageBytes
+    }
+
+    /// Origins this policy allows, for discovery.
+    var allowedOrigins: [String] {
+        Array(configuration.allowedOrigins)
+    }
+
+    /// Why a controller action may not run against the recent snapshots, or nil when it may (#5162).
+    func rejection(for action: AutoMobileWebControlAction) -> String? {
+        lock.withLock { latestSnapshots in
+            guard let snapshot = latestSnapshots[action.snapshotId] else {
+                return AutoMobileWebActionResult.staleSnapshotReason
+            }
+            guard let elementId = action.elementId else { return nil }
+            let actionable = snapshot.elements.contains { $0.id == elementId && $0.enabled && $0.visible }
+            return actionable ? nil : AutoMobileWebActionResult.elementNotActionableReason
+        }
     }
 
     public func validates(_ action: AutoMobileWebAction) -> Bool {
@@ -242,6 +220,26 @@ public final class AutoMobileWebViewPolicy: Sendable {
     }
 }
 
+extension AutoMobileWebAction {
+    /// The bridge action for a controller action (#5162). Every controller action is bounded.
+    init(_ action: AutoMobileWebControlAction) {
+        switch action {
+        case let .click(snapshot, element): self = .click(snapshotId: snapshot, elementId: element)
+        case let .focus(snapshot, element): self = .focus(snapshotId: snapshot, elementId: element)
+        case let .insertText(snapshot, element, text):
+            self = .insertText(snapshotId: snapshot, elementId: element, text: text)
+        case let .select(snapshot, element, value):
+            self = .select(snapshotId: snapshot, elementId: element, value: value)
+        case let .scroll(snapshot, element, x, y): self = .scroll(snapshotId: snapshot, elementId: element, x: x, y: y)
+        case let .setValue(snapshot, element, text):
+            self = .setValue(snapshotId: snapshot, elementId: element, text: text)
+        case let .clear(snapshot, element): self = .clear(snapshotId: snapshot, elementId: element)
+        case let .scrollIntoView(snapshot, element): self = .scrollIntoView(snapshotId: snapshot, elementId: element)
+        case let .submit(snapshot, element): self = .submit(snapshotId: snapshot, elementId: element)
+        }
+    }
+}
+
 #if canImport(WebKit)
     import WebKit
 
@@ -256,6 +254,10 @@ public final class AutoMobileWebViewPolicy: Sendable {
         private let recorder: NetworkCaptureRecorder?
         private weak var webView: WKWebView?
         private let requestLock = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
+        /// The last committed URL and whether the web content process is alive, readable off-main.
+        private let pageState = OSAllocatedUnfairLock<(url: URL?, processAvailable: Bool)>(
+            initialState: (nil, true)
+        )
 
         public init(
             webViewId: String = UUID().uuidString,
@@ -274,6 +276,7 @@ public final class AutoMobileWebViewPolicy: Sendable {
 
         public func attach(to webView: WKWebView) {
             self.webView = webView
+            notePage(url: webView.url, processAvailable: true)
             let controller = webView.configuration.userContentController
             controller.removeScriptMessageHandler(forName: "automobile")
             let world = WKContentWorld.world(name: configuration.contentWorldName)
@@ -366,6 +369,7 @@ public final class AutoMobileWebViewPolicy: Sendable {
                   let name = body["name"] as? String else { return }
             let url = webView?.url
             guard policy.allows(url: url, frameId: body["frameId"] as? String) else { return }
+            notePage(url: url, processAvailable: true)
             var metadata = body.compactMapValues { value -> String? in
                 guard !(value is [Any]), !(value is [String: Any]) else { return nil }
                 return String(describing: value)
@@ -435,23 +439,83 @@ public final class AutoMobileWebViewPolicy: Sendable {
             }
         }
 
-        public func webView(_ webView: WKWebView, didFinish _: WKNavigation!) { emit(
-            name: "navigation_finished",
-            url: webView.url
-        ) }
+        public func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
+            notePage(url: webView.url, processAvailable: true)
+            emit(name: "navigation_finished", url: webView.url)
+        }
+
         public func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError error: Error) { emit(
             name: "navigation_failed",
             url: webView.url,
             metadata: ["error": error.localizedDescription]
         ) }
-        public func webView(_ webView: WKWebView, didCommit _: WKNavigation!) { emit(
-            name: "navigation_committed",
-            url: webView.url
-        ) }
+        public func webView(_ webView: WKWebView, didCommit _: WKNavigation!) {
+            notePage(url: webView.url, processAvailable: true)
+            emit(name: "navigation_committed", url: webView.url)
+        }
+
         public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            notePage(url: webView.url, processAvailable: false)
             emit(name: "content_process_terminated", url: webView.url)
             attach(to: webView)
             webView.reload()
+        }
+
+        private func notePage(url: URL?, processAvailable: Bool) {
+            pageState.withLock { $0 = (url ?? $0.url, processAvailable) }
+        }
+
+        // MARK: AutoMobileWebViewControlling (#5162)
+
+        var bridgeEntry: WebViewBridgeEntry {
+            let page = pageState.withLock { $0 }
+            return WebViewBridgeEntry(
+                webViewId: webViewId,
+                url: page.url?.absoluteString,
+                allowedOrigins: policy.allowedOrigins,
+                contentProcessAvailable: page.processAvailable
+            )
+        }
+
+        var latestSnapshot: AutoMobileWebSnapshot? { policy.latestSnapshot }
+
+        var maxMessageBytes: Int { policy.maxMessageBytes }
+
+        var originAllowed: Bool {
+            policy.allows(url: pageState.withLock { $0.url }, frameId: nil)
+        }
+
+        var contentProcessAvailable: Bool {
+            pageState.withLock { $0.processAvailable }
+        }
+
+        func perform(_ action: AutoMobileWebControlAction) async -> AutoMobileWebActionResult {
+            if !contentProcessAvailable {
+                return .rejected(AutoMobileWebActionResult.webProcessUnavailableReason)
+            }
+            if !originAllowed {
+                return .rejected(AutoMobileWebActionResult.disallowedOriginReason)
+            }
+            if let reason = policy.rejection(for: action) {
+                return .rejected(reason)
+            }
+            let bridgeAction = AutoMobileWebAction(action)
+            return await withCheckedContinuation { continuation in
+                DispatchQueue.main.async {
+                    self.perform(bridgeAction) { result in
+                        switch result {
+                        case .success: continuation.resume(returning: AutoMobileWebActionResult(status: .accepted))
+                        case .failure:
+                            // perform re-validates; a rejection here means the snapshot moved on.
+                            continuation.resume(
+                                returning: self.policy.validates(bridgeAction)
+                                    ? .rejected(AutoMobileWebActionResult.javascriptErrorReason)
+                                    : .rejected(AutoMobileWebActionResult.staleSnapshotReason)
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         private func ifEvaluate(_ action: AutoMobileWebAction) -> Bool {
@@ -475,7 +539,6 @@ public final class AutoMobileWebViewPolicy: Sendable {
                 metadata: metadata
             ))
         }
-
 
         private static let script = #"""
         (() => {
@@ -503,4 +566,6 @@ public final class AutoMobileWebViewPolicy: Sendable {
         })();
         """#
     }
+
+    extension AutoMobileWebViewBridge: AutoMobileWebViewControlling {}
 #endif

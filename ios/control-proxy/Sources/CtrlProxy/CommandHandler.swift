@@ -183,7 +183,7 @@ final class CommandHandler: CommandHandling {
              .appearance, .siri, .clipboard:
             return try await dispatchAppAndDevice(request, startTime: startTime)
         case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
-             .setVoiceOverState, .accessibilityAudit, .sdkObservation, .sdkAction:
+             .setVoiceOverState, .accessibilityAudit, .sdkObservation, .sdkAction, .sdkWebSnapshot, .sdkWebAction:
             return try await dispatchAccessibility(request, startTime: startTime)
         case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
              .clearPreferences, .deleteKeychainItem:
@@ -340,6 +340,10 @@ final class CommandHandler: CommandHandling {
             return await handleSdkObservation(payload, startTime: startTime)
         case let .sdkAction(payload):
             return await handleSdkAction(payload, startTime: startTime)
+        case let .sdkWebSnapshot(payload):
+            return await handleSdkWebSnapshot(payload, startTime: startTime)
+        case let .sdkWebAction(payload):
+            return await handleSdkWebAction(payload, startTime: startTime)
         case let .getVoiceOverState(payload):
             return await handleGetVoiceOverState(payload, startTime: startTime)
         case let .setVoiceOverState(payload):

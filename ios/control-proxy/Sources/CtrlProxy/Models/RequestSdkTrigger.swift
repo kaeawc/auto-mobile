@@ -21,3 +21,22 @@ public struct RequestSdkAction: Decodable, Sendable {
 }
 
 extension RequestSdkAction: CommandPayload {}
+
+/// `request_sdk_web_snapshot`: the latest bounded snapshot of one opted-in WKWebView in the
+/// foreground app's SDK (#5162). A nil `webViewId` names the first registered web view.
+public struct RequestSdkWebSnapshot: Decodable, Sendable {
+    public var requestId: String?
+    public var webViewId: String?
+}
+
+extension RequestSdkWebSnapshot: CommandPayload {}
+
+/// `request_sdk_web_action`: perform one bounded web action (#5162). `actionJson` is one
+/// JSON-encoded `AutoMobileWebControlAction`, which has no JavaScript case.
+public struct RequestSdkWebAction: Decodable, Sendable {
+    public var requestId: String?
+    public var webViewId: String?
+    public var actionJson: String?
+}
+
+extension RequestSdkWebAction: CommandPayload {}

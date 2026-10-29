@@ -433,6 +433,7 @@
                 "observationBridge": [
                     "schemaVersion": 1, "available": false, "reason": "NOT_REGISTERED", "supportedActions": [],
                 ],
+                "webViewBridge": ["schemaVersion": 1, "webViews": []],
             ])
             try assertHttpContract(
                 response,

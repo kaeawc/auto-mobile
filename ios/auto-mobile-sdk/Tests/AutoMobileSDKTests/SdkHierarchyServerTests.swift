@@ -50,6 +50,8 @@ final class SdkHierarchyServerTests: XCTestCase {
             ("POST /trigger", .trigger),
             ("POST /observation/snapshot", .observationSnapshot),
             ("POST /observation/action", .observationAction),
+            ("POST /webview/snapshot", .webViewSnapshot),
+            ("POST /webview/action", .webViewAction),
         ]
         for (request, route) in routes {
             XCTAssertEqual(SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"), .matched(route), request)

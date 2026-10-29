@@ -21,6 +21,8 @@ public enum SdkRoute: String, CaseIterable, Sendable {
     case trigger = "/trigger"
     case observationSnapshot = "/observation/snapshot"
     case observationAction = "/observation/action"
+    case webViewSnapshot = "/webview/snapshot"
+    case webViewAction = "/webview/action"
 
     /// The path, starting with `/`.
     public var path: String { rawValue }

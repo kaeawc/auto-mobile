@@ -29,6 +29,12 @@ import {
   type AppleDeviceRuntime,
   type AppleDeviceType,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import {
+  isAppleWatchDeviceType,
+  isWatchOsSimulatorRuntime,
+} from "../utils/ios-cmdline-tools/simulatorRuntimeFamily";
+import { describeDevice as describeImageDevice } from "../utils/deviceDescriptionProjection";
 import {
   deviceTypeRuntimeBounds,
   evaluateRuntimeCompatibility,
@@ -219,6 +225,8 @@ export interface DeviceImagesResourceContent {
   totalCount: number;
   androidCount: number;
   iosCount: number;
+  /** Present when the read covers watchOS (`automobile:devices/images/watchos`). */
+  watchosCount?: number;
   lastUpdated: string; // ISO 8601
   catalogComplete: boolean;
   catalogObservations: Partial<Record<Platform, ProvisioningCatalogObservation>>;
@@ -241,6 +249,7 @@ interface DeviceImageResourcesDependencies {
   deviceManager: DeviceImageDiscoveryManager;
   avdManager: DeviceImageAvdManager;
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked">;
+  watchInventory: Pick<WatchSimulatorInventory, "listWatchSimulators" | "readCatalog">;
   timer: Timer;
   androidCatalogBudgetMs: number;
 }
@@ -261,7 +270,10 @@ export function createDeviceImageResourcesHandler(
   const avdManager = deps?.avdManager ?? new AvdManagerService();
   // Tests often inject only the Android/device seam. Avoid creating a real simctl
   // client in those partial fakes; production construction always includes it.
-  const simctl = deps?.simctl ?? (deps ? undefined : new SimCtlClient());
+  const productionSimctl = deps ? undefined : new SimCtlClient();
+  const simctl = deps?.simctl ?? productionSimctl;
+  const watchInventory =
+    deps?.watchInventory ?? (productionSimctl && new WatchSimulatorInventory(productionSimctl));
   const timer = deps?.timer ?? defaultTimer;
   const androidCatalogBudgetMs =
     deps?.androidCatalogBudgetMs ?? ANDROID_PROVISIONING_CATALOG_BUDGET_MS;
@@ -286,7 +298,9 @@ export function createDeviceImageResourcesHandler(
               timer,
               androidCatalogBudgetMs,
             )
-          : await buildIosResourceResult(deviceManager, simctl),
+          : platform === "ios"
+            ? await buildIosResourceResult(deviceManager, simctl)
+            : await buildWatchOsResourceResult(watchInventory),
       );
     }
     const images = platformResults.flatMap((result) => result.images);
@@ -304,6 +318,9 @@ export function createDeviceImageResourcesHandler(
       totalCount: images.length,
       androidCount: images.filter((image) => image.platform === "android").length,
       iosCount: images.filter((image) => image.platform === "ios").length,
+      ...(platforms.includes("watchos")
+        ? { watchosCount: images.filter((image) => image.platform === "watchos").length }
+        : {}),
       lastUpdated: new Date().toISOString(),
       catalogComplete: platforms.every(
         (platform) => catalogObservations[platform]?.catalogComplete === true,
@@ -333,13 +350,13 @@ export function createDeviceImageResourcesHandler(
     const platform = params.platform;
 
     // Validate platform parameter
-    if (platform !== "android" && platform !== "ios") {
+    if (platform !== "android" && platform !== "ios" && platform !== "watchos") {
       return {
         uri: `automobile:devices/images/${platform}`,
         mimeType: "application/json",
         text: JSON.stringify(
           {
-            error: `Invalid platform: ${platform}. Must be 'android' or 'ios'.`,
+            error: `Invalid platform: ${platform}. Must be 'android', 'ios' or 'watchos'.`,
           },
           null,
           2,
@@ -447,6 +464,73 @@ async function buildIosResourceResult(
   const catalog = await buildIosProvisioningCatalog(simctl);
   return {
     platform: "ios",
+    images: images.images,
+    provisioningCatalog: catalog.catalog,
+    catalogObservation: catalog.observation,
+    inventoryObservation: images.observation,
+  };
+}
+
+/** Apple Watch simulators and their catalog; read only for `automobile:devices/images/watchos`. */
+async function buildWatchOsResourceResult(
+  watch: Pick<WatchSimulatorInventory, "listWatchSimulators" | "readCatalog"> | undefined,
+): Promise<PlatformResourceResult> {
+  if (!watch) {
+    const error = { code: "unavailable" as const, message: "watchOS inventory is unavailable." };
+    return {
+      platform: "watchos",
+      images: [],
+      provisioningCatalog: emptyProvisioningCatalog(),
+      catalogObservation: { catalogComplete: false, error },
+      inventoryObservation: { complete: false, error },
+    };
+  }
+  const [images, catalog] = await Promise.all([
+    watch.listWatchSimulators().then(
+      (devices) => ({
+        images: devices.map((device) =>
+          projectConfiguredImage(
+            describeImageDevice({
+              kind: "image",
+              image: { ...device, stableId: device.deviceId ?? device.name },
+            }),
+          ),
+        ),
+        observation: { complete: true } as ConfiguredDeviceInventoryObservation,
+      }),
+      (error: unknown) => {
+        logger.warn(
+          `[DeviceImageResources] Failed to list watchOS simulators: ${errorMessage(error)}`,
+          error,
+        );
+        return {
+          images: [],
+          observation: failedConfiguredInventoryObservation(
+            "failed",
+            `watchOS configured-device inventory failed: ${errorMessage(error)}`,
+          ),
+        };
+      },
+    ),
+    watch.readCatalog().then(
+      ({ runtimes, deviceTypes }) => ({
+        catalog: buildSimulatorProvisioningCatalogEntries("watchos", runtimes, deviceTypes),
+        observation: { catalogComplete: true },
+      }),
+      (error: unknown) => {
+        logger.warn(
+          `[DeviceImageResources] Failed to build watchOS provisioning catalog: ${errorMessage(error)}`,
+          error,
+        );
+        return {
+          catalog: emptyProvisioningCatalog(),
+          observation: failedCatalogObservation("watchOS", error),
+        };
+      },
+    ),
+  ]);
+  return {
+    platform: "watchos",
     images: images.images,
     provisioningCatalog: catalog.catalog,
     catalogObservation: catalog.observation,
@@ -707,8 +791,13 @@ async function buildIosProvisioningCatalog(
       simctl.getRuntimesChecked(),
       simctl.getDeviceTypesChecked(),
     ]);
+    // Watch runtimes and models belong to the watchOS catalog, never the iOS one (#14901).
     return {
-      catalog: buildIosProvisioningCatalogEntries(runtimes, deviceTypes),
+      catalog: buildSimulatorProvisioningCatalogEntries(
+        "ios",
+        runtimes.filter((runtime) => !isWatchOsSimulatorRuntime(runtime.identifier)),
+        deviceTypes.filter((deviceType) => !isAppleWatchDeviceType(deviceType)),
+      ),
       observation: { catalogComplete: true },
     };
   } catch (error) {
@@ -721,7 +810,7 @@ async function buildIosProvisioningCatalog(
 }
 
 function failedCatalogObservation(
-  platform: "Android" | "iOS",
+  platform: "Android" | "iOS" | "watchOS",
   error: unknown,
 ): ProvisioningCatalogObservation {
   return {
@@ -793,7 +882,8 @@ function buildAndroidProvisioningCatalog(
   };
 }
 
-function buildIosProvisioningCatalogEntries(
+function buildSimulatorProvisioningCatalogEntries(
+  platform: "ios" | "watchos",
   runtimes: AppleDeviceRuntime[],
   deviceTypes: AppleDeviceType[],
 ): ProvisioningCatalog {
@@ -826,7 +916,7 @@ function buildIosProvisioningCatalogEntries(
       availability = { available: false, reason: "unknown" };
     }
     return {
-      platform: "ios" as const,
+      platform,
       id: deviceType.identifier,
       name: deviceType.name,
       family: deviceType.productFamily,
@@ -837,7 +927,7 @@ function buildIosProvisioningCatalogEntries(
 
   return {
     runtimes: runtimeEntries.map(({ runtime, availability }) => ({
-      platform: "ios",
+      platform,
       id: runtime.identifier,
       name: runtime.name,
       version: runtime.version,
@@ -929,7 +1019,7 @@ export function registerDeviceImageResources(): void {
   ResourceRegistry.registerTemplate(
     DEVICE_IMAGE_RESOURCE_URIS.PLATFORM_TEMPLATE,
     "Platform-specific Device Images",
-    "Configured device inventory and completeness evidence for android or ios.",
+    "Configured device inventory and completeness evidence for android, ios or watchos.",
     "application/json",
     handler.getDeviceImagesByPlatform,
   );
@@ -943,5 +1033,6 @@ export async function notifyDeviceImageResourcesUpdated(): Promise<void> {
     DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
     `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
     `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
+    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/watchos`,
   ]);
 }

@@ -53,29 +53,37 @@ describe("createIosSdkWebReader (#5162)", () => {
     expect(client.requests).toEqual([undefined]);
   });
 
-  test("reads each further web view by id and keeps a slot for one without a snapshot", async () => {
+  test("two or more registered web views cost one read and carry no snapshots", async () => {
+    const client = new FakeWebClient({
+      first: {
+        success: true,
+        available: true,
+        totalTimeMs: 1,
+        webViewId: "a",
+        snapshot: snapshotOf("s1"),
+        webViews: [entry("a"), entry("b"), entry("c")],
+      },
+    });
+    expect(await reader(client).snapshots()).toEqual([
+      { webViewId: "a" },
+      { webViewId: "b" },
+      { webViewId: "c" },
+    ]);
+    expect(client.requests).toEqual([undefined]);
+  });
+
+  test("a single web view whose read failed keeps its slot without a snapshot", async () => {
     const client = new FakeWebClient({
       first: {
         success: false,
         available: true,
         totalTimeMs: 1,
         failure: "no_snapshot",
-        webViews: [entry("a"), entry("b")],
-      },
-      b: {
-        success: true,
-        available: true,
-        totalTimeMs: 1,
-        webViewId: "b",
-        snapshot: snapshotOf("s2"),
-        webViews: [entry("a"), entry("b")],
+        webViews: [entry("a")],
       },
     });
-    expect(await reader(client).snapshots()).toEqual([
-      { webViewId: "a" },
-      { webViewId: "b", snapshot: snapshotOf("s2") },
-    ]);
-    expect(client.requests).toEqual([undefined, "b"]);
+    expect(await reader(client).snapshots()).toEqual([{ webViewId: "a" }]);
+    expect(client.requests).toEqual([undefined]);
   });
 
   test("routing off, no client, no registered web view or a failed read yields nothing", async () => {

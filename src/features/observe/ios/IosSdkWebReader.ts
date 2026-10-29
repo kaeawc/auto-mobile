@@ -60,21 +60,19 @@ export function createIosSdkWebReader(options: IosSdkWebReaderOptions): IosSdkWe
         return [];
       }
       // The first read names no web view: it answers with the registered list and the first one's
-      // snapshot, so an app with a single web view costs one round trip.
+      // snapshot, which is all a single web view needs.
       const first = await readSnapshot(client, { signal });
       const entries = first?.webViews ?? [];
-      const read: IosSdkWebViewSnapshot[] = [];
-      for (const [index, entry] of entries.entries()) {
-        // The unnamed read is the first registered web view's, even when it failed and so names
-        // no web view.
-        const reply =
-          index === 0 ? first : await readSnapshot(client, { webViewId: entry.webViewId, signal });
-        read.push({
-          webViewId: entry.webViewId,
-          ...(reply?.success && reply.snapshot ? { snapshot: reply.snapshot } : {}),
-        });
+      if (entries.length > 1) {
+        // Two or more web views cannot be paired with their WKWebView nodes, so the merge leaves
+        // them XCTest-only; reading their snapshots would only add round trips.
+        return entries.map(({ webViewId }) => ({ webViewId }));
       }
-      return read;
+      // The unnamed read is the single web view's, even when it failed and so names no web view.
+      return entries.map(({ webViewId }) => ({
+        webViewId,
+        ...(first?.success && first.snapshot ? { snapshot: first.snapshot } : {}),
+      }));
     },
   };
 }

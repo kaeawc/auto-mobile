@@ -147,8 +147,8 @@ sdkBridge` in `extras`. The result reports `backend: sdk`, or `backend: xctest` 
 reports neither.
 
 **Observe: web views.** When the projected hierarchy contains a `WKWebView` node, the collector
-also reads the app's opted-in web views: one unnamed snapshot read answers with the registered list
-and the first web view's snapshot, and each further web view is read by id (2 s budget each). A
+also reads the app's opted-in web views with one unnamed snapshot read (2 s budget), which answers
+with the registered list and the first web view's snapshot. A
 screen without a `WKWebView` makes no read. A snapshot is merged only when the app registered
 exactly one web view and the screen shows exactly one outermost `WKWebView`: nothing ties a
 registration to its native view, and the registry orders web views by registration rather than by

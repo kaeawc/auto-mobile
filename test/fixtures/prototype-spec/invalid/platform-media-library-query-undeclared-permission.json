@@ -1,0 +1,55 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "library": {
+        "recent": [],
+        "ticket": {},
+        "saved": {}
+      }
+    },
+    "state": {
+      "saveStatus": ""
+    },
+    "requires": {
+      "platform": ["mediaLibrary"],
+      "permissions": [
+        {
+          "name": "photosAdd",
+          "purpose": "Save your ticket to Photos"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Recent",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "mediaLibrary.query",
+              "args": {
+                "media": {
+                  "value": "images"
+                },
+                "limit": {
+                  "value": 24
+                }
+              },
+              "into": "/data/library/recent"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].call",
+  "expectedMessage": "Platform call mediaLibrary.query requires permission photos in requires.permissions"
+}

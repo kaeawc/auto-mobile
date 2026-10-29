@@ -1,6 +1,7 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../models/describeUnknownError";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import type {
   AudioInjection,
   CaptureResult,
@@ -37,6 +38,12 @@ export interface EmulatorAudioSession {
 
 export type EmulatorAudioSessionFactory = (endpoint: EmulatorGrpcEndpoint) => EmulatorAudioSession;
 
+/**
+ * How audio reaches the device: an emulator's own gRPC audio API, or for an iOS Simulator the host's
+ * CoreAudio loopback devices, which every simulator on the host shares.
+ */
+export type AudioRoute = "emulator-grpc" | "host-loopback";
+
 export type AudioSource =
   | { kind: "file"; path: string }
   | { kind: "tone"; frequencyHz?: number; durationMs?: number };
@@ -53,7 +60,7 @@ export interface StartedInjection {
   deviceId: string;
   durationMs: number;
   sampleRate: number;
-  route: "emulator-grpc";
+  route: AudioRoute;
 }
 
 export interface StoppedInjection extends InjectionResult {
@@ -70,7 +77,7 @@ export interface CapturedAudio extends AudioLevels {
   pcm: PcmAudio;
   /** True when the guest produced less audio than requested before the deadline. */
   timedOut: boolean;
-  route: "emulator-grpc";
+  route: AudioRoute;
 }
 
 /** Largest source file read into memory: about 4.5 minutes of 48 kHz stereo 16-bit audio. */
@@ -83,6 +90,7 @@ export const FINISHED_INJECTIONS_KEPT = 64;
 
 interface ActiveInjection {
   deviceId: string;
+  route: AudioRoute;
   /** The session that started the injection, if any. */
   owner?: string;
   injection: AudioInjection;
@@ -93,6 +101,8 @@ export interface EmulatorAudioServiceDeps {
   discovery: EmulatorGrpcDiscovery;
   guestCapture: GuestAudioCapture;
   createSession: EmulatorAudioSessionFactory;
+  /** A session over the host loopback devices, for iOS Simulators; absent where there is none. */
+  createHostLoopbackSession?: () => EmulatorAudioSession;
   /**
    * Reads a regular file, refusing it once it exceeds `maxBytes`. The cap must hold for the read
    * itself, not a prior size check: a device file such as /dev/zero reports size 0.
@@ -123,12 +133,14 @@ function unsupported(code: EmulatorAudioErrorCode, reason: string): EmulatorAudi
 
 /**
  * Microphone injection and output capture for Android emulators over each emulator's own gRPC
- * endpoint (#13628, #13629). Tracks live injections by id so a stop is idempotent and a session
+ * endpoint, and for iOS Simulators over the host loopback devices (#13628, #13629). Tracks live injections by id so a stop is idempotent and a session
  * release can stop everything still playing into a device.
  */
 export class EmulatorAudioService {
   private readonly reservedDevices = new Set<string>();
   private readonly active = new Map<string, ActiveInjection>();
+  /** A host-loopback start is between its busy check and registration. */
+  private hostLoopbackStarting = false;
   /** Settled results (success or failure) of ended injections, newest last. */
   private readonly finished = new Map<
     string,
@@ -160,27 +172,31 @@ export class EmulatorAudioService {
     deviceId: string,
     request: StartInjectionRequest,
   ): Promise<StartedInjection> {
-    const endpoint = await this.endpointFor(deviceId, "audio_injection_unsupported");
-    const pcm = applyGainDb(await this.loadSource(request.source), request.gainDb ?? 0);
-    const guestCapture = await this.deps.guestCapture.open(deviceId);
-    let session: EmulatorAudioSession | undefined;
-    let injection: AudioInjection;
-    let injectionId: string;
+    const route = await this.routeFor(deviceId, "audio_injection_unsupported");
+    const release = this.reserveHostLoopback(route.route);
+    let opened: Awaited<ReturnType<EmulatorAudioService["openInjection"]>>;
     try {
-      session = this.deps.createSession(endpoint);
-      injectionId = this.deps.ids.next();
-      injection = await session.injectAudio(pcm, {
-        loop: request.loop,
-        startDelayMs: request.startDelayMs,
-        maxDurationMs:
-          request.maxDurationMs ?? (request.loop ? DEFAULT_LOOP_MAX_DURATION_MS : undefined),
-      });
-    } catch (error) {
-      await this.closeInjectionResources(guestCapture, session);
-      throw await this.classifyInjectionError(deviceId, endpoint, error);
+      opened = await this.openInjection(deviceId, route, request);
+    } finally {
+      // Registration below has no intervening await, preserving the global reservation.
+      release();
     }
-    const result = this.settle(injectionId, deviceId, endpoint, injection, session, guestCapture);
-    this.active.set(injectionId, { deviceId, owner: request.sessionId, injection, result });
+    const { session, injection, injectionId, guestCapture } = opened;
+    const result = this.settle(
+      injectionId,
+      deviceId,
+      route.endpoint,
+      injection,
+      session,
+      guestCapture,
+    );
+    this.active.set(injectionId, {
+      deviceId,
+      route: route.route,
+      owner: request.sessionId,
+      injection,
+      result,
+    });
     const retire = () => {
       this.active.delete(injectionId);
       this.reservedDevices.delete(deviceId);
@@ -199,7 +215,7 @@ export class EmulatorAudioService {
       deviceId,
       durationMs: injection.durationMs,
       sampleRate: injection.sampleRate,
-      route: "emulator-grpc",
+      route: route.route,
     };
   }
 
@@ -271,15 +287,15 @@ export class EmulatorAudioService {
   }
 
   async capture(deviceId: string, request: CaptureRequest): Promise<CapturedAudio> {
-    const endpoint = await this.endpointFor(deviceId, "audio_capture_unsupported");
-    const session = this.deps.createSession(endpoint);
+    const route = await this.routeFor(deviceId, "audio_capture_unsupported");
+    const session = route.open();
     try {
       const { pcm, timedOut } = await session.captureAudio({
         durationMs: request.durationMs,
         sampleRate: request.sampleRate,
       });
       const levels = analyzeLevels(pcm, { silenceThresholdDbfs: request.silenceThresholdDbfs });
-      return { ...levels, pcm, timedOut, route: "emulator-grpc" };
+      return { ...levels, pcm, timedOut, route: route.route };
     } finally {
       await session.close();
     }
@@ -288,22 +304,24 @@ export class EmulatorAudioService {
   private async settle(
     injectionId: string,
     deviceId: string,
-    endpoint: EmulatorGrpcEndpoint,
+    endpoint: EmulatorGrpcEndpoint | undefined,
     injection: AudioInjection,
     session: EmulatorAudioSession,
-    guestCapture: GuestAudioCaptureHandle,
+    guestCapture: GuestAudioCaptureHandle | undefined,
   ): Promise<StoppedInjection> {
     try {
       return { injectionId, ...(await injection.done) };
     } catch (error) {
-      throw await this.classifyInjectionError(deviceId, endpoint, error);
+      throw endpoint
+        ? await this.classifyInjectionError(deviceId, endpoint, error)
+        : toActionableError(error, `Audio injection on ${deviceId} failed`);
     } finally {
       await this.closeInjectionResources(guestCapture, session);
     }
   }
 
   private async closeInjectionResources(
-    guestCapture: GuestAudioCaptureHandle,
+    guestCapture: GuestAudioCaptureHandle | undefined,
     session?: EmulatorAudioSession,
   ): Promise<boolean> {
     // Always attempt both cleanups, preserving the injection's original result or error.
@@ -337,6 +355,79 @@ export class EmulatorAudioService {
     return toActionableError(error, `Audio injection on ${deviceId} failed`);
   }
 
+  private async openInjection(
+    deviceId: string,
+    route: { open: () => EmulatorAudioSession; endpoint?: EmulatorGrpcEndpoint },
+    request: StartInjectionRequest,
+  ): Promise<{
+    session: EmulatorAudioSession;
+    injection: AudioInjection;
+    injectionId: string;
+    guestCapture?: GuestAudioCaptureHandle;
+  }> {
+    const pcm = applyGainDb(await this.loadSource(request.source), request.gainDb ?? 0);
+    const guestCapture = route.endpoint ? await this.deps.guestCapture.open(deviceId) : undefined;
+    let session: EmulatorAudioSession | undefined;
+    try {
+      session = route.open();
+      const injectionId = this.deps.ids.next();
+      const injection = await session.injectAudio(pcm, {
+        loop: request.loop,
+        startDelayMs: request.startDelayMs,
+        maxDurationMs:
+          request.maxDurationMs ?? (request.loop ? DEFAULT_LOOP_MAX_DURATION_MS : undefined),
+      });
+      return { session, injection, injectionId, guestCapture };
+    } catch (error) {
+      await this.closeInjectionResources(guestCapture, session);
+      throw route.endpoint
+        ? await this.classifyInjectionError(deviceId, route.endpoint, error)
+        : toActionableError(error, `Audio injection on ${deviceId} failed`);
+    }
+  }
+
+  /**
+   * The host loopback devices feed every simulator on the host at once, so a second injection would
+   * mix into the first one's microphone. Holds the route from the start until the injection is
+   * registered; returns the release.
+   */
+  private reserveHostLoopback(route: AudioRoute): () => void {
+    if (route !== "host-loopback") {
+      return () => {};
+    }
+    const playing = [...this.active].find(([, entry]) => entry.route === "host-loopback");
+    if (this.hostLoopbackStarting || playing) {
+      const holder = playing
+        ? `Audio injection '${playing[0]}' on ${playing[1].deviceId} is`
+        : "Another injection is starting and";
+      throw new EmulatorAudioError(
+        "audio_injection_busy",
+        `${holder} using the host loopback device, which every iOS Simulator on this host records ` +
+          "from. Stop it before starting another.",
+      );
+    }
+    this.hostLoopbackStarting = true;
+    return () => {
+      this.hostLoopbackStarting = false;
+    };
+  }
+
+  private async routeFor(
+    deviceId: string,
+    code: EmulatorAudioErrorCode,
+  ): Promise<{
+    route: AudioRoute;
+    open: () => EmulatorAudioSession;
+    endpoint?: EmulatorGrpcEndpoint;
+  }> {
+    const hostLoopback = this.deps.createHostLoopbackSession;
+    if (hostLoopback && resolveIosDeviceKind({ deviceId }) === "simulator") {
+      return { route: "host-loopback", open: hostLoopback };
+    }
+    const endpoint = await this.endpointFor(deviceId, code);
+    return { route: "emulator-grpc", endpoint, open: () => this.deps.createSession(endpoint) };
+  }
+
   private async endpointFor(
     deviceId: string,
     code: EmulatorAudioErrorCode,
@@ -344,7 +435,7 @@ export class EmulatorAudioService {
     if (!isAndroidEmulatorSerial(deviceId)) {
       throw unsupported(
         code,
-        `Audio injection and capture use the Android emulator's gRPC audio API; '${deviceId}' is not a local emulator.`,
+        `Audio injection and capture support local Android emulators and iOS Simulators; '${deviceId}' is neither.`,
       );
     }
     const consolePort = Number.parseInt(deviceId.slice("emulator-".length), 10);

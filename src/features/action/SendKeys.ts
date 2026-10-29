@@ -53,6 +53,7 @@ import {
 import { Keyboard } from "./Keyboard";
 import type { RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
+import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
 import { type KeyboardIdentity } from "./AndroidImeCatalog";
 
 export { DefaultSendKeysCommandExecutor };
@@ -177,7 +178,14 @@ export interface SendKeysCommandResult extends BaseActionResult {
   retryable?: boolean;
   verified?: boolean;
   warning?: string;
-  backend?: "autoMobileIme";
+  /**
+   * `autoMobileIme` on Android IME typing. On iOS, for a field merged from the app's SDK
+   * observation bridge (#5159): `sdk` when the bridge entered or cleared the text, `xctest` when
+   * XCTest stood in.
+   */
+  backend?: "autoMobileIme" | import("../../models/ObserveResult").ObservationBackend;
+  /** Why XCTest stood in for the bridge: it was unavailable, or it does not support the action. */
+  fallbackReason?: import("../../models/ObserveResult").ObservationFallbackReason;
   capability?: "semanticText";
   keyboard?: KeyboardIdentity;
 }
@@ -214,6 +222,10 @@ export interface SendKeysCommandExecutor {
   setTargetLayer?(layer: HierarchyLayer | undefined): void;
   /** The focuser reported the target as a password field; honoured for prototype-layer targets. */
   setTargetPasswordField?(passwordField: boolean): void;
+  /** iOS: the focused field's SDK observation-bridge identity, when it is a bridge node (#5159). */
+  setIosSdkTextTarget?(
+    target: import("../observe/ios/iosSdkObservationMerge").IosSdkBridgeTarget | undefined,
+  ): void;
   isPasswordTarget?(): boolean;
   resetCaretState?(): void;
   withImeSpan?(action: () => Promise<SendKeysCommandExecution>): Promise<SendKeysCommandExecution>;
@@ -238,6 +250,7 @@ export interface SendKeysCommandExecutor {
     retryable?: boolean;
     warning?: string;
     partialApplication?: boolean;
+    iosBackend?: import("./IosSdkBridgeTapRouter").IosSdkTapOutcome;
   }>;
 }
 
@@ -254,6 +267,8 @@ export interface SendKeysTargetFocuser {
       identifiers?: readonly string[];
       /** Layer of the resolved element, when known. */
       layer?: HierarchyLayer;
+      /** iOS: the resolved element's SDK observation-bridge identity (#5159). */
+      sdkTarget?: import("../observe/ios/iosSdkObservationMerge").IosSdkBridgeTarget;
     }
   >;
 }
@@ -319,6 +334,8 @@ export type TextActionResult = {
   /** Device upper bound; this is not the verified committedGraphemes count. */
   committedUnits?: number;
   sessionUnsafe?: boolean;
+  /** Internal: the iOS SDK bridge outcome, mapped to `backend` / `fallbackReason` (#5159). */
+  iosBackend?: import("./IosSdkBridgeTapRouter").IosSdkTapOutcome;
 };
 
 export interface SendKeysTextClient {
@@ -373,6 +390,15 @@ export interface SendKeysInputKey {
     verified?: boolean;
     warning?: string;
   }>;
+}
+
+/** The focused element's SDK bridge identity, so text entry can follow it to the bridge (#5159). */
+function sdkTargetField(
+  device: Pick<BootedDevice, "platform">,
+  element: Record<string, unknown> | undefined,
+): { sdkTarget?: import("../observe/ios/iosSdkObservationMerge").IosSdkBridgeTarget } {
+  const sdkTarget = device.platform === "ios" && element ? iosSdkBridgeTarget(element) : null;
+  return sdkTarget ? { sdkTarget } : {};
 }
 
 export class SendKeys {
@@ -446,6 +472,7 @@ export class SendKeys {
             ...(result.element && new FieldTypeDetector().isPasswordField(result.element)
               ? { passwordField: true }
               : {}),
+            ...sdkTargetField(device, result.element),
           };
         },
       } satisfies SendKeysTargetFocuser);
@@ -477,6 +504,7 @@ export class SendKeys {
       setTargetLayer: (layer) => this.executor.setTargetLayer?.(layer),
       setTargetPasswordField: (passwordField) =>
         this.executor.setTargetPasswordField?.(passwordField),
+      setIosSdkTextTarget: (target) => this.executor.setIosSdkTextTarget?.(target),
     });
     this.commandRunner = new CommandRunner({
       device: this.device,
@@ -504,6 +532,7 @@ export class SendKeys {
     this.target.effectiveLayer = options?.layer;
     this.executor.setTargetLayer?.(this.target.effectiveLayer);
     this.executor.setTargetPasswordField?.(false);
+    this.executor.setIosSdkTextTarget?.(undefined);
     const result = await this.executeFocused(
       commands,
       selector,

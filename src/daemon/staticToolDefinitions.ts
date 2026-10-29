@@ -50,6 +50,8 @@ const EMBEDDED_SDK_ONLY_META_KEY = "automobile/embeddedSdkOnly";
 const PLAN_ONLY_META_KEY = "automobile/planOnly";
 const DEVICE_RESOURCE_BUDGET_META_KEY = "automobile/deviceResourceBudget";
 const HOST_INVENTORY_META_KEY = "automobile/hostInventory";
+const HOST_SIDE_STATE_META_KEY = "automobile/hostSideState";
+const OPAQUE_PERSISTENT_STATE_META_KEY = "automobile/opaquePersistentState";
 
 function isConnectedFallbackAvailable(
   tool: RawToolDefinition,
@@ -81,6 +83,8 @@ function toolDefinitions(
     delete meta[PLAN_ONLY_META_KEY];
     delete meta[DEVICE_RESOURCE_BUDGET_META_KEY];
     delete meta[HOST_INVENTORY_META_KEY];
+    delete meta[HOST_SIDE_STATE_META_KEY];
+    delete meta[OPAQUE_PERSISTENT_STATE_META_KEY];
     const definition: ProxiedToolDefinition = {
       name: tool.name,
       title: tool.title,
@@ -145,6 +149,28 @@ export function staticToolDeclaresHostInventory(toolName: unknown): boolean {
     RAW_DEFINITIONS.find((tool) => tool.name === toolName)?._meta?.[HOST_INVENTORY_META_KEY] ===
       true
   );
+}
+
+function staticToolDeclaresMeta(toolName: string, key: string): boolean {
+  return RAW_DEFINITIONS.find((tool) => tool.name === toolName)?._meta?.[key] === true;
+}
+
+/**
+ * Whether the committed definition of `toolName` carries the `changesHostSideState` trait
+ * (`_meta["automobile/hostSideState"]`), read by the broker's Android reset policy instead of a
+ * tool-name set (#15672); the flag is stripped from the cold wire payload.
+ */
+export function staticToolChangesHostSideState(toolName: string): boolean {
+  return staticToolDeclaresMeta(toolName, HOST_SIDE_STATE_META_KEY);
+}
+
+/**
+ * Whether the committed definition of `toolName` carries the `changesOpaquePersistentState` trait
+ * (`_meta["automobile/opaquePersistentState"]`), read by the broker's Android reset policy instead of
+ * a tool-name set (#15672); the flag is stripped from the cold wire payload.
+ */
+export function staticToolChangesOpaquePersistentState(toolName: string): boolean {
+  return staticToolDeclaresMeta(toolName, OPAQUE_PERSISTENT_STATE_META_KEY);
 }
 
 export function staticToolDeclaresInput(toolName: string, property: string): boolean {

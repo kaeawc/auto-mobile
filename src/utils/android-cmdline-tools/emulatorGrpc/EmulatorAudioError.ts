@@ -1,14 +1,15 @@
 import { ActionableError } from "../../../models/ActionableError";
 import { GrpcStatus, type GrpcStatusResult } from "./grpcFraming";
 
-/** Stable codes callers can branch on for emulator audio and guest-capture failures. */
+/** Stable codes for emulator gRPC, guest capture, and iOS Simulator host-loopback failures. */
 export type EmulatorAudioErrorCode =
   | "audio_emulator_exited"
   | "audio_guest_capture_unavailable"
   | "audio_injection_busy"
   | "audio_injection_unsupported"
   | "audio_capture_unsupported"
-  | "audio_grpc_failed";
+  | "audio_grpc_failed"
+  | "audio_loopback_failed";
 
 /**
  * The generic tool-error path serializes only the message, so the message leads with the code in

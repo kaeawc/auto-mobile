@@ -1,27 +1,54 @@
-# Emulator audio
+# Emulator and simulator audio
 
-Feed known audio into an Android emulator's microphone and check whether an app played sound. Use
-these to test voice notes, voice search, calls, notification sounds and media playback on
-headless CI.
+Feed known audio into an Android emulator's or iOS Simulator's microphone and check whether an
+app played sound. Use these to test voice notes, voice search, calls, notification sounds and
+media playback on headless CI.
 
 All three tools are off by default; enable them with `setToolEnabled`. They work on local Android
-emulators only. Physical devices and iOS are refused.
+emulators and iOS Simulators. Physical devices are refused.
+
+## Android emulators
 
 Each emulator has its own audio channel, so emulators running side by side never hear each
 other. The host needs no microphone, speaker or sound server, and this works the same in a
 container. Keep audio enabled on the emulator: do not set `AUTOMOBILE_EMULATOR_AUDIO=false`.
+The result's `route` is `emulator-grpc`.
+
+## iOS Simulators
+
+A simulator records from the Mac's default input device and plays to its default output device,
+so audio goes through loopback devices on the Mac. The result's `route` is `host-loopback`.
+
+Set up the Mac once:
+
+1. Install a loopback audio driver such as BlackHole 2ch.
+2. Make the loopback device the default input (for `injectAudioInput`) and the default output
+   (for `captureAudio`).
+3. Set `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER` to the path of an `audio-loopback-helper`
+   executable.
+4. Give the process that runs AutoMobile Microphone permission, which `captureAudio` needs to read
+   the loopback device.
+
+Every simulator on the Mac shares these devices:
+
+- Only one simulator injection runs at a time per Mac; a second gets `audio_injection_busy`.
+- A capture hears every simulator on the Mac. Run audio tests on one simulator at a time.
+- With one loopback device as both default input and output, a simulator's own playback also
+  reaches its microphone.
 
 ## injectAudioInput
 
-Opens a guest microphone capture, verifies it is running for three seconds, then plays audio
-into the microphone and returns as soon as streaming starts. The app need not already be
-recording. The emulator image must provide `tinycap` to the ADB shell user and readable capture
-status under `/proc/asound`; AutoMobile does not enable `adb root`. If the capture cannot be
+Plays audio into the microphone and returns as soon as streaming starts. On Android, it first
+opens a guest microphone capture and verifies it is running for three seconds, so the app need
+not already be recording. The emulator image must provide `tinycap` to the ADB shell user and
+readable capture status under `/proc/asound`; AutoMobile does not enable `adb root`. If the capture cannot be
 verified within eight seconds, injection is refused. A competing app recording may prevent the
 recorder from opening; stop that recording and retry.
 
-Only one injection may start or run per emulator. AutoMobile closes only its own recorder when
+Only one injection may start or run per device. On Android, AutoMobile closes only its own recorder when
 injection stops, finishes, reaches its duration limit, or fails, including on session release.
+Cleanup skips signaling a recorder if the emulator restarted or the recorder's identity cannot
+be verified.
 
 | Parameter       | Description                                                                     |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -48,12 +75,12 @@ id after a server restart, is an error. If the emulator exited during injection,
 
 ## captureAudio
 
-Records the emulator's audio output for `seconds` (at most 20) and reports:
+Records the device's audio output for `seconds` (at most 20) and reports:
 
 - `silent`: true when no 20 ms window reaches `silenceThresholdDbfs` (default -50).
 - `rmsDbfs`, `peakDbfs`: overall level; digital silence reports -120.
 - `activeRatio`: the share of windows with sound.
-- `timedOut`: true when the emulator produced less audio than asked for. A silent app gives
+- `timedOut`: true when the device produced less audio than asked for. A silent app gives
   `silent: true` and `timedOut: true`, not an error.
 
 With `saveArtifact: true` the capture is also written as a WAV file, and `path` and `sizeBytes`
@@ -66,11 +93,12 @@ glitch real-time audio.
 
 Errors start with a code in brackets:
 
-| Code                              | Meaning and what to do                                                                                                                                         |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `audio_injection_busy`            | Another injection is starting or already feeds this emulator's microphone. Stop it first.                                                                      |
-| `audio_injection_unsupported`     | The device is not a local emulator, or its emulator build has no gRPC audio. Use a recent emulator on the same host.                                           |
-| `audio_guest_capture_unavailable` | A running guest capture could not be verified. Use an image with shell-accessible `tinycap` and readable `/proc/asound`, stop competing recordings, and retry. |
-| `audio_emulator_exited`           | The emulator exited during injection. Restart the named emulator and start a new injection.                                                                    |
-| `audio_capture_unsupported`       | The device is not a local emulator, or its emulator build has no gRPC output capture. Use a recent emulator on the same host.                                  |
-| `audio_grpc_failed`               | Any other emulator error; the message carries its detail.                                                                                                      |
+| Code                              | Meaning and what to do                                                                                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audio_injection_busy`            | Another injection is starting or already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                             |
+| `audio_injection_unsupported`     | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above. |
+| `audio_capture_unsupported`       | The same, for capture; a simulator needs a loopback default output.                                                                                                                                         |
+| `audio_grpc_failed`               | Any other emulator error; the message carries its detail.                                                                                                                                                   |
+| `audio_loopback_failed`           | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                              |
+| `audio_guest_capture_unavailable` | A running guest capture could not be verified. Use an image with shell-accessible `tinycap` and readable `/proc/asound`, stop competing recordings, and retry.                                              |
+| `audio_emulator_exited`           | The emulator exited during injection. Restart the named emulator and start a new injection.                                                                                                                 |

@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
+import { ENV } from "../../config/env";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
@@ -10,6 +11,8 @@ import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { audioSourceTooLarge, EmulatorAudioService } from "./EmulatorAudioService";
 import { AdbGuestAudioCapture } from "./GuestAudioCapture";
+import { HostLoopbackAudioSession } from "./HostLoopbackAudioSession";
+import { audioLoopbackHelperPath, spawnLoopbackHelper } from "./audioLoopbackHelper";
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -52,22 +55,34 @@ export async function readRegularFileCapped(path: string, maxBytes: number): Pro
   }
 }
 
-/** The service over each emulator's real gRPC endpoint, as discovered on this host. */
+/**
+ * The service over each emulator's real gRPC endpoint, as discovered on this host, and over the host
+ * loopback devices for iOS Simulators.
+ */
 export function createEmulatorAudioService(): EmulatorAudioService {
   const fs = new DefaultFileSystem();
+  const discovery = new FileEmulatorGrpcDiscovery(fs);
   return new EmulatorAudioService({
-    discovery: new FileEmulatorGrpcDiscovery(fs),
-    guestCapture: new AdbGuestAudioCapture((deviceId) =>
-      defaultAdbClientFactory.create({
-        deviceId,
-        platform: "android",
-        name: deviceId,
-      }),
+    discovery,
+    guestCapture: new AdbGuestAudioCapture(
+      (deviceId) =>
+        defaultAdbClientFactory.create({
+          deviceId,
+          platform: "android",
+          name: deviceId,
+        }),
+      discovery,
+      defaultIdGenerator,
     ),
     createSession: (endpoint) =>
       new EmulatorAudioClient(
         new Http2GrpcTransport(endpoint.address),
         createGrpcAuthorizer(endpoint.auth, fs),
+      ),
+    createHostLoopbackSession: () =>
+      new HostLoopbackAudioSession(
+        { helperPath: () => audioLoopbackHelperPath(), launchHelper: spawnLoopbackHelper },
+        ENV.IOS_AUDIO_LOOPBACK_HELPER.name,
       ),
     readFile: readRegularFileCapped,
     ids: defaultIdGenerator,

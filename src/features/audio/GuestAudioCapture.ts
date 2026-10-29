@@ -2,6 +2,9 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { errorMessage } from "../../models/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { EmulatorAudioError } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
+import type { EmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
+import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
+import type { IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -42,6 +45,8 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
 
   constructor(
     private readonly adbFor: (deviceId: string) => Pick<AdbExecutor, "execute">,
+    private readonly discovery: EmulatorGrpcDiscovery,
+    private readonly ids: IdGenerator,
     private readonly timer: Pick<Timer, "now" | "monotonicNow" | "sleep"> = defaultTimer,
     options: GuestAudioCaptureOptions = {},
   ) {
@@ -65,8 +70,10 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
   async open(deviceId: string): Promise<GuestAudioCaptureHandle> {
     const deadline = this.now() + this.timeoutMs;
     let pid: number | undefined;
+    let emulatorPid: number | undefined;
+    let recorderMarker: string;
     let closed = false;
-    // Retain the same executor for cleanup, including after the initiating session is released.
+    // The executor survives session release, but its serial can resolve to a replacement guest.
     let adb: Pick<AdbExecutor, "execute">;
     try {
       adb = this.adbFor(deviceId);
@@ -78,15 +85,53 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
         return;
       }
       closed = true;
+      // Never dispatch a kill to a replacement emulator or an unverified recorder PID.
+      const matchesRecorder =
+        `tr '\\000' '\\n' < /proc/${pid}/environ 2>/dev/null | ` +
+        `grep -Fqx -- ${shellQuote(recorderMarker)}`;
+      const cleanupOptions = {
+        timeoutMs: 1_000,
+        noRetry: true,
+        signal: new AbortController().signal,
+      };
       try {
+        if (emulatorPid === undefined || (await this.emulatorPidFor(deviceId)) !== emulatorPid) {
+          logger.debug(`Skipping guest capture cleanup on ${deviceId}: emulator identity changed`);
+          return;
+        }
+        const identity = await adb.execute(
+          ["shell", "sh", "-c", shellQuote(`if ${matchesRecorder}; then echo matched; fi`)],
+          cleanupOptions,
+        );
+        if (identity.error || identity.stdout.trim() !== "matched") {
+          logger.debug(
+            `Skipping guest capture cleanup on ${deviceId}: recorder identity unverified`,
+          );
+          return;
+        }
+      } catch (error) {
+        // Skipping cleanup is safe when identity cannot be verified; signaling a reused PID is not.
+        logger.debug(`Skipping guest capture cleanup on ${deviceId}: ${errorMessage(error)}`);
+        return;
+      }
+      try {
+        // Recheck in the signaling shell: ADB may resolve a new transport after the preflight.
         const result = await adb.execute(
-          ["shell", "sh", "-c", shellQuote(`if kill -0 ${pid} 2>/dev/null; then kill ${pid}; fi`)],
-          { timeoutMs: 1_000, noRetry: true, signal: new AbortController().signal },
+          [
+            "shell",
+            "sh",
+            "-c",
+            shellQuote(`if ${matchesRecorder}; then kill ${pid}; else echo identity_changed; fi`),
+          ],
+          cleanupOptions,
         );
         if (result.error) {
           throw new ActionableError(
             `Failed to close guest audio capture PID ${pid} on ${deviceId}: ${result.error}`,
           );
+        }
+        if (result.stdout.trim() === "identity_changed") {
+          logger.debug(`Skipped guest capture kill on ${deviceId}: recorder identity changed`);
         }
       } catch (error) {
         throw toActionableError(
@@ -112,6 +157,11 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       return result.stdout;
     };
     try {
+      emulatorPid = await this.emulatorPidFor(deviceId);
+      recorderMarker = `AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=${this.ids.next()}`;
+      if (/[\r\n\0]/.test(recorderMarker)) {
+        throw unavailable(deviceId, "the recorder marker is invalid");
+      }
       const paths = await shell(
         'for status in /proc/asound/card*/pcm*c/sub*/status; do if [ -r "$status" ]; then printf "%s\\n" "$status"; fi; done',
       );
@@ -132,7 +182,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       };
       // All streams are redirected so ADB can return while nohup keeps this exact PID alive.
       const output = await shell(
-        `nohup tinycap /dev/null -D ${match[1]} -d ${match[2]} -c 1 -r 48000 -b 16 </dev/null >/dev/null 2>&1 & echo $!`,
+        `env ${shellQuote(recorderMarker)} nohup tinycap /dev/null -D ${match[1]} -d ${match[2]} -c 1 -r 48000 -b 16 </dev/null >/dev/null 2>&1 & echo $!`,
         recordPid,
       );
       // Executors may not stream stdout; parse the completed output in that case.
@@ -156,6 +206,16 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
         ? error
         : unavailable(deviceId, errorMessage(error));
     }
+  }
+
+  private async emulatorPidFor(deviceId: string): Promise<number> {
+    const endpoint = isAndroidEmulatorSerial(deviceId)
+      ? await this.discovery.findByConsolePort(Number(deviceId.slice("emulator-".length)))
+      : undefined;
+    if (!endpoint || !Number.isSafeInteger(endpoint.pid) || endpoint.pid < 1) {
+      throw unavailable(deviceId, "the emulator incarnation could not be identified");
+    }
+    return endpoint.pid;
   }
 
   private async waitForRunning(

@@ -279,11 +279,11 @@ export async function runHarness(
   const ablations = rawAblations.map((result) => withAttribution(result));
   const results = raw.map((result) => {
     const own = ablations.filter((entry) => entry.parentId === result.id);
-    const ablated = options.ablate && result.kind === "persona" && isOemPersonaId(result.id);
+    const { id } = result;
     return withAttribution(
       result,
-      ablated
-        ? { results: own, expected: facetAblations(result.id, options.appId).length }
+      options.ablate && result.kind === "persona" && isOemPersonaId(id)
+        ? { results: own, expected: facetAblations(id, options.appId).length }
         : undefined,
     );
   });

@@ -131,6 +131,11 @@ export interface BootedDeviceDiscoveryOptions {
    * adds latency (#9920). The result then reports no physical source as succeeded.
    */
   skipPhysicalIosDiscovery?: boolean;
+  /**
+   * With `"either"`, also sweep Apple Watch simulators. Only the pool's own readers set it, so
+   * every other "either" read stays Android and iOS (#14908).
+   */
+  includeWatchOs?: boolean;
   /** Cancels short-lived platform discovery work. */
   signal?: AbortSignal;
   /**

@@ -27,6 +27,13 @@ import {
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecycleBackend";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import {
+  appendAndroidBootedDiscovery,
+  appendIosBootedDiscovery,
+  appendWatchBootedDiscovery,
+  discoverBootedWatches,
+} from "./bootedDiscoveryAppend";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -48,7 +55,6 @@ import {
   type PlatformDeviceManager,
   androidDiscoveryErrorCode,
   assertAndroidImageRunningStateKnown,
-  iosSucceededSources,
   mergeIosDevices,
   presentBootedDevices,
   simulatorDiscoveryErrorCode,
@@ -87,6 +93,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
   private simctl: DeviceManagerSimCtl;
+  private watchSimulators?: Pick<WatchSimulatorInventory, "listWatchSimulators">;
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly timer: Pick<Timer, "now">;
@@ -113,10 +120,19 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   ) {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();
+    if (this.simctl instanceof SimCtlClient) {
+      this.watchSimulators = new WatchSimulatorInventory(this.simctl);
+    }
     this.emulator = emulator || new AndroidEmulatorClient();
     this.physicalIosDevices = physicalIosDevices || getSharedDevicectlDeviceLister();
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
+  }
+
+  /** Booted Apple Watch simulators; read only when a caller asks for watchOS (#14908). */
+  withWatchSimulators(source: Pick<WatchSimulatorInventory, "listWatchSimulators">): this {
+    this.watchSimulators = source;
+    return this;
   }
 
   withForeignAndroidSerialSource(source: ForeignAndroidSerialSource): this {
@@ -387,36 +403,31 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
     const transitional: { simulators?: TransitionalSimulator[] } = {};
 
-    const [android, ios] = await Promise.all([
-      platform === "android" || platform === "either"
-        ? this.discoverBootedAndroidDevices(options)
-        : undefined,
-      platform === "ios" || platform === "either"
-        ? this.discoverBootedIosDevices(options)
-        : undefined,
+    const either = platform === "either";
+    // "Either" is Android or iOS; only the pool's own readers opt in to watches (#14908).
+    const watchRequested = platform === "watchos" || (either && options.includeWatchOs === true);
+    const [android, ios, watch] = await Promise.all([
+      platform === "android" || either ? this.discoverBootedAndroidDevices(options) : undefined,
+      platform === "ios" || either ? this.discoverBootedIosDevices(options) : undefined,
+      watchRequested ? discoverBootedWatches(this.watchSimulators, options.signal) : undefined,
     ]);
-
+    const result = {
+      devices,
+      succeededPlatforms,
+      succeededSources,
+      freshDeviceIds,
+      discoveryErrors,
+      sourceErrors,
+    };
     if (android) {
-      this.appendAndroidBootedDiscovery(android, {
-        devices,
-        succeededPlatforms,
-        succeededSources,
-        freshDeviceIds,
-        discoveryErrors,
-        sourceErrors,
-      });
+      appendAndroidBootedDiscovery(android, result);
     }
-
     if (ios) {
       transitional.simulators = ios.transitionalSimulators;
-      this.appendIosBootedDiscovery(ios, {
-        devices,
-        succeededPlatforms,
-        succeededSources,
-        freshDeviceIds,
-        discoveryErrors,
-        sourceErrors,
-      });
+      appendIosBootedDiscovery(ios, result);
+    }
+    if (watch) {
+      appendWatchBootedDiscovery(watch, result);
     }
 
     return {
@@ -430,53 +441,6 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     };
   }
 
-  private appendAndroidBootedDiscovery(
-    android: { devices: BootedDevice[]; error?: DeviceDiscoveryError },
-    result: BootedDeviceDiscovery & {
-      succeededSources: Set<DiscoverySource>;
-      freshDeviceIds: Set<string>;
-      discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
-    },
-  ): void {
-    result.devices.push(...android.devices);
-    if (android.error) {
-      result.discoveryErrors.android = android.error;
-      return;
-    }
-    result.succeededPlatforms.add("android");
-    result.succeededSources.add("android");
-    // adb has no retention replay: a listed device was listed just now.
-    for (const emulator of android.devices) {
-      result.freshDeviceIds.add(emulator.deviceId);
-    }
-  }
-
-  private appendIosBootedDiscovery(
-    ios: Awaited<ReturnType<MultiPlatformDeviceManager["discoverBootedIosDevices"]>>,
-    result: BootedDeviceDiscovery & {
-      succeededSources: Set<DiscoverySource>;
-      freshDeviceIds: Set<string>;
-      sourceErrors: Partial<Record<DiscoverySource, DeviceDiscoveryError>>;
-      discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
-    },
-  ): void {
-    if (ios.physicalError) {
-      result.sourceErrors["ios-physical"] = ios.physicalError;
-    }
-    // Physical devices confirmed by devicectl survive simulator discovery failure.
-    result.devices.push(...ios.devices);
-    for (const source of iosSucceededSources(ios)) {
-      result.succeededSources.add(source);
-    }
-    if (ios.simulatorsSucceeded) {
-      result.succeededPlatforms.add("ios");
-    } else if (ios.error) {
-      result.discoveryErrors.ios = ios.error;
-    }
-    for (const deviceId of ios.freshDeviceIds) {
-      result.freshDeviceIds.add(deviceId);
-    }
-  }
 
   /**
    * Among the given Android candidate serials, which are ADB `offline`

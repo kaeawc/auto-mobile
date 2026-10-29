@@ -95,6 +95,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_camera_video_v1",
       // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
       "prototype_platform_cast_v1",
+      // Contract only; the media queue runtime is owed (#14249).
+      "prototype_platform_media_queue_v1",
     )
 
   @Test

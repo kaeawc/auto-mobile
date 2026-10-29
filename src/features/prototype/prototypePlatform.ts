@@ -6,6 +6,7 @@ import {
 } from "./prototypeChannels";
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
+import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
 import {
   prototypeMediaCallError,
   prototypeMediaError,
@@ -624,6 +625,7 @@ function rootBlockError(
     prototypeLocationBlockError(root) ??
     prototypeNotificationsBlockError(root) ??
     prototypeMediaError(root) ??
+    prototypeMediaQueueError(root, check) ??
     prototypeVideoPlayerError(root) ??
     prototypeMediaCaptionsError(root, check) ??
     requiresError(root)
@@ -745,12 +747,34 @@ const callCapabilities = (): { capability: string; calls: string[] }[] => {
   return [...byCapability].map(([capability, calls]) => ({ capability, calls }));
 };
 
+/** Spec fields beyond its calls that a per-call capability also gates: a queued player (#14249). */
+const CALL_CAPABILITY_FIELDS: Record<
+  string,
+  { fields: (spec: unknown) => string[]; name: string }
+> = {
+  prototype_platform_media_queue_v1: {
+    fields: prototypeMediaQueueFields,
+    name: "a media player `queue`",
+  },
+};
+
 /** One generated gate per per-call capability, after the module gates. */
 const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, calls }) => ({
   capability,
-  fields: (spec: unknown) => prototypePlatformCallCapabilityFields(spec, capability),
+  fields: (spec: unknown) => [
+    ...(CALL_CAPABILITY_FIELDS[capability]?.fields(spec) ?? []),
+    ...prototypePlatformCallCapabilityFields(spec, capability),
+  ],
   unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-    unsupported(fields, platform, capability, calls.map((call) => `\`${call}\``).join(" or ")),
+    unsupported(
+      fields,
+      platform,
+      capability,
+      [
+        ...calls.map((call) => `\`${call}\``),
+        ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
+      ].join(" or "),
+    ),
 }));
 
 /** One generated gate per module in the `platformModules` table, then one per call capability. */

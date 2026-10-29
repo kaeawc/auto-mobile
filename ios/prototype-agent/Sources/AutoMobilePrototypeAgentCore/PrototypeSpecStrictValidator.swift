@@ -49,6 +49,7 @@ public enum PrototypeSpecStrictValidator {
                 root: root,
                 state: state
             )
+            try PrototypeMediaQueue.validate(fields)
             try PrototypeMedia.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeMediaCaptions.validate(fields, nodes: context.locatedNodes)
             try PrototypeTimerValidator.validate(context.actions)

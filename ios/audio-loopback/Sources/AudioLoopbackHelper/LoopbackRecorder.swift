@@ -59,16 +59,16 @@ final class LoopbackRecorder: @unchecked Sendable {
         guard let queue = audioQueue, !done else {
             return
         }
-        let count = min(Int(buffer.pointee.mAudioDataByteSize), remainingBytes)
-        if count > 0 {
+        let usable = min(Int(buffer.pointee.mAudioDataByteSize), remainingBytes)
+        if usable > 0 {
             do {
-                try output.write(contentsOf: Data(bytes: buffer.pointee.mAudioData, count: count))
+                try output.write(contentsOf: Data(bytes: buffer.pointee.mAudioData, count: usable))
             } catch {
                 // The reader went away; nobody is left to receive the rest.
                 finish(queue, code: 1)
                 return
             }
-            remainingBytes -= count
+            remainingBytes -= usable
         }
         if remainingBytes <= 0 {
             finish(queue, code: 0)

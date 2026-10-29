@@ -1,3 +1,4 @@
+import { iosBackendFields } from "./IosSdkTextRouting";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { withStaleDisplay } from "../../observe/StaleDisplayError";
@@ -340,6 +341,7 @@ export class CommandRunner {
           ...(result.retryable === false ? { retryable: false } : {}),
           ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),
+          ...iosBackendFields(result.iosBackend),
         }));
     }
   }

@@ -66,15 +66,21 @@ function bridgeAction(
   }
 }
 
-function failClosed(reason: string): never {
+function failClosed(reason: string, verb: string): never {
   throw new ActionableError(
-    `The app's SDK observation bridge rejected the tap (${reason}). Re-observe and retry; ` +
+    `The app's SDK observation bridge rejected the ${verb} (${reason}). Re-observe and retry; ` +
       "XCTest does not stand in for this result, because the element may have changed.",
   );
 }
 
-/** Maps a bridge reply to the backend that tapped, a permitted fallback, or a fail-closed error. */
-function tapOutcome(reply: CtrlProxySdkActionResult): IosSdkTapOutcome {
+/**
+ * Maps a bridge action reply to the backend that acted, a permitted XCTest fallback, or a
+ * fail-closed error naming `verb` (for example "tap" or "text entry").
+ */
+export function iosSdkBridgeActionOutcome(
+  reply: CtrlProxySdkActionResult,
+  verb: string,
+): IosSdkTapOutcome {
   if (reply.result?.status === "accepted") {
     return { backend: "sdk", nextObservationIdentity: reply.result.nextObservationIdentity };
   }
@@ -82,13 +88,13 @@ function tapOutcome(reply: CtrlProxySdkActionResult): IosSdkTapOutcome {
     const reason = reply.result.reason ?? reply.result.status;
     return UNSUPPORTED_REASONS.has(reason)
       ? { backend: "xctest", fallbackReason: "unsupported" }
-      : failClosed(reason);
+      : failClosed(reason, verb);
   }
   if (reply.failure === "bridge_unavailable" || reply.unsupported) {
     return { backend: "xctest", fallbackReason: "unavailable" };
   }
   // app_not_active, invalid_action, bad_reply, or a timeout after the action may have run.
-  return failClosed(reply.failure ?? reply.error ?? "no reply");
+  return failClosed(reply.failure ?? reply.error ?? "no reply", verb);
 }
 
 export interface IosSdkBridgeTapperOptions {
@@ -101,7 +107,8 @@ export function createIosSdkBridgeTapper(options: IosSdkBridgeTapperOptions): Io
   return {
     async tap(request) {
       const target = iosSdkBridgeTarget(request.element);
-      // A focus tap belongs to sendKeys, which routes through the bridge in a later slice.
+      // A focus tap stays on XCTest: sendKeys sends its text and clear through the bridge, and an
+      // XCTest fallback for those needs the field focused the usual way.
       if (!target || !enabled() || request.action === "focus") {
         return null;
       }
@@ -117,7 +124,7 @@ export function createIosSdkBridgeTapper(options: IosSdkBridgeTapperOptions): Io
         timeoutMs: IOS_SDK_BRIDGE_TAP_TIMEOUT_MS,
         signal: request.signal,
       });
-      return tapOutcome(reply);
+      return iosSdkBridgeActionOutcome(reply, "tap");
     },
   };
 }

@@ -48665,7 +48665,11 @@
               },
               "backend": {
                 "type": "string",
-                "const": "autoMobileIme"
+                "enum": ["autoMobileIme", "sdk", "xctest"]
+              },
+              "fallbackReason": {
+                "type": "string",
+                "enum": ["unavailable", "unsupported"]
               },
               "capability": {
                 "type": "string",

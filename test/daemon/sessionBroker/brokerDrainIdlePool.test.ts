@@ -9,6 +9,7 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
 
 function config(requestId: string): SessionConfig {
   return {
@@ -100,6 +101,91 @@ describe("drainIdlePool", () => {
 
     expect(replay.resources).toEqual([]);
     expect(devices.destroyed).toHaveLength(1);
+  });
+
+  test.each(["first", "second"] as const)(
+    "close waits for the entire drain when called during the %s destruction",
+    async (closeDuring) => {
+      const first = await broker.prepare(config("first"), "owner-token");
+      const second = await broker.prepare(config("second"), "owner-token");
+      await broker.release(first.sessionUuid!);
+      await broker.release(second.sessionUuid!);
+      const idle = (await options.store.listResources()).map((resource) => resource.resourceId);
+      expect(idle).toHaveLength(2);
+
+      const firstEntered = Promise.withResolvers<void>();
+      const finishFirst = Promise.withResolvers<void>();
+      const secondEntered = Promise.withResolvers<void>();
+      const finishSecond = Promise.withResolvers<void>();
+      const destroy = devices.destroy.bind(devices);
+      let calls = 0;
+      devices.destroy = async (resource) => {
+        calls++;
+        if (calls === 1) {
+          firstEntered.resolve();
+          await finishFirst.promise;
+        } else {
+          secondEntered.resolve();
+          await finishSecond.promise;
+        }
+        return destroy(resource);
+      };
+      const completed: string[] = [];
+      const draining = broker.drainIdlePool().then((result) => {
+        completed.push("drain");
+        return result;
+      });
+      let closing: Promise<void> | undefined;
+      const close = () =>
+        broker.close().then(() => {
+          completed.push("close");
+        });
+      try {
+        await firstEntered.promise;
+        if (closeDuring === "first") {
+          closing = close();
+          await drainMicrotasks(1_000);
+          expect(completed).toEqual([]);
+        }
+        finishFirst.resolve();
+        await secondEntered.promise;
+        expect(devices.destroyed).toHaveLength(1);
+        if (closeDuring === "second") {
+          closing = close();
+        }
+        await drainMicrotasks(1_000);
+        expect(completed).toEqual([]);
+      } finally {
+        finishFirst.resolve();
+        finishSecond.resolve();
+        await draining;
+        await closing;
+      }
+      expect(completed).toEqual(["drain", "close"]);
+      expect([...devices.destroyed].sort()).toEqual([...idle].sort());
+      for (const resourceId of idle) {
+        expect(await options.store.getResource(resourceId)).toMatchObject({ state: "destroyed" });
+      }
+    },
+  );
+
+  test("reports destroyed after the released receipt and destruction tombstone are pruned", async () => {
+    await readyAndReleased("expired");
+    const [idle] = await options.store.listResources();
+    expect(await options.store.pruneTerminalRequests(0, 10)).toBe(1);
+    expect(await options.store.getRequest("expired")).toBeUndefined();
+    expect(await options.store.getResource(idle.resourceId)).toMatchObject({
+      state: "idle",
+      requestId: null,
+    });
+
+    const drained = await broker.drainIdlePool();
+
+    expect(drained.resources).toEqual([
+      { resourceId: idle.resourceId, outcome: "destroyed", cleanupPending: false },
+    ]);
+    expect(devices.destroyed).toEqual([idle.resourceId]);
+    expect(await options.store.getResource(idle.resourceId)).toBeUndefined();
   });
 
   test("leaves an active session's device untouched", async () => {

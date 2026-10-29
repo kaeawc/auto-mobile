@@ -20,6 +20,7 @@ export interface SessionBrokerPoolDrainResult {
  */
 export class DestructionQueue {
   private readonly destroys = new Map<string, Promise<void>>();
+  private readonly drains = new Set<Promise<SessionBrokerPoolDrainResult>>();
 
   constructor(
     private readonly store: SqliteSessionBrokerStore,
@@ -46,9 +47,11 @@ export class DestructionQueue {
     return pending;
   }
 
-  /** Settles every in-flight destroy pass; a pass that stays pending keeps its durable row. */
+  /** Joins admitted drains and destroy passes; unfinished cleanup keeps its durable row. */
   async joinAll(): Promise<void> {
-    await Promise.allSettled([...this.destroys.values()]);
+    while (this.drains.size > 0 || this.destroys.size > 0) {
+      await Promise.allSettled([...this.drains, ...this.destroys.values()]);
+    }
   }
 
   /**
@@ -56,12 +59,21 @@ export class DestructionQueue {
    * transaction, then each is destroyed through the same path acquisition eviction uses.
    * A replay finds only resources that are still idle, so a settled drain is a no-op.
    */
-  async drainIdlePool(): Promise<SessionBrokerPoolDrainResult> {
+  drainIdlePool(): Promise<SessionBrokerPoolDrainResult> {
+    const pending = this.drainIdlePoolOnce().finally(() => {
+      this.drains.delete(pending);
+    });
+    this.drains.add(pending);
+    return pending;
+  }
+
+  private async drainIdlePoolOnce(): Promise<SessionBrokerPoolDrainResult> {
     const resources: SessionBrokerPoolDrainEntry[] = [];
     for (const ticket of await this.store.drainIdle()) {
       await this.tryCleanup(ticket);
       const resource = await this.store.getResource(ticket.resourceId);
-      const destroyed = resource?.state === "destroyed";
+      // Only unreferenced destroyed tombstones are deleted, so a missing row confirms cleanup.
+      const destroyed = !resource || resource.state === "destroyed";
       resources.push({
         resourceId: ticket.resourceId,
         outcome: destroyed ? "destroyed" : "cleanup_pending",

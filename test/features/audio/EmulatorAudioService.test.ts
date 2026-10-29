@@ -106,7 +106,7 @@ describe("EmulatorAudioService injection", () => {
     });
     const first = await service.stopInjection(injectionId);
     const second = await service.stopInjection(injectionId);
-    expect(first).toEqual({ injectionId, framesSent: 7, reason: "stopped" });
+    expect(first).toEqual({ injectionId, framesQueued: 7, framesPlayed: 0, reason: "stopped" });
     expect(second).toEqual(first);
     expect(sessions[0].closed).toBe(1);
     expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
@@ -117,12 +117,17 @@ describe("EmulatorAudioService injection", () => {
     const { injectionId } = await service.startInjection("emulator-5554", {
       source: { kind: "tone" },
     });
-    sessions[0].settleInjection?.({ framesSent: 96_000, reason: "completed" });
+    sessions[0].settleInjection?.({
+      framesQueued: 96_000,
+      framesPlayed: 96_000,
+      reason: "completed",
+    });
     await Promise.resolve();
     await Promise.resolve();
     expect(await service.stopInjection(injectionId)).toEqual({
       injectionId,
-      framesSent: 96_000,
+      framesQueued: 96_000,
+      framesPlayed: 96_000,
       reason: "completed",
     });
   });

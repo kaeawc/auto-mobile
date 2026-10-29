@@ -110,7 +110,12 @@ describe("audio tools (#13628, #13629)", () => {
     const stopped = stopAudioInputResultSchema.parse(
       structured(await stop(emulator, { injectionId: started.injectionId })),
     );
-    expect(stopped).toMatchObject({ injectionId: "inj-1", reason: "stopped", framesSent: 7 });
+    expect(stopped).toMatchObject({
+      injectionId: "inj-1",
+      reason: "stopped",
+      framesQueued: 7,
+      framesPlayed: 0,
+    });
   });
 
   test("stopAudioInput refuses an injection running on another emulator", async () => {

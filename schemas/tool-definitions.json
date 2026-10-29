@@ -56887,7 +56887,10 @@
         "injectionId": {
           "type": "string"
         },
-        "framesSent": {
+        "framesQueued": {
+          "type": "number"
+        },
+        "framesPlayed": {
           "type": "number"
         },
         "reason": {
@@ -56895,7 +56898,7 @@
           "enum": ["completed", "stopped", "max_duration"]
         }
       },
-      "required": ["success", "message", "injectionId", "framesSent", "reason"],
+      "required": ["success", "message", "injectionId", "framesQueued", "framesPlayed", "reason"],
       "additionalProperties": {}
     }
   },

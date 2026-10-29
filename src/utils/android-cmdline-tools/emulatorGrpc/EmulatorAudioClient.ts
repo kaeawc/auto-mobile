@@ -57,7 +57,13 @@ export interface InjectAudioOptions {
 }
 
 export interface InjectionResult {
-  framesSent: number;
+  /** Frames handed to the gRPC stream. Flow control lets this run far ahead of playback, so it is not audio heard. */
+  framesQueued: number;
+  /**
+   * Frames the emulator should have rendered by the time streaming ended: wall-clock time since the
+   * first packet at the clip rate, capped at framesQueued. An estimate; the emulator reports no ack.
+   */
+  framesPlayed: number;
   /** Why streaming ended: the clip finished, `stop()` was called, or the max duration elapsed. */
   reason: "completed" | "stopped" | "max_duration";
 }
@@ -109,7 +115,9 @@ interface InjectionRun {
   pcm: PcmAudio;
   options: InjectAudioOptions;
   control: InjectionControl;
-  framesSent: number;
+  framesQueued: number;
+  /** Clock time (ms) when the first packet was written; playback is measured from here. */
+  playbackStartMs?: number;
 }
 
 export interface CaptureAudioOptions {
@@ -224,7 +232,7 @@ export class EmulatorAudioClient {
     options: InjectAudioOptions,
     control: InjectionControl,
   ): Promise<InjectionResult> {
-    const run: InjectionRun = { call, pcm, options, control, framesSent: 0 };
+    const run: InjectionRun = { call, pcm, options, control, framesQueued: 0 };
     // A timer, not a check between writes, so it also ends a write parked on back-pressure.
     const deadline =
       options.maxDurationMs === undefined
@@ -245,7 +253,11 @@ export class EmulatorAudioClient {
     if (status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
       throw injectionError(status);
     }
-    return { framesSent: run.framesSent, reason: control.endReason ?? "completed" };
+    return {
+      framesQueued: run.framesQueued,
+      framesPlayed: this.framesPlayed(run),
+      reason: control.endReason ?? "completed",
+    };
   }
 
   private async sendAll(run: InjectionRun): Promise<void> {
@@ -272,6 +284,16 @@ export class EmulatorAudioClient {
     });
   }
 
+  /** Frames the emulator has rendered by now at the clip rate, never more than were queued. */
+  private framesPlayed(run: InjectionRun): number {
+    if (run.playbackStartMs === undefined) {
+      return 0;
+    }
+    const elapsedMs = Math.max(0, this.timer.now() - run.playbackStartMs);
+    const rendered = Math.floor((elapsedMs * run.pcm.sampleRate) / 1000);
+    return Math.min(run.framesQueued, rendered);
+  }
+
   /** Sends the clip once; true when it finished, false when the injection ended first. */
   private async sendPass(run: InjectionRun): Promise<boolean> {
     const { pcm } = run;
@@ -286,15 +308,16 @@ export class EmulatorAudioClient {
         return false;
       }
       const audio = pcmBytes(pcm.samples.subarray(start, start + packetSamples));
+      run.playbackStartMs ??= this.timer.now();
       // Only the first packet's format is honored by the emulator.
       await run.call.write(
         encodeAudioPacket({
-          format: run.framesSent === 0 ? format : undefined,
+          format: run.framesQueued === 0 ? format : undefined,
           timestampUs: this.timer.now() * 1000,
           audio,
         }),
       );
-      run.framesSent += audio.byteLength / 2;
+      run.framesQueued += audio.byteLength / 2;
     }
     return true;
   }

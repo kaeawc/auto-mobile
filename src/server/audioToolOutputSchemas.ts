@@ -20,7 +20,8 @@ export const stopAudioInputResultSchema = z
     success: z.literal(true),
     message: z.string(),
     injectionId: z.string(),
-    framesSent: z.number(),
+    framesQueued: z.number(),
+    framesPlayed: z.number(),
     reason: z.enum(["completed", "stopped", "max_duration"]),
   })
   .passthrough();

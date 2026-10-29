@@ -89,7 +89,13 @@ function page(options: { mainFrame?: boolean; visualViewport?: Record<string, nu
     WebSocket: class {},
   };
   window.top = options.mainFrame === false ? {} : window;
-  window.visualViewport = options.visualViewport;
+  const viewportListeners: Record<string, Array<() => void>> = {};
+  window.visualViewport = options.visualViewport && {
+    ...options.visualViewport,
+    addEventListener: (name: string, callback: () => void) => {
+      (viewportListeners[name] ??= []).push(callback);
+    },
+  };
   window.innerWidth = 390;
   window.innerHeight = 700;
   const document = { querySelectorAll: () => elements, activeElement: null as FakeElement | null };
@@ -122,6 +128,7 @@ function page(options: { mainFrame?: boolean; visualViewport?: Record<string, nu
     document,
     snapshots,
     fire: (name: string) => listeners[name]?.forEach((listener) => listener()),
+    fireViewport: (name: string) => viewportListeners[name]?.forEach((listener) => listener()),
     mutate: () => observers.forEach((observer) => observer()),
     flushTimers: () => timers.splice(0).forEach((timer) => timer()),
   };
@@ -224,5 +231,20 @@ describe("WKWebView bridge page script (#15877)", () => {
     });
     // An input with no type attribute is a text input.
     expect(posted?.elements?.[0].inputType).toBe("text");
+  });
+
+  test("a resize, pinch zoom or visual-viewport pan posts a fresh snapshot", () => {
+    const viewport = { offsetLeft: 0, offsetTop: 0, width: 390, height: 700, scale: 1 };
+    const p = page({ visualViewport: viewport });
+    p.elements.push(element("button", "Pay"));
+    p.fire("load");
+    // Rotation changes the window size; zoom and pan change only the visual viewport.
+    p.fire("resize");
+    p.flushTimers();
+    p.fireViewport("resize");
+    p.flushTimers();
+    p.fireViewport("scroll");
+    p.flushTimers();
+    expect(p.snapshots()).toHaveLength(4);
   });
 });

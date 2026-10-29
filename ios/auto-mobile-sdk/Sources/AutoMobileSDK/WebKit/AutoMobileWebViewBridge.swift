@@ -649,7 +649,8 @@ extension AutoMobileWebAction {
           addEventListener('load', snapshot);
           addEventListener('scroll', scheduleSnapshot, {passive: true, capture: true});
           addEventListener('focusin', scheduleSnapshot); addEventListener('focusout', scheduleSnapshot);
-          addEventListener('input', scheduleSnapshot, true); addEventListener('change', scheduleSnapshot, true); addEventListener('hashchange', () => post('spa_navigation')); addEventListener('popstate', () => post('history_navigation'));
+          addEventListener('input', scheduleSnapshot, true); addEventListener('change', scheduleSnapshot, true);
+          addEventListener('resize', scheduleSnapshot); window.visualViewport?.addEventListener('resize', scheduleSnapshot); window.visualViewport?.addEventListener('scroll', scheduleSnapshot); addEventListener('hashchange', () => post('spa_navigation')); addEventListener('popstate', () => post('history_navigation'));
           const push = history.pushState, replace = history.replaceState;
           history.pushState = (...a) => { const r = push.apply(history, a); post('history_navigation'); return r; };
           history.replaceState = (...a) => { const r = replace.apply(history, a); post('history_navigation'); return r; };

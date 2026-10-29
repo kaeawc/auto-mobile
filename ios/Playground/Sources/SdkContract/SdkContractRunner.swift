@@ -7,9 +7,12 @@ enum SdkContractRunner {
     static let networkScenario = "network"
     static let faultScenario = "faults"
     static let capabilityScenario = "capabilities"
+    static let observationScenario = "observe"
     static let scenarioTimeoutSeconds: UInt64 = 30
     /// How long the fault scenario waits for the harness to install its rules through CtrlProxy.
     static let rulesReadyWaitSeconds: Double = 60
+    /// How long the observation scenario keeps its bridge for the harness's observe/act cases.
+    static let actionsDoneWaitSeconds: Double = 180
     /// The SDK buffer flushes every 500 ms; allow several flushes before giving up.
     static let captureWaitSeconds: Double = 10
     static let capturePollNanoseconds: UInt64 = 100_000_000
@@ -76,8 +79,24 @@ enum SdkContractRunner {
             }
         case capabilityScenario:
             manifest.capabilities = SdkContractCapabilityScenario.run()
+        case observationScenario:
+            let host = SdkContractObservationScenario.register()
+            try await waitForMarker(
+                runId: runId,
+                suffix: "actions-done",
+                seconds: actionsDoneWaitSeconds,
+                orThrow: .harnessNotFinished(seconds: actionsDoneWaitSeconds)
+            )
+            manifest.observation = host.log()
+        case SdkContractStorageScenario.registeredScenario, SdkContractStorageScenario.defaultScenario:
+            manifest.storage = SdkContractStorageScenario.run(scenario: launch.scenario, runId: runId)
         case faultScenario:
-            try await waitForRulesReady(runId: runId)
+            try await waitForMarker(
+                runId: runId,
+                suffix: "rules-ready",
+                seconds: rulesReadyWaitSeconds,
+                orThrow: .rulesNotInstalled(seconds: rulesReadyWaitSeconds)
+            )
             manifest.faults = try await withTimeout(seconds: scenarioTimeoutSeconds) {
                 let ports = try await server.start()
                 return try await SdkContractFaultScenario(runId: runId, ports: ports).run()
@@ -87,9 +106,16 @@ enum SdkContractRunner {
         }
     }
 
-    /// The harness writes `<runId>.rules-ready` next to the manifest once CtrlProxy has delivered
-    /// the fault rules to the SDK, so no case runs before its rule exists.
-    private static func waitForRulesReady(runId: String, fileManager: FileManager = .default) async throws {
+    /// The harness writes `<runId>.<suffix>` next to the manifest when the scenario may go on:
+    /// `rules-ready` once CtrlProxy has delivered the fault rules to the SDK, so no case runs before
+    /// its rule exists, and `actions-done` once it has finished acting on the observation bridge.
+    private static func waitForMarker(
+        runId: String,
+        suffix: String,
+        seconds: Double,
+        orThrow timeout: SdkContractError,
+        fileManager: FileManager = .default
+    ) async throws {
         let documents = try fileManager.url(
             for: .documentDirectory,
             in: .userDomainMask,
@@ -98,12 +124,10 @@ enum SdkContractRunner {
         )
         let marker = documents
             .appendingPathComponent(SdkContractManifestWriter.directoryName, isDirectory: true)
-            .appendingPathComponent("\(runId).rules-ready")
-        let deadline = Date().addingTimeInterval(rulesReadyWaitSeconds)
+            .appendingPathComponent("\(runId).\(suffix)")
+        let deadline = Date().addingTimeInterval(seconds)
         while !fileManager.fileExists(atPath: marker.path) {
-            guard Date() < deadline else {
-                throw SdkContractError.rulesNotInstalled(seconds: rulesReadyWaitSeconds)
-            }
+            guard Date() < deadline else { throw timeout }
             try await Task.sleep(nanoseconds: capturePollNanoseconds)
         }
     }

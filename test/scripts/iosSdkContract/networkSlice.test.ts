@@ -200,7 +200,7 @@ describe("field helpers", () => {
 
 describe("judgeManifest", () => {
   const manifest: SdkContractManifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     runId: "run-1",
     scenario: "network",
     status: "complete",

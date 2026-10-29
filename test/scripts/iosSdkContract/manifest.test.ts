@@ -19,7 +19,7 @@ const swiftManifest = {
   ],
   runId: "run-1",
   scenario: "network",
-  schemaVersion: 2,
+  schemaVersion: 3,
   status: "complete",
   undecodableBatches: 0,
 };
@@ -70,7 +70,7 @@ test("parses URLProtocol records, fault observations and capability descriptors"
 });
 
 test("rejects a manifest from a newer schema", () => {
-  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 3 }));
+  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 4 }));
   expect(result).toMatchObject({ success: false });
   if (!result.success) {
     expect(result.error).toContain("schemaVersion");
@@ -79,4 +79,33 @@ test("rejects a manifest from a newer schema", () => {
 
 test("rejects text that is not JSON", () => {
   expect(parseSdkContractManifest("{")).toMatchObject({ success: false });
+});
+
+test("reads the observation host log and the storage registration", () => {
+  const result = parseSdkContractManifest(
+    JSON.stringify({
+      ...swiftManifest,
+      observation: {
+        actions: [{ elementId: "contract-save", kind: "tap", observationIdentity: 3 }],
+        captures: 4,
+      },
+      storage: {
+        allowKeychainDeletion: true,
+        coreDataStores: [{ identifier: "ContractPrivate-run-1" }],
+        hostCoordinatedSuites: [],
+        keychainEntries: [{ accessGroup: "g", account: "a", service: "s" }],
+        secretWritten: true,
+        uncoordinatedSuites: ["group.contract"],
+      },
+    }),
+  );
+  expect(result).toMatchObject({ success: true });
+  if (result.success) {
+    expect(result.manifest.observation?.actions[0]).toEqual({
+      kind: "tap",
+      elementId: "contract-save",
+      observationIdentity: 3,
+    });
+    expect(result.manifest.storage?.coreDataStores[0].appGroup).toBeUndefined();
+  }
 });

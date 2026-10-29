@@ -2,9 +2,11 @@
  * iOS SDK contract suite (#5164): launches Playground once per scenario on a booted simulator
  * and follows what the SDK did through CtrlProxy, the daemon's iOS client and the MCP network
  * resources. Scenarios: `network` (capture through each registered transport), `capabilities`
- * (the host registration capability matrix) and `faults` (delay and fail rules sent through
- * CtrlProxy and applied by the registered transports). Every failure names the boundary that
- * disagreed.
+ * (the host registration capability matrix), `faults` (delay and fail rules sent through
+ * CtrlProxy and applied by the registered transports), `observe` (observe, tapOn and sendKeys
+ * through the SDK observation bridge) and `storage-default` / `storage` (the storage capability
+ * resource for the default and a registered storage configuration). Every failure names the
+ * boundary that disagreed.
  *
  * Usage: bun scripts/ios/sdk-contract/run.ts --device <udid> --app <Playground.app> [--report <file>]
  * Prefer scripts/ios/sdk-contract-integration.sh, which builds Playground first.
@@ -45,7 +47,19 @@ import {
   matchSdkPayload,
   networkRecordKey,
 } from "./networkSlice";
+import {
+  OBSERVATION_SLICE,
+  OBSERVATION_STEPS,
+  judgeObservationCases,
+  type ToolOutcome,
+} from "./observationSlice";
 import { createReferenceDatabase, replayNetworkBatch } from "./referencePipeline";
+import {
+  STORAGE_DEFAULT_SLICE,
+  STORAGE_SLICE,
+  judgeStorageReport,
+  judgeUnreachableStorageReport,
+} from "./storageSlice";
 import {
   parseResourceJson,
   parseToolOutput,
@@ -103,6 +117,23 @@ async function callTool(
     { maxBuffer: 64 * 1024 * 1024, timeout: TOOL_TIMEOUT_MS },
   );
   return parseToolOutput(stdout);
+}
+
+/** A tool call that may fail: the observation slice judges failures as well as results. */
+async function invokeTool(
+  tool: string,
+  args: Record<string, string | boolean>,
+  sessionUuid: string,
+): Promise<ToolOutcome> {
+  try {
+    const result = await callTool(tool, args, sessionUuid);
+    return result.success === false
+      ? { result, error: String(result.error ?? "tool reported success: false") }
+      : { result };
+  } catch (error) {
+    const output = error as { stdout?: unknown; stderr?: unknown };
+    return { error: [String(error), output.stdout, output.stderr].filter(Boolean).join("\n") };
+  }
 }
 
 async function releaseSession(sessionUuid: string): Promise<void> {
@@ -240,7 +271,16 @@ interface ScenarioContext {
   container: string;
 }
 
-const SCENARIOS = [NETWORK_SLICE, CAPABILITY_SLICE, FAULT_SLICE] as const;
+const SCENARIOS = [
+  NETWORK_SLICE,
+  CAPABILITY_SLICE,
+  FAULT_SLICE,
+  OBSERVATION_SLICE,
+  STORAGE_DEFAULT_SLICE,
+  STORAGE_SLICE,
+] as const;
+/** How long observe may take to report the contract bridge after launch. */
+const BRIDGE_READY_WAIT_MS = 30_000;
 type Scenario = (typeof SCENARIOS)[number];
 
 function contractDirectory(container: string): string {
@@ -270,13 +310,80 @@ async function installFaultRules(
   return undefined;
 }
 
+/**
+ * Drives the observation steps while Playground keeps its contract bridge registered, then
+ * releases it with `<runId>.actions-done`. observe is retried until the bridge is up.
+ */
+async function driveObservationSteps(
+  context: ScenarioContext,
+  runId: string,
+): Promise<Map<string, ToolOutcome>> {
+  const outcomes = new Map<string, ToolOutcome>();
+  const deadline = defaultTimer.now() + BRIDGE_READY_WAIT_MS;
+  for (const step of OBSERVATION_STEPS) {
+    let outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+    while (
+      step.tool === "observe" &&
+      outcome.result?.backend !== "sdk" &&
+      defaultTimer.now() < deadline
+    ) {
+      await defaultTimer.sleep(POLL_INTERVAL_MS);
+      outcome = await invokeTool(step.tool, step.args, context.sessionUuid);
+    }
+    outcomes.set(step.caseName, outcome);
+  }
+  const directory = contractDirectory(context.container);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${runId}.actions-done`), "done\n");
+  return outcomes;
+}
+
+/** The storage capability resource for Playground, as an MCP client reads it. */
+async function readStorageCapabilities(deviceId: string): Promise<JsonRecord> {
+  const client = await connectMcpClient();
+  try {
+    const uri = `automobile:devices/${deviceId}/storage/capabilities?appId=${PLAYGROUND_BUNDLE_ID}`;
+    return parseResourceJson(await client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS }));
+  } finally {
+    await client.close();
+  }
+}
+
+/**
+ * Reads the storage resource while Playground serves its registration and, for the registered
+ * scenario, again after terminating Playground, when the SDK must be reported unreachable.
+ */
+async function judgeStorage(
+  manifest: SdkContractManifest,
+  deviceId: string,
+): Promise<ContractFinding[]> {
+  const findings = judgeStorageReport(manifest, await readStorageCapabilities(deviceId));
+  if (manifest.scenario !== STORAGE_SLICE) {
+    return findings;
+  }
+  await new SimCtlClient().terminateApp(PLAYGROUND_BUNDLE_ID, deviceId).catch(() => undefined);
+  return [
+    ...findings,
+    ...judgeUnreachableStorageReport(STORAGE_SLICE, await readStorageCapabilities(deviceId)),
+  ];
+}
+
 async function judgeScenario(
   scenario: Scenario,
   manifest: SdkContractManifest,
-  live: Omit<LiveContext, "readResource"> & { ctrlProxyPort: number },
+  live: Omit<LiveContext, "readResource"> & {
+    ctrlProxyPort: number;
+    observationOutcomes?: ReadonlyMap<string, ToolOutcome>;
+  },
 ): Promise<ContractFinding[]> {
   if (scenario === CAPABILITY_SLICE) {
     return judgeCapabilities(manifest);
+  }
+  if (scenario === OBSERVATION_SLICE) {
+    return judgeObservationCases(manifest, live.observationOutcomes ?? new Map());
+  }
+  if (scenario === STORAGE_SLICE || scenario === STORAGE_DEFAULT_SLICE) {
+    return judgeStorage(manifest, live.deviceId);
   }
   const expected =
     scenario === FAULT_SLICE ? expectedFaultRecords(manifest, manifest.runId) : manifest.network;
@@ -327,6 +434,8 @@ async function runScenario(
       return [failure];
     }
   }
+  const observationOutcomes =
+    scenario === OBSERVATION_SLICE ? await driveObservationSteps(context, runId) : undefined;
   const manifestText = await waitForManifest(
     join(contractDirectory(context.container), `${runId}.json`),
   );
@@ -346,6 +455,7 @@ async function runScenario(
     sessionUuid: context.sessionUuid,
     ctrlProxyPort: context.ctrlProxyPort,
     sinceMs: launchedAt - CLOCK_SKEW_MS,
+    observationOutcomes,
   });
   return [...manifestFindings, ...caseFindings];
 }

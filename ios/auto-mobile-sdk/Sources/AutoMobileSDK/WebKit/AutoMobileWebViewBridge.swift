@@ -310,7 +310,8 @@ extension AutoMobileWebAction {
 
         public func attach(to webView: WKWebView) {
             self.webView = webView
-            pageState.withLock { $0.attached(url: webView.url) }
+            let url = webView.url
+            pageState.withLock { $0.attached(url: url) }
             let controller = webView.configuration.userContentController
             controller.removeScriptMessageHandler(forName: "automobile")
             let world = WKContentWorld.world(name: configuration.contentWorldName)
@@ -474,8 +475,9 @@ extension AutoMobileWebAction {
         }
 
         public func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
-            pageState.withLock { $0.loaded(url: webView.url) }
-            emit(name: "navigation_finished", url: webView.url)
+            let url = webView.url
+            pageState.withLock { $0.loaded(url: url) }
+            emit(name: "navigation_finished", url: url)
         }
 
         public func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError error: Error) { emit(
@@ -484,14 +486,16 @@ extension AutoMobileWebAction {
             metadata: ["error": error.localizedDescription]
         ) }
         public func webView(_ webView: WKWebView, didCommit _: WKNavigation!) {
-            pageState.withLock { $0.loaded(url: webView.url) }
-            emit(name: "navigation_committed", url: webView.url)
+            let url = webView.url
+            pageState.withLock { $0.loaded(url: url) }
+            emit(name: "navigation_committed", url: url)
         }
 
         public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            pageState.withLock { $0.terminated(url: webView.url) }
+            let url = webView.url
+            pageState.withLock { $0.terminated(url: url) }
             policy.forgetSnapshots()
-            emit(name: "content_process_terminated", url: webView.url)
+            emit(name: "content_process_terminated", url: url)
             attach(to: webView)
             webView.reload()
         }

@@ -82,7 +82,8 @@ class VolumeShellFake implements AdbCommandRunner {
 const setCommand = (stream: number, level: number) =>
   `shell sh -c ${shellQuote(volumeSetScript(stream, level))}`;
 
-describe("Android volume setter", () => {
+// Shell-executing tests require /bin/sh, which is unavailable on Windows.
+describe.skipIf(process.platform === "win32")("Android volume setter", () => {
   test("API 37 uses the audio setter and preserves its captured output", async () => {
     const adb = new VolumeShellFake();
     expect((await adb.executeCommand(setCommand(3, 5))).stdout).toBe(SET_OUTPUT);
@@ -136,24 +137,27 @@ describe("volume journal verification", () => {
     expect(parseVolumeReadOutput(`tts\n${TTS}`, ["tts", "accessibility"])).toBeNull();
   });
 
-  test("sets every journaled stream including 9 and 10 before fail-closed read-back", async () => {
-    const streams = volumeMutationStreams(VOLUME_KEY_PRESS_MUTATION_KEY)!;
-    const script = volumeRevertScript(VOLUME_KEY_PRESS_MUTATION_KEY, {
-      state: "present",
-      value: Object.fromEntries(streams.map((stream) => [stream, 11])),
-    })!;
-    const adb = new VolumeShellFake();
-    // All fake reads return the captured level 11; command identities are checked separately.
-    const result = await adb.executeCommand(`shell sh -c ${shellQuote(script)}`);
-    expect(result.stdout.trim()).toBe(VOLUME_RESTORED_MARKER);
-    const codes = [6, 5, 1, 11, 9, 10, 0, 2, 4, 3];
-    expect(adb.shellCommands).toEqual([
-      ...codes.map((code) => `audio set-volume ${code} 11`),
-      ...codes.map((code) => `media_session volume --stream ${code} --get`),
-    ]);
-  });
+  test.skipIf(process.platform === "win32")(
+    "sets every journaled stream including 9 and 10 before fail-closed read-back",
+    async () => {
+      const streams = volumeMutationStreams(VOLUME_KEY_PRESS_MUTATION_KEY)!;
+      const script = volumeRevertScript(VOLUME_KEY_PRESS_MUTATION_KEY, {
+        state: "present",
+        value: Object.fromEntries(streams.map((stream) => [stream, 11])),
+      })!;
+      const adb = new VolumeShellFake();
+      // All fake reads return the captured level 11; command identities are checked separately.
+      const result = await adb.executeCommand(`shell sh -c ${shellQuote(script)}`);
+      expect(result.stdout.trim()).toBe(VOLUME_RESTORED_MARKER);
+      const codes = [6, 5, 1, 11, 9, 10, 0, 2, 4, 3];
+      expect(adb.shellCommands).toEqual([
+        ...codes.map((code) => `audio set-volume ${code} 11`),
+        ...codes.map((code) => `media_session volume --stream ${code} --get`),
+      ]);
+    },
+  );
 
-  test.each(["music", "tts", "accessibility"])(
+  test.skipIf(process.platform === "win32").each(["music", "tts", "accessibility"])(
     "a mismatched %s read-back never prints the marker",
     async (stream) => {
       const streams = volumeMutationStreams(VOLUME_KEY_PRESS_MUTATION_KEY)!;
@@ -175,19 +179,22 @@ describe("volume journal verification", () => {
   );
 });
 
-test("mediaSession uses the shared setter and keeps the prior-level restore receipt on API 37", async () => {
-  const adb = new VolumeShellFake();
-  const controller = new AndroidMediaSessionController(adb, new FakeTimer());
-  const result = await controller.setVolume({ stream: "music", level: 5 });
-  expect(adb.shellCommands).toEqual([
-    "media_session volume --stream 3 --get",
-    "audio set-volume 3 5",
-    "media_session volume --stream 3 --get",
-  ]);
-  expect(result).toMatchObject({
-    previousLevel: parseVolume(MUSIC)!.level,
-    level: 11,
-    verified: false, // The fake deliberately retains the captured pre-write read-back.
-    restore: { volume: { stream: "music", level: 11 } },
-  });
-});
+test.skipIf(process.platform === "win32")(
+  "mediaSession uses the shared setter and keeps the prior-level restore receipt on API 37",
+  async () => {
+    const adb = new VolumeShellFake();
+    const controller = new AndroidMediaSessionController(adb, new FakeTimer());
+    const result = await controller.setVolume({ stream: "music", level: 5 });
+    expect(adb.shellCommands).toEqual([
+      "media_session volume --stream 3 --get",
+      "audio set-volume 3 5",
+      "media_session volume --stream 3 --get",
+    ]);
+    expect(result).toMatchObject({
+      previousLevel: parseVolume(MUSIC)!.level,
+      level: 11,
+      verified: false, // The fake deliberately retains the captured pre-write read-back.
+      restore: { volume: { stream: "music", level: 11 } },
+    });
+  },
+);

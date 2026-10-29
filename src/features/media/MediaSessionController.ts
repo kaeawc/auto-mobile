@@ -1,6 +1,7 @@
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { ExecResult } from "../../models";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -120,17 +121,14 @@ function outputOf(value: unknown): string {
   }
   const stdout = "stdout" in value ? String(value.stdout) : "";
   const stderr = "stderr" in value ? String(value.stderr) : "";
-  const message = value instanceof Error ? value.message : "";
-  return `${stdout}\n${stderr}\n${message}`;
+  return `${stdout}\n${stderr}`;
 }
 
 /** `cmd` either exits non-zero or prints a marker when the shell command does not exist. */
 function isCommandUnavailable(value: unknown): boolean {
-  const cause =
-    value !== null && typeof value === "object" && "cause" in value ? value.cause : undefined;
-  return [value, cause].some((candidate) =>
-    COMMAND_UNAVAILABLE_MARKERS.some((marker) => outputOf(candidate).includes(marker)),
-  );
+  // Wrapped error messages echo the script, including its unsupported-command markers.
+  const output = outputOf(value instanceof Error ? adbFailureOutput(value) : value);
+  return COMMAND_UNAVAILABLE_MARKERS.some((marker) => output.includes(marker));
 }
 
 /** `[v] volume is 7 in range [0..25]`, printed by the media shell's `volume --get`. */

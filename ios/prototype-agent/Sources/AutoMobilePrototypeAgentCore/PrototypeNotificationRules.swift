@@ -3,9 +3,20 @@ import Foundation
 /// Notification rules (#14280) the contract cannot express, the twin of TypeScript's
 /// `prototypeNotifications.ts`: the root `notifications` block needs `notifications` in
 /// `requires.platform` and unique channel ids; a literal `notifications.post` channel names a declared
-/// channel and its action ids are unique; `notifications.cancel` names exactly one target.
+/// channel and its action ids are unique; `notifications.cancel` names exactly one target; a
+/// channel-scoped `/platform` read names a declared channel.
 enum PrototypeNotificationRules {
     private static let cancelTargets = ["id", "group", "all"]
+    /// Channel-scoped `/platform` keys, read at `/notifications/channels/<id>/<key>`.
+    private static let channelStateKeys: Set<String> = ["blocked"]
+
+    /// Whether a `/notifications` read names a module key or a declared channel's key.
+    static func validRead(_ tokens: [String], channels: Set<String>, state: Set<String>) -> Bool {
+        if tokens.count > 1, tokens[1] == "channels" {
+            return tokens.count == 4 && channels.contains(tokens[2]) && channelStateKeys.contains(tokens[3])
+        }
+        return tokens.count == 2 && state.contains(tokens[1]) && !channelStateKeys.contains(tokens[1])
+    }
 
     static func validateBlock(_ notifications: JSONValue?, requires: JSONValue?) throws {
         guard let block = notifications?.objectFields else { return }

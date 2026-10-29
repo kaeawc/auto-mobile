@@ -2,6 +2,7 @@ import {
   PROTOTYPE_PLATFORM_DIFFERENCES,
   PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
 } from "./prototypePlatformNotes";
+import { PROTOTYPE_NOTIFICATION_CHANNEL_STATE_KEYS } from "./prototypeNotifications";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -28,6 +29,7 @@ import {
 import {
   GUIDE_DEVICE_LOOPBACK,
   GUIDE_PLATFORM,
+  GUIDE_NOTIFICATIONS,
   GUIDE_PLATFORM_EXAMPLE,
   GUIDE_STRINGS_SEMANTICS,
   GUIDE_TEST_SESSIONS,
@@ -265,9 +267,9 @@ export function renderPlatformModules(
         return `\`${name}.${op}\`(${args.join(", ")})${needs.length > 0 ? ` needs ${needs.join(", ")}` : ""}`;
       });
       const events = Object.keys(module.events).map((event) => `\`${name}.${event}\``);
-      // Media state is per declared player (#14253).
-      const scope = name === "media" ? "players/<id>/" : "";
-      const state = Object.keys(module.state ?? {}).map((key) => `\`/${name}/${scope}${key}\``);
+      const state = Object.keys(module.state ?? {}).map(
+        (key) => `\`/${name}/${platformStateScope(name, key)}${key}\``,
+      );
       const capabilities = [module.capability, module.deviceCapability].filter(Boolean);
       return `| \`${name}\` | ${code(capabilities as string[])} | ${calls.join("<br>") || "-"} | ${events.join(", ") || "-"} | ${state.join(", ") || "-"} |`;
     });
@@ -276,6 +278,16 @@ export function renderPlatformModules(
     "| --- | --- | --- | --- | --- |",
     ...rows,
   ].join("\n");
+}
+
+/** Media state is per declared player (#14253); notification `blocked` is per channel (#14280). */
+function platformStateScope(module: string, key: string): string {
+  if (module === "media") {
+    return "players/<id>/";
+  }
+  return module === "notifications" && PROTOTYPE_NOTIFICATION_CHANNEL_STATE_KEYS.has(key)
+    ? "channels/<id>/"
+    : "";
 }
 
 function renderPlatformDifferences(): string {
@@ -327,7 +339,7 @@ export function renderPrototypeGuide(): string {
     renderIcons(),
     renderPlatformDifferences(),
     renderNativeCode(),
-    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}`,
+    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}\n\n${GUIDE_NOTIFICATIONS}`,
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

@@ -5,6 +5,8 @@ import {
   prototypeRealtimeFields,
 } from "./prototypeChannels";
 import { prototypeLinksArgumentsError } from "./prototypeLinks";
+import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
+import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
 import {
   prototypeMediaCallError,
   prototypeMediaError,
@@ -14,6 +16,10 @@ import {
 } from "./prototypeMedia";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import {
+  prototypeNotificationsBlockError,
+  prototypeNotificationsCallError,
+} from "./prototypeNotifications";
 import {
   prototypeSecureStorageEmitError,
   prototypeSecureStorageError,
@@ -585,7 +591,7 @@ export function prototypePlatformError(
 ): PrototypePlatformError | undefined {
   const root = record(spec) ?? {};
   const context = platformContext(root);
-  const error = rootBlockError(root);
+  const error = rootBlockError(root, check);
   if (error) {
     return error;
   }
@@ -608,14 +614,20 @@ export function prototypePlatformError(
  * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
  * the location block, then `requires`.
  */
-function rootBlockError(root: Raw): PrototypePlatformError | undefined {
+function rootBlockError(
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
   return (
     prototypeChannelsError(root) ??
     prototypeAuthBlockError(root) ??
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
+    prototypeNotificationsBlockError(root) ??
     prototypeMediaError(root) ??
+    prototypeMediaQueueError(root, check) ??
     prototypeVideoPlayerError(root) ??
+    prototypeMediaCaptionsError(root, check) ??
     requiresError(root)
   );
 }
@@ -735,12 +747,34 @@ const callCapabilities = (): { capability: string; calls: string[] }[] => {
   return [...byCapability].map(([capability, calls]) => ({ capability, calls }));
 };
 
+/** Spec fields beyond its calls that a per-call capability also gates: a queued player (#14249). */
+const CALL_CAPABILITY_FIELDS: Record<
+  string,
+  { fields: (spec: unknown) => string[]; name: string }
+> = {
+  prototype_platform_media_queue_v1: {
+    fields: prototypeMediaQueueFields,
+    name: "a media player `queue`",
+  },
+};
+
 /** One generated gate per per-call capability, after the module gates. */
 const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, calls }) => ({
   capability,
-  fields: (spec: unknown) => prototypePlatformCallCapabilityFields(spec, capability),
+  fields: (spec: unknown) => [
+    ...(CALL_CAPABILITY_FIELDS[capability]?.fields(spec) ?? []),
+    ...prototypePlatformCallCapabilityFields(spec, capability),
+  ],
   unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-    unsupported(fields, platform, capability, calls.map((call) => `\`${call}\``).join(" or ")),
+    unsupported(
+      fields,
+      platform,
+      capability,
+      [
+        ...calls.map((call) => `\`${call}\``),
+        ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
+      ].join(" or "),
+    ),
 }));
 
 /** One generated gate per module in the `platformModules` table, then one per call capability. */
@@ -811,6 +845,7 @@ function channelUseError(
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
         prototypeAuthCallError(use.action, use.path, root) ??
+        prototypeNotificationsCallError(use.action, use.path, root) ??
         prototypeMediaCallError(use.action, use.path, players))
     : undefined;
 }

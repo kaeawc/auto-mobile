@@ -130,6 +130,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     kind: "input",
     reason: "Read-only helper executable.",
   },
+  {
+    name: "AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER",
+    kind: "input",
+    reason: "Read-only helper executable.",
+  },
   { name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT", kind: "input", reason: "Read-only agent dylib." },
   {
     name: "AUTOMOBILE_BUNDLETOOL_JAR",

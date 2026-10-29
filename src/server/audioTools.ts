@@ -14,7 +14,6 @@ import type { SessionManager } from "../daemon/sessionManager";
 import type { AudioSource, EmulatorAudioService } from "../features/audio/EmulatorAudioService";
 import { defaultEmulatorAudioService } from "../features/audio/defaultEmulatorAudioService";
 import { ActionableError } from "../models/ActionableError";
-import type { BootedDevice } from "../models";
 import { encodeWav, DEFAULT_SILENCE_THRESHOLD_DBFS } from "../utils/audio/pcm";
 import { serverConfig } from "../utils/ServerConfig";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -63,7 +62,7 @@ const captureAudioInput = z.object({
     .number()
     .min(0.1)
     .max(MAX_CAPTURE_SECONDS)
-    .describe("How long to record the emulator's audio output."),
+    .describe("How long to record the device's audio output."),
   silenceThresholdDbfs: z
     .number()
     .min(-120)
@@ -82,14 +81,6 @@ export interface AudioToolDependencies {
   service?: Pick<EmulatorAudioService, "startInjection" | "stopInjection" | "capture">;
   sessionManager?: () => AudioSessionHost | undefined;
   saveWav?: (deviceId: string, bytes: Uint8Array) => Promise<string>;
-}
-
-function assertAndroid(device: BootedDevice, tool: string): void {
-  if (device.platform !== "android") {
-    throw new ActionableError(
-      `${tool} supports Android emulators only; iOS Simulator audio is not supported yet.`,
-    );
-  }
 }
 
 function sourceFrom(args: {
@@ -165,7 +156,6 @@ async function stopAndRefuse(
 export const createInjectAudioInputHandler =
   (deps: AudioToolDependencies = {}): DeviceToolHandler<typeof injectAudioInputInput> =>
   async (device, args, _progress, signal) => {
-    assertAndroid(device, "injectAudioInput");
     const source = sourceFrom(args);
     const sessionManager = args.sessionUuid
       ? (deps.sessionManager ?? (() => defaultDaemonContext.sessionManager()))()
@@ -184,7 +174,7 @@ export const createInjectAudioInputHandler =
           maxDurationMs: args.maxDurationMs,
           sessionId: owner,
         }),
-      { action: "inject emulator audio", change: "audio injection" },
+      { action: "inject audio", change: "audio injection" },
     );
     const outlived = startOutlivedBy(sessionManager, args.sessionUuid, device.deviceId, signal);
     if (outlived) {
@@ -214,7 +204,6 @@ export const createStopAudioInputHandler =
 export const createCaptureAudioHandler =
   (deps: AudioToolDependencies = {}): DeviceToolHandler<typeof captureAudioInput> =>
   async (device, args) => {
-    assertAndroid(device, "captureAudio");
     const service = deps.service ?? defaultEmulatorAudioService;
     const { pcm, ...levels } = await service.capture(device.deviceId, {
       durationMs: Math.round(args.seconds * 1000),
@@ -242,17 +231,19 @@ export const createCaptureAudioHandler =
 const injectAudioInputTool = defineDeviceTool({
   name: "injectAudioInput",
   description:
-    "Play a WAV file or a built-in tone into an Android emulator's microphone, so an app under test " +
-    "records known audio (voice notes, voice search, calls). Streams through the emulator's own gRPC " +
-    "audio API, so each emulator is isolated and no host audio device is needed. Returns an " +
-    "injectionId once streaming starts; stop it with stopAudioInput. Session release stops it. " +
-    "Errors lead with a code: [audio_injection_busy] another injection holds this emulator's " +
-    "microphone; [audio_injection_unsupported] the device is not a local emulator with gRPC audio. " +
-    "Physical devices and iOS are refused.",
+    "Play a WAV file or a built-in tone into an Android emulator's or iOS Simulator's microphone, so " +
+    "an app under test records known audio (voice notes, voice search, calls). An emulator streams " +
+    "through its own gRPC audio API, isolated per emulator. A simulator goes through the host's " +
+    "loopback input device, which every simulator on the host shares, so one simulator injection " +
+    "runs per host. Returns an injectionId once streaming starts; stop it with stopAudioInput. " +
+    "Session release stops it. Errors lead with a code: [audio_injection_busy] another injection " +
+    "holds the microphone; [audio_injection_unsupported] no route (not a local emulator with gRPC " +
+    "audio, or a host without a loopback default input); [audio_loopback_failed] the host loopback " +
+    "helper failed. Physical devices are refused.",
   input: injectAudioInputInput,
   options: {
     defaultEnabled: false,
-    // gRPC only: no CtrlProxy or runner setup.
+    // Emulator gRPC or a host helper: no CtrlProxy or runner setup.
     deviceReadiness: "booted",
     outputSchema: injectAudioInputResultSchema,
   },
@@ -267,7 +258,7 @@ const stopAudioInputTool = defineDeviceTool({
   input: stopAudioInputInput,
   options: {
     defaultEnabled: false,
-    // gRPC only: no CtrlProxy or runner setup.
+    // Emulator gRPC or a host helper: no CtrlProxy or runner setup.
     deviceReadiness: "booted",
     outputSchema: stopAudioInputResultSchema,
   },
@@ -276,15 +267,16 @@ const stopAudioInputTool = defineDeviceTool({
 const captureAudioTool = defineDeviceTool({
   name: "captureAudio",
   description:
-    `Record up to ${MAX_CAPTURE_SECONDS} s of an Android emulator's audio output and report its level: ` +
+    `Record up to ${MAX_CAPTURE_SECONDS} s of an Android emulator's or iOS Simulator's audio output and report its level: ` +
     "rmsDbfs, peakDbfs, the share of 20 ms windows with sound (activeRatio), and silent. A guest " +
     "that plays nothing returns silent: true rather than an error. saveArtifact writes a WAV and " +
     "returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts " +
-    "can glitch real-time audio. Physical devices and iOS are refused.",
+    "can glitch real-time audio. A simulator is read from the host's loopback default output, which " +
+    "mixes every simulator on the host. Physical devices are refused.",
   input: captureAudioInput,
   options: {
     defaultEnabled: false,
-    // gRPC only: no CtrlProxy or runner setup.
+    // Emulator gRPC or a host helper: no CtrlProxy or runner setup.
     deviceReadiness: "booted",
     deviceReadOnly: true,
     outputSchema: captureAudioResultSchema,

@@ -36,6 +36,12 @@ import {
 import { isSemanticKey, validateImeKeyEventsText } from "./SendKeysSupport";
 import { isSendKeysBudgetExhausted } from "./SendKeysRequestBudget";
 import { IosTyper } from "./IosTyper";
+import { IosSdkTextRouting, iosBackendFields } from "./IosSdkTextRouting";
+import {
+  deviceIosSdkBridgeTextRouter,
+  type IosSdkBridgeTextRouter,
+} from "../IosSdkBridgeTextRouter";
+import type { IosSdkBridgeTarget } from "../../observe/ios/iosSdkObservationMerge";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { clearIosFieldWithVerification } from "../iosClearVerification";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
@@ -76,6 +82,8 @@ export interface SendKeysPlatformDependencies {
   timer?: Timer;
   textClient?: SendKeysTextClient;
   inputKey?: SendKeysInputKey;
+  /** Routes iOS text entry and clear on an SDK bridge field (#5159). */
+  iosSdkTextRouter?: IosSdkBridgeTextRouter;
   imeSpanService?: Pick<
     ImeSpanService,
     "imeSpan" | "withImeSpan" | "acquireImeSpan" | "restoreImeSpan"
@@ -91,6 +99,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly clearVerifier: FocusedTextClearVerifier;
   private readonly passwordRouting: PasswordRouting;
   private readonly iosTyper: IosTyper;
+  private readonly iosSdkText: IosSdkTextRouting;
   // These values intentionally survive commands and concurrent calls on this executor.
   private readonly session = new TypingSession();
   private readonly keyEventSupport: KeyEventSupport;
@@ -103,6 +112,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   setTargetPasswordField(passwordField: boolean): void {
     this.targetPasswordField = passwordField;
+  }
+
+  setIosSdkTextTarget(target: IosSdkBridgeTarget | undefined): void {
+    this.iosSdkText.setTarget(target);
   }
 
   private isPasswordRouting(routedPassword: boolean | undefined): boolean {
@@ -140,6 +153,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.observer = {
       execute: async (options) => {
         const observation = await observer.execute(options);
+        this.iosSdkText.observed(observation);
         if (this.targetLayer !== "prototype") {
           return observation;
         }
@@ -154,6 +168,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       captureScreenshot: observer.captureScreenshot?.bind(observer),
     };
     this.timer = dependencies.timer ?? defaultTimer;
+    this.iosSdkText = new IosSdkTextRouting({
+      router: dependencies.iosSdkTextRouter ?? deviceIosSdkBridgeTextRouter(device),
+      observe: (signal) => this.observer.execute({ hierarchyOnly: true, signal }),
+    });
     this.clearVerifier = this.createClearVerifier();
     this.passwordRouting = this.createPasswordRouting();
     this.iosTyper = this.createIosTyper();
@@ -291,7 +309,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       timer: this.timer,
       targetLayer: () => this.targetLayer,
       clear: (signal, display) => this.clear(signal, display),
-      insert: (text, options) => this.textClient.insert(text, options),
+      insert: (text, options) =>
+        this.iosSdkText.insert(
+          text,
+          { timeoutMs: options?.timeoutMs, signal: options?.abortSignal },
+          () => this.textClient.insert(text, options),
+        ),
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
     });
@@ -405,7 +428,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
-          ? await this.executeIosType(command.text, operation, signal, display)
+          ? await this.iosSdkText.tracked(() =>
+              this.executeIosType(command.text, operation, signal, display),
+            )
           : await this.executeAndroidType({
               text: command.text,
               operation,
@@ -435,6 +460,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ...imeFailureFields(result),
         ...this.imeTraceFields(),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
+        ...iosBackendFields(result.iosBackend),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
       };
     } catch (error) {
@@ -586,6 +612,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         action: "key",
         key: command.key,
         modifiers,
+        ...(this.device.platform === "ios" ? this.iosSdkText.imeFields() : {}),
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
         ...(result.warning ? { warning: result.warning } : {}),
@@ -613,13 +640,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.resetCaretState();
     if (this.device.platform !== "android") {
       return this.device.platform === "ios"
-        ? clearIosFieldWithVerification({
-            clear: () => this.textClient.clear(signal),
-            observer: this.observer,
-            timer: this.timer,
-            signal,
-            display,
-          })
+        ? this.iosSdkText.tracked(() =>
+            clearIosFieldWithVerification({
+              clear: () => this.iosSdkText.clear(signal, () => this.textClient.clear(signal)),
+              observer: this.observer,
+              timer: this.timer,
+              signal,
+              display,
+            }),
+          )
         : this.textClient.clear();
     }
     if (mode === "a11y") {

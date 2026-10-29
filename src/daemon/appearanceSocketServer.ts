@@ -308,13 +308,14 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     const execution = executionTracker.startExecution(command, undefined, holderSessionUuid);
     target.execution = execution;
     executionTracker.bindDeviceExecution(execution.id, deviceId);
+    const signal = execution.abortController.signal;
     await admitInputOnHolderSession({
       deviceId,
       holderSessionUuid,
       sessionManager,
       execution: sessionExecutionMetadataOf(execution),
+      signal,
     });
-    const signal = execution.abortController.signal;
     if (signal.aborted) {
       // A release that landed while admission was awaited answers its own refusal.
       throw sessionReleaseThatCancelledCall(execution.cancelReason) ?? signal.reason;

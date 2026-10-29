@@ -132,6 +132,8 @@ enum PrototypePlatformValidator {
         var channels: [String: JSONValue] = [:]
         /// Whether the spec has a root `auth` block for `auth.*` calls (#14303).
         var hasAuth = false
+        /// The root `notifications` block's channel ids (#14280).
+        var notificationChannels: Set<String> = []
         /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
         var secureKeys: [String] = []
         var players: Set<String> = []
@@ -140,7 +142,8 @@ enum PrototypePlatformValidator {
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
         requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
-        storage: JSONValue? = nil, location: JSONValue? = nil, media: JSONValue? = nil, root: JSONValue,
+        storage: JSONValue? = nil, location: JSONValue? = nil, notifications: JSONValue? = nil,
+        media: JSONValue? = nil, root: JSONValue,
         state: [String: JSONValue]
     )
         throws
@@ -149,10 +152,12 @@ enum PrototypePlatformValidator {
         try PrototypeAuthRules.validateBlock(auth, requires: requires)
         try PrototypeSecureStorageRules.validateBlock(storage, requires: requires, state: state)
         try PrototypeLocationRules.validateBlock(location, requires: requires)
+        try PrototypeNotificationRules.validateBlock(notifications, requires: requires)
         try PrototypeMedia.validate(media, requires: requires)
         var declared = try validateRequires(requires)
         declared.channels = channels?.objectFields ?? [:]
         declared.hasAuth = auth?.objectFields != nil
+        declared.notificationChannels = PrototypeNotificationRules.channels(notifications)
         declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
         declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
@@ -448,6 +453,9 @@ enum PrototypePlatformValidator {
         }
         try PrototypeChannels.call(action, path: path, channels: declared.channels)
         try PrototypeAuthRules.validateCall(call, path: path, hasAuth: declared.hasAuth)
+        try PrototypeNotificationRules.validateCall(
+            call, args: args, path: path, channels: declared.notificationChannels
+        )
         try PrototypeMedia.call(action, path: path, players: declared.players)
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)

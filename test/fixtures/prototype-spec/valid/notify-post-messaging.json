@@ -131,5 +131,14 @@
         }
       }
     ]
+  },
+  "notifications": {
+    "channels": [
+      {
+        "id": "messages",
+        "name": "Messages",
+        "importance": "default"
+      }
+    ]
   }
 }

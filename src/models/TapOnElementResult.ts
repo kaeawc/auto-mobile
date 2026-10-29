@@ -55,6 +55,13 @@ export interface TapOnElementResult extends BaseActionResult {
     occurrence: number;
   };
   selectedElement?: TapOnSelectedElement;
+  /**
+   * iOS only, for a node merged from the app's SDK observation bridge (#5159): `sdk` when the bridge
+   * performed the tap, `xctest` when XCTest stood in.
+   */
+  backend?: import("./ObserveResult").ObservationBackend;
+  /** Why XCTest stood in for the bridge: it was unavailable, or it does not support the action. */
+  fallbackReason?: import("./ObserveResult").ObservationFallbackReason;
   debug?: ToolDebugInfo;
   /**
    * Heuristic: a context menu, text selection, or new window root appeared after the long press.

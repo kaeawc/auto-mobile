@@ -1878,6 +1878,7 @@ data class PrototypeVideoPlayerNode(
   val loop: Boolean? = null,
   val startMs: Int? = null,
   val positionKey: String? = null,
+  val captions: List<JsonObject>? = null,
 ) : PrototypeNode()
 
 @Serializable

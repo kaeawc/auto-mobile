@@ -74,6 +74,11 @@
                 { server.preferenceRouteHandler.handle(body: $0) }
             }),
             Entry(route: .trigger, handler: .body { $0.handleTrigger($1, initialData: $2) }),
+            Entry(
+                route: .observationSnapshot,
+                handler: .body { $0.handleObservationSnapshot($1, initialData: $2) }
+            ),
+            Entry(route: .observationAction, handler: .body { $0.handleObservationAction($1, initialData: $2) }),
         ]
     }
 #endif

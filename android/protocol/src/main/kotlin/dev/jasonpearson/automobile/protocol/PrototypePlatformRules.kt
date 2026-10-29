@@ -66,8 +66,11 @@ internal object PrototypePlatformRules {
       { root, _ -> PrototypeAuthRules.blockError(root) },
       { root, _ -> PrototypeSecureStorageRules.blockError(root) },
       { root, _ -> PrototypeLocationRules.blockError(root) },
+      { root, _ -> PrototypeNotificationRules.blockError(root) },
       { root, _ -> PrototypeMedia.error(root) },
+      { root, _ -> PrototypeMediaQueue.error(root) },
       PrototypeMedia::videoPlayerError,
+      PrototypeMediaCaptions::error,
       { root, _ -> requiresError(root) },
     )
 
@@ -87,6 +90,7 @@ internal object PrototypePlatformRules {
           ?: (if (use is Use.Call)
             PrototypeChannels.callError(use.action, use.path, root)
               ?: PrototypeAuthRules.callError(use.action, use.path, root)
+              ?: PrototypeNotificationRules.callError(use.action, use.path, root)
               ?: PrototypeMedia.callError(use.action, use.path, declared.players)
           else null))
         ?.let {

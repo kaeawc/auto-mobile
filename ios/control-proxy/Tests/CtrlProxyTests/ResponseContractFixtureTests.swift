@@ -119,6 +119,28 @@ final class ResponseContractFixtureTests: XCTestCase {
                                                             ),
                                                             error: "fixture failure", totalTimeMs: 17))
         try append(
+            "sdk_observation_result",
+            SdkObservationResponse(
+                requestId: requestId,
+                outcome: .success(AutoMobileObservationSnapshot(
+                    captureIdentity: 41,
+                    orientation: .portrait,
+                    coordinateSpace: .screen,
+                    bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+                    root: nil
+                )),
+                totalTimeMs: 17
+            )
+        )
+        try append(
+            "sdk_action_result",
+            SdkActionResponse(
+                requestId: requestId,
+                outcome: .success(AutoMobileActionResult(status: .rejected, reason: "stale_observation")),
+                totalTimeMs: 17
+            )
+        )
+        try append(
             "voiceover_state_result",
             VoiceOverStateResponse(requestId: requestId, enabled: true, totalTimeMs: 17)
         )

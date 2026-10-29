@@ -20,19 +20,14 @@ import type { BrokerNativeProfile } from "./profile";
 import type { ExecutionTracker } from "../executionTracker";
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
+import {
+  staticToolChangesHostSideState,
+  staticToolChangesOpaquePersistentState,
+} from "../staticToolDefinitions";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 
 export const DEFAULT_ANDROID_RESET_TIMEOUT_MS = 600_000;
 const ANDROID_BASELINE_STEP_ATTEMPTS = 3;
-// User snapshot capture writes emulator state outside the guest that a broker snapshot load keeps.
-// Host-side state (AVD config, mock-network rules) survives snapshot load and wipe-data alike.
-const HOST_SIDE_TOOLS: ReadonlySet<string> = new Set([
-  "network",
-  "mockNetwork",
-  "clearMockNetwork",
-  "setDeviceResources",
-]);
-const OPAQUE_PERSISTENT_TOOLS: ReadonlySet<string> = new Set(["deviceSnapshot"]);
 
 function activityAllowsReset(
   strategy: AndroidResetStrategy,
@@ -66,8 +61,10 @@ export function watchAndroidResetSession(
   const close = tracker.onSessionExecutionEnded((sessionIds, activity) => {
     if (sessionIds.includes(sessionId) && activity.admitted) {
       safe = false;
-      opaque ||= OPAQUE_PERSISTENT_TOOLS.has(activity.toolName);
-      hostSide ||= HOST_SIDE_TOOLS.has(activity.toolName);
+      // The tool traits say which tools leave state a snapshot load (opaque) or any guest reset
+      // (host-side) cannot revert (#15672).
+      opaque ||= staticToolChangesOpaquePersistentState(activity.toolName);
+      hostSide ||= staticToolChangesHostSideState(activity.toolName);
     }
   });
   return {

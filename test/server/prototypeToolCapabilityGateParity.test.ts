@@ -556,6 +556,54 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_mediaLibrary_query_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["mediaLibrary"],
+        permissions: [{ name: "photos", purpose: "Show recent photos" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "mediaLibrary.query",
+                args: { media: { value: "images" } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_mediaLibrary_v1"],
+  },
+  prototype_platform_mediaLibrary_save_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["mediaLibrary"],
+        permissions: [{ name: "photosAdd", purpose: "Save a ticket" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "mediaLibrary.save", args: { media: { value: {} } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_mediaLibrary_v1"],
+  },
   prototype_platform_camera_v1: {
     minimalSpec: {
       ...base,
@@ -676,6 +724,25 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     },
     ops: [],
     with: ["prototype_platform_v1"],
+  },
+  prototype_platform_media_queue_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["media"] },
+      data: { episodes: [{ id: "ep1", title: "Pilot", source: { sample: "tone440" } }] },
+      media: { players: { main: { kind: "audio", queue: "/data/episodes" } } },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "media.next", args: { player: { value: "main" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_media_v1", "prototype_data_model_v1"],
   },
   prototype_platform_cast_v1: {
     minimalSpec: {

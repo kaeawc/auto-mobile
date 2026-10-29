@@ -1,0 +1,4 @@
+[V] will control stream=5 (STREAM_NOTIFICATION)
+[V] will get volume
+[V] Connecting to AudioService
+[V] volume is 0 in range [0..7]

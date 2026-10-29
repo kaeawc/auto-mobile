@@ -1,0 +1,164 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "cues": {
+        "en": [
+          {
+            "startMs": 0,
+            "endMs": 1500,
+            "text": "Hello"
+          },
+          {
+            "startMs": 1500,
+            "endMs": 3000,
+            "text": "Welcome back"
+          }
+        ]
+      }
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "hero",
+          "player": "main",
+          "captions": [
+            {
+              "id": "t0",
+              "language": "en",
+              "label": "T0",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t1",
+              "language": "en",
+              "label": "T1",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t2",
+              "language": "en",
+              "label": "T2",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t3",
+              "language": "en",
+              "label": "T3",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t4",
+              "language": "en",
+              "label": "T4",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t5",
+              "language": "en",
+              "label": "T5",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t6",
+              "language": "en",
+              "label": "T6",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t7",
+              "language": "en",
+              "label": "T7",
+              "source": {
+                "asset": "a"
+              }
+            },
+            {
+              "id": "t8",
+              "language": "en",
+              "label": "T8",
+              "source": {
+                "asset": "a"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "{platform:/media/players/main/captionTrack}"
+        },
+        {
+          "type": "button",
+          "label": "Spanish",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setCaptions",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "track": {
+                  "value": "es"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Off",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setCaptions",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "track": {
+                  "value": ""
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].captions"
+}

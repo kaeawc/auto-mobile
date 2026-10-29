@@ -9059,6 +9059,12 @@
         "hasDefault": true
       },
       {
+        "name": "notifications",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "media",
         "type": "json",
         "nullable": true,
@@ -16107,6 +16113,12 @@
       {
         "name": "positionKey",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "captions",
+        "type": "list",
         "nullable": true,
         "hasDefault": true
       }

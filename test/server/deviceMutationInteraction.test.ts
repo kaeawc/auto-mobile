@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { ROTARY_BUTTONS } from "../../src/features/action/RotaryInput";
 import {
   opaqueIntentKey,
@@ -27,25 +28,32 @@ const SCREEN_STATE = { kind: "device-setting", key: "screen-state" };
 const VOLUME = { kind: "opaque", key: opaqueIntentKey("pressButton", "volume") };
 const VOLUME_KEY_PRESS = { kind: "device-setting", key: "volume:key-press" };
 const KEY_PRESS_STREAMS: [string, number, number][] = [
-  ["bluetooth_sco", 6, 7],
-  ["notification", 5, 5],
-  ["system", 1, 7],
-  ["assistant", 11, 5],
-  ["voice_call", 0, 4],
-  ["ring", 2, 5],
-  ["alarm", 4, 6],
-  ["music", 3, 9],
-  ["accessibility", 10, 6],
+  ["bluetooth_sco", 6, 3],
+  ["notification", 5, 0],
+  ["system", 1, 0],
+  ["assistant", 11, 11],
+  ["tts", 9, 11],
+  ["accessibility", 10, 11],
+  ["voice_call", 0, 3],
+  ["ring", 2, 0],
+  ["alarm", 4, 5],
+  ["music", 3, 11],
 ];
 
-/** What `volumeReadScript` prints on a device: each stream's name, then `volume --get` output. */
+// Read-only API 37 captures; see test/fixtures/android-volume/README.md.
+const VOLUME_OUTPUTS = new Map(
+  KEY_PRESS_STREAMS.map(([, code]) => [
+    code,
+    readFileSync(
+      new URL(`../fixtures/android-volume/api37-stream-${code}.stdout.txt`, import.meta.url),
+      "utf8",
+    ),
+  ]),
+);
+
+/** The journal reader labels each raw per-stream capture in its single shell response. */
 function volumeReadOutput(streams: readonly [string, number, number][]): string {
-  return streams
-    .map(
-      ([name, , level]) =>
-        `${name}\n[v] Connecting to AudioService\n[v] volume is ${level} in range [0..25]`,
-    )
-    .join("\n");
+  return streams.map(([name, code]) => `${name}\n${VOLUME_OUTPUTS.get(code)}`).join("\n");
 }
 
 /** Every tool the coverage table says changes no persistent device state. */
@@ -286,9 +294,9 @@ describe("InteractionMutationPriorReader volume levels", () => {
   test("a mediaSession row reads its one stream", async () => {
     adb.setCommandResponse(
       "volume --stream 3",
-      createExecResult(volumeReadOutput([["music", 3, 7]]), ""),
+      createExecResult(volumeReadOutput([["music", 3, 11]]), ""),
     );
-    expect(await reader.read(ANDROID, [MUSIC])).toEqual([{ state: "present", value: 7 }]);
+    expect(await reader.read(ANDROID, [MUSIC])).toEqual([{ state: "present", value: 11 }]);
   });
 
   test.each([

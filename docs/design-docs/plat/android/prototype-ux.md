@@ -2132,6 +2132,21 @@ with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usag
 plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
 system-UI call per prototype at a time). No production runtime advertises either module yet.
 
+**Photo library (#14195, calls only).** Three more `mediaLibrary` calls read and write the library
+itself. `query` and `manageLimitedSelection` share `prototype_platform_mediaLibrary_query_v1`;
+`save` has its own capability, so a runtime can offer save without read:
+
+- `mediaLibrary.query` (`media` as for `pick`, optional `limit` 1-64) writes the newest items to
+  `into` as device media items; `mediaLibrary.manageLimitedSelection` (no arguments) re-opens the
+  partial-access selection. Both need `photos` in `requires.permissions` and
+  `prototype_platform_mediaLibrary_query_v1`; `query` is `sensitive`.
+- `mediaLibrary.save` (required `media`, an item usually bound from `/data`, and optional nonempty
+  `album`) adds an item to the library and writes its saved identifier to `into`. It needs
+  `photosAdd` in `requires.permissions` and `prototype_platform_mediaLibrary_save_v1`.
+
+All three also need the module's `prototype_platform_mediaLibrary_v1`; no production runtime
+advertises the per-call capabilities yet.
+
 **Fake sign-in (#14303).** The `auth` module (`prototype_platform_auth_v1`) has two calls. `auth.signIn` takes
 an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated sign-in" sheet and writes
 `{userId, name, email}` into `into`; it is `sensitive`, and a back-out is the typed error `cancelled`.
@@ -2232,9 +2247,14 @@ pending, authorization}`: `active` is at most 24 per prototype, and `authorizati
 vocabulary (`granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The
 runtime homes follow the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and
 ProtoViewer advertise the module, the CtrlProxy overlay advertises it as a disclosed preview, and the iOS
-injected agent never does. The validators do not yet check the top-level `notifications.channels` block,
-that `channel` names a declared channel, unique action ids, or that `cancel` names exactly one target. No
-production runtime advertises the module yet.
+injected agent never does. Channels come from a root `notifications` block, `{channels: [{id, name,
+importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped ids, a non-blank `name` (at
+most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
+256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
+must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime. On iOS, `min` and `low`
+map to the passive interruption level and `default` and `high` to active. No production runtime
+advertises the module yet.
 
 **Media players (#14253, contract only).** The root `media` block declares long-lived players
 that outlive a screen (mini-player, background audio, picture-in-picture):
@@ -2286,6 +2306,21 @@ one-key union), which is a node-scoped player released when the node leaves comp
   position into; a slider bound to it holds device writes while it is dragged and seeks on release.
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
+
+**Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
+`{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`
+pointer to an array of `{startMs, endMs, text}` cues that each end after they start. Track ids are
+unique per player; `hls:` ids are reserved for in-band HLS tracks. `media.setCaptions` (`player`,
+`track`, `""` for off) selects a track and `/platform/media/players/<id>/captionTrack` reports it.
+The cue parser and caption overlay are separate slices.
+**Queues (#14249, contract only).** A declared player takes exactly one of `source` or `queue`, a
+`/data` pointer to an array of `{id, title, artist?, album?, artwork?, source, durationMs?}` items
+with unique ids; `appendData` and `removeData` edit the queue at runtime. A queued player, and the
+calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setShuffle`,
+`setRepeat` (`off`, `one`, `all`) and `setSleepTimer` (`timer` `{ms}`, 0 cancels, or
+`{endOfItem: true}`), need `prototype_platform_media_queue_v1`. Per-player state adds
+`currentItemId`, `currentIndex`, `rate`, `sleepRemainingMs`, `shuffle` and `repeat`, and
+`media.itemChanged` reports an item change. No runtime advertises the capability yet.
 
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and

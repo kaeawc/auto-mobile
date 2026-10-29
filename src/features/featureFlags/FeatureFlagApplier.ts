@@ -52,6 +52,9 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "navigation-screenshots":
         serverConfig.setNavigationScreenshotsEnabled(enabled);
         break;
+      case "ios-sdk-observation-bridge":
+        serverConfig.setIosSdkObservationBridgeEnabled(enabled);
+        break;
       default:
         this.applyOutputReduction(key, enabled);
         break;

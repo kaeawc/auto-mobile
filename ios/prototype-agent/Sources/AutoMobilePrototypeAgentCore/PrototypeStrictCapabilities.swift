@@ -32,6 +32,7 @@ enum PrototypeStrictCapabilities {
                 .contains(where: { $0.objectFields?["via"] == .string("device") }) { need("platform_realtime_device") }
         }
         if spec["data"] != nil { need("data_model") }
+        if PrototypeMediaQueue.queued(spec) { need("platform_media_queue") }
         if spec["derive"] != nil { need("format") }
         if spec["storage"] != nil { need("storage") }
         if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])

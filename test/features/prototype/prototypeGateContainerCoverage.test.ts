@@ -31,6 +31,14 @@ const mediaPickCall = {
   ...label,
   onTap: [{ type: "platform", call: "mediaLibrary.pick", args: { media: { value: "images" } } }],
 };
+const libraryQueryCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.query", args: { media: { value: "images" } } }],
+};
+const librarySaveCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.save", args: { media: { data: "/data/code" } } }],
+};
 const cameraCaptureCall = {
   ...label,
   onTap: [{ type: "platform", call: "camera.capture", args: { media: { value: "image" } } }],
@@ -50,6 +58,10 @@ const mediaCall = {
 const recordCall = {
   ...label,
   onTap: [{ type: "platform", call: "camera.startRecording", args: { preview: { value: "vf" } } }],
+};
+const queueCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "media.next", args: { player: { value: "main" } } }],
 };
 const castCall = {
   ...label,
@@ -316,6 +328,9 @@ const fixtures: Record<string, Node> = {
   prototype_platform_camera_capture_v1: cameraCaptureCall,
   prototype_platform_camera_video_v1: recordCall,
   prototype_platform_cast_v1: castCall,
+  prototype_platform_media_queue_v1: queueCall,
+  prototype_platform_mediaLibrary_query_v1: libraryQueryCall,
+  prototype_platform_mediaLibrary_save_v1: librarySaveCall,
   prototype_platform_calendar_v1: calendarCall,
   prototype_platform_commerce_v1: commerceCall,
   prototype_platform_auth_v1: authCall,

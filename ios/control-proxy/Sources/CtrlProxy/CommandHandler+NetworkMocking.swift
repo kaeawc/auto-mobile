@@ -95,6 +95,7 @@ extension CommandHandler {
             available: true,
             bundleId: normalizedBundleId(serverInfo.bundleId),
             capabilities: capabilities.map(\.rawValue),
+            observationBridge: serverInfo.observationBridge,
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }

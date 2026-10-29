@@ -61,6 +61,23 @@ final class SdkDatabaseModelParityTests: XCTestCase {
         )
     }
 
+    /// The #5161 store states and Keychain capability pass through CtrlProxy unchanged.
+    func testStorageCapabilitiesWithStoresAndKeychainParity() {
+        assertReencode(
+            SdkDatabase.storageCapabilities,
+            """
+            {"readOnly":true,"mutationAuthorized":false,"registeredAppGroupSuites":["group.a"],
+             "coreDataStores":[],"unavailableStores":["keychain","file_caches"],
+             "stores":[{"kind":"user_defaults_suite","identifier":"group.a","sharing":"app_group",
+               "appGroup":"group.a","coordination":"host_coordinated","query":"supported"}],
+             "keychain":{"schemaVersion":1,"capability":"storage.keychain","inspection":"unavailable",
+               "deletion":"enabled","deletionScopes":[{"itemClass":"genericPassword","service":"s",
+               "account":"a","accessGroup":"TEAMID.g"}]}}
+            """,
+            "SdkStorageCapabilities(stores, keychain)"
+        )
+    }
+
     func testExecuteSqlResultParity() {
         // SELECT result: columns/rows/diagnostic/truncated all present, rows carry nulls.
         assertReencode(

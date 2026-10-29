@@ -430,6 +430,9 @@
             XCTAssertEqual(capabilities.sorted(), expectedCapabilities.sorted())
             let expected = try JSONSerialization.data(withJSONObject: [
                 "status": "ok", "bundleId": "test.bundle", "capabilities": capabilities,
+                "observationBridge": [
+                    "schemaVersion": 1, "available": false, "reason": "NOT_REGISTERED", "supportedActions": [],
+                ],
             ])
             try assertHttpContract(
                 response,

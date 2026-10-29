@@ -515,6 +515,7 @@ function decodeSdkCapabilitiesResult(message: WebSocketMessage): unknown {
     available: message.available ?? false,
     bundleId: message.bundleId,
     capabilities: message.capabilities ?? [],
+    observationBridge: message.observationBridge,
     totalTimeMs: message.totalTimeMs ?? 0,
     error: message.error,
   };

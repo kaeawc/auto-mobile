@@ -831,6 +831,25 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
+  test("sdk_capabilities_result keeps the observation-bridge state for the probe (#5159)", () => {
+    const observationBridge = {
+      schemaVersion: 1,
+      available: true,
+      supportedActions: ["tap"],
+    };
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "sdk_capabilities_result",
+        success: true,
+        available: true,
+        bundleId: "com.example.app",
+        observationBridge,
+        totalTimeMs: 4,
+      }),
+    );
+    expect(decoded?.result).toMatchObject({ observationBridge });
+  });
+
   test("sdk_capabilities_result with no SDK in the foreground app reports unavailable", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({ type: "sdk_capabilities_result", success: true, available: false, totalTimeMs: 3 }),

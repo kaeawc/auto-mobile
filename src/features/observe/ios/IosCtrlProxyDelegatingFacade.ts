@@ -878,6 +878,17 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     return this.database.storageCapabilities(appId, options);
   }
 
+  /** Whether the foreground app's SDK observation bridge is available (#5159). */
+  async getObservationBridgeStateForIos(
+    appId: string,
+    timeoutMs?: number,
+  ): Promise<import("./observationBridgeState").IosObservationBridgeState> {
+    return this.sdkCapability.getObservationBridgeState(
+      appId,
+      sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000),
+    );
+  }
+
   async listTablesForIos(
     appId: string,
     databasePath: string,

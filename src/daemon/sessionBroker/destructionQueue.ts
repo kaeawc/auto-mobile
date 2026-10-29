@@ -60,16 +60,32 @@ export class DestructionQueue {
    * A replay finds only resources that are still idle, so a settled drain is a no-op.
    */
   drainIdlePool(): Promise<SessionBrokerPoolDrainResult> {
-    const pending = this.drainIdlePoolOnce().finally(() => {
+    return this.trackedDrain(() => this.store.drainIdle());
+  }
+
+  /**
+   * Idle expiry: each candidate leaves the pool only if it is still idle at the observed
+   * revision, then is destroyed through the same path as the operator drain.
+   */
+  expireIdle(candidates: readonly DestructionTicket[]): Promise<SessionBrokerPoolDrainResult> {
+    return this.trackedDrain(() => this.store.drainIdle(candidates));
+  }
+
+  private trackedDrain(
+    select: () => Promise<DestructionTicket[]>,
+  ): Promise<SessionBrokerPoolDrainResult> {
+    const pending = this.drainOnce(select).finally(() => {
       this.drains.delete(pending);
     });
     this.drains.add(pending);
     return pending;
   }
 
-  private async drainIdlePoolOnce(): Promise<SessionBrokerPoolDrainResult> {
+  private async drainOnce(
+    select: () => Promise<DestructionTicket[]>,
+  ): Promise<SessionBrokerPoolDrainResult> {
     const resources: SessionBrokerPoolDrainEntry[] = [];
-    for (const ticket of await this.store.drainIdle()) {
+    for (const ticket of await select()) {
       await this.tryCleanup(ticket);
       const resource = await this.store.getResource(ticket.resourceId);
       // Only unreferenced destroyed tombstones are deleted, so a missing row confirms cleanup.

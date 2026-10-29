@@ -650,6 +650,40 @@ describe("session broker service lifecycle", () => {
     expect(lock.events).toEqual(["lock:release"]);
   });
 
+  test("every recovery pass runs idle expiry, and an expiry failure does not stop the loop", async () => {
+    const timer = new FakeTimer();
+    const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
+    const expire = spyOn(broker, "expireIdlePool").mockRejectedValueOnce(new Error("busy"));
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const service = new SessionBrokerService(
+      broker,
+      BROKER_SCOPE_KEY,
+      new RecordingLock(),
+      timer,
+      new InMemoryMutationRecordingGaps(),
+    );
+    try {
+      service.start();
+      await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+        description: "first recovery pass",
+      });
+      expect(expire).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Session broker idle expiry failed: busy",
+        expect.any(Error),
+      );
+
+      timer.advanceTime(SESSION_BROKER_RECOVERY_INTERVAL_MS);
+      await drainUntil(() => expire.mock.calls.length === 2, {
+        description: "second recovery pass",
+      });
+    } finally {
+      await service.close();
+      expire.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
   test("close joins an in-flight recovery pass before broker close and lock release", async () => {
     const timer = new FakeTimer();
     const lock = new RecordingLock();

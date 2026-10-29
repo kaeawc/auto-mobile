@@ -10,7 +10,7 @@ import {
   type ExactIosRuntimeCatalog,
   type ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
-import { androidProfileFormFactor } from "../../../models/formFactor";
+import { androidProfileFormFactor, defaultAndroidProfileIdFor } from "../../../models/formFactor";
 import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import {
   inferIosFormFactor,
@@ -81,10 +81,10 @@ export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
   phone: BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
   tablet: "pixel_tablet",
   foldable: "pixel_fold",
-  // Names from avdmanager listings; confirm with `avdmanager list device` (form-factors.md row 10).
-  tv: "tv_1080p",
-  watch: "wearos_small_round",
-  automotive: "automotive_1024p_landscape",
+  // Shared with default provisioning (models/formFactor.ts), so the two paths create one profile.
+  tv: defaultAndroidProfileIdFor("tv"),
+  watch: defaultAndroidProfileIdFor("watch"),
+  automotive: defaultAndroidProfileIdFor("automotive"),
 } as const satisfies Record<BindingDeviceFamily, string>;
 
 export type ManagedSpecResolution =

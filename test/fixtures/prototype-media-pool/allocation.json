@@ -1,0 +1,471 @@
+[
+  {
+    "name": "pager plays the settled first page and preloads the next",
+    "input": {
+      "mode": "pager",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 1
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        },
+        {
+          "id": "e",
+          "visibleFraction": 0
+        }
+      ],
+      "settledIndex": 0,
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": "a",
+      "preload": ["b"],
+      "release": []
+    }
+  },
+  {
+    "name": "pager keeps current, next and previous and releases the rest",
+    "input": {
+      "mode": "pager",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        },
+        {
+          "id": "c",
+          "visibleFraction": 1
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        },
+        {
+          "id": "e",
+          "visibleFraction": 0
+        }
+      ],
+      "settledIndex": 2,
+      "held": ["a", "b"],
+      "visibleThreshold": 0.6,
+      "foreground": true
+    },
+    "expected": {
+      "play": "c",
+      "preload": ["d", "b"],
+      "release": ["a"]
+    }
+  },
+  {
+    "name": "pager on the last page preloads only the previous page",
+    "input": {
+      "mode": "pager",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        },
+        {
+          "id": "e",
+          "visibleFraction": 1
+        }
+      ],
+      "settledIndex": 4,
+      "held": ["c", "d", "e"],
+      "visibleThreshold": 0.6,
+      "foreground": true
+    },
+    "expected": {
+      "play": "e",
+      "preload": ["d"],
+      "release": ["c"]
+    }
+  },
+  {
+    "name": "pager mid-swipe plays nothing and holds the window around the most visible page",
+    "input": {
+      "mode": "pager",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0.55
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0.45
+        },
+        {
+          "id": "e",
+          "visibleFraction": 0
+        }
+      ],
+      "held": ["b", "c", "d"],
+      "visibleThreshold": 0.6,
+      "foreground": true
+    },
+    "expected": {
+      "play": null,
+      "preload": ["c", "d", "b"],
+      "release": []
+    }
+  },
+  {
+    "name": "pager in the background pauses the settled page but keeps its window",
+    "input": {
+      "mode": "pager",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        },
+        {
+          "id": "c",
+          "visibleFraction": 1
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        },
+        {
+          "id": "e",
+          "visibleFraction": 0
+        }
+      ],
+      "settledIndex": 2,
+      "foreground": false,
+      "held": ["b", "c", "d"],
+      "visibleThreshold": 0.6
+    },
+    "expected": {
+      "play": null,
+      "preload": ["c", "d", "b"],
+      "release": []
+    }
+  },
+  {
+    "name": "pager ignores a settled index past the end",
+    "input": {
+      "mode": "pager",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 1
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0
+        }
+      ],
+      "settledIndex": 7,
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": null,
+      "preload": ["b", "c", "a"],
+      "release": []
+    }
+  },
+  {
+    "name": "list plays the most visible player at or above the threshold",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0.2
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0.9
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0.3
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        }
+      ],
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": "b",
+      "preload": ["c", "a"],
+      "release": []
+    }
+  },
+  {
+    "name": "list plays nothing when the most visible player is under the threshold",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0.2
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0.5
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0.3
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        }
+      ],
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": null,
+      "preload": ["b", "c", "a"],
+      "release": []
+    }
+  },
+  {
+    "name": "list breaks a visibility tie in favour of the topmost player",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0.1
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0.8
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0.8
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        }
+      ],
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": "b",
+      "preload": ["c", "a"],
+      "release": []
+    }
+  },
+  {
+    "name": "list plays a player exactly at the threshold",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0.6
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0.4
+        }
+      ],
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": "b",
+      "preload": ["c", "a"],
+      "release": []
+    }
+  },
+  {
+    "name": "list honours a lower visibleThreshold",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0.45
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0.3
+        }
+      ],
+      "visibleThreshold": 0.4,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": "b",
+      "preload": ["c", "a"],
+      "release": []
+    }
+  },
+  {
+    "name": "list releases every held player when none is visible",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0
+        },
+        {
+          "id": "d",
+          "visibleFraction": 0
+        }
+      ],
+      "held": ["b", "c"],
+      "visibleThreshold": 0.6,
+      "foreground": true
+    },
+    "expected": {
+      "play": null,
+      "preload": [],
+      "release": ["b", "c"]
+    }
+  },
+  {
+    "name": "a single visible player plays with nothing to preload",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 1
+        }
+      ],
+      "visibleThreshold": 0.6,
+      "foreground": true,
+      "held": []
+    },
+    "expected": {
+      "play": "a",
+      "preload": [],
+      "release": []
+    }
+  },
+  {
+    "name": "held players that left the feed are released",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 0
+        },
+        {
+          "id": "b",
+          "visibleFraction": 1
+        },
+        {
+          "id": "c",
+          "visibleFraction": 0
+        }
+      ],
+      "held": ["x", "b", "y"],
+      "visibleThreshold": 0.6,
+      "foreground": true
+    },
+    "expected": {
+      "play": "b",
+      "preload": ["c", "a"],
+      "release": ["x", "y"]
+    }
+  },
+  {
+    "name": "held ids are released once even when repeated",
+    "input": {
+      "mode": "list",
+      "items": [
+        {
+          "id": "a",
+          "visibleFraction": 1
+        },
+        {
+          "id": "b",
+          "visibleFraction": 0
+        }
+      ],
+      "held": ["z", "z", "a"],
+      "visibleThreshold": 0.6,
+      "foreground": true
+    },
+    "expected": {
+      "play": "a",
+      "preload": ["b"],
+      "release": ["z"]
+    }
+  }
+]

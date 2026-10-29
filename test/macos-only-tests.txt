@@ -62,6 +62,7 @@ portable test/features/navigation/iosNavigationGraphWorkflow.test.ts     # share
 portable test/server/toolRegistry.iosSessionContext.test.ts              # shared ToolRegistry session routing
 portable test/server/inventoryIdeIosPhysicalSource.test.ts               # discovery_incomplete rule shared with Android
 portable test/devices/watchOsSimctlListingExclusion.test.ts             # keeps watchOS rows out of the iOS listing; pure fakes
+portable test/devices/watchOsInventory.test.ts                          # watchOS listing and catalog filters over a fake simctl
 
 # Tests that pin Android behavior beside the iOS case in code both platforms share.
 portable test/features/action/DragAndDropIos.test.ts                     # routes drag by platform; asserts the Android accessibility path

@@ -310,6 +310,33 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     expect(runStep("xctestrunner-simulator-tests", name)?.no_output_timeout).toBe("12m");
   });
 
+  test("iOS SDK contract suite runs after navigation in both CI systems (#5164)", () => {
+    const name = "Run iOS SDK contract suite";
+    const githubNames = loadJobSteps(
+      XCTESTRUNNER_WORKFLOW,
+      "ios-xctest-runner-simulator-tests",
+    ).map((step) => step.name ?? "");
+    const circleNames = (
+      loadCircle(CONTINUE).jobs?.["xctestrunner-simulator-tests"]?.steps ?? []
+    ).map((step) =>
+      typeof step === "string"
+        ? step
+        : String((step.run as { name?: string } | undefined)?.name ?? ""),
+    );
+    for (const names of [githubNames, circleNames]) {
+      expect(names.filter((stepName) => stepName === name)).toHaveLength(1);
+      expect(names.indexOf(name)).toBeGreaterThan(
+        names.indexOf("Run iOS navigation graph Simulator workflow"),
+      );
+      expect(names.indexOf(name)).toBeLessThan(
+        names.indexOf("Stop AutoMobile daemon before odd-width boot"),
+      );
+    }
+    expect(runStep("xctestrunner-simulator-tests", name)?.command).toContain(
+      "sdk-contract-integration.sh",
+    );
+  });
+
   test("nightly Thread Sanitizer stays simulator-free and bounded", () => {
     const steps = loadCircle(CONTINUE).jobs?.["xctestrunner-tsan"]?.steps ?? [];
     const run = runStep("xctestrunner-tsan", "Run XCTestRunner Thread Sanitizer");

@@ -166,9 +166,11 @@ public final class AutoMobileWebViewPolicy: Sendable {
                     id: element.id, role: element.role, label: element.label,
                     value: element.value == nil ? nil : "[REDACTED]",
                     bounds: element.bounds, enabled: element.enabled,
-                    visible: element.visible, focused: element.focused
+                    visible: element.visible, focused: element.focused,
+                    inputType: element.inputType
                 )
-            }
+            },
+            viewport: snapshot.viewport
         )
         lock.withLock { latestSnapshots in
             latestSnapshots[bounded.snapshotId] = bounded
@@ -429,16 +431,33 @@ extension AutoMobileWebAction {
                             bounds: bounds,
                             enabled: (element["enabled"] as? Bool) ?? true,
                             visible: (element["visible"] as? Bool) ?? true,
-                            focused: (element["focused"] as? Bool) ?? false
+                            focused: (element["focused"] as? Bool) ?? false,
+                            inputType: element["inputType"] as? String
                         )
                     }
                 _ = policy.accept(AutoMobileWebSnapshot(
                     snapshotId: body["snapshotId"] as? String ?? UUID().uuidString,
                     url: url?.absoluteString,
-                    elements: decoded
+                    elements: decoded,
+                    viewport: Self.viewport(body["viewport"])
                 ))
             }
             emit(name: name, url: url, frameId: body["frameId"] as? String, requestId: requestId, metadata: metadata)
+        }
+
+        /// The page's visual viewport, when it reported a usable one.
+        static func viewport(_ value: Any?) -> AutoMobileWebViewport? {
+            guard let fields = value as? [String: Any],
+                  let width = (fields["width"] as? NSNumber)?.doubleValue, width > 0,
+                  let height = (fields["height"] as? NSNumber)?.doubleValue, height > 0
+            else { return nil }
+            return AutoMobileWebViewport(
+                offsetLeft: (fields["offsetLeft"] as? NSNumber)?.doubleValue ?? 0,
+                offsetTop: (fields["offsetTop"] as? NSNumber)?.doubleValue ?? 0,
+                width: width,
+                height: height,
+                scale: (fields["scale"] as? NSNumber)?.doubleValue ?? 1
+            )
         }
 
         public func perform(_ action: AutoMobileWebAction, completion: @escaping (Result<Void, Error>) -> Void) {
@@ -618,9 +637,11 @@ extension AutoMobileWebAction {
             const elements = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].map(e => {
               const id = e.dataset.automobileId || (e.dataset.automobileId = `e${nextElementId++}`);
               const r = e.getBoundingClientRect();
-              return {id, role: e.getAttribute('role') || e.tagName.toLowerCase(), label: e.getAttribute('aria-label') || e.textContent?.trim().slice(0, 200), value: e.value || null, bounds: [r.x,r.y,r.width,r.height], enabled: !e.disabled, visible: r.width > 0 && r.height > 0 && rendered(e), focused: document.activeElement === e};
+              return {id, role: e.getAttribute('role') || e.tagName.toLowerCase(), label: e.getAttribute('aria-label') || e.textContent?.trim().slice(0, 200), value: e.value || null, bounds: [r.x,r.y,r.width,r.height], enabled: !e.disabled, visible: r.width > 0 && r.height > 0 && rendered(e), focused: document.activeElement === e, inputType: e.tagName === 'INPUT' ? (e.type || 'text') : null};
             });
-            post('snapshot', {snapshotId: `${Date.now()}-${Math.random()}`, elements});
+            const v = window.visualViewport;
+            const viewport = v ? {offsetLeft: v.offsetLeft, offsetTop: v.offsetTop, width: v.width, height: v.height, scale: v.scale} : {offsetLeft: 0, offsetTop: 0, width: window.innerWidth, height: window.innerHeight, scale: 1};
+            post('snapshot', {snapshotId: `${Date.now()}-${Math.random()}`, elements, viewport});
           };
           let snapshotPending = false;
           const scheduleSnapshot = () => { if (snapshotPending) return; snapshotPending = true; setTimeout(() => { snapshotPending = false; snapshot(); }, 100); };

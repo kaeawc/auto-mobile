@@ -47,6 +47,8 @@ public struct AutoMobileWebElement: Codable, Sendable, Equatable {
     public let enabled: Bool
     public let visible: Bool
     public let focused: Bool
+    /// An `<input>` element's `type` (`text`, `checkbox`, ...); nil for every other element.
+    public let inputType: String?
 
     public init(
         id: String,
@@ -56,7 +58,8 @@ public struct AutoMobileWebElement: Codable, Sendable, Equatable {
         bounds: [Double] = [],
         enabled: Bool = true,
         visible: Bool = true,
-        focused: Bool = false
+        focused: Bool = false,
+        inputType: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -66,6 +69,25 @@ public struct AutoMobileWebElement: Codable, Sendable, Equatable {
         self.enabled = enabled
         self.visible = visible
         self.focused = focused
+        self.inputType = inputType
+    }
+}
+
+/// The page's visual viewport when a snapshot was taken, in CSS pixels. Element bounds are relative
+/// to the layout viewport; the visual viewport's offset and width map them onto the web view.
+public struct AutoMobileWebViewport: Codable, Sendable, Equatable {
+    public let offsetLeft: Double
+    public let offsetTop: Double
+    public let width: Double
+    public let height: Double
+    public let scale: Double
+
+    public init(offsetLeft: Double = 0, offsetTop: Double = 0, width: Double, height: Double, scale: Double = 1) {
+        self.offsetLeft = offsetLeft
+        self.offsetTop = offsetTop
+        self.width = width
+        self.height = height
+        self.scale = scale
     }
 }
 
@@ -75,17 +97,20 @@ public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
     public let url: String?
     public let title: String?
     public let elements: [AutoMobileWebElement]
+    public let viewport: AutoMobileWebViewport?
 
     public init(
         snapshotId: String = UUID().uuidString,
         url: String? = nil,
         title: String? = nil,
-        elements: [AutoMobileWebElement] = []
+        elements: [AutoMobileWebElement] = [],
+        viewport: AutoMobileWebViewport? = nil
     ) {
         self.snapshotId = snapshotId
         self.url = url
         self.title = title
         self.elements = elements
+        self.viewport = viewport
     }
 }
 

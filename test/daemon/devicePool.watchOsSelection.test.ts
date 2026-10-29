@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { makePool } from "../helpers/makePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -26,26 +25,24 @@ const WATCH: BootedDevice = {
   platform: "watchos",
 };
 
-describe("DevicePool with an Apple Watch", () => {
-  let manager: SessionManager;
-  let utils: FakeDeviceUtils;
-  let pool: DevicePool;
-  let timer: FakeTimer;
-
-  beforeEach(async () => {
-    timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
-      barrier: () => new FakeDbWriteBarrier(),
-    });
-    utils = new FakeDeviceUtils();
-    utils.setBootedDevices("ios", [IPHONE]);
-    pool = makePool(manager, "watch-daemon", { timer, deviceManager: utils });
-    await pool.initializeWithDevices([IPHONE, WATCH]);
+/** A pool holding an iPhone and a watch; each test builds its own so mutations never leak. */
+async function poolWithWatch() {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
   });
+  manager.stopCleanupTimer();
+  const utils = new FakeDeviceUtils();
+  utils.setBootedDevices("ios", [IPHONE]);
+  const pool = makePool(manager, "watch-daemon", { timer, deviceManager: utils });
+  await pool.initializeWithDevices([IPHONE, WATCH]);
+  return { timer, pool };
+}
 
-  afterEach(() => manager.stopCleanupTimer());
-
+describe("DevicePool with an Apple Watch", () => {
   test("a complete iOS refresh does not remove a pooled watch", async () => {
+    const { pool } = await poolWithWatch();
+
     await pool.refreshDevices();
 
     expect(pool.getDevice(WATCH.deviceId)?.platform).toBe("watchos");
@@ -53,6 +50,8 @@ describe("DevicePool with an Apple Watch", () => {
   });
 
   test("an allocation that names no platform never takes the watch", async () => {
+    const { pool, timer } = await poolWithWatch();
+
     expect(await pool.assignDeviceToSession("either-1")).toBe(IPHONE.deviceId);
     const second = pool.assignDeviceToSession("either-2").then(
       (deviceId) => deviceId,
@@ -65,6 +64,8 @@ describe("DevicePool with an Apple Watch", () => {
   });
 
   test("a watch request takes the watch", async () => {
+    const { pool } = await poolWithWatch();
+
     expect(await pool.assignDeviceToSession("watch-1", "watchos")).toBe(WATCH.deviceId);
   });
 

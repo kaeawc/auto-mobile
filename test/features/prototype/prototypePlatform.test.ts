@@ -97,12 +97,24 @@ describe("platform module table", () => {
     for (const [name, definition] of Object.entries(contract.platformModules)) {
       expect(definition.capability).toMatch(new RegExp(`^prototype_platform_${name}_v[0-9]+$`));
     }
-    expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability)).toEqual(
-      Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
+    const callCapabilities = Object.entries(contract.platformModules).flatMap(
+      ([name, definition]) =>
+        Object.values(definition.calls as Record<string, { capability?: string }>)
+          .map((call) => call.capability)
+          .filter((capability): capability is string => capability !== undefined)
+          .map((capability) => {
+            // A call capability extends its module's name: prototype_platform_<module>_<op>_vN.
+            expect(capability).toMatch(new RegExp(`^prototype_platform_${name}_[a-z]+_v[0-9]+$`));
+            return capability;
+          }),
+    );
+    expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability)).toEqual([
+      ...Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
         definition.capability,
         ...(definition.deviceCapability ? [definition.deviceCapability] : []),
       ]),
-    );
+      ...new Set(callCapabilities),
+    ]);
   });
 });
 
@@ -767,16 +779,14 @@ describe("system media picker and camera module contracts", () => {
     expect(capture.args.maxDurationMs.value.min).toBe(1);
   });
 
-  test("both use system UI: sensitive, no declared permission, events or state", () => {
+  test("both use system UI: sensitive, with no declared permission or background mode", () => {
     for (const call of [pick, capture]) {
       expect(call.sensitive).toBe(true);
       expect(call.permissions).toEqual([]);
       expect(call.background).toEqual([]);
     }
-    for (const name of ["mediaLibrary", "camera"]) {
-      expect(PROTOTYPE_PLATFORM_MODULES[name].events).toEqual({});
-      expect(PROTOTYPE_PLATFORM_MODULES[name].state).toEqual({});
-    }
+    expect(PROTOTYPE_PLATFORM_MODULES.mediaLibrary.events).toEqual({});
+    expect(PROTOTYPE_PLATFORM_MODULES.mediaLibrary.state).toEqual({});
   });
 
   test("picker and capture are gated separately, so a device can offer only the picker", () => {
@@ -937,5 +947,72 @@ describe("audioRecorder module contract", () => {
       root: { type: "text", text: "Level {platform:/audioRecorder/level}" },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("live camera calls and per-call capabilities", () => {
+  const camera = PROTOTYPE_PLATFORM_MODULES.camera;
+  const spec = (onTap: unknown[], permissions = [{ name: "camera", purpose: "Shoot" }]) => ({
+    id: "cam",
+    window: { placement: { type: "fullscreen" } },
+    requires: { platform: ["camera"], permissions },
+    root: { type: "button", label: "Go", onTap },
+  });
+  const call = (op: string) => ({
+    type: "platform",
+    call: `camera.${op}`,
+    args: { preview: { value: "vf" } },
+  });
+
+  test("live calls name a preview and need the camera permission", () => {
+    for (const op of ["takePhoto", "startRecording", "stopRecording"]) {
+      expect(camera.calls[op].args.preview.optional).toBe(false);
+      expect(camera.calls[op].permissions).toEqual(["camera"]);
+      expect(camera.calls[op].sensitive).toBe(true);
+    }
+    expect(Object.keys(camera.state ?? {})).toEqual([
+      "status",
+      "flashAvailable",
+      "recordingMs",
+      "source",
+    ]);
+    expect(Object.keys(camera.events)).toEqual(["statusChanged"]);
+  });
+
+  test("a photo needs only the module capability", () => {
+    const required = requiredPrototypeCapabilities(spec([call("takePhoto")]));
+    expect(required).toContain("prototype_platform_camera_v1");
+    expect(required).not.toContain("prototype_platform_camera_video_v1");
+    expect(required).not.toContain("prototype_platform_camera_capture_v1");
+  });
+
+  test("recording and system capture each add their own capability", () => {
+    expect(requiredPrototypeCapabilities(spec([call("stopRecording")]))).toContain(
+      "prototype_platform_camera_video_v1",
+    );
+    const capture = {
+      type: "platform",
+      call: "camera.capture",
+      args: { media: { value: "image" } },
+    };
+    const required = requiredPrototypeCapabilities(spec([capture], []));
+    expect(required).toContain("prototype_platform_camera_capture_v1");
+    expect(required).toContain("prototype_platform_camera_v1");
+  });
+
+  test("the call gate reports each recording call's path", () => {
+    const gate = PROTOTYPE_PLATFORM_MODULE_GATES.find(
+      (entry) => entry.capability === "prototype_platform_camera_video_v1",
+    )!;
+    const recording = spec([call("takePhoto"), call("startRecording"), call("stopRecording")]);
+    expect(gate.fields(recording)).toEqual(["root.onTap[1]", "root.onTap[2]"]);
+    expect(gate.unsupportedMessage(["root.onTap[1]"], "ios")).toContain(
+      "`camera.startRecording` or `camera.stopRecording`",
+    );
+  });
+
+  test("a live call without the camera permission is refused", () => {
+    expect(validatePrototypeSpec(spec([call("takePhoto")], [])).success).toBe(false);
+    expect(validatePrototypeSpec(spec([call("takePhoto")])).success).toBe(true);
   });
 });

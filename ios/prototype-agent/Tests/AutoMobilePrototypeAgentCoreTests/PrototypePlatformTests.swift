@@ -35,6 +35,7 @@ final class PrototypePlatformTests: XCTestCase {
                 let swift = try XCTUnwrap(module.calls[op])
                 XCTAssertEqual(swift.permissions, call["permissions"] as? [String], op)
                 XCTAssertEqual(swift.background, call["background"] as? [String], op)
+                XCTAssertEqual(swift.capability, call["capability"] as? String, op)
                 let args = try XCTUnwrap(call["args"] as? [String: [String: Any]])
                 XCTAssertEqual(Set(args.keys), Set(swift.args.keys), op)
                 for (arg, definition) in args {

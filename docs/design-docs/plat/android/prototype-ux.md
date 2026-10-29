@@ -2121,11 +2121,12 @@ reports `fallback`. The result has no `handler`. The Simulator has no Phone or M
 permission and write device media items (see "Device media items") to `into`.
 `mediaLibrary` (`prototype_platform_mediaLibrary_v1`) has `mediaLibrary.pick` with `media` (required:
 `images`, `videos` or `imagesAndVideos`) and `maxItems` (optional whole number 1-64, default 1; 1 writes one
-item, more writes an array; Android clamps it to `MediaStore.getPickImagesMaxLimit()`). `camera`
-(`prototype_platform_camera_v1`) has `camera.capture` with `media` (required: `image` or `video`) and
-`maxDurationMs` (optional whole number 1-600000, used only for video). They are separate modules, so a
-device that has a picker but no camera (an iOS Simulator) advertises only `mediaLibrary`. Both calls are
-`sensitive` and have no events or `/platform` state. A cancel leaves `into` untouched and runs `onError`
+item, more writes an array; Android clamps it to `MediaStore.getPickImagesMaxLimit()`). `camera.capture`
+has `media` (required: `image` or `video`) and `maxDurationMs` (optional whole number 1-600000, used
+only for video), and needs `prototype_platform_camera_capture_v1` on top of the `camera` module's
+`prototype_platform_camera_v1`. A device with a picker but no system camera (an iOS Simulator)
+advertises `mediaLibrary` and not the capture capability. Both calls are `sensitive`;
+`mediaLibrary` has no events or `/platform` state. A cancel leaves `into` untouched and runs `onError`
 with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usage_description` when the iOS
 plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
 system-UI call per prototype at a time). No production runtime advertises either module yet.
@@ -2267,6 +2268,21 @@ Its events are `media.statusChanged`, `media.ended` and `media.error`. State is 
 (`source_not_found`, `decode`, `network`, `unsupported_format`, `blocked_egress`). A read must name
 a declared player and one of those keys. The `videoPlayer` node, the asset transport and the
 renderers are separate slices; no production runtime advertises the module yet.
+
+**Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
+`camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
+`maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes
+`preview`, the id of the viewfinder it acts on, needs `camera` in `requires.permissions` and is
+`sensitive`; the viewfinder node itself is a separate slice. Recording also needs
+`prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
+`/platform/camera/status` state report `starting`, `ready`, `capturing`, `recording`, `unavailable`,
+`permission_denied` or `error`; `/platform/camera/flashAvailable`, `recordingMs` and `source`
+(`camera` or `injected`, the fake frame source on a Simulator) complete the state.
+
+**Per-call capabilities.** A `platformModules` call may name a `capability` it needs on top of its
+module's, named `prototype_platform_<module>_<op>_vN`. The host, Kotlin and Swift validators add it to
+a spec's required capabilities wherever the call appears, so a runtime can offer a module but refuse
+one of its operations (camera recording, system capture, media queues).
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

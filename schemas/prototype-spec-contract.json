@@ -22252,11 +22252,110 @@
           },
           "permissions": [],
           "background": [],
+          "sensitive": true,
+          "capability": "prototype_platform_camera_capture_v1"
+        },
+        "takePhoto": {
+          "args": {
+            "preview": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": ["camera"],
+          "background": [],
           "sensitive": true
+        },
+        "startRecording": {
+          "args": {
+            "preview": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "audio": {
+              "optional": true,
+              "value": {
+                "kind": "boolean"
+              }
+            },
+            "maxDurationMs": {
+              "optional": true,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 600000
+              }
+            }
+          },
+          "permissions": ["camera"],
+          "background": [],
+          "sensitive": true,
+          "capability": "prototype_platform_camera_video_v1"
+        },
+        "stopRecording": {
+          "args": {
+            "preview": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": ["camera"],
+          "background": [],
+          "sensitive": true,
+          "capability": "prototype_platform_camera_video_v1"
         }
       },
-      "events": {},
-      "state": {}
+      "events": {
+        "statusChanged": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "status": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "starting",
+              "ready",
+              "capturing",
+              "recording",
+              "unavailable",
+              "permission_denied",
+              "error"
+            ]
+          }
+        },
+        "flashAvailable": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "recordingMs": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 600000
+          }
+        },
+        "source": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["camera", "injected"]
+          }
+        }
+      }
     },
     "auth": {
       "capability": "prototype_platform_auth_v1",

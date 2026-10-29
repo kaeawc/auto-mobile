@@ -30,6 +30,14 @@ enum PrototypePlatformValidator {
         let args: [String: Argument]
         let permissions: [String]
         let background: [String]
+        /// A capability the call needs on top of its module's (camera recording, media queues).
+        var capability: String?
+    }
+
+    /// The capability `call` needs on top of its module's, when its definition names one.
+    static func callCapability(_ call: String?) -> String? {
+        guard let call, let parts = qualified(call) else { return nil }
+        return modules[parts.module]?.calls[parts.member]?.capability
     }
 
     struct Module: Equatable {
@@ -58,7 +66,10 @@ enum PrototypePlatformValidator {
                     guard case let .array(values)? = call[key] else { return [] }
                     return values.compactMap(\.stringValue)
                 }
-                return Call(args: args, permissions: strings("permissions"), background: strings("background"))
+                return Call(
+                    args: args, permissions: strings("permissions"), background: strings("background"),
+                    capability: call["capability"]?.stringValue
+                )
             }
             return Module(
                 capability: fields["capability"]?.stringValue ?? "",

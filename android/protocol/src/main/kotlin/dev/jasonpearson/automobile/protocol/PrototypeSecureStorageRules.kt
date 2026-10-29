@@ -53,7 +53,11 @@ internal object PrototypeSecureStorageRules {
     return null
   }
 
-  fun emitError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
+  /** The first way [action] sends a secure key off the device: an emit context, then a request. */
+  fun actionError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? =
+    emitError(action, path, root) ?: requestError(action, path, root)
+
+  private fun emitError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
     if (action.text("type") != "emit") return null
     val context = action.member("context") ?: return null
     val secure = root.member("storage")?.strings("secure") ?: return null
@@ -73,7 +77,11 @@ internal object PrototypeSecureStorageRules {
    * in a header, query value or body (a whole body, a form entry or a multipart value), or a
    * `{key}` placeholder in the URL, a header or a query value. Members are checked in sorted order.
    */
-  fun requestError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
+  private fun requestError(
+    action: JsonObject,
+    path: String,
+    root: JsonObject,
+  ): PrototypeSpecError? {
     val secure = root.member("storage")?.strings("secure").orEmpty()
     if (action.text("type") != "request" || secure.isEmpty()) return null
     if ((action["allowSecureInRequest"] as? JsonPrimitive)?.booleanOrNull == true) return null

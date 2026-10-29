@@ -133,6 +133,8 @@
     "media-players.json",
     "media-repeat-asset.json",
     "media-tab-item-data.json",
+    "media-video-player-screen-named-data.json",
+    "media-video-player.json",
     "menu-overflow.json",
     "motion-none.json",
     "motion-tokens-default.json",
@@ -987,6 +989,19 @@
     "media-source-bad-url.json",
     "media-source-two-keys.json",
     "media-source-unknown-sample.json",
+    "media-video-player-bad-autoplay.json",
+    "media-video-player-bad-content-scale.json",
+    "media-video-player-both-sources.json",
+    "media-video-player-ghost-payload.json",
+    "media-video-player-inline-id-not-key.json",
+    "media-video-player-inline-id-repeats-player.json",
+    "media-video-player-inline-without-id.json",
+    "media-video-player-negative-start.json",
+    "media-video-player-no-source.json",
+    "media-video-player-position-key-not-number.json",
+    "media-video-player-position-key-undeclared.json",
+    "media-video-player-requires-undeclared.json",
+    "media-video-player-unknown-player.json",
     "menu-divider-with-label.json",
     "menu-empty-label.json",
     "menu-item-unknown-field.json",
@@ -1756,6 +1771,7 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-media-video-player.json",
     "strict-gate-on-appear-prototype_timers_v1.json",
     "strict-gate-prepend-prototype_lazy_list_v1.json",
     "strict-gate-prototype_adaptive_v1.json",
@@ -3088,6 +3104,12 @@
       "prototype_platform_camera_video_v1",
       "prototype_platform_v1"
     ],
-    "platform-cast.json": ["prototype_platform_cast_v1", "prototype_platform_v1"]
+    "platform-cast.json": ["prototype_platform_cast_v1", "prototype_platform_v1"],
+    "media-video-player.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "media-video-player-screen-named-data.json": [
+      "prototype_platform_media_v1",
+      "prototype_platform_v1",
+      "prototype_stack_v1"
+    ]
   }
 }

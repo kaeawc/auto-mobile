@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "ghost",
+    "window": { "placement": { "type": "fullscreen" } },
+    "requires": { "platform": ["media"] },
+    "media": { "players": { "main": { "kind": "audio", "source": { "sample": "tone440" } } } },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Share",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "shared_clip",
+              "payload": { "type": "videoPlayer", "id": "ghost", "source": { "sample": "silence" } }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Play",
+          "onTap": [
+            { "type": "platform", "call": "media.play", "args": { "player": { "value": "ghost" } } }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].args.player.value",
+  "expectedMessage": "Unknown media player"
+}

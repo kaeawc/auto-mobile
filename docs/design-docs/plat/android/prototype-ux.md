@@ -329,6 +329,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | textField       | material | material | —     |
 | timePicker      | native   | material | —     |
 | topAppBar       | material | material | —     |
+| videoPlayer     | material | material | —     |
 
 ### Light and dark values
 
@@ -2266,8 +2267,25 @@ Its events are `media.statusChanged`, `media.ended` and `media.error`. State is 
 `/platform/media/players/<id>/<key>`: `playing`, `positionMs`, `durationMs` (`-1` while unknown),
 `buffering`, `status` (`idle`, `loading`, `ready`, `ended`, `error`) and `error`
 (`source_not_found`, `decode`, `network`, `unsupported_format`, `blocked_egress`). A read must name
-a declared player and one of those keys. The `videoPlayer` node, the asset transport and the
-renderers are separate slices; no production runtime advertises the module yet.
+a declared player and one of those keys. The asset transport and the renderers are separate
+slices; no production runtime advertises the module yet.
+
+The `videoPlayer` node renders exactly one of a declared `player` or an inline `source` (the same
+one-key union), which is a node-scoped player released when the node leaves composition:
+
+```json
+{ "type": "videoPlayer", "player": "main", "autoplay": "whenVisible", "muted": true }
+```
+
+- An inline player is addressed by the node `id`, which must be a state key that no declared
+  player uses; `media.*` calls and `/platform/media/players/<id>` reads accept it like a declared
+  id.
+- Optional fields: `poster` (an image asset id), `controls` (`builtin` or `none`), `contentScale`
+  (`fit`, `crop`, `fill`), `autoplay` (`true`, `false` or `"whenVisible"`), `muted`, `loop`,
+  `startMs` (0-86400000) and `positionKey`, a declared number state key the device mirrors the
+  position into; a slider bound to it holds device writes while it is dragged and seeks on release.
+- Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
+  calling `media.*`.
 
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and

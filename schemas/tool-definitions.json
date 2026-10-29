@@ -34429,6 +34429,173 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["videoPlayer"]
+                    },
+                    "player": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "source": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "asset": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            }
+                          },
+                          "required": ["asset"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "maxLength": 2048,
+                              "pattern": "^https?:\\/\\/[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
+                            }
+                          },
+                          "required": ["url"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "data": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                            }
+                          },
+                          "required": ["data"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "sample": {
+                              "type": "string",
+                              "enum": ["tone440", "silence", "colorBars", "countdown"]
+                            }
+                          },
+                          "required": ["sample"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "poster": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "controls": {
+                      "type": "string",
+                      "enum": ["builtin", "none"]
+                    },
+                    "contentScale": {
+                      "type": "string",
+                      "enum": ["fit", "crop", "fill"]
+                    },
+                    "autoplay": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "whenVisible"
+                        }
+                      ]
+                    },
+                    "muted": {
+                      "type": "boolean"
+                    },
+                    "loop": {
+                      "type": "boolean"
+                    },
+                    "startMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 86400000
+                    },
+                    "positionKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/android"
+                    },
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "sharedKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/sharedKey"
+                    },
+                    "press": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/press"
+                    },
+                    "shared": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "keyframes": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "animate": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["chart"]
                     },
                     "variant": {
@@ -34598,7 +34765,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/31/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/32/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -34681,7 +34848,7 @@
                       "enum": ["tooltip"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/31/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/32/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
@@ -34801,7 +34968,7 @@
                       "enum": ["start", "end"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/31/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/32/properties/openWhen"
                     },
                     "scrim": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
@@ -34890,7 +35057,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/31/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/32/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -34900,10 +35067,10 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/31/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/32/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/31/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/32/properties/confirm/properties/onTap"
                               },
                               "icon": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
@@ -35013,14 +35180,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/31/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/32/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/31/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/32/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -35369,10 +35536,10 @@
                       "maxItems": 1
                     },
                     "header": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/38/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/39/properties/children/items"
                     },
                     "footer": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/38/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/39/properties/children/items"
                     }
                   },
                   "required": ["type", "repeat", "children"],
@@ -35457,7 +35624,7 @@
                       "default": "vertical"
                     },
                     "refresh": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/38/properties/refresh"
+                      "$ref": "#/properties/spec/properties/root/anyOf/39/properties/refresh"
                     },
                     "fadeEdges": {
                       "type": "object",
@@ -35747,7 +35914,7 @@
                                 "maxItems": 32
                               },
                               "onBack": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/41/properties/routes/allOf/0/additionalProperties/properties/onEnter"
+                                "$ref": "#/properties/spec/properties/root/anyOf/42/properties/routes/allOf/0/additionalProperties/properties/onEnter"
                               }
                             },
                             "additionalProperties": false
@@ -35961,7 +36128,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/42/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/43/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -36051,7 +36218,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/31/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/32/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -36975,53 +37142,7 @@
                             "enum": ["video", "audio"]
                           },
                           "source": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "asset": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 128
-                                  }
-                                },
-                                "required": ["asset"],
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "url": {
-                                    "type": "string",
-                                    "maxLength": 2048,
-                                    "pattern": "^https?:\\/\\/[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
-                                  }
-                                },
-                                "required": ["url"],
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
-                                  }
-                                },
-                                "required": ["data"],
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "sample": {
-                                    "type": "string",
-                                    "enum": ["tone440", "silence", "colorBars", "countdown"]
-                                  }
-                                },
-                                "required": ["sample"],
-                                "additionalProperties": false
-                              }
-                            ]
+                            "$ref": "#/properties/spec/properties/root/anyOf/30/properties/source"
                           },
                           "loop": {
                             "type": "boolean"

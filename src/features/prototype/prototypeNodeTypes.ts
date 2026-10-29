@@ -45,4 +45,5 @@ export const PROTOTYPE_NODE_TYPES = [
   "tooltip",
   "adaptive",
   "drawer",
+  "videoPlayer",
 ] as const;

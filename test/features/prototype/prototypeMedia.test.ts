@@ -99,3 +99,51 @@ test("a player declared as __proto__ survives validation with its own key", () =
   const players = result.success ? result.data.media?.players : undefined;
   expect(Object.hasOwn(players ?? {}, "__proto__")).toBe(true);
 });
+
+describe("videoPlayer nodes", () => {
+  const inline = { type: "videoPlayer", id: "clip", source: { sample: "countdown" } };
+
+  test("an inline player's id joins the ids calls and reads may name", () => {
+    const root = { media: { players }, root: { type: "column", children: [inline] } };
+    expect([...prototypeMediaPlayers(root)].sort()).toEqual(["clip", "main"]);
+  });
+
+  test("a node-scoped player can be driven and read like a declared one", () => {
+    const result = validatePrototypeSpec(
+      spec(
+        {},
+        {
+          type: "column",
+          children: [
+            inline,
+            { type: "text", text: "{platform:/media/players/clip/playing}" },
+            play({ value: "clip" }),
+          ],
+        },
+      ),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  test("a declared player is rendered by name without an id", () => {
+    const result = validatePrototypeSpec(spec({}, { type: "videoPlayer", player: "main" }));
+    expect(result.success).toBe(true);
+  });
+
+  test("an inline id must be a state key", () => {
+    const result = validatePrototypeSpec(
+      spec({}, { type: "videoPlayer", id: "clip-1", source: { sample: "silence" } }),
+    );
+    expect(result).toEqual({
+      success: false,
+      error: { path: "root", message: "An inline videoPlayer needs an id that is a state key" },
+    });
+  });
+
+  test("a positionKey must hold a number in declared state", () => {
+    const node = { type: "videoPlayer", player: "main", positionKey: "scrub" };
+    expect(validatePrototypeSpec(spec({ state: { scrub: 0 } }, node)).success).toBe(true);
+    expect(validatePrototypeSpec(spec({ state: { scrub: true } }, node)).success).toBe(false);
+    expect(validatePrototypeSpec(spec({}, node)).success).toBe(false);
+  });
+});

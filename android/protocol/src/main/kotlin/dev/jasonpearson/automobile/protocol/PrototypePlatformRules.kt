@@ -44,7 +44,7 @@ object PrototypePlatform {
  * `{event}` scope, the `into` path and the reserved `prototype_` emit prefix.
  */
 internal object PrototypePlatformRules {
-  private class Declared(root: JsonObject) {
+  private class Declared(root: JsonObject, nodes: List<PrototypeStateChecks.Located>) {
     private val requires = root.member("requires") ?: JsonObject(emptyMap())
     val modules = requires.strings("platform").toSet()
     val permissions =
@@ -53,29 +53,32 @@ internal object PrototypePlatformRules {
         .mapNotNull { (it as? JsonObject)?.text("name") }
         .toSet()
     val channels = root.member("channels") ?: JsonObject(emptyMap())
-    val players = PrototypeMedia.players(root)
+    val players = PrototypeMedia.players(root, nodes)
     val background = requires.strings("background").toSet()
   }
 
-  // Root-level blocks, checked in order before any call or event use.
-  private val rootChecks: List<(JsonObject) -> PrototypeSpecError?> =
+  // Root-level blocks, checked in order before any call or event use. The videoPlayer node rules
+  // need the node list, so they take it too and run before requires, in the host's order.
+  private val rootChecks:
+    List<(JsonObject, List<PrototypeStateChecks.Located>) -> PrototypeSpecError?> =
     listOf(
-      PrototypeChannels::error,
-      PrototypeAuthRules::blockError,
-      PrototypeSecureStorageRules::blockError,
-      PrototypeLocationRules::blockError,
-      PrototypeMedia::error,
-      ::requiresError,
+      { root, _ -> PrototypeChannels.error(root) },
+      { root, _ -> PrototypeAuthRules.blockError(root) },
+      { root, _ -> PrototypeSecureStorageRules.blockError(root) },
+      { root, _ -> PrototypeLocationRules.blockError(root) },
+      { root, _ -> PrototypeMedia.error(root) },
+      PrototypeMedia::videoPlayerError,
+      { root, _ -> requiresError(root) },
     )
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val root = value as? JsonObject ?: return null
-    val declared = Declared(root)
+    val declared = Declared(root, context.nodes)
     reservedTestTagError(context)?.let {
       return it
     }
     rootChecks
-      .firstNotNullOfOrNull { it(root) }
+      .firstNotNullOfOrNull { it(root, context.nodes) }
       ?.let {
         return it
       }

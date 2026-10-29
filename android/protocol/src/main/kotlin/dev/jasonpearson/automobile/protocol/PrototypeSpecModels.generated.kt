@@ -1843,6 +1843,43 @@ data class PrototypeAdaptiveNode(
   val items: List<PrototypeRadioOption>? = null,
 ) : PrototypeNode()
 
+@SerialName("videoPlayer")
+@Serializable
+data class PrototypeVideoPlayerNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val player: String? = null,
+  val source: JsonObject? = null,
+  val poster: String? = null,
+  val controls: String? = null,
+  val contentScale: String? = null,
+  val autoplay: JsonElement? = null,
+  val muted: Boolean? = null,
+  val loop: Boolean? = null,
+  val startMs: Int? = null,
+  val positionKey: String? = null,
+) : PrototypeNode()
+
 @Serializable
 data class PrototypeRouteEntry(
   val screen: String,

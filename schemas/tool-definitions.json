@@ -1999,7 +1999,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/hostSideState": true
     }
   },
   {
@@ -3007,6 +3008,9 @@
         }
       },
       "required": ["message", "snapshotName", "snapshotType", "deviceId", "deviceName"]
+    },
+    "_meta": {
+      "automobile/opaquePersistentState": true
     }
   },
   {
@@ -20113,7 +20117,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/hostSideState": true
     }
   },
   {
@@ -20534,7 +20539,8 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/hostSideState": true
     }
   },
   {
@@ -49936,7 +49942,8 @@
       }
     },
     "_meta": {
-      "automobile/deviceResourceBudget": true
+      "automobile/deviceResourceBudget": true,
+      "automobile/hostSideState": true
     }
   },
   {

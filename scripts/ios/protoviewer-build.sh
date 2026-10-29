@@ -8,6 +8,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${repo_root}/scripts/lib/spotlight-exclude.sh"
+# shellcheck source=scripts/lib/lipo-verify-arch.sh
+source "${repo_root}/scripts/lib/lipo-verify-arch.sh"
 out_dir="${1:-${repo_root}/scratch/protoviewer}"
 mkdir_spotlight_excluded_within "${repo_root}" "${out_dir}"
 out_dir="$(cd "${out_dir}" && pwd)"
@@ -52,7 +54,7 @@ for arch in "${archs[@]}"; do
   slices+=("${slice}")
 done
 lipo -create ${slices[@]+"${slices[@]}"} -output "${app}/ProtoViewer"
-lipo "${app}/ProtoViewer" -verify_arch "${archs[@]}"
+lipo_verify_archs "${app}/ProtoViewer" "${archs[@]}"
 cp "${viewer_root}/Info.plist" "${app}/Info.plist"
 plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"
 plutil -lint "${app}/Info.plist"

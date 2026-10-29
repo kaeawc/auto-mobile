@@ -142,6 +142,7 @@ nav:
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
       - "Emulator and simulator audio": using/emulator-audio.md
+      - "Headless host audio setup": using/headless-audio.md
       - "Device ownership": using/device-ownership.md
       - "Usage skill": using/usage-skill.md
       - "Managed Macs and CI runners": using/managed-macs.md

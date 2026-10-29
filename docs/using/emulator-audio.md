@@ -7,6 +7,9 @@ media playback on headless CI.
 All three tools are off by default; enable them with `setToolEnabled`. They work on local Android
 emulators and iOS Simulators. Physical devices are refused.
 
+For host setup, how to check what a device supports, and troubleshooting, see
+[Headless host audio setup](headless-audio.md).
+
 ## Android emulators
 
 Each emulator has its own audio channel, so emulators running side by side never hear each

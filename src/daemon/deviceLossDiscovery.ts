@@ -96,6 +96,8 @@ export async function discoverAndReconcile(
   const options = {
     bypassAndroidDeviceListCache,
     skipAndroidProfileEnrichment: true,
+    // Pooled watches need their own sweep, on the first read and the confirmation re-read alike.
+    includeWatchOs: platform === "either",
     // An unpooled held device still needs liveness evidence from its own source.
     skipPhysicalIosDiscovery: !trackedDevices.some(
       (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",

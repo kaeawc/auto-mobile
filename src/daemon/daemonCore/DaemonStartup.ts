@@ -1,3 +1,4 @@
+import { isAndroidOrIosPlatform } from "../../models/Platform";
 import type { SessionBrokerService } from "../sessionBroker/service";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
@@ -795,6 +796,10 @@ export class DaemonStartup {
         // minted these already; this is idempotent because the incarnation is
         // unchanged (epic #5256).
         for (const pooled of this.host.services.devicePool().getAllDevices()) {
+          // The device-session wire is Android and iOS; watches get no epoch yet (#14908).
+          if (!isAndroidOrIosPlatform(pooled.platform)) {
+            continue;
+          }
           this.host.services.deviceSessionRegistry().onDeviceConnected({
             deviceId: pooled.id,
             platform: pooled.platform,

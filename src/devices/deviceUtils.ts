@@ -441,7 +441,6 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     };
   }
 
-
   /**
    * Among the given Android candidate serials, which are ADB `offline`
    * rather than absent. Android-only: iOS's `simctl` has no analogous

@@ -65,7 +65,9 @@ describe("booted Apple Watch discovery", () => {
     const discovery = await managerWith(watches).getBootedDevicesDetailed("watchos");
 
     expect(discovery).toEqual({
-      devices: [{ name: "Apple Watch Series 10 (46mm)", platform: "watchos", deviceId: WATCH_UDID }],
+      devices: [
+        { name: "Apple Watch Series 10 (46mm)", platform: "watchos", deviceId: WATCH_UDID },
+      ],
       succeededPlatforms: new Set(["watchos"]),
       succeededSources: new Set(["watchos-simulator"]),
       freshDeviceIds: new Set([WATCH_UDID]),

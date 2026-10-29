@@ -89,7 +89,10 @@ export async function discoverBootedWatches(
     logger.warn(`watchOS simulator discovery failed: ${errorMessage(error)}`, error);
     return {
       devices: [],
-      error: { code: "failed", message: `watchOS simulator discovery failed: ${errorMessage(error)}` },
+      error: {
+        code: "failed",
+        message: `watchOS simulator discovery failed: ${errorMessage(error)}`,
+      },
     };
   }
 }

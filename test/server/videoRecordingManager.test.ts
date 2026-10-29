@@ -492,6 +492,27 @@ describe("videoRecordingManager", () => {
     expect(recordings[0]?.recordingId).toBe(active.recordingId);
   });
 
+  describe("the daemon refuses Android audio past one screenrecord segment (#15860)", () => {
+    test("a direct start with audio over 180 s is refused before any capture", async () => {
+      await expect(
+        startVideoRecording({ device: testDevice, maxDurationSeconds: 181, audio: true }),
+      ).rejects.toThrow("audio is supported for Android recordings up to 180 s");
+      expect(fakeBackend.startCalls).toHaveLength(0);
+    });
+
+    test("180 s with audio, longer without it, and iOS past 180 s with audio still start", async () => {
+      for (const request of [
+        { device: testDevice, maxDurationSeconds: 180, audio: true },
+        { device: testDevice, maxDurationSeconds: 300, audio: false },
+        { device: iosDevice, maxDurationSeconds: 600, audio: true },
+      ]) {
+        const active = await startVideoRecording(request);
+        await stopVideoRecording(active.recordingId);
+      }
+      expect(fakeBackend.startCalls).toHaveLength(3);
+    });
+  });
+
   describe("timer-driven stops do not inherit the start request's context (#10217)", () => {
     // AsyncLocalStorage stores are captured by timers created inside a run() scope (verified
     // under Bun), so an auto-stop armed during the `start` tool call fires with that call's
@@ -829,6 +850,28 @@ describe("videoRecordingManager", () => {
       await Promise.resolve();
       expect(probed).toEqual([active.outputPath]);
       expect(fakeBackend.stopCalls).toHaveLength(0);
+    });
+
+    test("an audio recording's PCM file counts toward the size cap (#15860)", async () => {
+      const probed: string[] = [];
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        // Neither file reaches the cap alone; together they do.
+        statFileSize: async (filePath) => {
+          probed.push(filePath);
+          return Math.ceil(capBytes * 0.6);
+        },
+      });
+      const active = await startVideoRecording({
+        device: testDevice,
+        maxDurationSeconds: 180,
+        audio: true,
+      });
+      fakeTimer.advanceTime(15_000);
+      await drainUntil(() => fakeBackend.stopCalls.length > 0, { description: "size-cap stop" });
+      expect(probed).toEqual([active.outputPath, `${active.outputPath}.audio.pcm`]);
+      await stopVideoRecording(active.recordingId);
+      expect(fakeBackend.stopCalls).toHaveLength(1);
     });
 
     test.each([

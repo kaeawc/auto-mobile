@@ -2,6 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../models/describeUnknownError";
 import type { AudioStream } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { logger } from "../../utils/logger";
+import { audioPcmPath } from "./recordingAudioLimits";
 import type {
   ForceStopOptions,
   RecordingHandle,
@@ -50,6 +51,9 @@ export interface AudioTrackDependencies {
   now: () => number;
 }
 
+const LOST_TRACK_WARNING =
+  "The recording has no audio track: an earlier stop failed and discarded the audio.";
+
 interface AudioTrack {
   stream: AudioStream;
   file: PcmFile;
@@ -66,6 +70,11 @@ interface AudioTrack {
  */
 export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
   private readonly tracks = new Map<string, AudioTrack>();
+  /**
+   * Recordings whose stop failed after the track was discarded. The video side may keep the
+   * recording active for a retry, which must still say the file has no audio (#15860).
+   */
+  private readonly lostTracks = new Set<string>();
 
   constructor(
     private readonly inner: VideoCaptureBackend,
@@ -91,7 +100,7 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
       throw new ActionableError("A recording with audio needs a target device.");
     }
     await this.deps.muxer.ensureAvailable();
-    const pcmPath = `${config.outputPath}.audio.pcm`;
+    const pcmPath = audioPcmPath(config.outputPath);
     const file = this.deps.openPcmFile(pcmPath);
     let stream: AudioStream;
     try {
@@ -119,7 +128,9 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
     const track = this.tracks.get(handle.recordingId);
     if (!track) {
-      return this.inner.stop(handle);
+      return this.lostTracks.has(handle.recordingId)
+        ? this.stopAfterLostTrack(handle)
+        : this.inner.stop(handle);
     }
     // The track stays registered until its teardown ends, so a force stop that arrives while the
     // video is still finalizing can still stop the audio (#15859).
@@ -131,6 +142,7 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
+    this.lostTracks.delete(handle.recordingId);
     const track = this.tracks.get(handle.recordingId);
     if (track) {
       this.tracks.delete(handle.recordingId);
@@ -148,6 +160,7 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
       result = await this.inner.stop(handle);
     } catch (error) {
       await this.discardOnce(track);
+      this.lostTracks.add(handle.recordingId);
       throw error;
     }
     const warning = track.discarded
@@ -160,6 +173,17 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
       ...(warning ? {} : { sizeBytes: undefined }),
       hasAudioTrack: warning === undefined,
       warnings: warnings.length > 0 ? warnings : undefined,
+    };
+  }
+
+  /** A retry of a stop that failed after discarding the track: the video, with no audio track. */
+  private async stopAfterLostTrack(handle: RecordingHandle): Promise<RecordingResult> {
+    const result = await this.inner.stop(handle);
+    this.lostTracks.delete(handle.recordingId);
+    return {
+      ...result,
+      hasAudioTrack: false,
+      warnings: [...(result.warnings ?? []), LOST_TRACK_WARNING],
     };
   }
 

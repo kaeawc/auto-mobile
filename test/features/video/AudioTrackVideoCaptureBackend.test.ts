@@ -39,6 +39,8 @@ interface SetupOptions {
   pcmWriteFails?: boolean;
   /** Holds the video stop until the returned release is called. */
   holdVideoStop?: boolean;
+  /** The first video stop fails; later stops succeed, like an Android finalization retry. */
+  videoStopFailsOnce?: boolean;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -48,6 +50,7 @@ function setup(options: SetupOptions = {}) {
     releaseVideoStop = resolve;
   });
   let clock = 1_000;
+  let videoStopFailures = options.videoStopFailsOnce ? 1 : 0;
   const files = new Map<string, number[]>();
   const removed: string[] = [];
   const muxed: AudioTrackMuxRequest[] = [];
@@ -69,6 +72,10 @@ function setup(options: SetupOptions = {}) {
       events.push("video-stop");
       if (options.holdVideoStop) {
         await videoStopHeld;
+      }
+      if (videoStopFailures > 0) {
+        videoStopFailures--;
+        throw new Error("screenrecord finalization failed");
       }
       return { recordingId: handle.recordingId, outputPath: handle.outputPath, sizeBytes: 42 };
     },
@@ -236,5 +243,37 @@ describe("AudioTrackVideoCaptureBackend", () => {
       "The recording has no audio track: it was force-stopped while stopping.",
     ]);
     expect(muxed).toEqual([]);
+  });
+
+  test("a stop retried after a failed video stop reports the audio track it lost (#15860)", async () => {
+    const { backend, removed, muxed } = setup({ videoStopFailsOnce: true });
+    const handle = await backend.start(config(true));
+    await expect(backend.stop(handle)).rejects.toThrow("screenrecord finalization failed");
+    expect(removed).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
+    const retried = await backend.stop(handle);
+    expect(retried.hasAudioTrack).toBe(false);
+    expect(retried.warnings).toEqual([
+      "The recording has no audio track: an earlier stop failed and discarded the audio.",
+    ]);
+    expect(muxed).toEqual([]);
+    // Reported once: a further stop of the same handle is the inner backend's alone.
+    expect((await backend.stop(handle)).hasAudioTrack).toBeUndefined();
+  });
+
+  test("a retried stop of a recording without audio reports no audio state", async () => {
+    const { backend } = setup({ videoStopFailsOnce: true });
+    const handle = await backend.start(config(false));
+    await expect(backend.stop(handle)).rejects.toThrow("screenrecord finalization failed");
+    const retried = await backend.stop(handle);
+    expect(retried.hasAudioTrack).toBeUndefined();
+    expect(retried.warnings).toBeUndefined();
+  });
+
+  test("a force stop after a failed stop forgets the lost track", async () => {
+    const { backend } = setup({ videoStopFailsOnce: true });
+    const handle = await backend.start(config(true));
+    await expect(backend.stop(handle)).rejects.toThrow("screenrecord finalization failed");
+    await backend.forceStop(handle);
+    expect((await backend.stop(handle)).hasAudioTrack).toBeUndefined();
   });
 });

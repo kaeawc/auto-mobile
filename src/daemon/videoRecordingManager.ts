@@ -1,3 +1,8 @@
+import {
+  assertAudioFitsOneSegment,
+  sizeMonitorPaths,
+  totalFileSize,
+} from "../features/video/recordingAudioLimits";
 import { ENV, readEnvNumber, type EnvVarSpec } from "../config/env";
 import {
   defaultRecordingCodecProbe,
@@ -927,7 +932,7 @@ async function runRetentionSweepWithDependencies(
  */
 function scheduleInProgressSizeCap(
   recordingId: string,
-  filePath: string,
+  filePaths: readonly string[],
   capBytes: number,
   deps: VideoRecordingManagerDependencies,
 ): void {
@@ -936,7 +941,7 @@ function scheduleInProgressSizeCap(
   }
   const { timer, retentionPolicy } = deps;
   const handle = timer.setInterval(() => {
-    void enforceInProgressSizeCap(recordingId, filePath, capBytes, deps).catch((error) => {
+    void enforceInProgressSizeCap(recordingId, filePaths, capBytes, deps).catch((error) => {
       logger.warn(`[VideoRecording] In-progress size check failed for ${recordingId}: ${error}`);
     });
   }, retentionPolicy.inProgressCheckIntervalMs);
@@ -993,20 +998,15 @@ async function rearmRetainedRecordingSafety(
   clearInProgressSizeCap(recordingId);
   scheduleInProgressSizeCap(
     recordingId,
-    sizeMonitorPath(deps.videoRecorderService.getLiveCapturePath(recordingId), record.filePath),
+    sizeMonitorPaths(deps.videoRecorderService.getLiveCapturePath(recordingId), record.filePath),
     capBytes,
     deps,
   );
 }
 
-/** The file to stat for the size cap: the live capture file if reported, else the output. */
-function sizeMonitorPath(liveCapturePath: string | undefined, outputPath: string): string {
-  return liveCapturePath ?? outputPath;
-}
-
 async function enforceInProgressSizeCap(
   recordingId: string,
-  filePath: string,
+  filePaths: readonly string[],
   capBytes: number,
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
@@ -1015,12 +1015,10 @@ async function enforceInProgressSizeCap(
     return;
   }
   const { statFileSize } = deps;
-  // Host output can be absent during capture (Android pulls it only at stop).
-  // Keep injected size probes intact; only the default probe's expected missing
-  // file diagnostic should be quiet on recurring monitor ticks.
-  const sizeBytes = await (statFileSize === getFileSize
-    ? getFileSize(filePath, true)
-    : statFileSize(filePath));
+  // Host output can be absent mid-capture (Android pulls it at stop): quiet the default probe only.
+  const probe =
+    statFileSize === getFileSize ? (path: string) => getFileSize(path, true) : statFileSize;
+  const sizeBytes = await totalFileSize(filePaths, probe);
   if (moduleDependencies !== deps || sizeBytes < capBytes) {
     return;
   }
@@ -1406,6 +1404,7 @@ export async function startVideoRecording(
       request.maxDurationSeconds,
       request.device.platform,
     );
+    assertAudioFitsOneSegment(request.device.platform, maxDurationSeconds, request.audio);
     const highlightInputs = request.highlights ?? [];
     const recordingDisplay = await recordingDisplayForStart(deps, request, start.abortSignal);
 
@@ -1455,7 +1454,7 @@ export async function startVideoRecording(
     const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
     scheduleInProgressSizeCap(
       active.recordingId,
-      sizeMonitorPath(active.liveCapturePath, active.outputPath),
+      sizeMonitorPaths(active.liveCapturePath, active.outputPath, request.audio),
       capBytes,
       deps,
     );

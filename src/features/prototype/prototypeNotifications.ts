@@ -5,7 +5,7 @@ import type { PrototypePlatformError } from "./prototypePlatform";
  * Notification rules (#14280) the contract cannot express: the root `notifications` block needs
  * `notifications` in `requires.platform` and unique channel ids; a literal `notifications.post`
  * channel names a declared channel and its action ids are unique; `notifications.cancel` names
- * exactly one target. Kotlin and Swift `PrototypeNotificationRules` mirror these checks.
+ * exactly one target; a channel-scoped `/platform` read names a declared channel. Kotlin and Swift `PrototypeNotificationRules` mirror these checks.
  */
 export function prototypeNotificationsBlockError(root: Raw): PrototypePlatformError | undefined {
   const block = record(root.notifications);
@@ -65,6 +65,32 @@ export function prototypeNotificationsCallError(
     seen.add(id);
   }
   return undefined;
+}
+
+/** Channel-scoped `/platform` keys (#14280), read at `/notifications/channels/<id>/<key>`. */
+export const PROTOTYPE_NOTIFICATION_CHANNEL_STATE_KEYS: ReadonlySet<string> = new Set(["blocked"]);
+
+/**
+ * Whether a `/notifications` read names a module key, or a channel-scoped key under a declared
+ * channel. `tokens` are the decoded pointer segments, the module name first.
+ */
+export function prototypeNotificationsReadValid(
+  tokens: readonly string[],
+  root: Raw,
+  state: Readonly<Record<string, unknown>>,
+): boolean {
+  if (tokens[1] === "channels") {
+    return (
+      tokens.length === 4 &&
+      declaredChannels(root).has(tokens[2]) &&
+      PROTOTYPE_NOTIFICATION_CHANNEL_STATE_KEYS.has(tokens[3])
+    );
+  }
+  return (
+    tokens.length === 2 &&
+    Object.hasOwn(state, tokens[1]) &&
+    !PROTOTYPE_NOTIFICATION_CHANNEL_STATE_KEYS.has(tokens[1])
+  );
 }
 
 function declaredChannels(root: Raw): Set<unknown> {

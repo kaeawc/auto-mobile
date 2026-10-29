@@ -23610,6 +23610,10 @@
               "unavailable"
             ]
           }
+        },
+        "blocked": {
+          "platforms": ["android", "ios"],
+          "value": { "kind": "boolean" }
         }
       }
     },

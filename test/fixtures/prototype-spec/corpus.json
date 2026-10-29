@@ -146,6 +146,7 @@
     "motion3-expressive.json",
     "motion3-layout.json",
     "motion3-press.json",
+    "notify-channel-blocked-read.json",
     "notify-channels-block.json",
     "notify-post-messaging.json",
     "notify-post-styles.json",
@@ -1056,6 +1057,11 @@
     "notify-big-picture-missing-image.json",
     "notify-cancel-no-target.json",
     "notify-cancel-two-targets.json",
+    "notify-channel-blocked-flat-key.json",
+    "notify-channel-blocked-too-deep.json",
+    "notify-channel-blocked-undeclared-channel.json",
+    "notify-channel-read-without-key.json",
+    "notify-channel-unknown-key.json",
     "notify-channels-bad-importance.json",
     "notify-channels-blank-name.json",
     "notify-channels-duplicate-id.json",
@@ -3172,6 +3178,10 @@
       "prototype_platform_mediaLibrary_query_v1",
       "prototype_platform_mediaLibrary_save_v1",
       "prototype_platform_mediaLibrary_v1",
+      "prototype_platform_v1"
+    ],
+    "notify-channel-blocked-read.json": [
+      "prototype_platform_notifications_v1",
       "prototype_platform_v1"
     ]
   }

@@ -55,13 +55,15 @@ describe("notifications module contract", () => {
     });
   });
 
-  test("state is the badge, active and pending counts and the authorization status", () => {
+  test("state is the counts, the authorization status and the per-channel blocked flag", () => {
     expect(Object.keys(notifications.state ?? {})).toEqual([
       "badge",
       "active",
       "pending",
       "authorization",
+      "blocked",
     ]);
+    expect(notifications.state?.blocked?.value).toEqual({ kind: "boolean" });
     expect(notifications.state?.active?.value).toMatchObject({ min: 0, max: 24 });
     expect(notifications.state?.authorization?.value.values).toEqual([
       "granted",

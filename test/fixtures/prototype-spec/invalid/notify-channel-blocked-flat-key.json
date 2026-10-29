@@ -1,0 +1,69 @@
+{
+  "spec": {
+    "id": "nb",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {},
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Tell you about new messages"
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "messages",
+          "name": "Messages",
+          "importance": "high"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Messages off: {platform:/notifications/blocked}"
+        },
+        {
+          "type": "text",
+          "text": "Allowed",
+          "visibleWhen": {
+            "platform": "/notifications/channels/messages/blocked",
+            "equals": false
+          }
+        },
+        {
+          "type": "button",
+          "label": "Notify",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "notifications.post",
+              "args": {
+                "id": {
+                  "value": "msg-1"
+                },
+                "channel": {
+                  "value": "messages"
+                },
+                "title": {
+                  "value": "Ada"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].text",
+  "expectedMessage": "Unknown platform state /notifications/blocked"
+}

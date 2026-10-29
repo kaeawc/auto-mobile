@@ -373,6 +373,8 @@ enum PrototypePlatformValidator {
             let valid = switch name {
             case "realtime": tokens.count == 3 && declared.channels[tokens[1]] != nil && state.contains(tokens[2])
             case "media": PrototypeMedia.validRead(tokens, players: declared.players, state: state)
+            case "notifications":
+                PrototypeNotificationRules.validRead(tokens, channels: declared.notificationChannels, state: state)
             default: tokens.count == 2 && state.contains(tokens[1])
             }
             guard valid else {

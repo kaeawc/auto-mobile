@@ -21,6 +21,7 @@ import {
   options as baseOptions,
 } from "./manualTestPrivateDaemonFixture";
 import { isSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
+import { warmedTests } from "../helpers/warmedTests";
 
 beforeAll(async () => {
   const host = await createFakeBrokerDaemon();
@@ -222,58 +223,66 @@ test("adapter preserves actual request/token, holds boot permit, observes explic
   expect(f.calls.at(-1)).toEqual(["close", "--client", c]);
   expect(f.calls.filter((args) => args[0] === "close")).toHaveLength(1);
 });
-test("real in-memory broker release keeps destruction assertions not-verifiable with unavailable samples", async () => {
-  const f = fixture();
-  const host = await createFakeBrokerDaemon({ capacity: 2 });
-  const harness = await createBrokerLiveContext(
-    f.batchDir,
-    f.evidence,
-    {},
-    { ...f.deps, daemonClient: host.client },
-  );
-  const ctx = harness.context;
-  const clients = ctx.clients.map((c) => ({
-    ...c,
-    token: `token-${c.name}`,
-    config: renderClientRequest({ name: c.name, platform: "ios" }, c.config.requestId),
-  }));
-  const ops = ctx.deviceOps!;
-  ops.bootGate = async (_name, _permits, action) => action();
-  ops.acquire = (c) => host.prepare(c.config, c.token);
-  ops.observe = async (c) => {
-    if ((await host.client.status(c.config.requestId, c.token))?.outcome !== "ready") {
-      throw new Error("broker_session_ended");
+// The first real-broker scenario run pays one-time module and first-use compilation for the
+// scenario, ledger and in-memory broker paths (~50 ms): run it once in beforeAll, outside the
+// per-test budget, before it runs again as the measured test.
+const warmed = warmedTests(() => {});
+
+warmed(
+  "real in-memory broker release keeps destruction assertions not-verifiable with unavailable samples",
+  async () => {
+    const f = fixture();
+    const host = await createFakeBrokerDaemon({ capacity: 2 });
+    const harness = await createBrokerLiveContext(
+      f.batchDir,
+      f.evidence,
+      {},
+      { ...f.deps, daemonClient: host.client },
+    );
+    const ctx = harness.context;
+    const clients = ctx.clients.map((c) => ({
+      ...c,
+      token: `token-${c.name}`,
+      config: renderClientRequest({ name: c.name, platform: "ios" }, c.config.requestId),
+    }));
+    const ops = ctx.deviceOps!;
+    ops.bootGate = async (_name, _permits, action) => action();
+    ops.acquire = (c) => host.prepare(c.config, c.token);
+    ops.observe = async (c) => {
+      if ((await host.client.status(c.config.requestId, c.token))?.outcome !== "ready") {
+        throw new Error("broker_session_ended");
+      }
+    };
+    ops.close = async () => {};
+    ops.devicesView = host.controls.inventory;
+    const scenario = brokerScenarios.find(
+      (s) => s.name === "release-destroy-verification" && s.class === "device",
+    )!;
+    const context = {
+      ...ctx,
+      clients,
+      timer: host.timer,
+      ids: host.ids,
+      preflight: async () => true,
+    };
+    try {
+      const summary = await runBrokerScenario(scenario, context, { device: true });
+      expect(summary.outcome).toBe("passed");
+      expect(summary.assertions).toContainEqual({
+        assertion: "resource destruction",
+        status: "not-verifiable",
+        reason: expect.any(String),
+      });
+      expect(
+        ctx.ledger
+          .devices()
+          .every((d) => ctx.ledger.hasEvent(d, "released") && ctx.ledger.hasEvent(d, "absent")),
+      ).toBe(true);
+    } finally {
+      await host.close();
     }
-  };
-  ops.close = async () => {};
-  ops.devicesView = host.controls.inventory;
-  const scenario = brokerScenarios.find(
-    (s) => s.name === "release-destroy-verification" && s.class === "device",
-  )!;
-  const context = {
-    ...ctx,
-    clients,
-    timer: host.timer,
-    ids: host.ids,
-    preflight: async () => true,
-  };
-  try {
-    const summary = await runBrokerScenario(scenario, context, { device: true });
-    expect(summary.outcome).toBe("passed");
-    expect(summary.assertions).toContainEqual({
-      assertion: "resource destruction",
-      status: "not-verifiable",
-      reason: expect.any(String),
-    });
-    expect(
-      ctx.ledger
-        .devices()
-        .every((d) => ctx.ledger.hasEvent(d, "released") && ctx.ledger.hasEvent(d, "absent")),
-    ).toBe(true);
-  } finally {
-    await host.close();
-  }
-});
+  },
+);
 
 test("production proxy command adapter runs up/tools/close through fake process and file seams", async () => {
   const f = fixture();

@@ -1,6 +1,5 @@
 import { ActionableError } from "../models";
 import type { Timer } from "../utils/SystemTimer";
-import type { getAbortSignal } from "../utils/AbortContext";
 import type { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 import type { PooledDevice } from "./devicePool";
@@ -122,7 +121,6 @@ export function describeMultiDeviceAllocationAttempts(
 
 export interface MultiDeviceAllocationQueuePort {
   readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-  readonly getAbortSignal: typeof getAbortSignal;
   readonly raceWithDeadline: typeof raceWithDeadline;
   readonly DEVICE_WAIT_INTERVAL_MS: number;
   deviceHeldByExistingSession(sessionId: string): Readonly<PooledDevice> | undefined;
@@ -178,7 +176,15 @@ export class MultiDeviceAllocationQueue {
     );
   }
 
-  async waitForMultiDeviceRetry(deadlineMs: number): Promise<void> {
+  /**
+   * Waits for the next retry round: a release wake-up, the retry interval or the deadline.
+   * `signal` is the allocation's caller signal, passed down from the multi-device entry point
+   * rather than read ambiently (#15671); its abort ends the wait. `undefined` waits uncancelled.
+   */
+  async waitForMultiDeviceRetry(
+    deadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
     const delay = Math.min(this.port.DEVICE_WAIT_INTERVAL_MS, deadlineMs - this.port.timer.now());
     if (delay <= 0) {
       return;
@@ -195,7 +201,7 @@ export class MultiDeviceAllocationQueue {
           }),
         {
           timer: this.port.timer,
-          signal: this.port.getAbortSignal(),
+          signal,
           label: "Multi-device allocation wait",
         },
       );

@@ -879,7 +879,8 @@ export class TapExecution {
           this.host.iosSdkBridgeTapper?.() ?? deviceIosSdkBridgeTapper(this.host.device());
         target.iosBackend =
           (await tapper.tap({
-            action: target.action,
+            // A focus rewritten to a tap still belongs to sendKeys, which stays on XCTest.
+            action: state.requestedAction === "focus" ? "focus" : target.action,
             element: target.tapElement,
             longPressDurationMs: target.longPressDuration,
             signal,

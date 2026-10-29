@@ -27,6 +27,8 @@ const CAPTURE_SAMPLE_RATE = 48_000;
 const CHUNK_MS = 100;
 /** Extra time past the requested capture before it counts as timed out. */
 const CAPTURE_GRACE_MS = 5_000;
+/** How long to wait, after the helper exits, for its stdout to deliver the last PCM. */
+export const CAPTURE_DRAIN_MS = 1_000;
 
 export interface HostLoopbackAudioSessionDeps {
   /** The helper executable, or undefined when none is configured. */
@@ -177,6 +179,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     if (!timedOut && exitCode !== 0) {
       throw helper.failure();
     }
+    await this.untilOutputEnded(helper);
     const bytes = Buffer.concat(received);
     const samples = new Int16Array(
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.byteLength & ~1)),
@@ -186,6 +189,17 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
       pcm: { sampleRate, channels: 1, samples },
       timedOut: timedOut || samples.length < expected,
     };
+  }
+
+  /** Waits for the last PCM after exit, bounded so a pipe that never closes cannot hang the call. */
+  private untilOutputEnded(helper: RunningLoopbackHelper): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const handle = this.timer.setTimeout(resolve, CAPTURE_DRAIN_MS);
+      void helper.outputEnded.then(() => {
+        this.timer.clearTimeout(handle);
+        resolve();
+      });
+    });
   }
 
   async close(): Promise<void> {

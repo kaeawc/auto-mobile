@@ -2,15 +2,14 @@ import AutoMobileSDK
 import Foundation
 import Network
 
-/// Phase A of the SDK contract suite (#5164): drives one exchange through each registered
-/// network capture adapter (URLSession, URLSessionWebSocketTask, NWConnection) against the
-/// loopback server and returns what it asked each adapter to record.
+/// Network slice of the SDK contract suite (#5164): registers each transport with the host
+/// registration API (URLSession, URLSessionWebSocketTask, NWConnection), drives one exchange
+/// through each against the loopback server and returns what the SDK must record.
 struct SdkContractNetworkScenario {
     static let authorizationValue = "Bearer contract-secret"
 
     let runId: String
     let ports: SdkContractLoopbackServer.Ports
-    let recorder: NetworkCaptureRecorder
 
     func run() async throws -> [ExpectedNetworkEvent] {
         var expected = try await [named("urlsession", urlSession)]
@@ -35,56 +34,36 @@ struct SdkContractNetworkScenario {
         return url
     }
 
+    /// A registered default configuration is captured by the SDK's `URLProtocol`, which records
+    /// the exchange without a request id, connection id, protocol name or direction.
     private func urlSession() async throws -> ExpectedNetworkEvent {
         let caseName = "urlsession"
         let url = try contractURL(scheme: "http", port: ports.http, caseName: caseName)
-        let connectionId = "contract-\(caseName)-\(runId)"
         var request = URLRequest(url: url)
         request.setValue(Self.authorizationValue, forHTTPHeaderField: "Authorization")
         request.setValue(runId, forHTTPHeaderField: "X-Contract-Run")
-        let session = URLSession(configuration: .ephemeral)
+        let configuration = URLSessionConfiguration.ephemeral
+        AutoMobileNetwork.shared.registerURLSession(configuration)
+        let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
 
-        let adapter = URLSessionNetworkCaptureAdapter(recorder: recorder)
-        let started = Date()
-        let requestId = adapter.begin(
-            url: url.absoluteString,
-            method: "GET",
-            connectionId: connectionId,
-            requestHeaders: request.allHTTPHeaderFields
-        )
-        recorder.recordMetadata(requestId: requestId, key: "contract_case", value: caseName)
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            adapter.didFail(requestId: requestId, error: error)
-            throw error
-        }
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            adapter.didFail(requestId: requestId, error: SdkContractError.unexpectedResponse(caseName))
             throw SdkContractError.unexpectedResponse("\(caseName) did not return HTTP 200")
         }
-        let body = String(decoding: data, as: UTF8.self)
-        adapter.didReceiveResponseHeaders(requestId: requestId, headers: Self.stringHeaders(http))
-        adapter.didReceiveBody(requestId: requestId, bytes: data.count, text: body)
-        let durationMs = Date().timeIntervalSince(started) * 1000
-        adapter.didReceiveMetrics(requestId: requestId, durationMs: durationMs)
-        adapter.didComplete(requestId: requestId, statusCode: http.statusCode)
         return ExpectedNetworkEvent(
             caseName: caseName,
             url: url.absoluteString,
             method: "GET",
-            protocolName: "http",
-            direction: "response",
-            requestId: requestId,
-            connectionId: connectionId,
+            protocolName: nil,
+            direction: nil,
+            requestId: nil,
+            connectionId: nil,
             statusCode: http.statusCode,
             requestBodySize: nil,
             responseBodySize: data.count,
-            responseBody: body,
-            metadata: ["contract_case": caseName, "duration_ms": String(durationMs)],
+            responseBody: String(decoding: data, as: UTF8.self),
+            metadata: nil,
             redactedRequestHeaders: ["Authorization"]
         )
     }
@@ -102,7 +81,7 @@ struct SdkContractNetworkScenario {
         }
         task.resume()
 
-        let adapter = WebSocketNetworkCaptureAdapter(recorder: recorder)
+        let adapter = AutoMobileNetwork.shared.registerWebSocket()
         try await task.send(.string(message))
         adapter.recordFrame(
             url: url.absoluteString,
@@ -175,9 +154,8 @@ struct SdkContractNetworkScenario {
         guard let port = NWEndpoint.Port(rawValue: ports.http) else {
             throw SdkContractError.listenerFailed("invalid HTTP port \(ports.http)")
         }
-        let adapter = NWConnectionNetworkCaptureAdapter(recorder: recorder)
+        let adapter = AutoMobileNetwork.shared.registerNWConnection()
         let requestId = adapter.begin(endpoint: endpoint, connectionId: connectionId)
-        recorder.recordMetadata(requestId: requestId, key: "contract_case", value: caseName)
 
         let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
         let queue = DispatchQueue(label: "dev.jasonpearson.automobile.Playground.sdk-contract-nwconnection")
@@ -217,20 +195,12 @@ struct SdkContractNetworkScenario {
             requestBodySize: payload.count,
             responseBodySize: received.count,
             responseBody: nil,
-            metadata: ["contract_case": caseName, "connection_state": "ready"],
+            metadata: ["connection_state": "ready"],
             redactedRequestHeaders: nil
         )
     }
 
-    private static func stringHeaders(_ response: HTTPURLResponse) -> [String: String] {
-        response.allHeaderFields.reduce(into: [String: String]()) { headers, field in
-            if let name = field.key as? String {
-                headers[name] = "\(field.value)"
-            }
-        }
-    }
-
-    private static func waitUntilReady(_ connection: NWConnection, queue: DispatchQueue) async throws {
+    static func waitUntilReady(_ connection: NWConnection, queue: DispatchQueue) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let once = SdkContractResumeOnce()
             connection.stateUpdateHandler = { state in
@@ -250,7 +220,7 @@ struct SdkContractNetworkScenario {
         }
     }
 
-    private static func send(_ data: Data, on connection: NWConnection) async throws {
+    static func send(_ data: Data, on connection: NWConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.send(content: data, completion: .contentProcessed { error in
                 if let error {
@@ -262,7 +232,7 @@ struct SdkContractNetworkScenario {
         }
     }
 
-    private static func receiveUntilClosed(_ connection: NWConnection) async throws -> Data {
+    static func receiveUntilClosed(_ connection: NWConnection) async throws -> Data {
         var received = Data()
         while true {
             let (chunk, isComplete) = try await receiveChunk(connection)
@@ -283,5 +253,192 @@ struct SdkContractNetworkScenario {
                 }
             }
         }
+    }
+}
+
+/// Capability slice (#5164 phase C): the transport capability matrix in a fresh process, before
+/// and after the host registers a default URLSession, a WebSocket and an NWConnection. The
+/// background URLSession family is left unregistered on purpose.
+enum SdkContractCapabilityScenario {
+    static func run(network: AutoMobileNetwork = .shared) -> CapabilityObservation {
+        let before = network.transportCapabilities()
+        network.registerURLSession(URLSessionConfiguration.ephemeral)
+        _ = network.registerWebSocket()
+        _ = network.registerNWConnection()
+        return CapabilityObservation(beforeRegistration: before, afterRegistration: network.transportCapabilities())
+    }
+}
+
+/// Fault slice (#5163): runs one exchange per case through the transports the host registration
+/// API returns, after the harness installed delay and fail rules through CtrlProxy, and reports
+/// what the client saw. Case names match `FAULT_CASES` in `scripts/ios/sdk-contract/faultSlice.ts`.
+struct SdkContractFaultScenario {
+    static let urlSessionCases = ["fault-urlsession-delay", "fault-urlsession-fail", "fault-urlsession-fail-expired"]
+    static let webSocketCases = ["fault-websocket-delay", "fault-websocket-fail"]
+    static let nwConnectionCases = ["fault-nwconnection-delay", "fault-nwconnection-fail"]
+
+    let runId: String
+    let ports: SdkContractLoopbackServer.Ports
+
+    func run() async throws -> [FaultCaseObservation] {
+        let configuration = URLSessionConfiguration.ephemeral
+        AutoMobileNetwork.shared.registerURLSession(configuration)
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+
+        var observations: [FaultCaseObservation] = []
+        // In order: the expired case must follow the fail case that consumes its one-shot rule.
+        for caseName in Self.urlSessionCases {
+            try await observations.append(urlSessionCase(caseName, session: session))
+        }
+        for caseName in Self.webSocketCases {
+            try await observations.append(webSocketCase(caseName))
+        }
+        for caseName in Self.nwConnectionCases {
+            try await observations.append(nwConnectionCase(caseName))
+        }
+        return observations
+    }
+
+    private func contractURL(scheme: String, port: UInt16, caseName: String) throws -> URL {
+        guard let url = URL(string: "\(scheme)://127.0.0.1:\(port)/contract/\(runId)/\(caseName)") else {
+            throw SdkContractError.unexpectedResponse("invalid contract URL for \(caseName)")
+        }
+        return url
+    }
+
+    private func urlSessionCase(_ caseName: String, session: URLSession) async throws -> FaultCaseObservation {
+        let url = try contractURL(scheme: "http", port: ports.http, caseName: caseName)
+        let started = Date()
+        var clientError: String?
+        do {
+            let (_, response) = try await session.data(from: url)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                clientError = "http:\(http.statusCode)"
+            }
+        } catch {
+            clientError = Self.errorCode(error)
+        }
+        return FaultCaseObservation(
+            caseName: caseName, url: url.absoluteString, connectionId: nil, requestId: nil,
+            elapsedMs: Self.elapsedMs(since: started), clientError: clientError
+        )
+    }
+
+    private func webSocketCase(_ caseName: String) async throws -> FaultCaseObservation {
+        let url = try contractURL(scheme: "ws", port: ports.webSocket, caseName: caseName)
+        let connectionId = "contract-\(caseName)-\(runId)"
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.webSocketTask(with: url)
+        defer {
+            task.cancel(with: .normalClosure, reason: nil)
+            session.invalidateAndCancel()
+        }
+        task.resume()
+
+        let adapter = AutoMobileNetwork.shared.registerWebSocket()
+        let message = URLSessionWebSocketTask.Message.string("contract:\(runId)")
+        let started = Date()
+        var clientError: String?
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                adapter.send(message, on: task, connectionId: connectionId) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            clientError = Self.errorCode(error)
+        }
+        return FaultCaseObservation(
+            caseName: caseName, url: url.absoluteString, connectionId: connectionId, requestId: nil,
+            elapsedMs: Self.elapsedMs(since: started), clientError: clientError
+        )
+    }
+
+    private func nwConnectionCase(_ caseName: String) async throws -> FaultCaseObservation {
+        let endpoint = try contractURL(scheme: "tcp", port: ports.http, caseName: caseName).absoluteString
+        let connectionId = "contract-\(caseName)-\(runId)"
+        guard let port = NWEndpoint.Port(rawValue: ports.http) else {
+            throw SdkContractError.listenerFailed("invalid HTTP port \(ports.http)")
+        }
+        let adapter = AutoMobileNetwork.shared.registerNWConnection()
+        let requestId = adapter.begin(endpoint: endpoint, connectionId: connectionId)
+        let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+        let queue = DispatchQueue(label: "dev.jasonpearson.automobile.Playground.sdk-contract-fault-nwconnection")
+        defer { connection.cancel() }
+
+        let started = Date()
+        var clientError: String?
+        do {
+            try await Self.start(
+                connection, through: adapter, queue: queue,
+                endpoint: endpoint, connectionId: connectionId, requestId: requestId
+            )
+            adapter.didUpdateState(requestId: requestId, state: "ready")
+            let payload = Data(
+                "GET /contract/\(runId)/\(caseName) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".utf8
+            )
+            try await SdkContractNetworkScenario.send(payload, on: connection)
+            adapter.didSend(requestId: requestId, bytes: payload.count)
+            let received = try await SdkContractNetworkScenario.receiveUntilClosed(connection)
+            adapter.didReceive(requestId: requestId, bytes: received.count)
+            adapter.didComplete(requestId: requestId)
+        } catch {
+            clientError = Self.errorCode(error)
+            // A no-op when a fail rule already recorded the failed exchange.
+            adapter.didCancel(requestId: requestId)
+        }
+        return FaultCaseObservation(
+            caseName: caseName, url: endpoint, connectionId: connectionId, requestId: requestId,
+            elapsedMs: Self.elapsedMs(since: started), clientError: clientError
+        )
+    }
+
+    /// Starts the connection through the adapter, which applies a matched rule first. A fail
+    /// rule cancels the connection and reports the POSIX error through `onFault`, so the
+    /// `cancelled` state is left for that callback to resolve.
+    private static func start(
+        _ connection: NWConnection,
+        through adapter: NWConnectionNetworkCaptureAdapter,
+        queue: DispatchQueue,
+        endpoint: String,
+        connectionId: String,
+        requestId: String
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = SdkContractResumeOnce()
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    once.run { continuation.resume() }
+                case let .waiting(error), let .failed(error):
+                    once.run { continuation.resume(throwing: error) }
+                default:
+                    break
+                }
+            }
+            adapter.start(
+                connection, queue: queue, endpoint: endpoint,
+                connectionId: connectionId, requestId: requestId
+            ) { error in
+                once.run { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    static func errorCode(_ error: Error) -> String {
+        if let nwError = error as? NWError, case let .posix(code) = nwError {
+            return "posix:\(code.rawValue)"
+        }
+        let nsError = error as NSError
+        return "\(nsError.domain):\(nsError.code)"
+    }
+
+    private static func elapsedMs(since started: Date) -> Double {
+        Date().timeIntervalSince(started) * 1000
     }
 }

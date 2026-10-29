@@ -103,6 +103,30 @@ such as a double tap (`fallbackReason: unsupported`). Every other result fails c
 bridge's reason: `stale_observation`, `unknown_element`, `element_not_actionable`,
 `action_in_flight`, `action_queue_overloaded`, `action_cancelled`, `app_not_active`, `bad_reply`,
 and a timeout after the action may have run. Tapping whatever XCTest now finds at those
-coordinates could act on a different element. A focus tap issued by `sendKeys` is not routed yet.
+coordinates could act on a different element.
+
+**sendKeys.** When the field `sendKeys` focused is a bridge node, its text entry goes through the
+bridge's `insertText` and its clear (the `clear` command and the clear before a replace) through
+`clearText`, under the same fallback and fail-closed rules as `tapOn`. Each command result reports
+`backend` and, for an XCTest stand-in, `fallbackReason`; a command that used both reports the
+fallback. The focus tap itself stays on XCTest, so an XCTest stand-in finds the field focused as
+usual, and the typed text is verified by read-back as for XCTest typing. IME actions have no
+bridge form: on a bridge field they run through XCTest and report `fallbackReason: unsupported`.
+`sendKeys` without a selector has no resolved field, so it stays on XCTest.
+
+Any capture moves the bridge's current observation, and the bridge rejects an action naming an older
+one. So sendKeys keeps the field's element id, takes the capture identity of every observation it
+reads and of every accepted action, and reads the screen once before its first bridge action if
+nothing has been read since focus.
+
+**swipeOn.** A container (named or auto-targeted) that is a bridge node scrolls through the
+bridge's `scroll` with `delta` set to the change in content offset, in points: start minus end of
+the stroke XCTest would have run, so swiping up gives a positive `y`. A screen swipe on a screen
+that carries bridge nodes goes through the bridge's `swipe` with the same start, end and duration,
+naming the capture the swipe was resolved against. Edge swipes reach system UI the bridge cannot
+see and stay on XCTest without a `backend`. A boomerang has no bridge form, so XCTest runs it and
+reports `fallbackReason: unsupported`. Other fallbacks and fail-closed results follow `tapOn`. A bridge scroll has no timed stroke, so its result marks the duration as ignored (`durationIgnored`, with a warning when `durationMs` was passed). The display fence is checked right before the bridge dispatch, as it is before an XCTest swipe. The
+bridge budget is the gesture's duration plus 3 s, and never less than 5 s. Scroll searches
+(`lookFor`) stay on XCTest.
 
 WKWebView DOM nodes (#5162) extend the same observation under their WKWebView node.

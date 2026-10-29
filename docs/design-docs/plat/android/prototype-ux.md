@@ -2010,8 +2010,10 @@ vocabulary testable before any real module exists; no production runtime adverti
 
 **Device status (#14316).** Three state-only modules expose read-only device status under
 `/platform/<module>/<key>`; a spec lists the module in `requires.platform` and reads keys with the
-`{platform}` forms. Each module has a `<module>.changed` event, debounced to one delivery per
-500 ms, whose `{event}` data carries the new values. Unknown keys and events fail validation with a
+`{platform}` forms. Each module has a `<module>.changed` event whose `{event}` data carries the new
+values, delivered like `connectivity.changed`: the state updates at once, the event fires once the
+state has been quiet for 500 ms, and a flap that settles back on the last delivered values is not an
+event. Unknown keys and events fail validation with a
 path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
 
 | Module (capability)                         | Keys                                                                                                                                                                                  |
@@ -2045,8 +2047,17 @@ first path after start is the baseline, not a change. Every path that changes th
 a prototype shown before the first path still sees it; only `connectivity.changed` waits for the
 debounce. The offline simulation override is not built.
 
-The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
-`fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
+The reading mappings are normative. `prototypeDeviceStatusReference.ts` is the reference the device status
+runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
+
+- Thermal: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2 `fair`, 3 `serious` and 4-6
+  `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
+- Battery `state`: Android `BATTERY_STATUS_CHARGING` is `charging`, `FULL` is `full`, `DISCHARGING` and
+  `NOT_CHARGING` are `unplugged`, anything else `unknown`; iOS `UIDevice.BatteryState` maps one to one.
+- Battery `level` and audio `volume` are whole percents (Android level over scale and stream index over
+  its maximum; iOS `batteryLevel` and `outputVolume`). An unknown reading, such as the Simulator's
+  battery level of -1, leaves the key absent.
+- `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
 
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
@@ -2131,6 +2142,21 @@ advertises `mediaLibrary` and not the capture capability. Both calls are `sensit
 with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usage_description` when the iOS
 plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
 system-UI call per prototype at a time). No production runtime advertises either module yet.
+
+**Photo library (#14195, calls only).** Three more `mediaLibrary` calls read and write the library
+itself. `query` and `manageLimitedSelection` share `prototype_platform_mediaLibrary_query_v1`;
+`save` has its own capability, so a runtime can offer save without read:
+
+- `mediaLibrary.query` (`media` as for `pick`, optional `limit` 1-64) writes the newest items to
+  `into` as device media items; `mediaLibrary.manageLimitedSelection` (no arguments) re-opens the
+  partial-access selection. Both need `photos` in `requires.permissions` and
+  `prototype_platform_mediaLibrary_query_v1`; `query` is `sensitive`.
+- `mediaLibrary.save` (required `media`, an item usually bound from `/data`, and optional nonempty
+  `album`) adds an item to the library and writes its saved identifier to `into`. It needs
+  `photosAdd` in `requires.permissions` and `prototype_platform_mediaLibrary_save_v1`.
+
+All three also need the module's `prototype_platform_mediaLibrary_v1`; no production runtime
+advertises the per-call capabilities yet.
 
 **Fake sign-in (#14303).** The `auth` module (`prototype_platform_auth_v1`) has two calls. `auth.signIn` takes
 an optional `style` (`chooser` or `button`), shows a runtime-owned "Simulated sign-in" sheet and writes

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import {
   isCliToolFailure,
@@ -6,6 +6,7 @@ import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 let isolatedCliDataDir: IsolatedCliDataDir;
@@ -21,6 +22,9 @@ afterEach(() => {
 describe("isCliToolFailure (issue #6017)", () => {
   const originalProcessExit = process.exit;
   const originalConsoleError = console.error;
+
+  // Registering every CLI tool is a one-time ~60 ms cost the first CLI parse pays; pay it here.
+  beforeAll(() => initializeCliTools());
 
   afterEach(() => {
     process.exit = originalProcessExit;

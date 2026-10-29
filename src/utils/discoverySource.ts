@@ -13,9 +13,10 @@ import { isIosPhysicalUdid } from "./ios-cmdline-tools/iosDeviceType";
  * simctl failed. Carrying completeness per source removes the tension (#5683).
  *
  * Android has exactly one source today; it is named here so callers can treat
- * every platform uniformly rather than special-casing iOS.
+ * every platform uniformly rather than special-casing iOS. Apple Watch simulators have their own
+ * source: an iOS sweep never lists them, so it can never prove a watch is gone (#14908).
  */
-export type DiscoverySource = "android" | "ios-simulator" | "ios-physical";
+export type DiscoverySource = "android" | "ios-simulator" | "ios-physical" | "watchos-simulator";
 
 /**
  * The source that would have observed this device.
@@ -33,6 +34,9 @@ export function discoverySourceFor(
   if (platform === "android") {
     return "android";
   }
+  if (platform === "watchos") {
+    return "watchos-simulator";
+  }
   return deviceId !== undefined && isIosPhysicalUdid(deviceId) ? "ios-physical" : "ios-simulator";
 }
 
@@ -45,7 +49,26 @@ export function discoverySourceFor(
  * source enumerates a platform's sources through this.
  */
 export function sourcesForPlatform(platform: Platform): DiscoverySource[] {
-  return platform === "android" ? ["android"] : ["ios-simulator", "ios-physical"];
+  switch (platform) {
+    case "android":
+      return ["android"];
+    case "ios":
+      return ["ios-simulator", "ios-physical"];
+    case "watchos":
+      return ["watchos-simulator"];
+  }
+}
+
+function platformForSource(source: DiscoverySource): Platform {
+  switch (source) {
+    case "android":
+      return "android";
+    case "watchos-simulator":
+      return "watchos";
+    case "ios-simulator":
+    case "ios-physical":
+      return "ios";
+  }
 }
 
 /** The completeness half of a discovery result, per platform and per source. */
@@ -125,7 +148,7 @@ export function discoverySourceOutcome(
   discovery: DiscoverySourceEvidence,
   source: DiscoverySource,
 ): DiscoverySourceOutcome {
-  const platform: Platform = source === "android" ? "android" : "ios";
+  const platform = platformForSource(source);
   const succeeded = discovery.succeededSources
     ? discovery.succeededSources.has(source)
     : discovery.succeededPlatforms.has(platform);

@@ -1,13 +1,16 @@
 /**
- * iOS SDK contract suite, phase A (#5164): drives the network capture adapters inside
- * Playground on a booted simulator, then follows each event through CtrlProxy, the daemon's
- * iOS client and the MCP network resources. Every failure names the boundary that disagreed.
+ * iOS SDK contract suite (#5164): launches Playground once per scenario on a booted simulator
+ * and follows what the SDK did through CtrlProxy, the daemon's iOS client and the MCP network
+ * resources. Scenarios: `network` (capture through each registered transport), `capabilities`
+ * (the host registration capability matrix) and `faults` (delay and fail rules sent through
+ * CtrlProxy and applied by the registered transports). Every failure names the boundary that
+ * disagreed.
  *
  * Usage: bun scripts/ios/sdk-contract/run.ts --device <udid> --app <Playground.app> [--report <file>]
  * Prefer scripts/ios/sdk-contract-integration.sh, which builds Playground first.
  */
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -22,15 +25,33 @@ import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient"
 import { NetworkState } from "../../../src/utils/NetworkState";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { formatFindings, type ContractFinding } from "./boundaries";
-import { parseSdkContractManifest, type SdkContractManifest } from "./manifest";
-import { NETWORK_SLICE, judgeManifest, judgeNetworkCase, matchSdkPayload } from "./networkSlice";
+import { CAPABILITY_SLICE, judgeCapabilities } from "./capabilitySlice";
+import { setFaultRulesThroughCtrlProxy } from "./ctrlProxyFaultRules";
+import {
+  FAULT_SLICE,
+  expectedFaultRecords,
+  faultRules,
+  judgeFaultClientOutcomes,
+} from "./faultSlice";
+import {
+  parseSdkContractManifest,
+  type ExpectedNetworkEvent,
+  type SdkContractManifest,
+} from "./manifest";
+import {
+  NETWORK_SLICE,
+  judgeManifest,
+  judgeNetworkCase,
+  matchSdkPayload,
+  networkRecordKey,
+} from "./networkSlice";
 import { createReferenceDatabase, replayNetworkBatch } from "./referencePipeline";
 import {
   parseResourceJson,
   parseToolOutput,
-  queuedRequestIds,
+  queuedRecordKeys,
   readAcquisition,
-  trafficIdsByRequestId,
+  trafficIdsByKey,
 } from "./toolOutput";
 
 const execFileAsync = promisify(execFile);
@@ -117,10 +138,10 @@ interface LiveContext {
   readResource: (uri: string) => Promise<unknown>;
 }
 
-/** Polls the MCP traffic resource until every request id appears, then reads each detail. */
+/** Polls the MCP traffic resource until every record key appears, then reads each detail. */
 async function collectLiveDetails(
   context: LiveContext,
-  requestIds: readonly string[],
+  keys: readonly string[],
 ): Promise<Map<string, JsonRecord>> {
   const query = new URLSearchParams({
     deviceId: context.deviceId,
@@ -136,18 +157,18 @@ async function collectLiveDetails(
     const traffic = parseResourceJson(
       await context.readResource(`automobile:network/traffic?${query}`),
     );
-    ids = trafficIdsByRequestId(traffic);
-    if (requestIds.every((id) => ids.has(id))) {
+    ids = trafficIdsByKey(traffic);
+    if (keys.every((key) => ids.has(key))) {
       break;
     }
     await defaultTimer.sleep(POLL_INTERVAL_MS);
   }
   const details = new Map<string, JsonRecord>();
-  for (const requestId of requestIds) {
-    const id = ids.get(requestId);
+  for (const key of keys) {
+    const id = ids.get(key);
     if (id !== undefined) {
       details.set(
-        requestId,
+        key,
         parseResourceJson(await context.readResource(`automobile:network/request/${id}`)),
       );
     }
@@ -159,15 +180,18 @@ async function collectLiveDetails(
 async function probeCtrlProxyQueue(port: number): Promise<Set<string>> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/sdk-events`);
-    return queuedRequestIds(await response.text(), () => defaultTimer.now());
+    return queuedRecordKeys(await response.text(), () => defaultTimer.now());
   } catch (error) {
     console.warn(`warning: CtrlProxy queue probe failed: ${String(error)}`);
     return new Set();
   }
 }
 
-async function judgeNetworkSlice(
+/** Judges each expected record at every boundary, from the SDK payload to the live resource. */
+async function judgeNetworkRecords(
   manifest: SdkContractManifest,
+  expectedRecords: readonly ExpectedNetworkEvent[],
+  slice: string,
   context: LiveContext & { ctrlProxyPort: number },
 ): Promise<ContractFinding[]> {
   const batch: SdkEventBatchWire = { bundleId: manifest.bundleId, events: manifest.events };
@@ -180,17 +204,17 @@ async function judgeNetworkSlice(
     deviceId: context.deviceId,
     batch,
   });
-  const requestIds = payloads
-    .map((payload) => payload.requestId)
-    .filter((id): id is string => typeof id === "string");
-  const live = await collectLiveDetails(context, requestIds);
-  const queued = requestIds.some((id) => !live.has(id))
+  const keyed = expectedRecords.map((expected) => {
+    const sdkPayload = matchSdkPayload(expected, payloads);
+    return { expected, sdkPayload, key: sdkPayload ? networkRecordKey(sdkPayload) : undefined };
+  });
+  const keys = keyed.flatMap(({ key }) => (key === undefined ? [] : [key]));
+  const live = await collectLiveDetails(context, keys);
+  const queued = keys.some((key) => !live.has(key))
     ? await probeCtrlProxyQueue(context.ctrlProxyPort)
     : new Set<string>();
-  return manifest.network.flatMap((expected) => {
-    const sdkPayload = matchSdkPayload(expected, payloads);
-    const requestId = typeof sdkPayload?.requestId === "string" ? sdkPayload.requestId : "";
-    const replayed = reference.get(requestId);
+  return keyed.flatMap(({ expected, sdkPayload, key }) => {
+    const replayed = key === undefined ? undefined : reference.get(key);
     const result = judgeNetworkCase(
       {
         expected,
@@ -199,8 +223,9 @@ async function judgeNetworkSlice(
           row: Object.fromEntries(Object.entries(replayed.row)),
           detail: replayed.detail,
         },
-        live: live.get(requestId),
-        queuedInCtrlProxy: queued.has(requestId),
+        live: key === undefined ? undefined : live.get(key),
+        queuedInCtrlProxy: key !== undefined && queued.has(key),
+        slice,
       },
       FORBIDDEN_SUBSTRINGS,
     );
@@ -208,62 +233,145 @@ async function judgeNetworkSlice(
   });
 }
 
+interface ScenarioContext {
+  options: Options;
+  sessionUuid: string;
+  ctrlProxyPort: number;
+  container: string;
+}
+
+const SCENARIOS = [NETWORK_SLICE, CAPABILITY_SLICE, FAULT_SLICE] as const;
+type Scenario = (typeof SCENARIOS)[number];
+
+function contractDirectory(container: string): string {
+  return join(container, "Documents", "sdk-contract");
+}
+
+/**
+ * Sends the fault rules through CtrlProxy, then releases Playground's fault scenario, which
+ * waits for `<runId>.rules-ready` so no case runs before the rules reach the SDK.
+ */
+async function installFaultRules(
+  context: ScenarioContext,
+  runId: string,
+): Promise<ContractFinding | undefined> {
+  const delivery = await setFaultRulesThroughCtrlProxy(context.ctrlProxyPort, faultRules(runId));
+  if (!delivery.success) {
+    return {
+      slice: FAULT_SLICE,
+      caseName: "rules",
+      boundary: "ctrlproxy-command",
+      message: `set_network_fault_rules did not reach the SDK: ${delivery.error}`,
+    };
+  }
+  const directory = contractDirectory(context.container);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${runId}.rules-ready`), "ready\n");
+  return undefined;
+}
+
+async function judgeScenario(
+  scenario: Scenario,
+  manifest: SdkContractManifest,
+  live: Omit<LiveContext, "readResource"> & { ctrlProxyPort: number },
+): Promise<ContractFinding[]> {
+  if (scenario === CAPABILITY_SLICE) {
+    return judgeCapabilities(manifest);
+  }
+  const expected =
+    scenario === FAULT_SLICE ? expectedFaultRecords(manifest, manifest.runId) : manifest.network;
+  const clientFindings = scenario === FAULT_SLICE ? judgeFaultClientOutcomes(manifest) : [];
+  const client = await connectMcpClient();
+  try {
+    const recordFindings = await judgeNetworkRecords(manifest, expected, scenario, {
+      ...live,
+      readResource: (uri) => client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS }),
+    });
+    return [...clientFindings, ...recordFindings];
+  } finally {
+    await client.close();
+  }
+}
+
 async function runScenario(
-  options: Options,
-  sessionUuid: string,
-  ctrlProxyPort: number,
+  context: ScenarioContext,
+  scenario: Scenario,
 ): Promise<ContractFinding[]> {
   const simctl = new SimCtlClient();
-  const { deviceId } = options;
+  const { deviceId } = context.options;
   const runId = `c${defaultIdGenerator.next().replaceAll("-", "").slice(0, 20)}`;
-  await callTool("network", { capture: true, platform: "ios" }, sessionUuid);
-  await simctl.installApp(options.appPath, deviceId, { timeoutMs: 120_000 });
-  const container = (
-    await simctl.executeCommandArgs(["get_app_container", deviceId, PLAYGROUND_BUNDLE_ID, "data"])
-  ).stdout.trim();
+  // A fresh process per scenario: host registration cannot be undone in-process.
+  await simctl.terminateApp(PLAYGROUND_BUNDLE_ID, deviceId).catch(() => undefined);
   const launchedAt = defaultTimer.now();
   const launch = await simctl.launchApp(
     PLAYGROUND_BUNDLE_ID,
     {
       environment: {
-        SIMCTL_CHILD_PLAYGROUND_SDK_CONTRACT: NETWORK_SLICE,
+        SIMCTL_CHILD_PLAYGROUND_SDK_CONTRACT: scenario,
         SIMCTL_CHILD_PLAYGROUND_SDK_CONTRACT_RUN_ID: runId,
       },
     },
     deviceId,
   );
   if (!launch.success) {
-    return [fixtureFailure(`Playground did not launch: ${launch.error ?? "unknown error"}`)];
+    return [
+      fixtureFailure(scenario, `Playground did not launch: ${launch.error ?? "unknown error"}`),
+    ];
   }
-  // Binds this session's CtrlProxy client so it drains the SDK events into this daemon.
-  await callTool("observe", { platform: "ios" }, sessionUuid);
+  // Binds this session's CtrlProxy client so it drains the SDK events into this daemon, and
+  // makes Playground CtrlProxy's tracked foreground app for the fault-rule command.
+  await callTool("observe", { platform: "ios" }, context.sessionUuid);
+  if (scenario === FAULT_SLICE) {
+    const failure = await installFaultRules(context, runId);
+    if (failure) {
+      return [failure];
+    }
+  }
   const manifestText = await waitForManifest(
-    join(container, "Documents", "sdk-contract", `${runId}.json`),
+    join(contractDirectory(context.container), `${runId}.json`),
   );
   if (manifestText === undefined) {
-    return [fixtureFailure(`no manifest for run ${runId} after ${MANIFEST_WAIT_MS} ms`)];
+    return [fixtureFailure(scenario, `no manifest for run ${runId} after ${MANIFEST_WAIT_MS} ms`)];
   }
   const parsed = parseSdkContractManifest(manifestText);
   if (!parsed.success) {
-    return [fixtureFailure(parsed.error)];
+    return [fixtureFailure(scenario, parsed.error)];
   }
-  const manifestFindings = judgeManifest(parsed.manifest);
+  const manifestFindings = judgeManifest(parsed.manifest, scenario);
   if (parsed.manifest.status === "failed") {
     return manifestFindings;
   }
-  const client = await connectMcpClient();
-  try {
-    const caseFindings = await judgeNetworkSlice(parsed.manifest, {
-      deviceId,
-      sessionUuid,
-      ctrlProxyPort,
-      sinceMs: launchedAt - CLOCK_SKEW_MS,
-      readResource: (uri) => client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS }),
-    });
-    return [...manifestFindings, ...caseFindings];
-  } finally {
-    await client.close();
+  const caseFindings = await judgeScenario(scenario, parsed.manifest, {
+    deviceId,
+    sessionUuid: context.sessionUuid,
+    ctrlProxyPort: context.ctrlProxyPort,
+    sinceMs: launchedAt - CLOCK_SKEW_MS,
+  });
+  return [...manifestFindings, ...caseFindings];
+}
+
+async function runScenarios(
+  options: Options,
+  sessionUuid: string,
+  ctrlProxyPort: number,
+): Promise<ContractFinding[]> {
+  const simctl = new SimCtlClient();
+  await callTool("network", { capture: true, platform: "ios" }, sessionUuid);
+  await simctl.installApp(options.appPath, options.deviceId, { timeoutMs: 120_000 });
+  const container = (
+    await simctl.executeCommandArgs([
+      "get_app_container",
+      options.deviceId,
+      PLAYGROUND_BUNDLE_ID,
+      "data",
+    ])
+  ).stdout.trim();
+  const context: ScenarioContext = { options, sessionUuid, ctrlProxyPort, container };
+  const findings: ContractFinding[] = [];
+  for (const scenario of SCENARIOS) {
+    findings.push(...(await runScenario(context, scenario)));
   }
+  return findings;
 }
 
 /**
@@ -288,8 +396,8 @@ async function connectMcpClient(): Promise<Client> {
   return client;
 }
 
-function fixtureFailure(message: string): ContractFinding {
-  return { slice: NETWORK_SLICE, caseName: "run", boundary: "fixture-host", message };
+function fixtureFailure(slice: string, message: string): ContractFinding {
+  return { slice, caseName: "run", boundary: "fixture-host", message };
 }
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -299,7 +407,7 @@ async function main(argv: readonly string[]): Promise<number> {
   );
   let findings: ContractFinding[];
   try {
-    findings = await runScenario(options, sessionUuid, ctrlProxyPort);
+    findings = await runScenarios(options, sessionUuid, ctrlProxyPort);
   } finally {
     await new SimCtlClient()
       .terminateApp(PLAYGROUND_BUNDLE_ID, options.deviceId)

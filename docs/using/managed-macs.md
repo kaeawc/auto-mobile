@@ -100,3 +100,8 @@ After the profile is installed and `activate` has run:
 If the controller still reports `approval_required`, check that `profiles status -type
 enrollment` shows an MDM enrollment and that the profile appears in `profiles show`. A
 profile installed by hand doesn't count.
+
+## Audio
+
+Audio tests on a Mac need a loopback audio device as the default input and output. See
+[Headless host audio setup](headless-audio.md).

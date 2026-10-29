@@ -1,5 +1,5 @@
 import { BrokerDeviceLedger } from "../../scripts/manual-test/brokerDeviceLedger";
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash, createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -3532,64 +3532,74 @@ describe("private broker acceptance lane", () => {
       close: harness.close,
     };
   }
-  const firstHalf = [
-    "parallel-acquire",
-    "release-destroy-verification",
-    "multi-client-crash-isolation",
-  ];
-  const secondHalf = [
-    "cross-client-isolation-live",
-    "capacity-refusal-and-replay",
-    "daemon-restart-with-live-sessions",
-  ];
   // The full six-scenario run costs ~2x the 100ms unit budget on a CI runner, so the lane contract is
-  // verified in two halves that each run the real scenarios, signing, and ledger checks.
-  async function runHalf(only: string[]) {
-    const f = await laneFixture();
-    try {
-      const args = brokerArgs(["--confirm-live", "--test-owned-devices", "--only", only.join(",")]);
-      await runBrokerAcceptance(args, f.dependencies);
-      const bytes = f.files.get(args.evidencePath)!;
-      const evidence = JSON.parse(bytes);
-      expect(evidence).toMatchObject({
-        schemaVersion: 11,
-        scenario: "broker",
-        outcome: { passed: true },
-      });
-      expect(evidence.steps.map((s: { name: string }) => s.name)).toEqual(only);
-      expect(bytes).not.toContain("private-token-");
-      const { mac, ...authentication } = evidence.authentication;
-      expect(mac).toBe(
-        createHmac("sha256", f.key)
-          .update(stableStringify({ ...evidence, authentication }))
-          .digest("hex"),
-      );
-      expect(
-        evidence.scenarios.some((s: { assertions: unknown[] }) => s.assertions.length > 0),
-      ).toBe(true);
-      expect(
-        f.context.ledger
-          .devices()
-          .every(
-            (d) =>
-              f.context.ledger.hasEvent(d, "released") && f.context.ledger.hasEvent(d, "absent"),
-          ),
-      ).toBe(true);
-      return f.counters();
-    } finally {
-      await f.close();
-    }
+  // verified one scenario at a time: each test runs that real scenario through the lane, signing,
+  // and ledger checks. Each gets a fresh lane fixture (fake broker daemon over a migrated SQLite
+  // store, ~20 ms) built in its own beforeAll and closed in afterAll, outside the per-test budget;
+  // the run itself is timed. The beforeAll above runs all six together in one lane.
+  function freshLaneFixture(): () => Awaited<ReturnType<typeof laneFixture>> {
+    let fixture: Awaited<ReturnType<typeof laneFixture>> | undefined;
+    beforeAll(async () => {
+      fixture = await laneFixture();
+    });
+    afterAll(async () => {
+      await fixture?.close();
+    });
+    return () => {
+      if (!fixture) {
+        throw new Error("Lane fixture was not built");
+      }
+      return fixture;
+    };
   }
-  test("runs the first three live scenario contracts and signs one redacted broker evidence file", async () => {
-    const counters = await runHalf(firstHalf);
-    expect(counters).toMatchObject({ stops: 0, starts: 0, crashes: 0 });
-    expect(counters.permits).toBeGreaterThan(0);
-  });
-  test("runs the last three live scenario contracts including the daemon restart and signs the evidence", async () => {
-    const counters = await runHalf(secondHalf);
-    expect(counters).toMatchObject({ stops: 1, starts: 1, crashes: 0 });
-    expect(counters.permits).toBeGreaterThan(0);
-  });
+  async function runScenarios(f: Awaited<ReturnType<typeof laneFixture>>, only: string[]) {
+    const args = brokerArgs(["--confirm-live", "--test-owned-devices", "--only", only.join(",")]);
+    await runBrokerAcceptance(args, f.dependencies);
+    const bytes = f.files.get(args.evidencePath)!;
+    const evidence = JSON.parse(bytes);
+    expect(evidence).toMatchObject({
+      schemaVersion: 11,
+      scenario: "broker",
+      outcome: { passed: true },
+    });
+    expect(evidence.steps.map((s: { name: string }) => s.name)).toEqual(only);
+    expect(bytes).not.toContain("private-token-");
+    const { mac, ...authentication } = evidence.authentication;
+    expect(mac).toBe(
+      createHmac("sha256", f.key)
+        .update(stableStringify({ ...evidence, authentication }))
+        .digest("hex"),
+    );
+    expect(evidence.scenarios.some((s: { assertions: unknown[] }) => s.assertions.length > 0)).toBe(
+      true,
+    );
+    expect(
+      f.context.ledger
+        .devices()
+        .every(
+          (d) => f.context.ledger.hasEvent(d, "released") && f.context.ledger.hasEvent(d, "absent"),
+        ),
+    ).toBe(true);
+    return f.counters();
+  }
+  // Only the daemon restart stops and starts the private daemon.
+  for (const [scenario, restarts] of [
+    ["parallel-acquire", 0],
+    ["release-destroy-verification", 0],
+    ["multi-client-crash-isolation", 0],
+    ["cross-client-isolation-live", 0],
+    ["capacity-refusal-and-replay", 0],
+    ["daemon-restart-with-live-sessions", 1],
+  ] as const) {
+    describe(scenario, () => {
+      const fixture = freshLaneFixture();
+      test(`runs the ${scenario} live scenario contract and signs one redacted broker evidence file`, async () => {
+        const counters = await runScenarios(fixture(), [scenario]);
+        expect(counters).toMatchObject({ stops: restarts, starts: restarts, crashes: 0 });
+        expect(counters.permits).toBeGreaterThan(0);
+      });
+    });
+  }
   test("signed ownership includes ledger rows appended by another writer during cleanup", async () => {
     const f = await laneFixture();
     const fs = {

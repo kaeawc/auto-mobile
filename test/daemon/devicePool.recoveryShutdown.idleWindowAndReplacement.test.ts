@@ -4,6 +4,7 @@ import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionMa
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
+import { warmedTests } from "../helpers/warmedTests";
 import {
   original,
   image,
@@ -60,7 +61,12 @@ async function advanceSecondsUntil(timer: FakeTimer, untilMs: number): Promise<v
   }
 }
 
-test("an in-flight caller keeps device-restart recovery past the idle window", async () => {
+// The first restart-recovery scenario in this file pays one-time module and first-use compilation
+// (~70 ms) for the recovery, persistence and pool paths: run it once in beforeAll, outside the
+// per-test budget, before it runs again as the measured test.
+const warmed = warmedTests(() => {});
+
+warmed("an in-flight caller keeps device-restart recovery past the idle window", async () => {
   const { timer, sessions, manager, pool } = await setupPassiveRestartWithIdleWindow();
   try {
     const resume = trackSettlement(

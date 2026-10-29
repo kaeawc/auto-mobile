@@ -41,7 +41,7 @@ enum PrototypeMediaCaptions {
               case let .array(cues)? = PrototypeDataPointer.resolve(data, pointer: String(pointer.dropFirst(5)))
         else { throw PrototypeLimits.violation(path, "Caption data must point to a /data array") }
         let base = PrototypeDataPointer.tokens(String(pointer.dropFirst(5)))
-            .reduce("data") { PrototypeContractValidator.keyPath($0, $1) }
+            .reduce(into: "data") { $0 = PrototypeContractValidator.keyPath($0, $1) }
         for (index, cue) in cues.enumerated() {
             let at = "\(base)[\(index)]"
             try PrototypeContractValidator.validateValue(cue, rule: cueRule, path: at)

@@ -425,3 +425,28 @@ describe("coordinate quantization (#5162)", () => {
     expect(elements[0].bounds).toEqual({ left: 10, top: 120, right: 110, bottom: 160 });
   });
 });
+
+describe("redaction over a readable native value (#5162)", () => {
+  test("a replaced native field whose value XCTest reads stays verifiable", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "UITextField",
+        "content-desc": "Email",
+        value: "correct",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([{ ...submit, role: "input", label: "Email", value: "[REDACTED]" }]),
+      },
+    ]);
+    const element = webElements(findWebViewNodes(hierarchy)[0])[0] as Element;
+    expect(element.value).toBe("correct");
+    expect(element["value-redacted"]).toBeUndefined();
+    const detector = new FieldTypeDetector();
+    expect(detector.shouldSkipVerification(element, detector.detect(element))).toBe(false);
+  });
+});

@@ -154,7 +154,12 @@ export class SocketRequestAdmissionQueue {
   }
 }
 
-/** Acquisition and profile tools rebind the socket's routing state, so they stay barriers. */
+/**
+ * Acquisition and profile tools rebind the socket's routing state, so they stay barriers.
+ * It stays a name list rather than a tool trait (#15672): it names the hidden `startDevice`, which
+ * `schemas/tool-definitions.json` deliberately omits, so a trait read from the committed definitions
+ * could not reach it.
+ */
 const SOCKET_ROUTING_MUTATING_TOOLS = new Set([
   "getAndroid",
   "getApple",

@@ -401,3 +401,27 @@ describe("redacted DOM values (#5162)", () => {
     expect(detector.shouldSkipVerification(email, detector.detect(email))).toBe(false);
   });
 });
+
+describe("coordinate quantization (#5162)", () => {
+  test("fractional DOM bounds truncate as the runner's XCTest bounds do, so the native twin is replaced", () => {
+    // The runner reports a frame of x 10.75…110.75 as left 10, right 110 (`Int(value)` truncates).
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "XCUIElementTypeButton",
+        "content-desc": "Submit",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    const summary = mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([{ ...submit, bounds: [10.75, 20.75, 100, 40] }]),
+      },
+    ]);
+    expect(summary?.deduplicated).toBe(1);
+    const elements = webElements(findWebViewNodes(hierarchy)[0]);
+    expect(elements).toHaveLength(1);
+    expect(elements[0].bounds).toEqual({ left: 10, top: 120, right: 110, bottom: 160 });
+  });
+});

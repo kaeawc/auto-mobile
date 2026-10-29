@@ -132,17 +132,18 @@ function originOf(url: string | undefined): string | undefined {
 
 /**
  * The element's screen bounds: its `[x, y, width, height]` in the page's CSS pixels, offset by the
- * web view's origin and clipped to the web view, rounded to whole points as XCTest reports them.
+ * web view's origin and clipped to the web view, truncated to whole points as the runner reports
+ * XCTest frames (`Int(value)`), so a DOM element and its XCTest twin get the same bounds.
  */
 function screenBounds(element: IosSdkWebElement, webView: Box): Box | null {
   const [x, y, width, height] = element.bounds;
   if ([x, y, width, height].some((part) => part === undefined || !Number.isFinite(part))) {
     return null;
   }
-  const left = Math.round(Math.max(webView.left, webView.left + x));
-  const top = Math.round(Math.max(webView.top, webView.top + y));
-  const right = Math.round(Math.min(webView.right, webView.left + x + width));
-  const bottom = Math.round(Math.min(webView.bottom, webView.top + y + height));
+  const left = Math.trunc(Math.max(webView.left, webView.left + x));
+  const top = Math.trunc(Math.max(webView.top, webView.top + y));
+  const right = Math.trunc(Math.min(webView.right, webView.left + x + width));
+  const bottom = Math.trunc(Math.min(webView.bottom, webView.top + y + height));
   return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 

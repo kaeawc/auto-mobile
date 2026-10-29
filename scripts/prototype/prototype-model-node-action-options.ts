@@ -71,6 +71,8 @@ export const nodeModelOptions = {
     "videoPlayer.source": { kotlin: "JsonObject" },
     // `true`, `false` or `"whenVisible"` (#14253).
     "videoPlayer.autoplay": { kotlin: "JsonElement" },
+    // Caption tracks (#14259); the contract walk validates each one.
+    "videoPlayer.captions": { kotlin: "List<JsonObject>" },
   },
   fieldDefaults: {
     "image.contentScale": {

@@ -2292,6 +2292,13 @@ one-key union), which is a node-scoped player released when the node leaves comp
 - Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
   calling `media.*`.
 
+**Captions (#14259, contract only).** A `videoPlayer` may list up to 8 `captions` tracks
+`{id, language, label, source}`, where `source` is an uploaded WebVTT `{asset}` or `{data}`, a `/data`
+pointer to an array of `{startMs, endMs, text}` cues that each end after they start. Track ids are
+unique per player; `hls:` ids are reserved for in-band HLS tracks. `media.setCaptions` (`player`,
+`track`, `""` for off) selects a track and `/platform/media/players/<id>/captionTrack` reports it.
+The cue parser and caption overlay are separate slices.
+
 **Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
 `maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes

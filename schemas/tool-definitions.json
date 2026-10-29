@@ -34749,6 +34749,56 @@
                     },
                     "positionKey": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "captions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "maxLength": 64
+                          },
+                          "language": {
+                            "type": "string",
+                            "maxLength": 35
+                          },
+                          "label": {
+                            "type": "string",
+                            "maxLength": 64
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "asset": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128
+                                  }
+                                },
+                                "required": ["asset"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "data": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  }
+                                },
+                                "required": ["data"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["id", "language", "label", "source"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
                     }
                   },
                   "required": ["type"],

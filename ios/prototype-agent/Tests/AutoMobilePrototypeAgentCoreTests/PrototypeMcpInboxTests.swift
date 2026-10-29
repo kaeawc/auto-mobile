@@ -52,6 +52,77 @@ final class PrototypeMcpInboxTests: XCTestCase {
     }
 
     @MainActor
+    func testRequestFilesDispatchImportAndOpenAndConsumeMalformedRequests() async throws {
+        let files = McpFiles(); let entry = entry; let id = id
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, label in
+                XCTAssertEqual(label, "Demo"); return entry
+            }, entries: { [entry] }, warning: { _ in }
+        )
+        try await inbox.ensureDirectories()
+        let delivery = try files.read(root.appendingPathComponent("delivery"), cap: 64)
+        XCTAssertEqual(String(decoding: delivery, as: UTF8.self), "file-inbox-v1")
+        files.state.withLock {
+            $0.data["/mcp/inbox/imp.request"] = Data(#"{"action":"import","label":"Demo"}"#.utf8)
+            $0.data["/mcp/inbox/imp.automobile-proto"] = Data([1])
+            $0.data["/mcp/inbox/opn.request"] = Data("{\"action\":\"open\",\"libraryId\":\"\(id)\"}".utf8)
+            $0.data["/mcp/inbox/bad.request"] = Data("bad".utf8)
+            $0.data["/mcp/inbox/bad.automobile-proto"] = Data([1])
+            $0.data["/mcp/inbox/staged.request.tmp"] = Data("bad".utf8)
+        }
+        let opened = await inbox.receiveFiles(screen: "1206x2622")
+        XCTAssertEqual(opened.count, 3)
+        let command = try XCTUnwrap(opened.first { $0.1 != nil })
+        XCTAssertEqual(command.0, .open(request: "opn", libraryId: id))
+        XCTAssertEqual(command.1, entry)
+        try await inbox.reportOpened(command.0, entry: XCTUnwrap(command.1))
+        XCTAssertEqual(try result(files, request: "imp")["status"], "imported")
+        XCTAssertEqual(try result(files, request: "opn")["status"], "opened")
+        XCTAssertEqual(try result(files, request: "bad")["status"], "rejected")
+        XCTAssertEqual(try result(files, request: "bad")["path"], "action")
+        for name in ["imp.request", "opn.request", "bad.request", "bad.automobile-proto", "imp.automobile-proto"] {
+            XCTAssertFalse(files.exists(root.appendingPathComponent("inbox/" + name)))
+        }
+        XCTAssertTrue(files.exists(root.appendingPathComponent("inbox/staged.request.tmp")))
+        let again = await inbox.receiveFiles()
+        XCTAssertTrue(again.isEmpty)
+    }
+
+    @MainActor
+    func testRetriedSaveFilesReturnTheSameLibraryEntryWithoutWrites() async throws {
+        let files = McpFiles()
+        let libraryFiles = PrototypeLibraryFakeFileSystem()
+        let library = try PrototypeLibraryStore(
+            root: URL(fileURLWithPath: "/library"), storageRoot: URL(fileURLWithPath: "/storage"),
+            files: libraryFiles, clock: PrototypeLibraryFakeClock(), libraryId: { self.id }
+        )
+        let locked = OSAllocatedUnfairLock(uncheckedState: library)
+        let spec =
+            Data(#"{"id":"demo","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"#.utf8)
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, label in
+                try locked.withLock { try PrototypeLibraryImporter(store: $0).importData(
+                    spec,
+                    source: .mcp,
+                    label: label
+                ) }
+            }, entries: { try locked.withLock { try $0.list().entries } }, warning: { _ in }
+        )
+        try await inbox.ensureDirectories()
+        for request in ["first", "retry"] {
+            files.state.withLock {
+                $0.data["/mcp/inbox/\(request).request"] = Data("{\"action\":\"import\",\"label\":\"\(request)\"}".utf8)
+                $0.data["/mcp/inbox/\(request).automobile-proto"] = spec
+            }
+            _ = await inbox.receiveFiles()
+            XCTAssertEqual(try result(files, request: request)["status"], "imported")
+            XCTAssertEqual(try result(files, request: request)["libraryId"], id)
+            XCTAssertEqual(try result(files, request: request)["label"], "first")
+        }
+        XCTAssertEqual(try library.list().entries.count, 1)
+    }
+
+    @MainActor
     func testImportAndCleanupSuccessAndFailure() async throws {
         for fails in [false, true] {
             let files = McpFiles()
@@ -190,7 +261,7 @@ final class PrototypeMcpInboxTests: XCTestCase {
     func testDirectoriesPreserveColdLaunchInboxAndWriteFailureWarns() async throws {
         let files = McpFiles()
         let url = root.appendingPathComponent("inbox/r.automobile-proto")
-        files.state.withLock { $0.data[url.path] = Data([1]); $0.failWrite = true }
+        files.state.withLock { $0.data[url.path] = Data([1]) }
         let warnings = OSAllocatedUnfairLock(initialState: [String]())
         let entry = entry
         let inbox = PrototypeMcpInbox(
@@ -199,6 +270,7 @@ final class PrototypeMcpInboxTests: XCTestCase {
         )
         try await inbox.ensureDirectories()
         XCTAssertTrue(files.exists(url))
+        files.state.withLock { $0.failWrite = true }
         _ = await inbox.handle(.unsupported(request: "r", reason: "Unknown action"))
         XCTAssertEqual(warnings.withLock { $0.count }, 1)
         XCTAssertTrue(warnings.withLock { $0[0].contains("Cannot publish MCP result") })

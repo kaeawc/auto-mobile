@@ -32,6 +32,21 @@ final class PrototypeLibraryImportTests: XCTestCase {
         )
     }
 
+    func testSameSpecDigestReturnsExistingEntryWithoutWritingOrRelabelling() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let library = try store(files)
+        let importer = PrototypeLibraryImporter(store: library)
+        let first = try importer.importData(spec, source: .mcp, label: "First")
+        let before = files.data
+        let directories = files.directories
+        let archive = try PrototypeBundle.export(.init(spec: spec, assets: { _ in nil }, fonts: { _ in nil }))
+        let second = try importer.importData(archive, source: .mcp, label: "Retry")
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(try library.list().entries.count, 1)
+        XCTAssertEqual(files.data, before)
+        XCTAssertEqual(files.directories, directories)
+    }
+
     private func imageSpec(_ count: Int = 1) throws -> Data {
         try JSONEncoder().encode([
             "id": JSONValue.string("images"),
@@ -64,17 +79,22 @@ final class PrototypeLibraryImportTests: XCTestCase {
         let files = PrototypeLibraryFakeFileSystem()
         let library = try store(files)
         let importer = PrototypeLibraryImporter(store: library)
-        let archive = try PrototypeBundle.export(.init(spec: spec, assets: { _ in nil }, fonts: { _ in nil }))
+        var fields = try JSONDecoder().decode([String: JSONValue].self, from: spec)
+        fields["id"] = .string("shared")
+        let sharedSpec = try JSONEncoder().encode(fields)
+        fields["id"] = .string("pasted")
+        let pastedSpec = try JSONEncoder().encode(fields)
+        let archive = try PrototypeBundle.export(.init(spec: sharedSpec, assets: { _ in nil }, fonts: { _ in nil }))
         let first = try importer.importData(spec, source: .file)
         let second = try importer.importData(archive, source: .share)
-        let third = try importer.importData(spec, source: .paste)
+        let third = try importer.importData(pastedSpec, source: .paste)
         XCTAssertEqual([first.source, second.source, third.source], [.file, .share, .paste])
         XCTAssertEqual(first.label, "demo")
         XCTAssertNotEqual(first.libraryId, "demo")
         XCTAssertNotEqual(first.libraryId, second.libraryId)
         XCTAssertEqual(try library.list().entries.count, 3)
-        for entry in [first, second, third] {
-            XCTAssertEqual(try library.load(entry.libraryId).spec, spec)
+        for (entry, expectedSpec) in [(first, spec), (second, sharedSpec), (third, pastedSpec)] {
+            XCTAssertEqual(try library.load(entry.libraryId).spec, expectedSpec)
             XCTAssertEqual(try files.children(library.storageURL(entry.libraryId)), [])
         }
     }

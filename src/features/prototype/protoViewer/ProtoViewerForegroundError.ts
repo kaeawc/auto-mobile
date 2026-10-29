@@ -1,10 +1,10 @@
 import { ActionableError } from "../../../models/ActionableError";
 
-/** URL delivery is unsafe when the simulator cannot bring ProtoViewer to the foreground. */
+/** The simulator must bring ProtoViewer forward to consume its file inbox. */
 export class ProtoViewerForegroundError extends ActionableError {
   constructor(options?: ErrorOptions) {
     super(
-      'Could not bring ProtoViewer to the foreground on the iOS simulator. An "Open in ProtoViewer?" alert may be pending; dismiss it, open ProtoViewer manually, and retry.',
+      "Could not bring ProtoViewer to the foreground on the iOS simulator. Open ProtoViewer manually and retry.",
       options,
     );
     this.name = "ProtoViewerForegroundError";

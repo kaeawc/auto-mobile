@@ -129,6 +129,12 @@ export const PROTOVIEWER_IOS_SCHEME = "automobile-proto";
 export const PROTOVIEWER_IOS_MCP_FOLDER = "Library/Application Support/ProtoViewer/mcp";
 export const PROTOVIEWER_INBOX_FOLDER = "inbox";
 export const PROTOVIEWER_RESULTS_FOLDER = "results";
+/** Published by the iOS app at mcp/delivery; URL-only builds never publish this capability. */
+export const PROTOVIEWER_IOS_DELIVERY = "file-inbox-v1";
+/** Atomic inbox/<request>.request JSON; its filename supplies the request id. Twin: PrototypeMcpRequest.parseFile. */
+export type ProtoViewerIosRequest =
+  | { action: "import"; label?: string }
+  | { action: "open"; libraryId: string };
 /** Query values use percent encoding (including apostrophes), never shell interpolation. */
 function queryValue(value: string): string {
   return encodeURIComponent(value).replace(

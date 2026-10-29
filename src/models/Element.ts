@@ -2,6 +2,12 @@ import { ElementBounds } from "./ElementBounds";
 import type { SemanticLink } from "./SemanticLink";
 
 /**
+ * Set to "true" on an element whose input value its source redacted (an iOS SDK web snapshot's
+ * `[REDACTED]`, #5162): it has a value, but not one text verification can compare against.
+ */
+export const VALUE_REDACTED_ATTRIBUTE = "value-redacted";
+
+/**
  * Represents a UI element with its properties
  */
 export interface Element {

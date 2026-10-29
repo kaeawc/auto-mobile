@@ -92,7 +92,7 @@ function convertNode(
 }
 
 /** Hierarchy children may arrive as one object rather than an array (XML-shaped nodes). */
-function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
+export function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
   const children: unknown = node.node;
   if (Array.isArray(children)) {
     return children;
@@ -100,7 +100,7 @@ function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
   return children && typeof children === "object" ? [children as ViewHierarchyNode] : [];
 }
 
-function boundsKey(value: unknown): string | null {
+export function boundsKey(value: unknown): string | null {
   if (value === null || typeof value !== "object") {
     return null;
   }

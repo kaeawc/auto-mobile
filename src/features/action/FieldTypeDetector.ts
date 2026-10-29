@@ -1,4 +1,4 @@
-import { Element } from "../../models/Element";
+import { Element, VALUE_REDACTED_ATTRIBUTE } from "../../models/Element";
 import { FieldType } from "../../models/SetUIStateResult";
 
 /**
@@ -211,6 +211,10 @@ export class FieldTypeDetector {
    * @returns true if verification should be skipped
    */
   shouldSkipVerification(element: Element, fieldType: FieldType): boolean {
+    // A redacted value exists but cannot be read back.
+    if (element[VALUE_REDACTED_ATTRIBUTE] === "true" && fieldType === "text") {
+      return true;
+    }
     // On iOS, text verification is unreliable unless `value` attribute is available
     if (this.isIOSElement(element) && (fieldType === "text" || fieldType === "dropdown")) {
       // Only skip if there's no `value` attribute to verify against

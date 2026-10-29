@@ -13,10 +13,26 @@ final class LoopbackRecorder: @unchecked Sendable {
     private var remainingBytes: Int
     private var done = false
 
-    init(sampleRate: Int, durationMs: Int, finished: @escaping @Sendable (Int32) -> Void) {
+    /// With a nil `durationMs` the capture runs until stdin closes.
+    init(sampleRate: Int, durationMs: Int?, finished: @escaping @Sendable (Int32) -> Void) {
         self.sampleRate = sampleRate
-        remainingBytes = Pcm16Mono.bytes(durationMs: durationMs, sampleRate: sampleRate)
+        remainingBytes = durationMs.map { Pcm16Mono.bytes(durationMs: $0, sampleRate: sampleRate) } ?? Int.max
         self.finished = finished
+        if durationMs == nil {
+            stopWhenStdinCloses()
+        }
+    }
+
+    /// The daemon ends an open-ended capture by closing stdin, so the last buffer is still written.
+    private func stopWhenStdinCloses() {
+        DispatchQueue.global().async { [self] in
+            _ = try? FileHandle.standardInput.readToEnd()
+            callbackQueue.async { [self] in
+                if let audioQueue, !done {
+                    finish(audioQueue, code: 0)
+                }
+            }
+        }
     }
 
     func start(on device: LoopbackDevice) throws {

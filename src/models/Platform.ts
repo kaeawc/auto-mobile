@@ -20,6 +20,17 @@ export function isAndroidOrIosPlatform(platform: string): platform is AndroidOrI
 }
 
 /**
+ * Whether a device on `platform` satisfies an optional platform request. No request means
+ * "either" (Android or iOS): a watch is reached only when asked for by name (#14908).
+ */
+export function matchesPlatformSelector(
+  platform: Platform,
+  requested: Platform | undefined,
+): boolean {
+  return requested === undefined ? isAndroidOrIosPlatform(platform) : platform === requested;
+}
+
+/**
  * Narrow a device platform for Android/iOS-only code. Throws an ActionableError naming the
  * operation for a watch, so platform branches never fall through to the iPhone or Android path.
  */

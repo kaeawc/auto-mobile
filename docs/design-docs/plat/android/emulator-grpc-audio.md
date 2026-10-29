@@ -67,11 +67,43 @@ is only worth building if some supported environment cannot reach the gRPC port.
   Assertions should be loose (non-silent, duration within a margin), not waveform matches,
   because loaded CI hosts glitch real-time audio.
 
+## Audio tracks in recordings
+
+A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCaptureBackend`:
+
+- Before the video capture starts it opens an open-ended capture on the device's route (gRPC
+  `streamAudio` with no deadline, or the loopback helper's `--until-stopped`) and appends the PCM to
+  `<recording>.audio.pcm`, so a long recording never sits in memory. A silent guest sends no
+  packets, so the gRPC route writes silence for the time between packets (from the packet
+  timestamps, or arrival time when a timestamp disagrees with the host clock by over 10 s) to keep
+  the track in step with the video.
+- At stop, after the video is final, it ends the capture and muxes with ffmpeg: video copied, audio
+  AAC, the audio captured between the stream opening and the video launch skipped (`-ss`), and the
+  track padded with silence to the video's length (`apad` + `-shortest`). An empty capture becomes
+  `anullsrc`. The muxed file replaces the original.
+- A failed capture or mux keeps the video, sets `hasAudioTrack: false` and adds a warning; a failed
+  start or a force stop discards the PCM file. A `streamAudio` call that ends with a status other
+  than OK or CANCELLED is a failed capture even after some audio arrived, and so is a PCM file
+  write error (kept from the first failed write and raised at close). The PCM file is closed
+  before it is removed on every path, including a failed audio stop.
+- A force stop that arrives while the video is still finalizing stops the audio and discards its
+  file right away; the pending stop then reports `hasAudioTrack: false`.
+- ffmpeg is probed at start, so a host without it is refused before anything is captured.
+- Segmented Android recordings (over 180 s) refuse `audio`: the track would need stitching across
+  segments.
+
 ## Discovery and auth
 
+- The launcher passes `-grpc <port>` to every emulator it spawns unless the arguments already
+  carry `-grpc` or `-grpc=`. The port is leased from `EmulatorPortReservations`
+  (`reserveEmulatorGrpcPort`) across 8554-8653: a port another launch holds, or one the host
+  cannot bind, is skipped. The lease is released with the child's launch reservation on exit.
+  Console and ADB ports (5554-5683) are outside that range.
 - The emulator writes `pid_<pid>.ini` under `<dir>/avd/running`, where `<dir>` is
   `~/Library/Caches/TemporaryItems` on macOS, `$XDG_RUNTIME_DIR` (else `/tmp/android-<user>`)
   on Linux, and the temp dir. These are the same directories the AVD launch guard reads.
+- The endpoint address comes from the file's `grpc.address` or `grpc.port`, which is the port the
+  launcher passed. `localhost:8554` is the fallback for a file with neither key.
 - The emulator for `emulator-<N>` is the file whose `port.serial` is `N`. Files whose pid is
   no longer running are skipped, because a crashed emulator leaves its file behind and a later
   emulator can reuse the port.

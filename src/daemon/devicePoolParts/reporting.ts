@@ -100,7 +100,10 @@ export class DevicePoolReporting {
     error: number;
     avgAssignments: number;
   } {
-    const all = this.callbacks.getAllDevices().filter((device) => !live || live.has(device.id));
+    // Totals use the same "either" set (Android and iOS) as the idle/assigned/error buckets.
+    const all = this.callbacks
+      .getDevicesByPlatform(undefined)
+      .filter((device) => !live || live.has(device.id));
     const { idle, assigned, error } = this.callbacks.getStatsForPlatform(undefined, live);
     const avgAssignments =
       all.length > 0

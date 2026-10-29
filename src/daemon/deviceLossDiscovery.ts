@@ -72,6 +72,16 @@ function needsFreshTransitionalSimulatorRead(
   return iosDeviceListMaxAgeMs !== undefined && (discovery.transitionalSimulators?.length ?? 0) > 0;
 }
 
+/**
+ * Pooled watches need their own sweep on an "either" loss read, first read and confirmation re-read
+ * alike (#14908). Other reads carry no watch option, so their options are unchanged.
+ */
+function watchSweepOption(
+  platform: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0],
+): { includeWatchOs?: true } {
+  return platform === "either" ? { includeWatchOs: true } : {};
+}
+
 export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
@@ -96,6 +106,7 @@ export async function discoverAndReconcile(
   const options = {
     bypassAndroidDeviceListCache,
     skipAndroidProfileEnrichment: true,
+    ...watchSweepOption(platform),
     // An unpooled held device still needs liveness evidence from its own source.
     skipPhysicalIosDiscovery: !trackedDevices.some(
       (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",

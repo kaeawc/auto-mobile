@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { HostLoopbackAudioSession } from "../../../src/features/audio/HostLoopbackAudioSession";
+import {
+  CAPTURE_DRAIN_MS,
+  HostLoopbackAudioSession,
+} from "../../../src/features/audio/HostLoopbackAudioSession";
 import { LOOPBACK_READY_TIMEOUT_MS } from "../../../src/features/audio/loopbackHelperProcess";
 import { sineTone } from "../../../src/utils/audio/pcm";
 import { FakeLoopbackHelperProcess } from "../../fakes/FakeLoopbackHelperProcess";
@@ -39,7 +42,7 @@ async function turns(count: number): Promise<void> {
 
 describe("HostLoopbackAudioSession injection", () => {
   test("plays a clip as mono PCM, closes stdin and completes when the helper exits", async () => {
-    const { session, helpers } = setup();
+    const { session, helpers, timer } = setup();
     const mono = sineTone({ durationMs: 250, sampleRate: 16_000 });
     const stereo = {
       sampleRate: 16_000,
@@ -53,8 +56,29 @@ describe("HostLoopbackAudioSession injection", () => {
     await turns(5);
     expect(helpers[0].stdinEnded).toBe(true);
     expect(helpers[0].writtenFrames()).toBe(4_000);
+    timer.advanceTime(250);
     helpers[0].exit(0);
-    expect(await injection.done).toEqual({ framesSent: 4_000, reason: "completed" });
+    expect(await injection.done).toEqual({
+      framesQueued: 4_000,
+      framesPlayed: 4_000,
+      reason: "completed",
+    });
+  });
+
+  test("stop estimates played frames since the first write, excluding the start delay", async () => {
+    const { session, helpers, timer } = setup();
+    const injection = await session.injectAudio(sineTone({ durationMs: 250, sampleRate: 16_000 }), {
+      startDelayMs: 500,
+    });
+    timer.advanceTime(500);
+    await turns(5);
+    expect(helpers[0].writtenFrames()).toBe(4_000);
+    timer.advanceTime(62.6);
+    expect(await injection.stop()).toEqual({
+      framesQueued: 4_000,
+      framesPlayed: 1_001,
+      reason: "stopped",
+    });
   });
 
   test("a rate the helper cannot take is resampled to 48 kHz", async () => {
@@ -179,6 +203,49 @@ describe("HostLoopbackAudioSession capture", () => {
     const result = await session.captureAudio({ durationMs: 10 });
     expect(result.pcm.samples.length).toBe(480);
     expect(result.timedOut).toBe(false);
+  });
+
+  test("an open-ended capture streams PCM until stopped by closing stdin", async () => {
+    const { session, helpers } = setup();
+    const received: number[] = [];
+    const stream = await session.streamCapture((pcm) => received.push(...pcm));
+    expect(helpers[0].args).toEqual(["capture", "--until-stopped", "--sample-rate", "48000"]);
+    helpers[0].stdout.write(pcmBytes([7, 8]));
+    // Closing stdin is the helper's cue to write its last buffer and exit.
+    helpers[0].stdin.on("finish", () => {
+      helpers[0].stdout.write(pcmBytes([9]));
+      helpers[0].exit(0);
+    });
+    await stream.stop();
+    expect(Array.from(new Int16Array(Uint8Array.from(received).buffer))).toEqual([7, 8, 9]);
+    expect(helpers[0].signals).toEqual([]);
+  });
+
+  test("an open-ended capture the helper does not end on its own is killed and fails", async () => {
+    const { session, helpers, timer } = setup();
+    const stream = await session.streamCapture(() => {});
+    const stopping = stream.stop();
+    await turns(1);
+    timer.advanceTime(2_000);
+    await expect(stopping).rejects.toMatchObject({ code: "audio_loopback_failed" });
+    expect(helpers[0].signals).toEqual(["SIGTERM"]);
+  });
+
+  test("an open-ended capture whose helper crashed fails at stop", async () => {
+    const { session, helpers } = setup();
+    const stream = await session.streamCapture(() => {});
+    helpers[0].exit(null);
+    await expect(stream.stop()).rejects.toMatchObject({ code: "audio_loopback_failed" });
+  });
+
+  test("an open-ended capture whose output never ends after exit fails at stop", async () => {
+    const { session, helpers, timer } = setup();
+    const stream = await session.streamCapture(() => {});
+    helpers[0].stdin.on("finish", () => helpers[0].emit("exit", 0));
+    const stopping = stream.stop();
+    await turns(2);
+    timer.advanceTime(CAPTURE_DRAIN_MS);
+    await expect(stopping).rejects.toThrow("may be missing");
   });
 
   test("less audio than asked for is timedOut, not an error", async () => {

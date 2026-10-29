@@ -54,6 +54,7 @@ internal object PrototypePlatformRules {
         .toSet()
     val channels = root.member("channels") ?: JsonObject(emptyMap())
     val players = PrototypeMedia.players(root, nodes)
+    val notificationChannels = PrototypeNotificationRules.channels(root)
     val background = requires.strings("background").toSet()
   }
 
@@ -154,6 +155,8 @@ internal object PrototypePlatformRules {
         when (name) {
           "realtime" -> !PrototypeChannels.validRead(use.pointer, declared.channels)
           "media" -> !PrototypeMedia.validRead(use.pointer, declared.players)
+          "notifications" ->
+            !PrototypeNotificationRules.validRead(tokens, declared.notificationChannels, state)
           else -> tokens.size != 2 || tokens[1] !in state
         }
       } == true -> fail(use.path, "Unknown platform state ${use.pointer}")

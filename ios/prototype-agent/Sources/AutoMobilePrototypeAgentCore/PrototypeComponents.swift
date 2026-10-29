@@ -51,17 +51,21 @@ extension PrototypeNode {
     func openModals(
         state: [String: JSONValue],
         pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot] = [:]
+        stacks: [String: PrototypeStackSnapshot] = [:],
+        data: [String: JSONValue]? = nil
     )
         -> [PrototypeNode]
     {
         if let visibleWhen, !visibleWhen.holds(state) { return [] }
         let modal = prototypeModalTypes.contains(type)
         if modal, !(openWhen?.holds(state) ?? false) { return [] }
+        // A lazy list's rows are decoded on demand, so a modal in the row template joins the layer here.
         let nested = currentChildEntries(
             path: "root", pages: pages, stacks: stacks, state: state, clampPagerPage: false
-        ).map(\.node)
-        return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages, stacks: stacks) }
+        ).map(\.node) + lazyModalRows.nodes(of: self, data: data)
+        return (modal ? [self] : []) + nested.flatMap {
+            $0.openModals(state: state, pages: pages, stacks: stacks, data: data)
+        }
     }
 
     /// Whether an open dialog or menu makes the page behind it inert (hidden from accessibility); a
@@ -69,11 +73,12 @@ extension PrototypeNode {
     func blocksPage(
         state: [String: JSONValue],
         pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot] = [:]
+        stacks: [String: PrototypeStackSnapshot] = [:],
+        data: [String: JSONValue]? = nil
     )
         -> Bool
     {
-        openModals(state: state, pages: pages, stacks: stacks).contains { node in
+        openModals(state: state, pages: pages, stacks: stacks, data: data).contains { node in
             guard node.blocksUnderlyingPage else { return false }
             if node.type == "tooltip", let id = node.anchorTo {
                 return renderedNode(id: id, state: state, pages: pages, stacks: stacks) != nil
@@ -90,11 +95,12 @@ extension PrototypeNode {
     func layerAccessibility(
         state: [String: JSONValue],
         pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot] = [:]
+        stacks: [String: PrototypeStackSnapshot] = [:],
+        data: [String: JSONValue]? = nil
     )
         -> PrototypeLayerAccessibility
     {
-        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages, stacks: stacks))
+        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages, stacks: stacks, data: data))
     }
 
     /// The node or composite part whose identifier is `identifier`, depth-first in tree order.

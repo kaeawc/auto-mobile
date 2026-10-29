@@ -14,6 +14,7 @@ import {
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorAudioMessages";
 import { GrpcStatus } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/grpcFraming";
 import { analyzeLevels, sineTone, type PcmAudio } from "../../../../src/utils/audio/pcm";
+import { SilenceFiller } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/SilenceFiller";
 import { FakeGrpcTransport } from "../../../fakes/FakeGrpcTransport";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
@@ -51,7 +52,11 @@ describe("EmulatorAudioClient.injectAudio", () => {
   test("streams the clip in 20ms packets with the format on the first packet only", async () => {
     const { client, transport } = setup();
     const injection = await client.injectAudio(CLIP);
-    expect(await injection.done).toEqual({ framesSent: 1600, reason: "completed" });
+    expect(await injection.done).toEqual({
+      framesQueued: 1600,
+      framesPlayed: 0,
+      reason: "completed",
+    });
 
     const [call] = transport.calls;
     expect(call.method).toBe(INJECT_AUDIO_METHOD);
@@ -125,7 +130,7 @@ describe("EmulatorAudioClient.injectAudio", () => {
     }
     const first = await injection.stop();
     const second = await injection.stop();
-    expect(first).toEqual({ framesSent: 640, reason: "stopped" });
+    expect(first).toEqual({ framesQueued: 640, framesPlayed: 0, reason: "stopped" });
     expect(second).toBe(first);
     expect(transport.calls[0].cancelled).toBe(true);
   });
@@ -139,8 +144,9 @@ describe("EmulatorAudioClient.injectAudio", () => {
     const result = await injection.done;
     expect(result.reason).toBe("max_duration");
     // 250ms at 20ms per packet: 13 packets of 320 frames, more than two full passes.
-    expect(result.framesSent).toBe(13 * 320);
-    expect(sentFrames(transport.calls[0].written)).toBe(result.framesSent);
+    expect(result.framesQueued).toBe(13 * 320);
+    expect(result.framesPlayed).toBe(4_160);
+    expect(sentFrames(transport.calls[0].written)).toBe(result.framesQueued);
   });
 
   test("startDelayMs waits before the first packet", async () => {
@@ -149,13 +155,13 @@ describe("EmulatorAudioClient.injectAudio", () => {
     await Promise.resolve();
     expect(transport.calls[0].written).toHaveLength(0);
     timer.advanceTime(500);
-    expect((await injection.done).framesSent).toBe(1600);
+    expect((await injection.done).framesQueued).toBe(1600);
   });
 
   test("stop during the start delay settles at once without sending audio", async () => {
     const { client, transport, timer } = setup();
     const injection = await client.injectAudio(CLIP, { startDelayMs: 60_000 });
-    expect(await injection.stop()).toEqual({ framesSent: 0, reason: "stopped" });
+    expect(await injection.stop()).toEqual({ framesQueued: 0, framesPlayed: 0, reason: "stopped" });
     expect(transport.calls[0].written).toHaveLength(0);
     expect(transport.calls[0].cancelled).toBe(true);
     expect(timer.getMsUntilNextDueEvent()).toBeUndefined();
@@ -172,14 +178,64 @@ describe("EmulatorAudioClient.injectAudio", () => {
       await Promise.resolve();
     }
     timer.advanceTime(1_000);
-    expect(await injection.done).toEqual({ framesSent: 320, reason: "max_duration" });
+    expect(await injection.done).toEqual({
+      framesQueued: 320,
+      framesPlayed: 320,
+      reason: "max_duration",
+    });
     expect(transport.calls[0].cancelled).toBe(true);
+  });
+
+  test("framesPlayed follows the monotonic clock at real-time pace and never exceeds framesQueued", async () => {
+    const { client, transport, timer } = setup();
+    transport.onOpen = (call) => {
+      call.onWrite = (index) => {
+        timer.advanceTime(10);
+        return index === 2 ? new Promise<void>(() => {}) : undefined;
+      };
+    };
+    const injection = await client.injectAudio(CLIP);
+    while (transport.calls[0].written.length < 3) {
+      await Promise.resolve();
+    }
+    // Three 10ms steps elapsed: 480 frames at 16 kHz, of the 640 frames queued.
+    expect(await injection.stop()).toEqual({
+      framesQueued: 640,
+      framesPlayed: 480,
+      reason: "stopped",
+    });
+  });
+
+  test.each([60_000, -60_000])("framesPlayed ignores a %i ms wall-clock step", async (stepMs) => {
+    const { client, transport, timer } = setup();
+    // Start with distinct clock origins so mixing time sources also fails this test.
+    timer.stepWallClock(5_000);
+    transport.onOpen = (call) => {
+      call.onWrite = (index) => {
+        timer.advanceTime(10);
+        return index === 2 ? new Promise<void>(() => {}) : undefined;
+      };
+    };
+    const injection = await client.injectAudio(CLIP);
+    while (transport.calls[0].written.length < 3) {
+      await Promise.resolve();
+    }
+    timer.stepWallClock(stepMs);
+    expect(await injection.stop()).toEqual({
+      framesQueued: 640,
+      framesPlayed: 480,
+      reason: "stopped",
+    });
   });
 
   test("a clip that finishes before maxDurationMs clears its deadline", async () => {
     const { client, timer } = setup();
     const injection = await client.injectAudio(CLIP, { maxDurationMs: 5_000 });
-    expect(await injection.done).toEqual({ framesSent: 1600, reason: "completed" });
+    expect(await injection.done).toEqual({
+      framesQueued: 1600,
+      framesPlayed: 0,
+      reason: "completed",
+    });
     expect(timer.getMsUntilNextDueEvent()).toBeUndefined();
   });
 });
@@ -239,6 +295,91 @@ describe("EmulatorAudioClient.captureAudio", () => {
     await expect(client.captureAudio({ durationMs: 100 })).rejects.toMatchObject({
       code: "audio_capture_unsupported",
     });
+  });
+});
+
+describe("EmulatorAudioClient.streamCapture", () => {
+  function audioPacket(bytes: number[]): Uint8Array {
+    return encodeAudioPacket({ audio: Uint8Array.from(bytes) });
+  }
+
+  test("forwards PCM until stopped, then cancels the stream", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = undefined;
+      call.onWrite = () => {
+        call.respond(audioPacket([1, 0, 2, 0]));
+        call.respond(audioPacket([3, 0]));
+      };
+    };
+    const received: number[] = [];
+    const stream = await client.streamCapture((pcm) => received.push(...pcm), {
+      sampleRate: 16_000,
+    });
+    while (received.length < 6) {
+      await Promise.resolve();
+    }
+    await stream.stop();
+    await stream.stop();
+    expect(stream.sampleRate).toBe(16_000);
+    expect(received).toEqual([1, 0, 2, 0, 3, 0]);
+    expect(transport.calls[0].cancelled).toBe(true);
+  });
+
+  test("a stream the emulator refuses before any audio fails at stop", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = { code: GrpcStatus.UNIMPLEMENTED, message: "" };
+    };
+    const stream = await client.streamCapture(() => {});
+    await expect(stream.stop()).rejects.toMatchObject({ code: "audio_capture_unsupported" });
+  });
+
+  test("a stream that fails after some audio still fails at stop", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = undefined;
+      call.onWrite = () => {
+        call.respond(audioPacket([1, 0]));
+        call.finish({ code: GrpcStatus.UNAVAILABLE, message: "emulator went away" });
+      };
+    };
+    const received: number[] = [];
+    const stream = await client.streamCapture((pcm) => received.push(...pcm));
+    while (received.length < 2) {
+      await Promise.resolve();
+    }
+    await expect(stream.stop()).rejects.toBeInstanceOf(EmulatorAudioError);
+  });
+});
+
+describe("SilenceFiller", () => {
+  const START_US = 1_700_000_000_000_000;
+  /** 20 ms of 16 kHz mono PCM. */
+  const packet = (timestampUs?: number) => ({ timestampUs, audio: new Uint8Array(640) });
+
+  test("a quiet stretch between packets becomes silence of the same length", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    expect(filler.before(packet(START_US))).toBeUndefined();
+    nowUs = START_US + 2_020_000;
+    expect(filler.before(packet(START_US + 2_020_000))?.byteLength).toBe(64_000);
+  });
+
+  test("silence before the first packet is kept, and jitter is not", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    nowUs += 1_000_000;
+    expect(filler.before(packet(nowUs))?.byteLength).toBe(32_000);
+    nowUs += 30_000;
+    expect(filler.before(packet(nowUs))).toBeUndefined();
+  });
+
+  test("a timestamp that disagrees with the host clock falls back to arrival time", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    nowUs += 500_000;
+    expect(filler.before(packet(42))?.byteLength).toBe(16_000);
   });
 });
 

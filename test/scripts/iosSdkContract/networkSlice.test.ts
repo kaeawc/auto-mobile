@@ -9,6 +9,7 @@ import {
   judgeNetworkCase,
   matchSdkPayload,
   networkFieldMismatches,
+  networkRecordKey,
   recordDifferences,
   type NetworkCaseObservation,
 } from "../../../scripts/ios/sdk-contract/networkSlice";
@@ -142,8 +143,25 @@ describe("field helpers", () => {
     expect(recordDifferences({ id: 1, url: "a" }, { id: 2, url: "b" })).toHaveLength(1);
   });
 
+  test("treats header and metadata maps as equal whatever their key order", () => {
+    const reference = { responseHeaders: { Connection: "close", "Content-Length": "32" } };
+    const live = { responseHeaders: { "Content-Length": "32", Connection: "close" } };
+    expect(recordDifferences(reference, live)).toEqual([]);
+    expect(
+      recordDifferences(reference, {
+        responseHeaders: { Connection: "keep-alive", "Content-Length": "32" },
+      }),
+    ).toHaveLength(1);
+  });
+
   test("matches payloads by request id, or by frame identity when the SDK generated the id", () => {
-    const sent = { url: "ws://x", protocolName: "websocket", direction: "sent", connectionId: "c" };
+    const sent = {
+      url: "ws://x",
+      method: "text",
+      protocolName: "websocket",
+      direction: "sent",
+      connectionId: "c",
+    };
     const received = { ...sent, direction: "received" };
     const frame: ExpectedNetworkEvent = {
       caseName: "websocket-received",
@@ -157,15 +175,48 @@ describe("field helpers", () => {
     expect(matchSdkPayload(frame, [sent, received])).toBe(received);
     expect(matchSdkPayload(frame, [sent])).toBeUndefined();
   });
+
+  test("matches a URLProtocol record, which has no protocol, direction or connection", () => {
+    const record = { url: "http://h/contract/r/x", method: "GET", connectionId: null };
+    const decision = { ...record, method: "SEND" };
+    const urlProtocol: ExpectedNetworkEvent = {
+      caseName: "fault-urlsession-fail",
+      url: "http://h/contract/r/x",
+      method: "GET",
+    };
+    expect(matchSdkPayload(urlProtocol, [decision, record])).toBe(record);
+  });
+
+  test("asserts an absent error with null and leaves an undefined error unasserted", () => {
+    const noError: ExpectedNetworkEvent = { ...expected, error: null };
+    expect(networkFieldMismatches(noError, payload, "wire")).toEqual([]);
+    expect(networkFieldMismatches(noError, { ...surface, error: null }, "surface")).toEqual([]);
+    expect(networkFieldMismatches(noError, { ...payload, error: "fault:f:error" }, "wire")).toEqual(
+      ['error: expected null, got "fault:f:error"'],
+    );
+    expect(networkFieldMismatches(expected, { ...payload, error: "x" }, "wire")).toEqual([]);
+  });
+
+  test("keys records by request id, else by method and URL", () => {
+    expect(networkRecordKey({ requestId: "r-1", url: "u", method: "GET" })).toBe("r-1");
+    expect(networkRecordKey({ requestId: "", url: "u", method: "GET" })).toBe("url:GET u");
+    expect(networkRecordKey({ requestId: null })).toBeUndefined();
+  });
+
+  test("reports case findings under the observation's slice", () => {
+    const result = judgeNetworkCase(observation({ sdkPayload: undefined, slice: "faults" }));
+    expect(result?.slice).toBe("faults");
+  });
 });
 
 describe("judgeManifest", () => {
   const manifest: SdkContractManifest = {
-    schemaVersion: 1,
+    schemaVersion: 3,
     runId: "run-1",
     scenario: "network",
     status: "complete",
     network: [expected],
+    faults: [],
     events: [],
     undecodableBatches: 0,
   };
@@ -179,6 +230,44 @@ describe("judgeManifest", () => {
     expect(findings).toEqual([
       { slice: "network", caseName: "run", boundary: "fixture-host", message: "listener failed" },
     ]);
+  });
+
+  test("accepts the observation and storage scenarios' own output, not an empty manifest", () => {
+    const empty = { ...manifest, network: [] };
+    const storage = {
+      allowKeychainDeletion: false,
+      keychainEntries: [],
+      uncoordinatedSuites: [],
+      hostCoordinatedSuites: [],
+      coreDataStores: [],
+      secretWritten: false,
+    };
+    const complete: Array<[string, SdkContractManifest]> = [
+      ["observe", { ...empty, scenario: "observe", observation: { captures: 0, actions: [] } }],
+      ["storage-default", { ...empty, scenario: "storage-default", storage }],
+      ["storage", { ...empty, scenario: "storage", storage: { ...storage, secretWritten: true } }],
+    ];
+    for (const [slice, scenario] of complete) {
+      expect(judgeManifest(scenario, slice)).toEqual([]);
+      expect(judgeManifest({ ...empty, scenario: slice }, slice)[0]).toMatchObject({
+        slice,
+        boundary: "fixture-host",
+      });
+    }
+  });
+
+  test("needs recorded cases for the scenario that ran", () => {
+    expect(judgeManifest({ ...manifest, network: [] })[0].message).toContain("network scenario");
+    const faults = { ...manifest, scenario: "faults", network: [] };
+    expect(judgeManifest(faults, "faults")[0]).toMatchObject({
+      slice: "faults",
+      boundary: "fixture-host",
+    });
+    const withCapabilities = {
+      ...faults,
+      capabilities: { beforeRegistration: [], afterRegistration: [] },
+    };
+    expect(judgeManifest(withCapabilities, "capabilities")).toEqual([]);
   });
 
   test("blames SDK serialization for batches the public type cannot decode", () => {

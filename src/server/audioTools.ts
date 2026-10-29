@@ -196,7 +196,7 @@ export const createStopAudioInputHandler =
     const stopped = await service.stopInjection(args.injectionId, device.deviceId);
     return createStructuredToolResponse({
       success: true,
-      message: `Audio injection ${stopped.injectionId} ended (${stopped.reason}) after ${stopped.framesSent} frames.`,
+      message: `Audio injection ${stopped.injectionId} ended (${stopped.reason}) after ${stopped.framesQueued} frames queued (about ${stopped.framesPlayed} played).`,
       ...stopped,
     });
   };
@@ -235,11 +235,13 @@ const injectAudioInputTool = defineDeviceTool({
     "an app under test records known audio (voice notes, voice search, calls). An emulator streams " +
     "through its own gRPC audio API, isolated per emulator. A simulator goes through the host's " +
     "loopback input device, which every simulator on the host shares, so one simulator injection " +
-    "runs per host. Returns an injectionId once streaming starts; stop it with stopAudioInput. " +
+    "runs per host. For Android, AutoMobile opens and verifies a guest microphone capture before " +
+    "streaming and closes its recorder when injection ends. Returns an injectionId once streaming starts; stop it with stopAudioInput. " +
     "Session release stops it. Errors lead with a code: [audio_injection_busy] another injection " +
     "holds the microphone; [audio_injection_unsupported] no route (not a local emulator with gRPC " +
     "audio, or a host without a loopback default input); [audio_loopback_failed] the host loopback " +
-    "helper failed. Physical devices are refused.",
+    "helper failed; [audio_guest_capture_unavailable] a safe Android guest capture could not be " +
+    "verified; [audio_emulator_exited] the emulator exited during injection. Physical devices are refused.",
   input: injectAudioInputInput,
   options: {
     defaultEnabled: false,
@@ -254,7 +256,8 @@ const stopAudioInputTool = defineDeviceTool({
   description:
     "Stop an audio injection started by injectAudioInput, on the device it runs on. Idempotent: an " +
     "injection that already ended returns its result (frames sent and why it ended); the last 64 " +
-    "ended injections are kept.",
+    "ended injections are kept. [audio_emulator_exited] means the emulator exited during injection; " +
+    "restart it before starting another injection.",
   input: stopAudioInputInput,
   options: {
     defaultEnabled: false,

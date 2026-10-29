@@ -1,3 +1,4 @@
+import { isAndroidOrIosPlatform } from "../models/Platform";
 import type { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -211,7 +212,11 @@ export function configureObservationStreamCallbacks(
     });
     const pooledDevices = deviceId
       ? [deps.devicePool().getDevice(deviceId)].filter((device) => device !== null)
-      : deps.devicePool().getAllDevices();
+      : // An all-device request means every observable device; watches have no hierarchy yet.
+        deps
+          .devicePool()
+          .getAllDevices()
+          .filter((device) => isAndroidOrIosPlatform(device.platform));
 
     if (pooledDevices.length === 0) {
       throw new Error(

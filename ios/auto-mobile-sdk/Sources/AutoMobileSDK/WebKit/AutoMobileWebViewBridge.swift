@@ -1,57 +1,6 @@
+import AutoMobileSdkWire
 import Foundation
 import os
-
-/// A stable description of an interactive element in a web document.
-public struct AutoMobileWebElement: Codable, Sendable, Equatable {
-    public let id: String
-    public let role: String?
-    public let label: String?
-    public let value: String?
-    public let bounds: [Double]
-    public let enabled: Bool
-    public let visible: Bool
-    public let focused: Bool
-
-    public init(
-        id: String,
-        role: String? = nil,
-        label: String? = nil,
-        value: String? = nil,
-        bounds: [Double] = [],
-        enabled: Bool = true,
-        visible: Bool = true,
-        focused: Bool = false
-    ) {
-        self.id = id
-        self.role = role
-        self.label = label
-        self.value = value
-        self.bounds = bounds
-        self.enabled = enabled
-        self.visible = visible
-        self.focused = focused
-    }
-}
-
-/// A bounded DOM snapshot. Element IDs are valid only for this snapshot.
-public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
-    public let snapshotId: String
-    public let url: String?
-    public let title: String?
-    public let elements: [AutoMobileWebElement]
-
-    public init(
-        snapshotId: String = UUID().uuidString,
-        url: String? = nil,
-        title: String? = nil,
-        elements: [AutoMobileWebElement] = []
-    ) {
-        self.snapshotId = snapshotId
-        self.url = url
-        self.title = title
-        self.elements = elements
-    }
-}
 
 /// Policy for attaching the bridge to a web view.
 public struct AutoMobileWebViewConfiguration: Sendable {
@@ -124,11 +73,13 @@ enum AutoMobileWebActionScript {
         }
     }
 
-    /// Runs `body` with `e` bound to the element whose `data-automobile-id` is `id`, if present.
+    /// Runs `body` with `e` bound to the element whose `data-automobile-id` is `id`. A missing
+    /// element throws, so the action is reported as `javascript_error` rather than accepted with
+    /// nothing done (#15877).
     private static func element(_ id: String, _ body: String) -> String {
         "(() => { const id=\(json(id)); "
             + "const e=document.querySelector('[data-automobile-id=\"'+CSS.escape(id)+'\"]'); "
-            + "if (!e) { return; } \(body) })()"
+            + "if (!e) { throw new Error('automobile element not found: '+id); } \(body) })()"
     }
 
     private static func events(_ names: String...) -> String {
@@ -174,21 +125,34 @@ public struct SdkWebViewEvent: SdkEvent {
 public final class AutoMobileWebViewPolicy: Sendable {
     private let configuration: AutoMobileWebViewConfiguration
     private let lock = OSAllocatedUnfairLock<[String: AutoMobileWebSnapshot]>(initialState: [:])
+    private let latest = OSAllocatedUnfairLock<AutoMobileWebSnapshot?>(initialState: nil)
 
     public init(configuration: AutoMobileWebViewConfiguration = .init()) {
         self.configuration = configuration
     }
 
     public func allows(url: URL?, frameId: String?) -> Bool {
+        let frameAllowed = frameId
+            .map { configuration.allowedFrames.isEmpty || configuration.allowedFrames.contains($0) } ?? configuration
+            .allowedFrames.isEmpty
+        return allowsOrigin(url: url) && frameAllowed
+    }
+
+    /// Whether the page's origin is allowed, regardless of frame (#5162). The routes check the page
+    /// with this; each snapshot's frame was already checked by ``allows(url:frameId:)`` when the
+    /// page posted it.
+    func allowsOrigin(url: URL?) -> Bool {
         guard let url, let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
             return false
         }
         let origin = "\(scheme)://\(url.host ?? "")\(url.port.map { ":\($0)" } ?? "")"
-        let originAllowed = configuration.allowedOrigins.contains(origin)
-        let frameAllowed = frameId
-            .map { configuration.allowedFrames.isEmpty || configuration.allowedFrames.contains($0) } ?? configuration
-            .allowedFrames.isEmpty
-        return originAllowed && frameAllowed
+        return configuration.allowedOrigins.contains(origin)
+    }
+
+    /// Drops every recent snapshot, so none from a terminated page is served or acted on (#5162).
+    func forgetSnapshots() {
+        lock.withLock { $0.removeAll() }
+        latest.withLock { $0 = nil }
     }
 
     public func accept(_ snapshot: AutoMobileWebSnapshot) -> AutoMobileWebSnapshot {
@@ -212,7 +176,35 @@ public final class AutoMobileWebViewPolicy: Sendable {
                 latestSnapshots.removeValue(forKey: first)
             }
         }
+        latest.withLock { $0 = bounded }
         return bounded
+    }
+
+    /// The most recent snapshot this policy accepted, already bounded and redacted (#5162).
+    var latestSnapshot: AutoMobileWebSnapshot? {
+        latest.withLock { $0 }
+    }
+
+    /// The largest message the bridge accepts or serves, in bytes.
+    var maxMessageBytes: Int {
+        configuration.maxMessageBytes
+    }
+
+    /// Origins this policy allows, for discovery.
+    var allowedOrigins: [String] {
+        Array(configuration.allowedOrigins)
+    }
+
+    /// Why a controller action may not run against the recent snapshots, or nil when it may (#5162).
+    func rejection(for action: AutoMobileWebControlAction) -> String? {
+        lock.withLock { latestSnapshots in
+            guard let snapshot = latestSnapshots[action.snapshotId] else {
+                return AutoMobileWebActionResult.staleSnapshotReason
+            }
+            guard let elementId = action.elementId else { return nil }
+            let actionable = snapshot.elements.contains { $0.id == elementId && $0.enabled && $0.visible }
+            return actionable ? nil : AutoMobileWebActionResult.elementNotActionableReason
+        }
     }
 
     public func validates(_ action: AutoMobileWebAction) -> Bool {
@@ -242,6 +234,50 @@ public final class AutoMobileWebViewPolicy: Sendable {
     }
 }
 
+/// A web view's page as the routes see it (#5162): the last URL and whether its content process
+/// is alive. Only a load or a fresh snapshot from the page restores a terminated process;
+/// reattaching after termination does not.
+struct AutoMobileWebPageState: Equatable, Sendable {
+    private(set) var url: URL?
+    private(set) var contentProcessAvailable = true
+
+    /// The bridge attached, or reattached after termination: record the URL only.
+    mutating func attached(url: URL?) {
+        if let url { self.url = url }
+    }
+
+    /// A navigation committed or finished, or the page posted a message: the process is alive.
+    mutating func loaded(url: URL?) {
+        if let url { self.url = url }
+        contentProcessAvailable = true
+    }
+
+    mutating func terminated(url: URL?) {
+        if let url { self.url = url }
+        contentProcessAvailable = false
+    }
+}
+
+extension AutoMobileWebAction {
+    /// The bridge action for a controller action (#5162). Every controller action is bounded.
+    init(_ action: AutoMobileWebControlAction) {
+        switch action {
+        case let .click(snapshot, element): self = .click(snapshotId: snapshot, elementId: element)
+        case let .focus(snapshot, element): self = .focus(snapshotId: snapshot, elementId: element)
+        case let .insertText(snapshot, element, text):
+            self = .insertText(snapshotId: snapshot, elementId: element, text: text)
+        case let .select(snapshot, element, value):
+            self = .select(snapshotId: snapshot, elementId: element, value: value)
+        case let .scroll(snapshot, element, x, y): self = .scroll(snapshotId: snapshot, elementId: element, x: x, y: y)
+        case let .setValue(snapshot, element, text):
+            self = .setValue(snapshotId: snapshot, elementId: element, text: text)
+        case let .clear(snapshot, element): self = .clear(snapshotId: snapshot, elementId: element)
+        case let .scrollIntoView(snapshot, element): self = .scrollIntoView(snapshotId: snapshot, elementId: element)
+        case let .submit(snapshot, element): self = .submit(snapshotId: snapshot, elementId: element)
+        }
+    }
+}
+
 #if canImport(WebKit)
     import WebKit
 
@@ -256,6 +292,8 @@ public final class AutoMobileWebViewPolicy: Sendable {
         private let recorder: NetworkCaptureRecorder?
         private weak var webView: WKWebView?
         private let requestLock = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
+        /// The last committed URL and whether the web content process is alive, readable off-main.
+        private let pageState = OSAllocatedUnfairLock<AutoMobileWebPageState>(initialState: .init())
 
         public init(
             webViewId: String = UUID().uuidString,
@@ -274,6 +312,8 @@ public final class AutoMobileWebViewPolicy: Sendable {
 
         public func attach(to webView: WKWebView) {
             self.webView = webView
+            let url = webView.url
+            pageState.withLock { $0.attached(url: url) }
             let controller = webView.configuration.userContentController
             controller.removeScriptMessageHandler(forName: "automobile")
             let world = WKContentWorld.world(name: configuration.contentWorldName)
@@ -366,13 +406,17 @@ public final class AutoMobileWebViewPolicy: Sendable {
                   let name = body["name"] as? String else { return }
             let url = webView?.url
             guard policy.allows(url: url, frameId: body["frameId"] as? String) else { return }
+            pageState.withLock { $0.loaded(url: url) }
             var metadata = body.compactMapValues { value -> String? in
                 guard !(value is [Any]), !(value is [String: Any]) else { return nil }
                 return String(describing: value)
             }
             metadata.removeValue(forKey: "name")
             let requestId = trackRequest(name: name, body: body, url: url, metadata: &metadata)
-            if name == "snapshot", let elements = body["elements"] as? [[String: Any]] {
+            // Only the main frame's document is snapshotted: element ids are per document, and the
+            // action script resolves them in the main frame, so a frame's `e0` could reach another
+            // element (#15877).
+            if name == "snapshot", message.frameInfo.isMainFrame, let elements = body["elements"] as? [[String: Any]] {
                 let decoded = elements.prefix(configuration.maxElements)
                     .compactMap { element -> AutoMobileWebElement? in
                         guard let id = element["id"] as? String else { return nil }
@@ -430,28 +474,116 @@ public final class AutoMobileWebViewPolicy: Sendable {
                 )))
                 return
             }
-            webView?.evaluateJavaScript(source) { _, error in
+            guard let webView else {
+                // The web view is held weakly; without one there is nothing to run the action in,
+                // and the completion must still be called (#15868).
+                completion(.failure(NSError(
+                    domain: "AutoMobileWebViewBridge",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "No web view is attached"]
+                )))
+                return
+            }
+            webView.evaluateJavaScript(source) { _, error in
                 if let error { completion(.failure(error)) } else { completion(.success(())) }
             }
         }
 
-        public func webView(_ webView: WKWebView, didFinish _: WKNavigation!) { emit(
-            name: "navigation_finished",
-            url: webView.url
-        ) }
+        public func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
+            let url = webView.url
+            pageState.withLock { $0.loaded(url: url) }
+            emit(name: "navigation_finished", url: url)
+        }
+
         public func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError error: Error) { emit(
             name: "navigation_failed",
             url: webView.url,
             metadata: ["error": error.localizedDescription]
         ) }
-        public func webView(_ webView: WKWebView, didCommit _: WKNavigation!) { emit(
-            name: "navigation_committed",
-            url: webView.url
-        ) }
+        public func webView(_ webView: WKWebView, didCommit _: WKNavigation!) {
+            let url = webView.url
+            documentCommitted(url: url)
+            emit(name: "navigation_committed", url: url)
+        }
+
+        /// A main-frame navigation committed, so the page is a new document, even on a reload of
+        /// the same URL (#15868). The old snapshots describe elements that are gone, and their ids
+        /// (such as `e0`) can name unrelated elements in the new page, so they are dropped: the
+        /// snapshot route answers `no_snapshot`, and actions naming them are `stale_snapshot`.
+        nonisolated func documentCommitted(url: URL?) {
+            pageState.withLock { $0.loaded(url: url) }
+            policy.forgetSnapshots()
+        }
+
         public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            emit(name: "content_process_terminated", url: webView.url)
+            let url = webView.url
+            pageState.withLock { $0.terminated(url: url) }
+            policy.forgetSnapshots()
+            emit(name: "content_process_terminated", url: url)
             attach(to: webView)
             webView.reload()
+        }
+
+        // MARK: AutoMobileWebViewControlling (#5162)
+
+        // The WebKit conformances make the bridge main-actor isolated, but the SDK route handler
+        // reads these off the main actor. Each one reads only lock-protected or Sendable state.
+
+        nonisolated var bridgeEntry: WebViewBridgeEntry {
+            let page = pageState.withLock { $0 }
+            return WebViewBridgeEntry(
+                webViewId: webViewId,
+                url: page.url?.absoluteString,
+                allowedOrigins: policy.allowedOrigins,
+                contentProcessAvailable: page.contentProcessAvailable
+            )
+        }
+
+        nonisolated var latestSnapshot: AutoMobileWebSnapshot? { policy.latestSnapshot }
+
+        nonisolated var maxMessageBytes: Int { policy.maxMessageBytes }
+
+        nonisolated var originAllowed: Bool {
+            policy.allowsOrigin(url: pageState.withLock { $0.url })
+        }
+
+        nonisolated var contentProcessAvailable: Bool {
+            pageState.withLock { $0.contentProcessAvailable }
+        }
+
+        nonisolated func perform(_ action: AutoMobileWebControlAction) async -> AutoMobileWebActionResult {
+            if !contentProcessAvailable {
+                return .rejected(AutoMobileWebActionResult.webProcessUnavailableReason)
+            }
+            if !originAllowed {
+                return .rejected(AutoMobileWebActionResult.disallowedOriginReason)
+            }
+            if let reason = policy.rejection(for: action) {
+                return .rejected(reason)
+            }
+            let bridgeAction = AutoMobileWebAction(action)
+            return await withCheckedContinuation { continuation in
+                Task { @MainActor in
+                    // A deallocated or detached web view answers here rather than leaving the
+                    // request suspended until the daemon times out (#15868).
+                    guard self.webView != nil else {
+                        continuation.resume(returning: .rejected(AutoMobileWebActionResult.webProcessUnavailableReason))
+                        return
+                    }
+                    self.perform(bridgeAction) { result in
+                        switch result {
+                        case .success: continuation.resume(returning: AutoMobileWebActionResult(status: .accepted))
+                        case .failure:
+                            // perform re-validates; a rejection here means the snapshot moved on.
+                            continuation.resume(
+                                returning: self.policy.validates(bridgeAction)
+                                    ? .rejected(AutoMobileWebActionResult.javascriptErrorReason)
+                                    : .rejected(AutoMobileWebActionResult.staleSnapshotReason)
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         private func ifEvaluate(_ action: AutoMobileWebAction) -> Bool {
@@ -476,20 +608,27 @@ public final class AutoMobileWebViewPolicy: Sendable {
             ))
         }
 
-
         private static let script = #"""
         (() => {
           const post = (name, extra = {}) => window.webkit?.messageHandlers?.automobile?.postMessage({name, frameId: location.href, ...extra});
+          let nextElementId = 0;
+          const rendered = e => e.checkVisibility ? e.checkVisibility({visibilityProperty: true, opacityProperty: true}) : getComputedStyle(e).visibility !== 'hidden';
           const snapshot = () => {
-            const elements = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].map((e, i) => {
-              const id = e.dataset.automobileId || (e.dataset.automobileId = `e${i}`);
+            if (window.top !== window) return;
+            const elements = [...document.querySelectorAll('button,a,input,textarea,select,[role]')].map(e => {
+              const id = e.dataset.automobileId || (e.dataset.automobileId = `e${nextElementId++}`);
               const r = e.getBoundingClientRect();
-              return {id, role: e.getAttribute('role') || e.tagName.toLowerCase(), label: e.getAttribute('aria-label') || e.textContent?.trim().slice(0, 200), value: e.value || null, bounds: [r.x,r.y,r.width,r.height], enabled: !e.disabled, visible: r.width > 0 && r.height > 0, focused: document.activeElement === e};
+              return {id, role: e.getAttribute('role') || e.tagName.toLowerCase(), label: e.getAttribute('aria-label') || e.textContent?.trim().slice(0, 200), value: e.value || null, bounds: [r.x,r.y,r.width,r.height], enabled: !e.disabled, visible: r.width > 0 && r.height > 0 && rendered(e), focused: document.activeElement === e};
             });
             post('snapshot', {snapshotId: `${Date.now()}-${Math.random()}`, elements});
           };
+          let snapshotPending = false;
+          const scheduleSnapshot = () => { if (snapshotPending) return; snapshotPending = true; setTimeout(() => { snapshotPending = false; snapshot(); }, 100); };
           new MutationObserver(snapshot).observe(document, {subtree:true, childList:true, attributes:true});
-          addEventListener('load', snapshot); addEventListener('hashchange', () => post('spa_navigation')); addEventListener('popstate', () => post('history_navigation'));
+          addEventListener('load', snapshot);
+          addEventListener('scroll', scheduleSnapshot, {passive: true, capture: true});
+          addEventListener('focusin', scheduleSnapshot); addEventListener('focusout', scheduleSnapshot);
+          addEventListener('input', scheduleSnapshot, true); addEventListener('change', scheduleSnapshot, true); addEventListener('hashchange', () => post('spa_navigation')); addEventListener('popstate', () => post('history_navigation'));
           const push = history.pushState, replace = history.replaceState;
           history.pushState = (...a) => { const r = push.apply(history, a); post('history_navigation'); return r; };
           history.replaceState = (...a) => { const r = replace.apply(history, a); post('history_navigation'); return r; };
@@ -503,4 +642,6 @@ public final class AutoMobileWebViewPolicy: Sendable {
         })();
         """#
     }
+
+    extension AutoMobileWebViewBridge: AutoMobileWebViewControlling {}
 #endif

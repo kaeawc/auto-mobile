@@ -2011,8 +2011,10 @@ vocabulary testable before any real module exists; no production runtime adverti
 
 **Device status (#14316).** Three state-only modules expose read-only device status under
 `/platform/<module>/<key>`; a spec lists the module in `requires.platform` and reads keys with the
-`{platform}` forms. Each module has a `<module>.changed` event, debounced to one delivery per
-500 ms, whose `{event}` data carries the new values. Unknown keys and events fail validation with a
+`{platform}` forms. Each module has a `<module>.changed` event whose `{event}` data carries the new
+values, delivered like `connectivity.changed`: the state updates at once, the event fires once the
+state has been quiet for 500 ms, and a flap that settles back on the last delivered values is not an
+event. Unknown keys and events fail validation with a
 path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
 
 | Module (capability)                         | Keys                                                                                                                                                                                  |
@@ -2046,8 +2048,17 @@ first path after start is the baseline, not a change. Every path that changes th
 a prototype shown before the first path still sees it; only `connectivity.changed` waits for the
 debounce. The offline simulation override is not built.
 
-The thermal mapping is normative: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2
-`fair`, 3 `serious` and 4-6 `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
+The reading mappings are normative. `prototypeDeviceStatusReference.ts` is the reference the device status
+runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
+
+- Thermal: Android `PowerManager.THERMAL_STATUS_*` 0 is `nominal`, 1-2 `fair`, 3 `serious` and 4-6
+  `critical`; iOS `ProcessInfo.ThermalState` maps one to one.
+- Battery `state`: Android `BATTERY_STATUS_CHARGING` is `charging`, `FULL` is `full`, `DISCHARGING` and
+  `NOT_CHARGING` are `unplugged`, anything else `unknown`; iOS `UIDevice.BatteryState` maps one to one.
+- Battery `level` and audio `volume` are whole percents (Android level over scale and stream index over
+  its maximum; iOS `batteryLevel` and `outputVolume`). An unknown reading, such as the Simulator's
+  battery level of -1, leaves the key absent.
+- `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
 
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
@@ -2244,7 +2255,8 @@ and `progress` is `{value: 0..1}` or `{indeterminate: true}`. `notifications.can
 `all: true`, and `notifications.setBadge` takes `count` (0-9999). `post` and `setBadge` need `notifications`
 in `requires.permissions`; `cancel` does not. Events are `notifications.opened`, `.action`, `.reply` (marked
 sensitive, since it carries typed text) and `.dismissed`. State is `/platform/notifications/{badge, active,
-pending, authorization}`: `active` is at most 24 per prototype, and `authorization` uses the permission
+pending, authorization}` plus `/platform/notifications/channels/<id>/blocked` (a boolean, readable only
+for a declared channel): `active` is at most 24 per prototype, and `authorization` uses the permission
 vocabulary (`granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The
 runtime homes follow the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and
 ProtoViewer advertise the module, the CtrlProxy overlay advertises it as a disclosed preview, and the iOS
@@ -3467,9 +3479,9 @@ to the resolved runtime count. Shared fixtures define host validation behavior.
 ## Carousel and pager indicator (not device-verified)
 
 `prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
-(default `none`): page dots drawn over the pager (a centred row at the bottom, or a column at the
-end edge for a vertical pager) with the current page filled. The dots are decoration and add no
-semantics node.
+(default `none`): Android draws page dots over the pager (a centred row at the bottom, or a column at
+the end edge for a vertical pager); iOS lays them out below horizontal pages or beside vertical pages.
+The current page is filled. The dots are decoration and add no semantics node.
 
 A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
 `repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is

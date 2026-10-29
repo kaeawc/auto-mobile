@@ -6,6 +6,10 @@ import { raceWithDeadline } from "../raceWithDeadline";
 import type { Timer } from "../SystemTimer";
 import type { AdbClientFactory } from "./AdbClientFactory";
 import { ENV, readEnvRaw, readEnvTrimmed } from "../../config/env";
+import {
+  EMULATOR_GRPC_PORT_FIRST,
+  EMULATOR_GRPC_PORT_LAST,
+} from "./emulatorGrpc/emulatorGrpcPorts";
 import { EmulatorConsolePortExcludedError } from "./EmulatorConsolePortExcludedError";
 
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
@@ -229,6 +233,10 @@ interface ReservationState {
    */
   readonly unreservedLaunchAvdNames: Map<ChildProcess, string>;
   terminalReservationGeneration: number;
+  /** gRPC ports handed to live or starting emulator launches; see `reserveEmulatorGrpcPort`. */
+  readonly leasedEmulatorGrpcPorts: Set<number>;
+  /** gRPC leases held by a running emulator child, released with its launch reservation. */
+  readonly grpcLeasesByChild: Map<ChildProcess, EmulatorGrpcPortLease>;
 }
 
 // startDevice creates a fresh client per request, so reservations must cover every client in the
@@ -240,6 +248,8 @@ const state: ReservationState = {
   inFlightAvdLaunches: new Set(),
   unreservedLaunchAvdNames: new Map(),
   terminalReservationGeneration: 0,
+  leasedEmulatorGrpcPorts: new Set(),
+  grpcLeasesByChild: new Map(),
 };
 
 /** Drop every process-wide launch reservation. Test seam. */
@@ -250,6 +260,14 @@ export function resetEmulatorLaunchReservations(): void {
   state.inFlightAvdLaunches.clear();
   state.unreservedLaunchAvdNames.clear();
   state.terminalReservationGeneration = 0;
+  state.leasedEmulatorGrpcPorts.clear();
+  state.grpcLeasesByChild.clear();
+}
+
+/** A gRPC port held for one emulator launch. `release` is idempotent. */
+export interface EmulatorGrpcPortLease {
+  readonly port: number;
+  release(): void;
 }
 
 export interface EmulatorPortReservationDeps {
@@ -286,6 +304,8 @@ export interface EmulatorPortReservations {
   ): string | undefined;
   hasLiveUnreservedLaunch(avdName: string): boolean;
   releaseLaunchChild(childProcess?: ChildProcess | null): void;
+  /** Hold a gRPC lease until this child is released by `releaseLaunchChild` (its exit). */
+  trackEmulatorGrpcLease(childProcess: ChildProcess, lease: EmulatorGrpcPortLease): void;
   releasePendingEmulatorDeviceId(reservation: EmulatorDeviceIdReservation): void;
   /** Move a pending reservation onto its spawned child. */
   recordReservedEmulatorDeviceId(
@@ -297,10 +317,40 @@ export interface EmulatorPortReservations {
   hasInFlightLaunch(avdName: string): boolean;
   claimInFlightLaunch(avdName: string): void;
   releaseInFlightLaunch(avdName: string): void;
+  /**
+   * Lease a host gRPC port for an emulator launch that does not pass `-grpc` itself. A port is
+   * free when no live launch holds it and the host can bind it.
+   */
+  reserveEmulatorGrpcPort(): Promise<EmulatorGrpcPortLease>;
 }
 
 export class DefaultEmulatorPortReservations implements EmulatorPortReservations {
   constructor(private readonly deps: EmulatorPortReservationDeps) {}
+
+  async reserveEmulatorGrpcPort(): Promise<EmulatorGrpcPortLease> {
+    const checker = this.deps.hostPortAvailabilityChecker();
+    for (let port = EMULATOR_GRPC_PORT_FIRST; port <= EMULATOR_GRPC_PORT_LAST; port += 1) {
+      if (state.leasedEmulatorGrpcPorts.has(port) || !PortManager.isPortAvailable(port, checker)) {
+        continue;
+      }
+      state.leasedEmulatorGrpcPorts.add(port);
+      let released = false;
+      return {
+        port,
+        release: () => {
+          if (!released) {
+            released = true;
+            state.leasedEmulatorGrpcPorts.delete(port);
+          }
+        },
+      };
+    }
+    throw new ActionableError(
+      `Cannot start an Android emulator with gRPC audio: all gRPC ports ` +
+        `${EMULATOR_GRPC_PORT_FIRST}-${EMULATOR_GRPC_PORT_LAST} are in use on this host. ` +
+        `Stop an emulator that is holding one, or pass an explicit -grpc <port> in extra emulator arguments.`,
+    );
+  }
 
   private excludedConsolePorts(): ReadonlySet<number> {
     return this.deps.excludedConsolePorts?.() ?? resolveExcludedEmulatorConsolePorts(process.env);
@@ -698,6 +748,12 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     }
     state.unreservedLaunchAvdNames.delete(childProcess);
     this.releaseReservedEmulatorDeviceId(childProcess);
+    state.grpcLeasesByChild.get(childProcess)?.release();
+    state.grpcLeasesByChild.delete(childProcess);
+  }
+
+  trackEmulatorGrpcLease(childProcess: ChildProcess, lease: EmulatorGrpcPortLease): void {
+    state.grpcLeasesByChild.set(childProcess, lease);
   }
 
   releasePendingEmulatorDeviceId(reservation: EmulatorDeviceIdReservation): void {

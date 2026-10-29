@@ -12,8 +12,8 @@ device-verified" below remain open. `scripts/ios/prototype-agent-demo.ts` is a s
 `theme.design` accepts `material` and `platform`, defaulting to `platform`. Explicit platform
 requests require `prototype_design_platform_v1`. Omitted design falls back silently on older agents.
 The contract's coverage is below; `neutral` nodes carry no design language. Material entries keep
-their current drawing and explicit platform requests report `design.fallback` notes. Button uses
-SwiftUI bordered/borderedProminent/borderless styles; slider, datePicker and timePicker already
+their current drawing and explicit platform requests report `design.fallback` notes. Buttons use
+SwiftUI bordered/borderedProminent/borderless styles or an unfilled capsule outline; slider, datePicker and timePicker already
 use native controls. No rendering changes accompany this default.
 
 | Node            | iOS      | Android  | Parts |
@@ -493,6 +493,16 @@ Fullscreen, floating and top sheets never move. Not yet verified on a simulator.
   moves with it; the anchor layer's clip uses the same lift (`PrototypeSheetFrame.rect(lift:)`).
 - **Motion.** Keyboard duration, ease-in-out (UIKit's keyboard curve is private); instant under
   `motion: "none"` or Reduce Motion (`PrototypeKeyboardLift.animationDuration`).
+- **Modal bottom sheet (`bottomSheet` node).** It draws in the top layer, but lays out and scrims
+  inside the window's frame for the placement, not the whole screen (`PrototypeModalSheetFrame`): the
+  `sheet` placement's frame (already above the keyboard), a `floating` root's reported frame, or the
+  window. Detents are fractions of that frame, and its scrim and `modal.N` touch rect stop at its edge,
+  so touches outside a partial-height window still reach the app. In a window that does not itself
+  move (floating, fullscreen, top sheet) the frame ends at the keyboard's top edge, so a field in the
+  sheet stays visible.
+- **Lazy `list` rows.** A modal declared in a lazy list's row template opens: `openModals` decodes the
+  rows of a list whose template declares a modal (`PrototypeLazyModalRows`, cached per row so view
+  identity survives re-renders) because the visible cells never draw modals in place.
 
 ## Light and dark values
 
@@ -605,21 +615,21 @@ pick/drag effects, `change` events, and `<testTag>.<part>` identifiers. Tap sema
 UIKit-free core (`PrototypeComponents.swift`), so the `simulate_tap` test hook performs the same
 transition as a real tap, including on part identifiers.
 
-| Node                            | iOS drawing                                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `switch`, `checkbox`            | One toggle element with SwiftUI-drawn track (no `UISwitch`); checkbox is a button that reads as selected                 |
-| `button`                        | `.borderedProminent` filled, `.bordered` tonal/outlined/elevated, `.borderless` text; optional leading SF Symbol         |
-| `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                                |
-| `chip`                          | Rounded button; filter chip toggles its key and reads as selected                                                        |
-| `card`                          | Rounded container: filled, elevated (shadow) or outlined                                                                 |
-| `radioGroup`, `segmentedButton` | One button per option, identified `<testTag>.<value>`, selected trait (a segmented `Picker` can't carry per-segment ids) |
-| `listItem`                      | One row element; toggle when it has a trailing switch/checkbox                                                           |
-| `iconButton`, `fab`             | Labelled by `contentDescription`, a FAB's `label`, else the icon                                                         |
-| `topAppBar`                     | Header title; `<testTag>.navigation` and `<testTag>.actions.<index>`                                                     |
-| `divider`, `badge`, `progress`  | Hairline, dot/count capsule, determinate `ProgressView`/ring, indeterminate sweep                                        |
-| `timePicker`, `datePicker`      | Wheel `DatePicker` (one `change` per edit), graphical `DatePicker` in UTC days                                           |
-| `dialog`, `snackbar`            | Drawn above the author tree in the prototype window; `<testTag>.confirm`, `.dismiss`, `.action`                          |
-| `tooltip`, `drawer`             | Hoisted bubble/spotlight or modal side panel; see [Tooltip and drawer overlays](#tooltip-and-drawer-overlays)            |
+| Node                            | iOS drawing                                                                                                                                                                   |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `switch`, `checkbox`            | One toggle element with SwiftUI-drawn track (no `UISwitch`); checkbox is a button that reads as selected                                                                      |
+| `button`                        | `.borderedProminent` filled, `.bordered` tonal/elevated, `.plain` outlined with an unfilled 1 pt theme-primary capsule stroke, `.borderless` text; optional leading SF Symbol |
+| `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                                                                                     |
+| `chip`                          | Rounded button; filter chip toggles its key and reads as selected                                                                                                             |
+| `card`                          | Rounded container: filled, elevated (shadow) or outlined                                                                                                                      |
+| `radioGroup`, `segmentedButton` | One button per option, identified `<testTag>.<value>`, selected trait (a segmented `Picker` can't carry per-segment ids)                                                      |
+| `listItem`                      | One row element; toggle when it has a trailing switch/checkbox                                                                                                                |
+| `iconButton`, `fab`             | Labelled by `contentDescription`, a FAB's `label`, else the icon                                                                                                              |
+| `topAppBar`                     | Header title; `<testTag>.navigation` and `<testTag>.actions.<index>`                                                                                                          |
+| `divider`, `badge`, `progress`  | Hairline, dot/count capsule, determinate `ProgressView`/ring, indeterminate sweep                                                                                             |
+| `timePicker`, `datePicker`      | Wheel `DatePicker` (one `change` per edit), graphical `DatePicker` in UTC days                                                                                                |
+| `dialog`, `snackbar`            | Drawn above the author tree in the prototype window; `<testTag>.confirm`, `.dismiss`, `.action`                                                                               |
+| `tooltip`, `drawer`             | Hoisted bubble/spotlight or modal side panel; see [Tooltip and drawer overlays](#tooltip-and-drawer-overlays)                                                                 |
 
 - **Dialog.** Its scrim covers the whole window (below the dismiss bar with `chrome: "bar"`) and takes
   every touch while open, even for floating/sheet placements; a snackbar takes touches only on itself.
@@ -958,7 +968,7 @@ pager; plain pagers expose only the current page on both.
 ## Carousel and pager indicator (not device-verified)
 
 `prototype_carousel_v1` gates two #12071 additions. A pager may declare `indicator: "dots"` (default
-`none`): dots over the pager (bottom row, or end-edge column for vertical) with the current page filled;
+`none`): dots laid out below horizontal pages or beside vertical pages, with the current page filled;
 plain circles, decoration only, hidden from accessibility. A `carousel` is a horizontally scrolling,
 snapping row, one item per child (at least one; `repeat` expands like `row`); `itemWidth` (dp, > 0,
 <= 10000) required; `variant` `multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` dp >= 0. No

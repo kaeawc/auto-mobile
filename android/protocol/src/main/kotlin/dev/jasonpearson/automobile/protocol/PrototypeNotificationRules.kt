@@ -13,10 +13,20 @@ import kotlinx.serialization.json.JsonPrimitive
  * Notification rules (#14280) the contract cannot express, the twin of TypeScript's
  * `prototypeNotifications.ts`: the root `notifications` block needs `notifications` in
  * `requires.platform` and unique channel ids; a literal `notifications.post` channel names a
- * declared channel and its action ids are unique; `notifications.cancel` names exactly one target.
+ * declared channel and its action ids are unique; `notifications.cancel` names exactly one target;
+ * a channel-scoped `/platform` read names a declared channel.
  */
 internal object PrototypeNotificationRules {
   private val cancelTargets = listOf("id", "group", "all")
+
+  /** Channel-scoped `/platform` keys, read at `/notifications/channels/<id>/<key>`. */
+  private val channelStateKeys = setOf("blocked")
+
+  /** Whether a `/notifications` read names a module key or a declared channel's key. */
+  fun validRead(tokens: List<String>, channels: Set<String>, state: JsonObject): Boolean =
+    if (tokens.getOrNull(1) == "channels")
+      tokens.size == 4 && tokens[2] in channels && tokens[3] in channelStateKeys
+    else tokens.size == 2 && tokens[1] in state && tokens[1] !in channelStateKeys
 
   fun blockError(root: JsonObject): PrototypeSpecError? {
     val block = root.member("notifications") ?: return null
@@ -44,14 +54,15 @@ internal object PrototypeNotificationRules {
   // A bound channel or action list is checked by the runtime once it resolves.
   private fun postError(args: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
     val channel = ((args["channel"] as? JsonObject)?.get("value") as? JsonPrimitive)
-    if (channel != null && channel.isString && channel.content !in declaredChannels(root))
+    if (channel != null && channel.isString && channel.content !in channels(root))
       return fail("$path.args.channel.value", "Undeclared notification channel")
     return duplicateIdIndex((args["actions"] as? JsonObject)?.get("value"))?.let {
       fail("$path.args.actions.value[$it].id", "Duplicate action id")
     }
   }
 
-  private fun declaredChannels(root: JsonObject): Set<String> =
+  /** The declared channel ids of the root `notifications` block. */
+  fun channels(root: JsonObject): Set<String> =
     (root.member("notifications")?.get("channels") as? JsonArray)
       .orEmpty()
       .mapNotNull { (it as? JsonObject)?.text("id") }

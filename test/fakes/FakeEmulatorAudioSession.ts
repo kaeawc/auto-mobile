@@ -32,7 +32,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
       sampleRate: source.sampleRate,
       done,
       stop: async () => {
-        this.settleInjection?.({ framesSent: 7, reason: "stopped" });
+        this.settleInjection?.({ framesQueued: 7, framesPlayed: 0, reason: "stopped" });
         return done;
       },
     };
@@ -43,6 +43,23 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
     return {
       pcm: { sampleRate: options.sampleRate ?? 48_000, channels: 1, samples: this.captureSamples },
       timedOut: this.captureTimedOut,
+    };
+  }
+
+  streamSink: ((pcm: Uint8Array) => void) | undefined;
+  streamStops = 0;
+  streamStopError: Error | undefined;
+
+  async streamCapture(sink: (pcm: Uint8Array) => void, options: { sampleRate?: number } = {}) {
+    this.streamSink = sink;
+    return {
+      sampleRate: options.sampleRate ?? 48_000,
+      stop: async () => {
+        this.streamStops++;
+        if (this.streamStopError) {
+          throw this.streamStopError;
+        }
+      },
     };
   }
 

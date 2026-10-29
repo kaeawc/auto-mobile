@@ -8,6 +8,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
+import { matchesPlatformSelector } from "../models/Platform";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
@@ -654,13 +655,14 @@ export class DeviceAutolockManager {
     const device = this.pool.getDevice(session.assignedDevice);
     if (!device || device.autolockSessionId !== sessionId) {
       if (this.pool.isAdbServerResetQuarantined(sessionId)) {
-        return !platform || session.platform === platform ? sessionId : undefined;
+        return matchesPlatformSelector(session.platform, platform) ? sessionId : undefined;
       }
       this.mcpSessionAutolockMap.delete(mcpSessionId);
       return undefined;
     }
 
-    if (platform && device.platform !== platform) {
+    // A call that names no platform never lands on a watch (#14908).
+    if (!matchesPlatformSelector(device.platform, platform)) {
       return undefined;
     }
 
@@ -703,7 +705,7 @@ export class DeviceAutolockManager {
     );
     const matches = candidates.filter(
       (candidate) =>
-        (!platform || candidate.platform === platform) &&
+        matchesPlatformSelector(candidate.platform, platform) &&
         (!deviceId || candidate.deviceId === deviceId),
     );
     if (matches.length === 1) {

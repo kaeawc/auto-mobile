@@ -5,7 +5,14 @@ import Foundation
 /// the harness can tell a fixture-host failure from an SDK or transport disagreement.
 enum SdkContractRunner {
     static let networkScenario = "network"
+    static let faultScenario = "faults"
+    static let capabilityScenario = "capabilities"
+    static let observationScenario = "observe"
     static let scenarioTimeoutSeconds: UInt64 = 30
+    /// How long the fault scenario waits for the harness to install its rules through CtrlProxy.
+    static let rulesReadyWaitSeconds: Double = 60
+    /// How long the observation scenario keeps its bridge for the harness's observe/act cases.
+    static let actionsDoneWaitSeconds: Double = 180
     /// The SDK buffer flushes every 500 ms; allow several flushes before giving up.
     static let captureWaitSeconds: Double = 10
     static let capturePollNanoseconds: UInt64 = 100_000_000
@@ -25,24 +32,14 @@ enum SdkContractRunner {
         let server = SdkContractLoopbackServer()
         defer { server.stop() }
         do {
-            guard launch.scenario == networkScenario else {
-                throw SdkContractError.unknownScenario(launch.scenario)
-            }
             AutoMobileNetwork.shared.setEnabled(true)
             AutoMobileNetwork.shared.setCaptureHeaders(true)
             AutoMobileNetwork.shared.setCaptureBodies(true)
-            let runId = launch.runId
-            manifest.network = try await withTimeout(seconds: scenarioTimeoutSeconds) {
-                let ports = try await server.start()
-                return try await SdkContractNetworkScenario(
-                    runId: runId,
-                    ports: ports,
-                    recorder: AutoMobileNetwork.shared.captureRecorder()
-                ).run()
-            }
+            try await runScenario(launch, server: server, into: &manifest)
             // Fewer captured events than expected is a finding for the harness to attribute,
             // not a fixture failure, so the run still completes.
-            let captured = await waitForCapture(tap, expectedCount: manifest.network.count)
+            let expectedCount = manifest.network.count + manifest.faults.count
+            let captured = await waitForCapture(tap, expectedCount: expectedCount)
             manifest.bundleId = captured.bundleId
             manifest.events = captured.events
             manifest.undecodableBatches = captured.undecodableBatches
@@ -65,6 +62,73 @@ enum SdkContractRunner {
                 "SdkContract",
                 "manifest_write_failed run=\(launch.runId) error=\(error.localizedDescription)"
             )
+        }
+    }
+
+    private static func runScenario(
+        _ launch: SdkContractLaunch,
+        server: SdkContractLoopbackServer,
+        into manifest: inout SdkContractManifest
+    ) async throws {
+        let runId = launch.runId
+        switch launch.scenario {
+        case networkScenario:
+            manifest.network = try await withTimeout(seconds: scenarioTimeoutSeconds) {
+                let ports = try await server.start()
+                return try await SdkContractNetworkScenario(runId: runId, ports: ports).run()
+            }
+        case capabilityScenario:
+            manifest.capabilities = SdkContractCapabilityScenario.run()
+        case observationScenario:
+            let host = SdkContractObservationScenario.register()
+            try await waitForMarker(
+                runId: runId,
+                suffix: "actions-done",
+                seconds: actionsDoneWaitSeconds,
+                orThrow: .harnessNotFinished(seconds: actionsDoneWaitSeconds)
+            )
+            manifest.observation = host.log()
+        case SdkContractStorageScenario.registeredScenario, SdkContractStorageScenario.defaultScenario:
+            manifest.storage = SdkContractStorageScenario.run(scenario: launch.scenario, runId: runId)
+        case faultScenario:
+            try await waitForMarker(
+                runId: runId,
+                suffix: "rules-ready",
+                seconds: rulesReadyWaitSeconds,
+                orThrow: .rulesNotInstalled(seconds: rulesReadyWaitSeconds)
+            )
+            manifest.faults = try await withTimeout(seconds: scenarioTimeoutSeconds) {
+                let ports = try await server.start()
+                return try await SdkContractFaultScenario(runId: runId, ports: ports).run()
+            }
+        default:
+            throw SdkContractError.unknownScenario(launch.scenario)
+        }
+    }
+
+    /// The harness writes `<runId>.<suffix>` next to the manifest when the scenario may go on:
+    /// `rules-ready` once CtrlProxy has delivered the fault rules to the SDK, so no case runs before
+    /// its rule exists, and `actions-done` once it has finished acting on the observation bridge.
+    private static func waitForMarker(
+        runId: String,
+        suffix: String,
+        seconds: Double,
+        orThrow timeout: SdkContractError,
+        fileManager: FileManager = .default
+    ) async throws {
+        let documents = try fileManager.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let marker = documents
+            .appendingPathComponent(SdkContractManifestWriter.directoryName, isDirectory: true)
+            .appendingPathComponent("\(runId).\(suffix)")
+        let deadline = Date().addingTimeInterval(seconds)
+        while !fileManager.fileExists(atPath: marker.path) {
+            guard Date() < deadline else { throw timeout }
+            try await Task.sleep(nanoseconds: capturePollNanoseconds)
         }
     }
 

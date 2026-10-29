@@ -19,6 +19,11 @@ import {
   type SdkBridgeRequestOptions,
 } from "./CtrlProxySdkObservation";
 import {
+  requestSdkWebAction,
+  requestSdkWebSnapshot,
+  type SdkWebSnapshotRequestOptions,
+} from "./CtrlProxySdkWebView";
+import {
   requestAccessibilityAudit,
   type CtrlProxyAccessibilityAuditResult,
   type IosAccessibilityAuditRequest,
@@ -744,6 +749,22 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     options?: SdkBridgeRequestOptions,
   ): Promise<import("./types").CtrlProxySdkActionResult> {
     return requestSdkAction(this.createDelegateContext(), action, options);
+  }
+
+  /** An opted-in web view's latest bounded, redacted snapshot (#5162). */
+  async requestSdkWebSnapshotForIos(
+    options?: SdkWebSnapshotRequestOptions,
+  ): Promise<import("./types").CtrlProxySdkWebSnapshotResult> {
+    return requestSdkWebSnapshot(this.createDelegateContext(), options);
+  }
+
+  /** Perform one bounded web action on an opted-in web view (#5162). */
+  async requestSdkWebActionForIos(
+    webViewId: string,
+    action: import("./sdkWebViewBridge").IosSdkWebAction,
+    options?: SdkBridgeRequestOptions,
+  ): Promise<import("./types").CtrlProxySdkWebActionResult> {
+    return requestSdkWebAction(this.createDelegateContext(), webViewId, action, options);
   }
 
   /** Run XCUITest's own accessibility audit on the foreground app (#14086). */

@@ -1,5 +1,6 @@
 import type {
   AudioInjection,
+  AudioStream,
   CaptureResult,
   InjectAudioOptions,
   InjectionResult,
@@ -27,6 +28,8 @@ const CAPTURE_SAMPLE_RATE = 48_000;
 const CHUNK_MS = 100;
 /** Extra time past the requested capture before it counts as timed out. */
 const CAPTURE_GRACE_MS = 5_000;
+/** How long an open-ended capture may take to finish after stdin closes before it is killed. */
+const STREAM_STOP_GRACE_MS = 2_000;
 /** How long to wait, after the helper exits, for its stdout to deliver the last PCM. */
 export const CAPTURE_DRAIN_MS = 1_000;
 
@@ -34,7 +37,7 @@ export interface HostLoopbackAudioSessionDeps {
   /** The helper executable, or undefined when none is configured. */
   helperPath: () => string | undefined;
   launchHelper: LoopbackHelperSpawner;
-  timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
+  timer?: Pick<Timer, "now" | "monotonicNow" | "setTimeout" | "clearTimeout">;
 }
 
 type EarlyEnd = Exclude<InjectionResult["reason"], "completed">;
@@ -85,7 +88,7 @@ function write(
  * devices are shared by every simulator on the host; the service allows one injection at a time.
  */
 export class HostLoopbackAudioSession implements EmulatorAudioSession {
-  private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">;
+  private readonly timer: Pick<Timer, "now" | "monotonicNow" | "setTimeout" | "clearTimeout">;
   private readonly live = new Set<LoopbackHelperProcess>();
 
   constructor(
@@ -124,17 +127,16 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
       options.maxDurationMs === undefined
         ? undefined
         : this.timer.setTimeout(() => end("max_duration"), options.maxDurationMs);
-    let framesSent = 0;
-    const feeding = this.feed(
-      helper,
-      pcm,
-      options,
-      ended,
-      () => halted,
-      (frames) => {
-        framesSent += frames;
+    let framesQueued = 0;
+    let playbackStartMs: number | undefined;
+    const feeding = this.feed(helper, pcm, options, ended, () => halted, {
+      started: () => {
+        playbackStartMs ??= this.timer.monotonicNow?.() ?? this.timer.now();
       },
-    );
+      queued: (frames) => {
+        framesQueued += frames;
+      },
+    });
     const done = (async (): Promise<InjectionResult> => {
       const exitCode = await helper.exited;
       halt();
@@ -142,11 +144,12 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         this.timer.clearTimeout(limit);
       }
       await feeding;
+      const framesPlayed = this.framesPlayed(playbackStartMs, framesQueued, pcm.sampleRate);
       if (endReason) {
-        return { framesSent, reason: endReason };
+        return { framesQueued, framesPlayed, reason: endReason };
       }
       if (exitCode === 0) {
-        return { framesSent, reason: "completed" };
+        return { framesQueued, framesPlayed, reason: "completed" };
       }
       throw helper.failure();
     })();
@@ -159,6 +162,20 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         return done;
       },
     };
+  }
+
+  private framesPlayed(
+    playbackStartMs: number | undefined,
+    framesQueued: number,
+    sampleRate: number,
+  ): number {
+    if (playbackStartMs === undefined) {
+      return 0;
+    }
+    const now = this.timer.monotonicNow?.() ?? this.timer.now();
+    const elapsedMs = Math.max(0, now - playbackStartMs);
+    const rendered = Math.floor((elapsedMs * sampleRate) / 1000);
+    return Math.min(framesQueued, rendered);
   }
 
   async captureAudio(options: { durationMs: number; sampleRate?: number }): Promise<CaptureResult> {
@@ -191,13 +208,59 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     };
   }
 
-  /** Waits for the last PCM after exit, bounded so a pipe that never closes cannot hang the call. */
-  private untilOutputEnded(helper: RunningLoopbackHelper): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const handle = this.timer.setTimeout(resolve, CAPTURE_DRAIN_MS);
+  async streamCapture(
+    sink: (pcm: Uint8Array) => void,
+    options: { sampleRate?: number } = {},
+  ): Promise<AudioStream> {
+    const sampleRate = helperRate(options.sampleRate ?? CAPTURE_SAMPLE_RATE);
+    const helper = await this.start(
+      "capture",
+      ["capture", "--until-stopped", "--sample-rate", String(sampleRate)],
+      sink,
+    );
+    // Closing stdin asks the helper to write its last buffer and exit; a kill is the fallback. Only
+    // a clean exit whose output has ended is a complete capture: a signal (the fallback kill or a
+    // crash) or a pipe still open after the drain wait means the tail may be missing (#15860).
+    const stop = async (): Promise<void> => {
+      helper.process.stdin.end();
+      const kill = this.timer.setTimeout(
+        () => helper.process.kill("SIGTERM"),
+        STREAM_STOP_GRACE_MS,
+      );
+      const exitCode = await helper.exited;
+      this.timer.clearTimeout(kill);
+      const ended = await this.untilOutputEnded(helper);
+      if (exitCode !== 0) {
+        throw helper.failure();
+      }
+      if (!ended) {
+        throw new EmulatorAudioError(
+          "audio_loopback_failed",
+          `The audio-loopback helper's output did not finish within ${CAPTURE_DRAIN_MS} ms of ` +
+            "its exit, so the end of the capture may be missing.",
+        );
+      }
+    };
+    let stopping: Promise<void> | undefined;
+    return {
+      sampleRate,
+      stop: () => {
+        stopping ??= stop();
+        return stopping;
+      },
+    };
+  }
+
+  /**
+   * Waits for the last PCM after exit, bounded so a pipe that never closes cannot hang the call.
+   * Resolves true when the output ended, false when the wait ran out.
+   */
+  private untilOutputEnded(helper: RunningLoopbackHelper): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const handle = this.timer.setTimeout(() => resolve(false), CAPTURE_DRAIN_MS);
       void helper.outputEnded.then(() => {
         this.timer.clearTimeout(handle);
-        resolve();
+        resolve(true);
       });
     });
   }
@@ -239,7 +302,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     options: InjectAudioOptions,
     ended: Promise<void>,
     isEnded: () => boolean,
-    sent: (frames: number) => void,
+    progress: { started(): void; queued(frames: number): void },
   ): Promise<void> {
     const delayMs = options.startDelayMs;
     if (delayMs) {
@@ -264,8 +327,9 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         if (isEnded()) {
           return;
         }
+        progress.started();
         await write(stdin, chunk, ended);
-        sent(chunk.byteLength / 2);
+        progress.queued(chunk.byteLength / 2);
       }
     } while (options.loop && !isEnded());
     if (!isEnded()) {

@@ -241,3 +241,70 @@ are the documented intent and still need on-device confirmation (#13082).
 ### prototype
 
 Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md).
+
+#### Watch-sized mockups
+
+Prototypes cannot run on watchOS, but a watch-sized spec gives a quick visual mockup of a watch
+screen on an iPhone simulator or Android emulator. Float the window in the centre and give the root
+`box` the watch screen's size, a large corner radius (which also clips its content) and a black
+background:
+
+| Case        | `width` × `height` (dp/pt) | `cornerRadius` |
+| ----------- | -------------------------- | -------------- |
+| 41 mm       | 176 × 215                  | 36             |
+| 45 mm       | 198 × 242                  | 40             |
+| 49 mm Ultra | 205 × 251                  | 44             |
+
+```json
+{
+  "id": "watch-41mm",
+  "window": {
+    "placement": { "type": "floating", "gravity": "center", "offset": { "x": 0, "y": 0 } }
+  },
+  "components": {
+    "watchRow": {
+      "root": {
+        "type": "row",
+        "style": {
+          "width": "fill",
+          "background": "#222222",
+          "cornerRadius": 16,
+          "padding": { "start": 10, "end": 10, "top": 8, "bottom": 8 }
+        },
+        "children": [{ "type": "text", "text": "{props.title}", "style": { "color": "#FFFFFF" } }]
+      }
+    }
+  },
+  "root": {
+    "type": "box",
+    "style": {
+      "width": { "dp": 176 },
+      "height": { "dp": 215 },
+      "cornerRadius": 36,
+      "background": "#000000"
+    },
+    "children": [
+      {
+        "type": "scroll",
+        "child": {
+          "type": "column",
+          "style": { "spacing": 6, "padding": { "start": 8, "end": 8, "top": 12 } },
+          "children": [
+            { "type": "use", "component": "watchRow", "props": { "title": "Drink water" } },
+            { "type": "use", "component": "watchRow", "props": { "title": "Stand up" } }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+Put each common watch pattern in `components` and reuse it with `use`: a vertically scrolling list
+of rows, a full-screen metric (one large number with a label and unit), a two-button confirmation
+(two `button`s with `weight: 1` in a `row`, swapped in with `visibleWhen`), and a now-playing card
+(title, artist, previous / play-pause / next `iconButton`s and a linear `progress`).
+
+The mockup is a phone overlay sized like a watch. It does not simulate the Digital Crown, Always-On
+or wrist-down dimming, real watchOS or Wear OS fonts and controls, or the round Wear OS screen, and
+nothing runs on a watch. Check the final design on a real watch.

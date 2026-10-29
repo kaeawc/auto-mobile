@@ -19,6 +19,7 @@ import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
 import {
   prototypeNotificationsBlockError,
+  prototypeNotificationsReadValid,
   prototypeNotificationsCallError,
 } from "./prototypeNotifications";
 import {
@@ -376,6 +377,7 @@ interface PlatformContext {
   background: Set<string>;
   channels: Raw;
   players: ReadonlySet<string>;
+  root: Raw;
 }
 
 function callError(
@@ -446,7 +448,12 @@ function strings(value: unknown): Set<string> {
 
 function readError(
   use: { path: string; pointer: string },
-  { declared, channels, players }: Pick<PlatformContext, "declared" | "channels" | "players">,
+  {
+    declared,
+    channels,
+    players,
+    root,
+  }: Pick<PlatformContext, "declared" | "channels" | "players" | "root">,
 ): PrototypePlatformError | undefined {
   const name = prototypePlatformPointerModule(use.pointer);
   if (!module(name)) {
@@ -455,7 +462,7 @@ function readError(
   if (!declared.has(name)) {
     return notDeclared(use.path, name);
   }
-  return stateKnown(name, use.pointer, { channels, players })
+  return stateKnown(name, use.pointer, { channels, players, root })
     ? undefined
     : { path: use.path, message: `Unknown platform state ${use.pointer}` };
 }
@@ -467,7 +474,7 @@ function readError(
 function stateKnown(
   name: string,
   pointer: string,
-  { channels, players }: Pick<PlatformContext, "channels" | "players">,
+  { channels, players, root }: Pick<PlatformContext, "channels" | "players" | "root">,
 ): boolean {
   const state = module(name)?.state;
   const tokens = pointer
@@ -476,6 +483,9 @@ function stateKnown(
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
   if (name === "media") {
     return prototypeMediaReadValid(tokens, players, state ?? {});
+  }
+  if (name === "notifications") {
+    return prototypeNotificationsReadValid(tokens, root, state ?? {});
   }
   if (name === "realtime") {
     return (
@@ -576,6 +586,7 @@ function platformContext(root: Raw): PlatformContext {
   return {
     channels: record(root.channels) ?? {},
     players: prototypeMediaPlayers(root),
+    root,
     declared: strings(requires.platform),
     permissions: new Set(
       (Array.isArray(requires.permissions) ? requires.permissions : []).map(

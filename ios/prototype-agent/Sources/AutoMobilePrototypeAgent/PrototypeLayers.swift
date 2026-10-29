@@ -198,7 +198,8 @@
             let pageAccessibility = model.spec?.root.layerAccessibility(
                 state: model.state,
                 pages: model.pages,
-                stacks: model.stacks
+                stacks: model.stacks,
+                data: model.spec?.data
             )
                 ?? .container
             ZStack {

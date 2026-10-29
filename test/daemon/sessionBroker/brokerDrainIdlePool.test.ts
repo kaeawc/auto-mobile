@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import {
   openSqliteBindingRegistry,
@@ -24,39 +24,61 @@ function config(requestId: string): SessionConfig {
   };
 }
 
+interface BrokerFixture {
+  registry: SqliteBindingRegistry;
+  devices: FakeNativePort;
+  options: SessionBrokerOptions;
+  broker: SessionBroker;
+}
+
+async function openBrokerFixture(): Promise<BrokerFixture> {
+  const timer = new FakeTimer();
+  const registry = await openSqliteBindingRegistry({
+    dbPath: ":memory:",
+    isExecOwnerLive: () => true,
+    timer,
+  });
+  const scope = await registry.ensureScope({
+    managedHostScope: "private-host",
+    runnerNamespace: "private-broker",
+    runnerIncarnation: "persistent",
+  });
+  if (scope.kind !== "ready") {
+    throw new Error("Missing scope");
+  }
+  const devices = new FakeNativePort(registry);
+  const options: SessionBrokerOptions = {
+    store: registry.sessionBrokerStore(scope.scope.scopeKey, new CountingIdGenerator("resource")),
+    devices,
+    owner: FAKE_BROKER_OWNER,
+    limits: { totalDeviceCap: 3, sessionCap: 3, idlePoolCap: 3 },
+    catalog: async () => iosCatalog(),
+    defaults: () => iosDefaults(),
+    reuseCleanDevices: true,
+    timer,
+  };
+  return { registry, devices, options, broker: new SessionBroker(options) };
+}
+
 describe("drainIdlePool", () => {
   let registry: SqliteBindingRegistry;
   let devices: FakeNativePort;
   let options: SessionBrokerOptions;
   let broker: SessionBroker;
 
+  // The first prepare/release/drain in a process pays one-time module and SQLite warm-up
+  // (~40 ms); run one cycle on a throwaway broker so no test's budget carries it.
+  beforeAll(async () => {
+    const warm = await openBrokerFixture();
+    const prepared = await warm.broker.prepare(config("warm-up"), "owner-token");
+    await warm.broker.release(prepared.sessionUuid!);
+    await warm.broker.drainIdlePool();
+    await warm.broker.close();
+    await warm.registry.close();
+  });
+
   beforeEach(async () => {
-    const timer = new FakeTimer();
-    registry = await openSqliteBindingRegistry({
-      dbPath: ":memory:",
-      isExecOwnerLive: () => true,
-      timer,
-    });
-    const scope = await registry.ensureScope({
-      managedHostScope: "private-host",
-      runnerNamespace: "private-broker",
-      runnerIncarnation: "persistent",
-    });
-    if (scope.kind !== "ready") {
-      throw new Error("Missing scope");
-    }
-    devices = new FakeNativePort(registry);
-    options = {
-      store: registry.sessionBrokerStore(scope.scope.scopeKey, new CountingIdGenerator("resource")),
-      devices,
-      owner: FAKE_BROKER_OWNER,
-      limits: { totalDeviceCap: 3, sessionCap: 3, idlePoolCap: 3 },
-      catalog: async () => iosCatalog(),
-      defaults: () => iosDefaults(),
-      reuseCleanDevices: true,
-      timer,
-    };
-    broker = new SessionBroker(options);
+    ({ registry, devices, options, broker } = await openBrokerFixture());
   });
 
   afterEach(async () => {

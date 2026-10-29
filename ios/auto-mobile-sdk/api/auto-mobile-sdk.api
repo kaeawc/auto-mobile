@@ -916,22 +916,6 @@ public enum WindowClassification
   public static func isNonContentWindow(className: String) -> Bool
 
 // WebKit/AutoMobileWebViewBridge.swift
-public struct AutoMobileWebElement: Codable, Sendable, Equatable
-  public let id: String
-  public let role: String?
-  public let label: String?
-  public let value: String?
-  public let bounds: [Double]
-  public let enabled: Bool
-  public let visible: Bool
-  public let focused: Bool
-  public init( id: String, role: String? = nil, label: String? = nil, value: String? = nil, bounds: [Double] = [], enabled: Bool = true, visible: Bool = true, focused: Bool = false )
-public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable
-  public let snapshotId: String
-  public let url: String?
-  public let title: String?
-  public let elements: [AutoMobileWebElement]
-  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [] )
 public struct AutoMobileWebViewConfiguration: Sendable
   public let allowedOrigins: Set<String>
   public let allowedFrames: Set<String>
@@ -979,6 +963,13 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
   public func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError error: Error)
   public func webView(_ webView: WKWebView, didCommit _: WKNavigation!)
   public func webViewWebContentProcessDidTerminate(_ webView: WKWebView)
+
+// WebKit/AutoMobileWebViewRegistry.swift
+public final class AutoMobileWebViewRegistry: Sendable
+  public static let shared = AutoMobileWebViewRegistry()
+  public func register(_ bridge: AutoMobileWebViewBridge)
+  public func unregister(webViewId: String)
+  public var state: WebViewBridgeState
 
 // sdk-wire/CapabilityWireModels.swift
 public enum SdkCapabilityState: String, Codable, Equatable, Sendable
@@ -1201,6 +1192,8 @@ public enum SdkRoute: String, CaseIterable, Sendable
   case trigger = "/trigger"
   case observationSnapshot = "/observation/snapshot"
   case observationAction = "/observation/action"
+  case webViewSnapshot = "/webview/snapshot"
+  case webViewAction = "/webview/action"
   public var path: String
   public var method: String
 
@@ -1304,3 +1297,69 @@ public struct KeychainCapability: Codable, Equatable, Sendable
   public let reason: String?
   public let deletionScopes: [KeychainItemSelector]
   public init( schemaVersion: Int, capability: String, inspection: String, deletion: String, reason: String?, deletionScopes: [KeychainItemSelector] )
+
+// sdk-wire/WebViewWireModels.swift
+public struct WebViewBridgeEntry: Codable, Equatable, Sendable
+  public let webViewId: String
+  public let url: String?
+  public let allowedOrigins: [String]
+  public let contentProcessAvailable: Bool
+  public init(webViewId: String, url: String?, allowedOrigins: [String], contentProcessAvailable: Bool)
+public struct WebViewBridgeState: Codable, Equatable, Sendable
+  public static let currentSchemaVersion = 1
+  public let schemaVersion: Int
+  public let webViews: [WebViewBridgeEntry]
+  public init(schemaVersion: Int = WebViewBridgeState.currentSchemaVersion, webViews: [WebViewBridgeEntry])
+  public static let none = WebViewBridgeState(webViews: [])
+public struct AutoMobileWebElement: Codable, Sendable, Equatable
+  public let id: String
+  public let role: String?
+  public let label: String?
+  public let value: String?
+  public let bounds: [Double]
+  public let enabled: Bool
+  public let visible: Bool
+  public let focused: Bool
+  public init( id: String, role: String? = nil, label: String? = nil, value: String? = nil, bounds: [Double] = [], enabled: Bool = true, visible: Bool = true, focused: Bool = false )
+public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable
+  public let snapshotId: String
+  public let url: String?
+  public let title: String?
+  public let elements: [AutoMobileWebElement]
+  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [] )
+public struct AutoMobileWebSnapshotRequest: Codable, Equatable, Sendable
+  public let webViewId: String?
+  public init(webViewId: String? = nil)
+public struct AutoMobileWebSnapshotReply: Codable, Equatable, Sendable
+  public let webViewId: String
+  public let snapshot: AutoMobileWebSnapshot
+  public init(webViewId: String, snapshot: AutoMobileWebSnapshot)
+public enum AutoMobileWebControlAction: Codable, Sendable, Equatable
+  case click(snapshotId: String, elementId: String)
+  case focus(snapshotId: String, elementId: String)
+  case insertText(snapshotId: String, elementId: String, text: String)
+  case select(snapshotId: String, elementId: String, value: String)
+  case scroll(snapshotId: String, elementId: String?, x: Double, y: Double)
+  case setValue(snapshotId: String, elementId: String, text: String)
+  case clear(snapshotId: String, elementId: String)
+  case scrollIntoView(snapshotId: String, elementId: String)
+  case submit(snapshotId: String, elementId: String)
+  public var snapshotId: String
+  public var elementId: String?
+public struct AutoMobileWebActionRequest: Codable, Equatable, Sendable
+  public let webViewId: String
+  public let action: AutoMobileWebControlAction
+  public init(webViewId: String, action: AutoMobileWebControlAction)
+public struct AutoMobileWebActionResult: Codable, Sendable, Equatable
+public enum Status: String, Codable, Sendable
+  case accepted
+  case rejected
+  public static let staleSnapshotReason = "stale_snapshot"
+  public static let elementNotActionableReason = "element_not_actionable"
+  public static let disallowedOriginReason = "disallowed_origin"
+  public static let webProcessUnavailableReason = "web_process_unavailable"
+  public static let javascriptErrorReason = "javascript_error"
+  public let status: Status
+  public let reason: String?
+  public init(status: Status, reason: String? = nil)
+  public static func rejected(_ reason: String) -> AutoMobileWebActionResult

@@ -26,6 +26,21 @@ final class LoopbackCommandTests: XCTestCase {
         }
     }
 
+    func testCaptureCanRunUntilStopped() throws {
+        XCTAssertEqual(
+            try LoopbackCommand.parse(["capture", "--until-stopped", "--sample-rate", "16000"]),
+            .capture(sampleRate: 16000, durationMs: nil)
+        )
+        XCTAssertThrowsError(
+            try LoopbackCommand.parse(["capture", "--until-stopped", "--duration-ms", "10"])
+        ) { error in
+            XCTAssertEqual(error as? LoopbackCommand.ParseError, .unknownArgument("--duration-ms"))
+        }
+        XCTAssertThrowsError(try LoopbackCommand.parse(["play", "--until-stopped"])) { error in
+            XCTAssertEqual(error as? LoopbackCommand.ParseError, .missingValue(flag: "--until-stopped"))
+        }
+    }
+
     func testRejectsMalformedArguments() {
         XCTAssertThrowsError(try LoopbackCommand.parse([])) { error in
             XCTAssertEqual(error as? LoopbackCommand.ParseError, .missingCommand)

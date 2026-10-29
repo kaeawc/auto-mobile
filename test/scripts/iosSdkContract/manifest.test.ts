@@ -5,6 +5,7 @@ import { parseSdkContractManifest } from "../../../scripts/ios/sdk-contract/mani
 const swiftManifest = {
   bundleId: "dev.jasonpearson.automobile.Playground",
   events: [{ eventType: "network_request", payload: "e30=" }],
+  faults: [],
   network: [
     {
       caseName: "websocket-sent",
@@ -18,7 +19,7 @@ const swiftManifest = {
   ],
   runId: "run-1",
   scenario: "network",
-  schemaVersion: 1,
+  schemaVersion: 3,
   status: "complete",
   undecodableBatches: 0,
 };
@@ -32,8 +33,44 @@ test("parses the manifest the Swift writer emits", () => {
   }
 });
 
+test("parses URLProtocol records, fault observations and capability descriptors", () => {
+  const manifest = {
+    ...swiftManifest,
+    scenario: "faults",
+    network: [
+      { caseName: "urlsession", url: "http://127.0.0.1:5000/contract/run-1/x", method: "GET" },
+    ],
+    faults: [
+      {
+        caseName: "fault-urlsession-fail",
+        clientError: "NSURLErrorDomain:-1001",
+        elapsedMs: 3.5,
+        url: "http://127.0.0.1:5000/contract/run-1/fault-urlsession-fail",
+      },
+    ],
+    capabilities: {
+      afterRegistration: [
+        {
+          faultActions: ["closeConnection"],
+          faultEnforcement: "ENFORCED",
+          id: "network.transport.websocket",
+          state: "SUPPORTED",
+        },
+      ],
+      beforeRegistration: [],
+    },
+  };
+  const result = parseSdkContractManifest(JSON.stringify(manifest));
+  expect(result.success).toBe(true);
+  if (result.success) {
+    expect(result.manifest.network[0].protocolName).toBeUndefined();
+    expect(result.manifest.faults[0].clientError).toBe("NSURLErrorDomain:-1001");
+    expect(result.manifest.capabilities?.afterRegistration[0].reason).toBeUndefined();
+  }
+});
+
 test("rejects a manifest from a newer schema", () => {
-  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 2 }));
+  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 4 }));
   expect(result).toMatchObject({ success: false });
   if (!result.success) {
     expect(result.error).toContain("schemaVersion");
@@ -42,4 +79,33 @@ test("rejects a manifest from a newer schema", () => {
 
 test("rejects text that is not JSON", () => {
   expect(parseSdkContractManifest("{")).toMatchObject({ success: false });
+});
+
+test("reads the observation host log and the storage registration", () => {
+  const result = parseSdkContractManifest(
+    JSON.stringify({
+      ...swiftManifest,
+      observation: {
+        actions: [{ elementId: "contract-save", kind: "tap", observationIdentity: 3 }],
+        captures: 4,
+      },
+      storage: {
+        allowKeychainDeletion: true,
+        coreDataStores: [{ identifier: "ContractPrivate-run-1" }],
+        hostCoordinatedSuites: [],
+        keychainEntries: [{ accessGroup: "g", account: "a", service: "s" }],
+        secretWritten: true,
+        uncoordinatedSuites: ["group.contract"],
+      },
+    }),
+  );
+  expect(result).toMatchObject({ success: true });
+  if (result.success) {
+    expect(result.manifest.observation?.actions[0]).toEqual({
+      kind: "tap",
+      elementId: "contract-save",
+      observationIdentity: 3,
+    });
+    expect(result.manifest.storage?.coreDataStores[0].appGroup).toBeUndefined();
+  }
 });

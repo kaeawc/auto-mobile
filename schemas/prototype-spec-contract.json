@@ -23803,7 +23803,7 @@
               "value": {
                 "kind": "string",
                 "empty": false,
-                "maxBytes": 128
+                "maxBytes": 384
               }
             }
           },

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { AndroidMediaSessionController } from "../../../src/features/media/MediaSessionController";
+import { volumeSetScript } from "../../../src/features/media/AndroidVolume";
+import { shellQuote } from "../../../src/utils/shellQuote";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ExecResult } from "../../../src/models";
 import type {
@@ -262,7 +264,7 @@ describe("AndroidMediaSessionController.setVolume", () => {
   test("sets the stream, verifies by read-back and returns a restore receipt", async () => {
     const adb = new ScriptedAdb()
       .on(get, reading(7), reading(12))
-      .on("shell cmd media_session volume --stream 3 --set 12", ok());
+      .on(`shell sh -c ${shellQuote(volumeSetScript(3, 12))}`, ok());
     const { controller } = controllerFor(adb);
 
     const result = await controller.setVolume({ stream: "music", level: 12 });
@@ -294,13 +296,35 @@ describe("AndroidMediaSessionController.setVolume", () => {
   test("reports an unverified write", async () => {
     const adb = new ScriptedAdb()
       .on(get, reading(7), reading(9))
-      .on("shell cmd media_session volume --stream 3 --set 12", ok());
+      .on(`shell sh -c ${shellQuote(volumeSetScript(3, 12))}`, ok());
     const { controller } = controllerFor(adb);
 
     const result = await controller.setVolume({ stream: "music", level: 12 });
 
     expect(result.verified).toBe(false);
     expect(result.level).toBe(9);
+  });
+
+  test("preserves the standalone media setter when both cmd setters are unavailable", async () => {
+    const captured = ok(
+      readFileSync(
+        new URL("../../fixtures/android-volume/api37-stream-3.stdout.txt", import.meta.url),
+        "utf8",
+      ),
+    );
+    // Synthetic capability response: no older-API capture is available.
+    const unavailable = ok("No shell command implementation.");
+    const adb = new ScriptedAdb()
+      .on(get, captured)
+      .on(`shell sh -c ${shellQuote(volumeSetScript(3, 5))}`, unavailable)
+      .on("shell cmd media_session volume --stream 3 --set 5", unavailable)
+      .on("shell media volume --stream 3 --set 5", ok());
+    const { controller } = controllerFor(adb);
+
+    const result = await controller.setVolume({ stream: "music", level: 5 });
+
+    expect(adb.commands).toContain("shell media volume --stream 3 --set 5");
+    expect(result.restore).toEqual({ volume: { stream: "music", level: 11 } });
   });
 
   test("refuses an out-of-range level without writing", async () => {

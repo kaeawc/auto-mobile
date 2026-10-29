@@ -4,6 +4,8 @@ import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfa
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { shellQuote } from "../../utils/shellQuote";
+import { volumeSetScript } from "./AndroidVolume";
 import { AospMediaSessionDumpParser, type MediaSessionDumpParser } from "./MediaSessionDumpParser";
 import type {
   MediaDispatchKey,
@@ -239,10 +241,17 @@ export class AndroidMediaSessionController implements MediaSessionController {
       );
     }
     if (request.level !== before.level) {
-      await this.runMediaCommand(
-        `volume --stream ${streamCode} --set ${request.level}`,
+      const set = await this.tryCommand(
+        `shell sh -c ${shellQuote(volumeSetScript(streamCode, request.level))}`,
         request.signal,
       );
+      if (set.unavailable) {
+        // Preserve the standalone `media` fallback on releases without either cmd setter.
+        await this.runMediaCommand(
+          `volume --stream ${streamCode} --set ${request.level}`,
+          request.signal,
+        );
+      }
     }
     const after = await this.readVolume(streamCode, request.signal);
     return {

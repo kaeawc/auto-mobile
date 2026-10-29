@@ -4309,6 +4309,16 @@
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
                 },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
+                },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
                   "type": "boolean"
@@ -6957,6 +6967,16 @@
                 },
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
+                },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -12662,6 +12682,16 @@
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
                 },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
+                },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
                   "type": "boolean"
@@ -16073,6 +16103,16 @@
                 },
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
+                },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -22692,6 +22732,16 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
+        "backend": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "fallbackReason": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
         "elements": {
           "type": "object",
           "properties": {
@@ -24779,6 +24829,16 @@
                 },
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
+                },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -26928,6 +26988,16 @@
                 },
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
+                },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -41429,6 +41499,16 @@
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
                 },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
+                },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
                   "type": "boolean"
@@ -44560,6 +44640,16 @@
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
                 },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
+                },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
                   "type": "boolean"
@@ -46497,6 +46587,16 @@
                 },
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
+                },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -53212,6 +53312,16 @@
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
                 },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
+                },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
                   "type": "boolean"
@@ -55216,6 +55326,16 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -58510,6 +58630,16 @@
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
                 },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
+                },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
                   "type": "boolean"
@@ -61341,6 +61471,12 @@
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema46"
                 },
+                "backend": {
+                  "$ref": "#/$defs/__schema47"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema48"
+                },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
                   "type": "boolean"
@@ -61360,12 +61496,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema47"
+                                "$ref": "#/$defs/__schema49"
                               }
                             }
                           ]
@@ -61384,7 +61520,7 @@
                                 "$ref": "#/$defs/__schema1"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema47"
+                                "$ref": "#/$defs/__schema49"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -61436,7 +61572,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema47"
+                      "$ref": "#/$defs/__schema49"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -61482,10 +61618,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema48"
+                                  "$ref": "#/$defs/__schema50"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema48"
+                                  "$ref": "#/$defs/__schema50"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -61499,7 +61635,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema48"
+                              "$ref": "#/$defs/__schema50"
                             },
                             {
                               "type": "null"
@@ -61546,7 +61682,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema48"
+                              "$ref": "#/$defs/__schema50"
                             },
                             {
                               "type": "null"
@@ -61556,7 +61692,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema48"
+                              "$ref": "#/$defs/__schema50"
                             },
                             {
                               "type": "null"
@@ -61566,7 +61702,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema48"
+                              "$ref": "#/$defs/__schema50"
                             },
                             {
                               "type": "null"
@@ -61574,7 +61710,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema48"
+                          "$ref": "#/$defs/__schema50"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -61725,10 +61861,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema49"
+              "$ref": "#/$defs/__schema51"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema49"
+              "$ref": "#/$defs/__schema51"
             }
           },
           "required": ["mode", "reason"],
@@ -61758,6 +61894,12 @@
         },
         "selectedElement": {
           "$ref": "#/$defs/__schema45"
+        },
+        "backend": {
+          "$ref": "#/$defs/__schema47"
+        },
+        "fallbackReason": {
+          "$ref": "#/$defs/__schema48"
         },
         "activatedSubtext": {
           "description": "Semantic accessibility link confirmed by the native runner",
@@ -62787,6 +62929,16 @@
           "additionalProperties": {}
         },
         "__schema47": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema48": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema49": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -62809,12 +62961,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema47"
+                  "$ref": "#/$defs/__schema49"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema47"
+                    "$ref": "#/$defs/__schema49"
                   }
                 }
               ]
@@ -62822,7 +62974,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "top": {
@@ -62841,7 +62993,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema49": {
+        "__schema51": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -63414,6 +63566,16 @@
                 },
                 "screenIdentity": {
                   "$ref": "#/$defs/__schema45"
+                },
+                "backend": {
+                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+                  "type": "string",
+                  "enum": ["sdk", "xctest"]
+                },
+                "fallbackReason": {
+                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+                  "type": "string",
+                  "enum": ["unavailable", "unsupported"]
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",

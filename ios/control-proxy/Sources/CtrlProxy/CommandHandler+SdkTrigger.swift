@@ -78,13 +78,17 @@ extension CommandHandler {
 
     /// Sends one observation-bridge request to the tracked foreground app's SDK, only when its
     /// `/health` reports a registered bridge, and maps the SDK's status codes to typed failures.
+    /// `bridgeUnavailable` means the request was never sent. A request that was sent but got no
+    /// reply is `badReply`: the SDK may have acted, so the daemon must not retry it elsewhere.
     private func bridgeReply(route: SdkRoute, body: Data) async -> Result<Data, SdkBridgeFailure> {
         guard let info = await sdkServerInfoForTrackedForegroundApp(),
               info.observationBridge?.available == true,
-              let client = sdkHierarchyClient,
-              let reply = await client.sendObservationRequest(route, body: body)
+              let client = sdkHierarchyClient
         else {
             return .failure(.bridgeUnavailable)
+        }
+        guard let reply = await client.sendObservationRequest(route, body: body) else {
+            return .failure(.badReply)
         }
         switch reply.statusCode {
         case 200: return .success(reply.body)

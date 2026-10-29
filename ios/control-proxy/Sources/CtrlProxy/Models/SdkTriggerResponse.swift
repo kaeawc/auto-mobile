@@ -57,22 +57,23 @@ public struct SdkTriggerReply: Equatable, Sendable {
 
 /// Why an observation-bridge command did not produce a result (#5159).
 public enum SdkBridgeFailure: String, Error, Sendable {
-    /// No SDK in the foreground app, no registered bridge, or the SDK did not answer.
+    /// No SDK in the foreground app or no registered bridge; the request was never sent.
     case bridgeUnavailable = "bridge_unavailable"
     /// The app resigned active before the SDK could serve the request.
     case appNotActive = "app_not_active"
     /// `actionJson` is missing or is not an `AutoMobileAction`.
     case invalidAction = "invalid_action"
-    /// The SDK answered with a status or body this runner does not understand.
+    /// A sent request got no answer, or the SDK replied with a status or body this runner does not
+    /// understand. The SDK may have acted.
     case badReply = "bad_reply"
 
     var message: String {
         switch self {
         case .bridgeUnavailable:
-            "The foreground app has no AutoMobile SDK observation bridge registered, or the SDK did not answer."
+            "The foreground app has no AutoMobile SDK observation bridge registered; nothing was sent."
         case .appNotActive: "The foreground app resigned active before the SDK could serve the request."
         case .invalidAction: "actionJson must be one JSON-encoded AutoMobileAction."
-        case .badReply: "The in-app SDK returned a reply this runner could not decode."
+        case .badReply: "The in-app SDK did not answer a sent request, or its reply could not be decoded."
         }
     }
 }

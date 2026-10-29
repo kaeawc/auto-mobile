@@ -85,7 +85,7 @@ final class SdkObservationCommandTests: XCTestCase {
 
     func testSdkStatusCodesMapToTypedFailures() async throws {
         let cases: [(SdkBridgeReply?, String, Bool)] = [
-            (nil, "bridge_unavailable", false),
+            (nil, "bad_reply", true),
             (SdkBridgeReply(statusCode: 503, body: Data()), "bridge_unavailable", false),
             (SdkBridgeReply(statusCode: 409, body: Data()), "app_not_active", true),
             (SdkBridgeReply(statusCode: 500, body: Data()), "bad_reply", true),

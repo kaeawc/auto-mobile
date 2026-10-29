@@ -265,7 +265,7 @@ import XCTest
             XCTAssertEqual(failed.first?.metadata?["fault_outcome"], "failed")
         }
 
-        func testWebSocketRecordsKeepTheWebSocketScheme() {
+        func testWebSocketRecordsKeepTheWebSocketScheme() throws {
             XCTAssertEqual(WebSocketOperations.webSocketURL(URL(string: "http://127.0.0.1:9/c")), "ws://127.0.0.1:9/c")
             XCTAssertEqual(
                 WebSocketOperations.webSocketURL(URL(string: "https://example.com/s?q=1")),
@@ -276,7 +276,7 @@ import XCTest
 
             let session = URLSession(configuration: .ephemeral)
             defer { session.invalidateAndCancel() }
-            let task = session.webSocketTask(with: URL(string: "ws://127.0.0.1:9/contract/run/case")!)
+            let task = try session.webSocketTask(with: XCTUnwrap(URL(string: "ws://127.0.0.1:9/contract/run/case")))
             XCTAssertEqual(WebSocketOperations(task: task).url, "ws://127.0.0.1:9/contract/run/case")
         }
     }

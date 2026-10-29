@@ -675,6 +675,10 @@ export interface VideoRecordingsTable {
   recorder_daemon_session_id: string | null;
   recorded_panel_json: string | null;
   display_transitions_json: string | null;
+  // Set for a recording that asked for audio: 1 when the file has an audio track (#15858).
+  has_audio_track: number | null;
+  // The finalized stop's warnings, such as why the audio track is missing (#15858).
+  warnings_json: string | null;
   // Daemon session that started the recording (issue #4752). Nullable: rows that
   // predate the owner-scoping migration have no known owner and are treated as
   // legacy/unowned.

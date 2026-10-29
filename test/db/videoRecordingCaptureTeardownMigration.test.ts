@@ -10,6 +10,7 @@ import { up as baseUp } from "../../src/db/migrations/2026_01_09_000_video_recor
 import { up as highlightsUp } from "../../src/db/migrations/2026_01_11_000_video_recording_highlights";
 import { up as ownerUp } from "../../src/db/migrations/2026_07_31_000_video_recordings_owner_session";
 import { up as displayUp } from "../../src/db/migrations/2026_09_30_000_video_recording_display";
+import { up as audioStateUp } from "../../src/db/migrations/2026_10_29_000_video_recording_audio_state";
 
 let sqlite: BunDatabase;
 let db: Kysely<Database>;
@@ -23,6 +24,7 @@ beforeEach(async () => {
   await (
     await import("../../src/db/migrations/2026_10_13_000_video_recording_recorder_daemon")
   ).up(db);
+  await audioStateUp(db);
 });
 afterEach(async () => {
   await db.destroy();

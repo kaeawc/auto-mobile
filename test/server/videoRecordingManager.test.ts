@@ -54,6 +54,7 @@ import {
   type VideoRetentionPolicy,
 } from "../../src/daemon/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
+import { stopResultEntry } from "../../src/server/videoRecordingStopById";
 import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
 import {
   restoreDeviceSnapshot,
@@ -490,6 +491,43 @@ describe("videoRecordingManager", () => {
 
     const recordings = await listVideoRecordings();
     expect(recordings[0]?.recordingId).toBe(active.recordingId);
+  });
+
+  describe("an audio recording finalized before the caller's stop keeps its audio state (#15858)", () => {
+    const AUDIO_WARNING = "The recording has no audio track: the audio capture ended early.";
+
+    // Waits for the auto-stop to finish, so later reads see only the finalized row.
+    const autoStopped = async (audio: { hasAudioTrack: boolean; warnings?: string[] }) => {
+      const stopCall = fakeBackend.waitForStopCall();
+      const active = await startVideoRecording({
+        device: testDevice,
+        maxDurationSeconds: 2,
+        audio: true,
+      });
+      fakeBackend.setStopResultOverrides(audio);
+      fakeTimer.advanceTime(2000);
+      await stopCall;
+      await stopVideoRecording(active.recordingId);
+      return active.recordingId;
+    };
+
+    test("a stop by id after the duration limit reports the stored hasAudioTrack and warning", async () => {
+      const recordingId = await autoStopped({ hasAudioTrack: false, warnings: [AUDIO_WARNING] });
+      const metadata = await getVideoRecordingMetadata(recordingId);
+      if (!metadata) {
+        throw new Error("the finalized recording has no metadata");
+      }
+      expect(metadata.warnings).toEqual([AUDIO_WARNING]);
+      // The stop-by-id tool answers a finalized recording from this stored metadata.
+      expect(stopResultEntry(metadata).hasAudioTrack).toBe(false);
+    });
+
+    test("a later metadata read restores a complete track", async () => {
+      const recordingId = await autoStopped({ hasAudioTrack: true });
+      const metadata = await getVideoRecordingMetadata(recordingId);
+      expect(metadata?.hasAudioTrack).toBe(true);
+      expect(metadata?.warnings).toBeUndefined();
+    });
   });
 
   describe("the daemon refuses Android audio past one screenrecord segment (#15860)", () => {

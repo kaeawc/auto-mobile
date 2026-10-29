@@ -88,6 +88,10 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   before it is removed on every path, including a failed audio stop.
 - A force stop that arrives while the video is still finalizing stops the audio and discards its
   file right away; the pending stop then reports `hasAudioTrack: false`.
+- The completed row stores `hasAudioTrack` and the stop's warnings (`has_audio_track`,
+  `warnings_json`), so a stop that finds the recording already finalized (duration limit, repeated
+  stop, daemon restart) returns what the finalizing stop produced. A recording that did not ask for
+  audio stores null and reads with no `hasAudioTrack`.
 - A video stop that fails after the audio was discarded leaves the recording active for a retry;
   the retry reports `hasAudioTrack: false` with a warning instead of no audio state.
 - The in-progress size cap adds the `.audio.pcm` file to the video's size, so a long recording

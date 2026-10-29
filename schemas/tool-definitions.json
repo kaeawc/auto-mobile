@@ -18371,6 +18371,7 @@
       }
     },
     "_meta": {
+      "automobile/hostInventory": true,
       "automobile/deviceReadOnly": true
     }
   },
@@ -19110,6 +19111,7 @@
       }
     },
     "_meta": {
+      "automobile/hostInventory": true,
       "automobile/deviceReadOnly": true
     }
   },

@@ -21,7 +21,8 @@ export type RawSettingRead = { readable: true; value: string | null } | { readab
 export interface LocalizationPriorSource {
   /**
    * The app's locales for the user changeLocalization targets, or null when the device has no
-   * app-scoped locale command (below Android 13), the user cannot be resolved, or the reply is
+   * app-scoped locale command (below Android 13), more than one user is running (calls could
+   * target different users under one journal key), the user cannot be resolved, or the reply is
    * not a locale list. Throws when the device cannot be reached.
    */
   readAppLocales(appId: string, signal?: AbortSignal): Promise<AppLocalePrior | null>;
@@ -38,6 +39,12 @@ export class AdbLocalizationPriorSource implements LocalizationPriorSource {
   async readAppLocales(appId: string, signal?: AbortSignal): Promise<AppLocalePrior | null> {
     const apiLevel = await readAndroidDeviceApiLevel(this.adb, undefined, defaultTimer, signal);
     if (apiLevel === null || apiLevel < MIN_APP_LOCALE_API_LEVEL) {
+      return null;
+    }
+    // With several running users, successive calls can resolve different users (the foreground
+    // instance wins), yet the journal records one prior per app. No prior, so reset escalates.
+    const running = (await this.adb.listUsers(signal)).filter((user) => user.running);
+    if (running.length > 1) {
       return null;
     }
     // The same resolution changeLocalization makes before it writes the app's locales.

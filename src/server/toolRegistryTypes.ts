@@ -124,6 +124,8 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   readOnly?: boolean | ((args: T) => boolean);
   /** See {@link ToolTraits.selectsActiveDevice}. */
   selectsActiveDevice?: boolean;
+  /** See {@link ToolTraits.hostInventory}. */
+  hostInventory?: boolean;
 }
 
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
@@ -178,6 +180,14 @@ export interface ToolTraits {
    * so a process that cannot load the registry reads it from the committed tool definitions.
    */
   deviceResourceBudget?: boolean;
+  /**
+   * Lists host-wide device inventory (`listDevices`, `listDeviceImages`): it never operates a device
+   * or mints a device session, so a call with no routing arguments runs on the socket's host lane
+   * and stays callable after a binding's terminal release (#7144, #15672). Advertised as
+   * `_meta["automobile/hostInventory"]` so a process that cannot load the registry reads it from the
+   * committed tool definitions.
+   */
+  hostInventory?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
@@ -208,6 +218,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     planRelevant,
     selectsActiveDevice,
     deviceResourceBudget,
+    hostInventory,
   } = options;
   return {
     stopsApp,
@@ -220,6 +231,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     planRelevant,
     selectsActiveDevice,
     deviceResourceBudget,
+    hostInventory,
   };
 }
 

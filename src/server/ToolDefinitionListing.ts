@@ -63,6 +63,7 @@ export class ToolDefinitionListing {
           "automobile/planOnly"?: boolean;
           "automobile/deviceReadOnly"?: boolean;
           "automobile/deviceResourceBudget"?: boolean;
+          "automobile/hostInventory"?: boolean;
           "automobile/deviceReadOnlyArgs"?: readonly DeviceReadOnlyArgShape[];
           ui?: { resourceUri: string };
         };
@@ -101,6 +102,9 @@ export class ToolDefinitionListing {
       // Request-budget trait for processes that cannot load the registry (#15672).
       if (tool.deviceResourceBudget) {
         definition._meta = { ...definition._meta, "automobile/deviceResourceBudget": true };
+      }
+      if (tool.hostInventory) {
+        definition._meta = { ...definition._meta, "automobile/hostInventory": true };
       }
       // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
       if (tool.deviceReadOnly === true) {

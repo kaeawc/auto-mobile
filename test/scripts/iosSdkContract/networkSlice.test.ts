@@ -143,6 +143,17 @@ describe("field helpers", () => {
     expect(recordDifferences({ id: 1, url: "a" }, { id: 2, url: "b" })).toHaveLength(1);
   });
 
+  test("treats header and metadata maps as equal whatever their key order", () => {
+    const reference = { responseHeaders: { Connection: "close", "Content-Length": "32" } };
+    const live = { responseHeaders: { "Content-Length": "32", Connection: "close" } };
+    expect(recordDifferences(reference, live)).toEqual([]);
+    expect(
+      recordDifferences(reference, {
+        responseHeaders: { Connection: "keep-alive", "Content-Length": "32" },
+      }),
+    ).toHaveLength(1);
+  });
+
   test("matches payloads by request id, or by frame identity when the SDK generated the id", () => {
     const sent = {
       url: "ws://x",

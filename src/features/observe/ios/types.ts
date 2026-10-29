@@ -194,6 +194,8 @@ export interface WebSocketMessage {
   supportedTriggers?: string[];
   bundleId?: string;
   capabilities?: string[];
+  /** sdk_capabilities_result: the app's observation-bridge state (#5159), parsed by the probe. */
+  observationBridge?: unknown;
   data?: XCTestHierarchy;
   /** True when a hierarchy response contains a previous runner capture. */
   servedFromCache?: boolean;

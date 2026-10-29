@@ -88,6 +88,10 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   before it is removed on every path, including a failed audio stop.
 - A force stop that arrives while the video is still finalizing stops the audio and discards its
   file right away; the pending stop then reports `hasAudioTrack: false`.
+- The completed row stores `hasAudioTrack` and the stop's warnings (`has_audio_track`,
+  `warnings_json`), so a stop that finds the recording already finalized (duration limit, repeated
+  stop, daemon restart) returns what the finalizing stop produced. A recording that did not ask for
+  audio stores null and reads with no `hasAudioTrack`.
 - ffmpeg is probed at start, so a host without it is refused before anything is captured.
 - Segmented Android recordings (over 180 s) refuse `audio`: the track would need stitching across
   segments.

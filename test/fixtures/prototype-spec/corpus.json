@@ -145,6 +145,7 @@
     "motion3-expressive.json",
     "motion3-layout.json",
     "motion3-press.json",
+    "notify-channels-block.json",
     "notify-post-messaging.json",
     "notify-post-styles.json",
     "ns-accessory-chart.json",
@@ -1036,11 +1037,24 @@
     "notify-bad-channel-id.json",
     "notify-badge-over-limit.json",
     "notify-big-picture-missing-image.json",
+    "notify-cancel-no-target.json",
+    "notify-cancel-two-targets.json",
+    "notify-channels-bad-importance.json",
+    "notify-channels-blank-name.json",
+    "notify-channels-duplicate-id.json",
+    "notify-channels-empty.json",
+    "notify-channels-no-platform-list.json",
+    "notify-channels-too-many.json",
+    "notify-channels-undeclared-module.json",
+    "notify-channels-unknown-field.json",
     "notify-data-over-limit.json",
     "notify-inbox-too-many-lines.json",
     "notify-messaging-too-many.json",
     "notify-missing-permission.json",
     "notify-missing-title.json",
+    "notify-post-duplicate-action-id.json",
+    "notify-post-undeclared-channel.json",
+    "notify-post-without-channels-block.json",
     "notify-progress-indeterminate-false.json",
     "notify-progress-over.json",
     "notify-set-badge-missing-permission.json",
@@ -3110,6 +3124,7 @@
       "prototype_platform_media_v1",
       "prototype_platform_v1",
       "prototype_stack_v1"
-    ]
+    ],
+    "notify-channels-block.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"]
   }
 }

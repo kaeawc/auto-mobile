@@ -9059,6 +9059,12 @@
         "hasDefault": true
       },
       {
+        "name": "notifications",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "media",
         "type": "json",
         "nullable": true,

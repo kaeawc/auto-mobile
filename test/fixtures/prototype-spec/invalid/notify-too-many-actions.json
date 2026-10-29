@@ -58,6 +58,15 @@
           }
         }
       ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "messages",
+          "name": "Messages",
+          "importance": "default"
+        }
+      ]
     }
   },
   "expectedPath": "root.onTap[0].args.actions.value"

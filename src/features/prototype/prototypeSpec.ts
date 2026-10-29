@@ -1,7 +1,6 @@
 import { buildAdaptiveSchema, adaptiveChildren, type AdaptiveSlots } from "./prototypeAdaptive";
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
-import { prototypeAuthSchema } from "./prototypeAuthSchema";
-import { prototypeLocationBlockSchema } from "./prototypeLocationBlockSchema";
+import { prototypeRootBlockFields } from "./prototypeRootBlockSchemas";
 import { prototypeMediaSchema, prototypeVideoPlayerSchema } from "./prototypeMediaSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
@@ -937,8 +936,7 @@ const specSchema = z
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
     channels: prototypeChannelsSchema(() => actionSchema).optional(),
-    auth: prototypeAuthSchema().optional(),
-    location: prototypeLocationBlockSchema().optional(),
+    ...prototypeRootBlockFields(),
     media: prototypeMediaSchema.optional(),
     derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),

@@ -2232,9 +2232,14 @@ pending, authorization}`: `active` is at most 24 per prototype, and `authorizati
 vocabulary (`granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The
 runtime homes follow the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and
 ProtoViewer advertise the module, the CtrlProxy overlay advertises it as a disclosed preview, and the iOS
-injected agent never does. The validators do not yet check the top-level `notifications.channels` block,
-that `channel` names a declared channel, unique action ids, or that `cancel` names exactly one target. No
-production runtime advertises the module yet.
+injected agent never does. Channels come from a root `notifications` block, `{channels: [{id, name,
+importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped ids, a non-blank `name` (at
+most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
+256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
+must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime. On iOS, `min` and `low`
+map to the passive interruption level and `default` and `high` to active. No production runtime
+advertises the module yet.
 
 **Media players (#14253, contract only).** The root `media` block declares long-lived players
 that outlive a screen (mini-player, background audio, picture-in-picture):

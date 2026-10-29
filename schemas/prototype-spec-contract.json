@@ -15741,6 +15741,13 @@
           },
           "optional": true
         },
+        "notifications": {
+          "rule": {
+            "kind": "ref",
+            "name": "notificationsBlock"
+          },
+          "optional": true
+        },
         "channels": {
           "rule": {
             "kind": "map",
@@ -21742,6 +21749,64 @@
           "optional": false
         }
       }
+    },
+    "notificationChannel": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": false
+        },
+        "name": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "importance": {
+          "rule": {
+            "kind": "enum",
+            "values": ["min", "low", "default", "high"]
+          },
+          "optional": false
+        },
+        "description": {
+          "rule": {
+            "kind": "string",
+            "max": 256
+          },
+          "optional": true
+        },
+        "showBadge": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "notificationsBlock": {
+      "kind": "object",
+      "fields": {
+        "channels": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 8,
+            "item": {
+              "kind": "ref",
+              "name": "notificationChannel"
+            }
+          },
+          "optional": false
+        }
+      }
     }
   },
   "eventKinds": [
@@ -22378,7 +22443,10 @@
               "optional": true,
               "value": {
                 "kind": "array",
-                "item": { "kind": "enum", "values": ["name", "phone", "email"] },
+                "item": {
+                  "kind": "enum",
+                  "values": ["name", "phone", "email"]
+                },
                 "min": 1,
                 "max": 3,
                 "unique": true

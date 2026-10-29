@@ -1,0 +1,192 @@
+{
+  "id": "watch-45mm-metric-confirm",
+  "window": {
+    "placement": {
+      "type": "floating",
+      "gravity": "center",
+      "offset": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  "state": {
+    "screen": "metric"
+  },
+  "components": {
+    "watchMetric": {
+      "root": {
+        "type": "column",
+        "visibleWhen": {
+          "key": "screen",
+          "equals": "metric"
+        },
+        "style": {
+          "width": "fill",
+          "height": "fill",
+          "padding": {
+            "start": 12,
+            "end": 12,
+            "top": 16,
+            "bottom": 12
+          },
+          "alignment": "center",
+          "arrangement": "spaceBetween"
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "{props.label}",
+            "style": {
+              "textSize": 15,
+              "color": "#FF375F"
+            }
+          },
+          {
+            "type": "text",
+            "text": "{props.value}",
+            "contentDescription": "{props.label}: {props.value} {props.unit}",
+            "style": {
+              "textSize": 56,
+              "fontWeight": 700,
+              "color": "#FFFFFF",
+              "textAlign": "center"
+            }
+          },
+          {
+            "type": "text",
+            "text": "{props.unit}",
+            "style": {
+              "textSize": 15,
+              "color": "#AEAEB2"
+            }
+          },
+          {
+            "type": "button",
+            "label": "{props.action}",
+            "variant": "tonal",
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "screen",
+                "value": "confirm"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "watchConfirm": {
+      "root": {
+        "type": "column",
+        "visibleWhen": {
+          "key": "screen",
+          "equals": "confirm"
+        },
+        "style": {
+          "width": "fill",
+          "height": "fill",
+          "padding": {
+            "start": 12,
+            "end": 12,
+            "top": 20,
+            "bottom": 12
+          },
+          "alignment": "center",
+          "arrangement": "spaceBetween"
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "{props.question}",
+            "style": {
+              "textSize": 17,
+              "fontWeight": 600,
+              "color": "#FFFFFF",
+              "textAlign": "center"
+            }
+          },
+          {
+            "type": "row",
+            "style": {
+              "width": "fill",
+              "spacing": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "{props.cancel}",
+                "variant": "tonal",
+                "style": {
+                  "weight": 1
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "screen",
+                    "value": "metric"
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "label": "{props.confirm}",
+                "style": {
+                  "weight": 1,
+                  "background": "#FF453A"
+                },
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "{props.event}"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "screen",
+                    "value": "metric"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "root": {
+    "type": "box",
+    "contentDescription": "45 mm watch screen",
+    "style": {
+      "width": {
+        "dp": 198
+      },
+      "height": {
+        "dp": 242
+      },
+      "cornerRadius": 40,
+      "background": "#000000"
+    },
+    "children": [
+      {
+        "type": "use",
+        "component": "watchMetric",
+        "props": {
+          "label": "Heart rate",
+          "value": "128",
+          "unit": "BPM",
+          "action": "End workout"
+        }
+      },
+      {
+        "type": "use",
+        "component": "watchConfirm",
+        "props": {
+          "question": "End this workout?",
+          "cancel": "Cancel",
+          "confirm": "End",
+          "event": "end-workout"
+        }
+      }
+    ]
+  }
+}

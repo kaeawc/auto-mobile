@@ -1,0 +1,166 @@
+{
+  "id": "watch-45mm-metric-confirm",
+  "window": {
+    "placement": {
+      "type": "floating",
+      "gravity": "center",
+      "offset": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  },
+  "state": {
+    "screen": "metric"
+  },
+  "root": {
+    "type": "box",
+    "contentDescription": "45 mm watch screen",
+    "style": {
+      "width": {
+        "dp": 198
+      },
+      "height": {
+        "dp": 242
+      },
+      "cornerRadius": 40,
+      "background": "#000000"
+    },
+    "children": [
+      {
+        "type": "column",
+        "visibleWhen": {
+          "key": "screen",
+          "equals": "metric"
+        },
+        "style": {
+          "width": "fill",
+          "height": "fill",
+          "padding": {
+            "start": 12,
+            "end": 12,
+            "top": 16,
+            "bottom": 12
+          },
+          "alignment": "center",
+          "arrangement": "spaceBetween"
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "Heart rate",
+            "style": {
+              "textSize": 15,
+              "color": "#FF375F"
+            }
+          },
+          {
+            "type": "text",
+            "text": "128",
+            "contentDescription": "{props.label}: {props.value} {props.unit}",
+            "style": {
+              "textSize": 56,
+              "fontWeight": 700,
+              "color": "#FFFFFF",
+              "textAlign": "center"
+            }
+          },
+          {
+            "type": "text",
+            "text": "BPM",
+            "style": {
+              "textSize": 15,
+              "color": "#AEAEB2"
+            }
+          },
+          {
+            "type": "button",
+            "label": "End workout",
+            "variant": "tonal",
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "screen",
+                "value": "confirm"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "column",
+        "visibleWhen": {
+          "key": "screen",
+          "equals": "confirm"
+        },
+        "style": {
+          "width": "fill",
+          "height": "fill",
+          "padding": {
+            "start": 12,
+            "end": 12,
+            "top": 20,
+            "bottom": 12
+          },
+          "alignment": "center",
+          "arrangement": "spaceBetween"
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "End this workout?",
+            "style": {
+              "textSize": 17,
+              "fontWeight": 600,
+              "color": "#FFFFFF",
+              "textAlign": "center"
+            }
+          },
+          {
+            "type": "row",
+            "style": {
+              "width": "fill",
+              "spacing": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "variant": "tonal",
+                "style": {
+                  "weight": 1
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "screen",
+                    "value": "metric"
+                  }
+                ]
+              },
+              {
+                "type": "button",
+                "label": "End",
+                "style": {
+                  "weight": 1,
+                  "background": "#FF453A"
+                },
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "end-workout"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "screen",
+                    "value": "metric"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

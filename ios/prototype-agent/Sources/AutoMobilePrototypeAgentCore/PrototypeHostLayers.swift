@@ -60,7 +60,7 @@ struct PrototypeHostAccessibility: Equatable, Sendable {
             self = .hidden
             return
         }
-        let dialogOpen = spec.root.blocksPage(state: session.state, pages: session.pages, stacks: session.stacks)
+        let dialogOpen = spec.root.blocksPage(state: session.state, pages: session.pages, stacks: session.stacks, data: spec.data)
         self.init(
             pageElementsHidden: dialogOpen,
             topIsModal: dialogOpen,

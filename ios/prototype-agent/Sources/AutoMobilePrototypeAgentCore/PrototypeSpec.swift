@@ -854,6 +854,8 @@ final class PrototypeNode: Decodable {
     let refresh: PrototypeScrollRefresh?
     let listRepeat: PrototypeListRepeat?
     let listRowTemplate: JSONValue?
+    /// Decoded modal nodes of this lazy list's rows, kept so their identity survives re-renders.
+    let lazyModalRows = PrototypeLazyModalRows()
     let header: PrototypeNode?
     let footer: PrototypeNode?
     let spacing: Double?

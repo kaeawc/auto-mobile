@@ -183,6 +183,30 @@
             )
         }
 
+        /// The window frame a modal bottom sheet lays out and draws its scrim in: the placement's
+        /// frame for a `sheet` or `floating` window, the whole window otherwise, shortened above a
+        /// software keyboard that does not move the window itself.
+        var modalSheetContainer: PrototypeRect {
+            let placement = spec?.window.placement
+            let content = hitRects.rect(key: "content").map {
+                PrototypeRect(x: $0.minX, y: $0.minY, width: $0.width, height: $0.height)
+            }
+            let originY = keyboardContainerFrame.map { Double($0.minY) } ?? Double(windowOrigin.y)
+            let top: Double? = nativePresentationActive() ? nil : keyboardFrame.flatMap {
+                $0.height > 0 ? Double($0.minY) - originY : nil
+            }
+            return PrototypeModalSheetFrame.container(
+                placementType: placement?.type ?? "",
+                edge: placement?.edge,
+                height: placement?.height,
+                contentFrame: content,
+                windowWidth: Double(windowSize.width),
+                windowHeight: Double(windowSize.height),
+                lift: keyboardLift,
+                keyboardTop: top
+            )
+        }
+
         /// Window-space rects that accept touches; everything else passes through to the app.
         @ObservationIgnored var hitRects = PrototypeHitRects()
 
@@ -316,7 +340,7 @@
         /// Re-arms snackbar timeouts against the snackbars the session now has open.
         private func syncSnackbarTimeouts() {
             let open = session.spec?.root
-                .openModals(state: session.state, pages: session.pages, stacks: session.stacks) ?? []
+                .openModals(state: session.state, pages: session.pages, stacks: session.stacks, data: session.spec?.data) ?? []
             snackbarTimeouts.sync(openModals: open)
         }
 

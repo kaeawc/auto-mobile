@@ -32,15 +32,24 @@ enum PrototypeLazyList {
         }
     }
 
-    static func row(node: PrototypeNode, data: [String: JSONValue]?, index: Int) throws -> Row? {
+    /// The row's template with its item bound and data resolved, before decoding.
+    static func resolvedRow(
+        node: PrototypeNode, data: [String: JSONValue]?, index: Int
+    )
+        -> (key: String, json: JSONValue)?
+    {
         guard let spec = node.listRepeat, let raw = node.listRowTemplate,
               case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: spec.items.path),
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
         let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
-        let resolved = PrototypeDataResolver.resolveRoot(bound, data: data)
-        let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved))
-        return Row(key: fields[spec.key]?.displayString ?? "", index: index, node: row)
+        return (fields[spec.key]?.displayString ?? "", PrototypeDataResolver.resolveRoot(bound, data: data))
+    }
+
+    static func row(node: PrototypeNode, data: [String: JSONValue]?, index: Int) throws -> Row? {
+        guard let resolved = resolvedRow(node: node, data: data, index: index) else { return nil }
+        let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved.json))
+        return Row(key: resolved.key, index: index, node: row)
     }
 
     static func rows(node: PrototypeNode, data: [String: JSONValue]?) throws -> [Row] {

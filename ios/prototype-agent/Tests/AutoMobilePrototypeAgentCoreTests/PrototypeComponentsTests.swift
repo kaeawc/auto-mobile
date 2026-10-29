@@ -331,6 +331,36 @@ final class PrototypeComponentsTests: XCTestCase {
         }
     }
 
+    func testOpenModalsCollectBottomSheetsDeclaredInLazyListRowTemplates() throws {
+        let loaded = try spec("""
+        {"id":"l","window":{"placement":{"type":"fullscreen"}},
+         "data":{"feed":{"items":[{"id":1},{"id":2}]}},
+         "root":{"type":"list","maxItems":2,"repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},
+          "children":[{"type":"column","children":[
+           {"type":"text","text":"Row {post.id}"},
+           {"type":"bottomSheet","openWhen":{"key":"open_{post.id}","equals":true},
+            "child":{"type":"text","text":"Sheet {post.id}"}}]}]}}
+        """)
+        let open: [String: JSONValue] = ["open_2": .bool(true)]
+        let first = loaded.root.openModals(state: open, pages: [:], data: loaded.data)
+        XCTAssertEqual(first.map { $0.openCondition?.key }, ["open_2"])
+        // The same node comes back while the row is unchanged, so view identity survives a re-render.
+        let again = loaded.root.openModals(state: open, pages: [:], data: loaded.data)
+        XCTAssertEqual(first.map(ObjectIdentifier.init), again.map(ObjectIdentifier.init))
+        XCTAssertTrue(loaded.root.openModals(state: [:], pages: [:], data: loaded.data).isEmpty)
+        XCTAssertTrue(loaded.root.openModals(state: open, pages: [:]).isEmpty, "no data, no rows")
+    }
+
+    func testLazyListWithoutModalTemplateContributesNoModals() throws {
+        let loaded = try spec("""
+        {"id":"l","window":{"placement":{"type":"fullscreen"}},
+         "data":{"feed":{"items":[{"id":1}]}},
+         "root":{"type":"list","maxItems":1,"repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},
+          "children":[{"type":"text","text":"Row {post.id}"}]}}
+        """)
+        XCTAssertTrue(loaded.root.openModals(state: [:], pages: [:], data: loaded.data).isEmpty)
+    }
+
     // MARK: Pickers and sliders
 
     func testTimeChangeStoresBothKeysInOneEvent() throws {

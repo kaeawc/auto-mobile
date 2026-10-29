@@ -13,6 +13,11 @@ struct PrototypeHitRects: Sendable {
         entries.values.contains { $0.values.contains { $0.contains(point) } }
     }
 
+    /// The reported rect for `key` (the union when several views share it), nil when none is on screen.
+    func rect(key: String) -> CGRect? {
+        entries[key]?.values.reduce(nil) { union, rect in union.map { $0.union(rect) } ?? rect }
+    }
+
     func layer(at point: CGPoint) -> PrototypeHostLayer? {
         var layer: PrototypeHostLayer?
         for (key, rects) in entries where rects.values.contains(where: { $0.contains(point) }) {

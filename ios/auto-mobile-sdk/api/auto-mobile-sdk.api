@@ -688,6 +688,25 @@ public protocol AutoMobileActionExecutor: AnyObject, Sendable
   public func observe() async -> AutoMobileObservationSnapshot
   public func perform(_ action: AutoMobileAction) async -> AutoMobileActionResult
 
+// Observation/AutoMobileObservationRegistry.swift
+public enum AutoMobileActionKind: String, CaseIterable, Codable, Sendable
+  case tap
+  case longPress
+  case swipe
+  case drag
+  case pinch
+  case insertText
+  case clearText
+  case back
+  case scroll
+  public var kind: AutoMobileActionKind
+public final class AutoMobileObservationRegistry: Sendable
+  public static let shared = AutoMobileObservationRegistry()
+  public func register( _ bridge: AutoMobileObservationBridge, supportedActions: Set<AutoMobileActionKind> = Set(AutoMobileActionKind.allCases) )
+  public func unregister()
+  public var bridge: AutoMobileObservationBridge?
+  public var state: ObservationBridgeState
+
 // OsEvents/AutoMobileNotificationObserver.swift
 public final class AutoMobileNotificationObserver: @unchecked Sendable
   public static let shared = AutoMobileNotificationObserver()
@@ -1065,6 +1084,17 @@ public struct SetNetworkFaultRulesBody: Codable, Sendable
 public struct SetMockRulesReply: Codable, Sendable
   public let rejected: [RejectedMockRule]?
   public init(rejected: [RejectedMockRule]?)
+
+// sdk-wire/ObservationWireModels.swift
+public struct ObservationBridgeState: Codable, Equatable, Sendable
+  public static let currentSchemaVersion = 1
+  public static let notRegisteredReason = "NOT_REGISTERED"
+  public let schemaVersion: Int
+  public let available: Bool
+  public let reason: String?
+  public let supportedActions: [String]
+  public init( schemaVersion: Int = ObservationBridgeState.currentSchemaVersion, available: Bool, reason: String? = nil, supportedActions: [String] = [] )
+  public static let notRegistered = ObservationBridgeState(available: false, reason: notRegisteredReason)
 
 // sdk-wire/SdkBounds.swift
 public enum BoundsArithmetic

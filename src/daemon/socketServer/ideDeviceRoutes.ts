@@ -111,6 +111,7 @@ export interface IdeDeviceRoutesPorts {
     execution: ActiveExecution,
     deviceId: string,
     holderSessionUuid: string | undefined,
+    ownerSignal: AbortSignal | undefined,
   ) => Promise<void>;
   /** Call through the server so protected instance overrides and spies still intercept. */
   listBootedDevicesForIdeAction: IdeDeviceRoutes["listBootedDevicesForIdeAction"];
@@ -537,6 +538,7 @@ export class IdeDeviceRoutes {
         execution,
         target.deviceId,
         target.holderSessionUuid,
+        ideMutation?.signal,
       );
       if (ideMutation) {
         // Tracked from here; stamped as session use only when the route dispatches (#11596).

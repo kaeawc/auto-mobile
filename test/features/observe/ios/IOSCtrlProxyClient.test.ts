@@ -416,7 +416,9 @@ describe("IOSCtrlProxyClient", function () {
     socket: CapturingWebSocket,
     type: string,
   ): Promise<Record<string, unknown>> => {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    // A microtask budget, not a timeout: each awaited hop between the probe reply and the send
+    // costs a few turns, so leave headroom for the capability lookup's internal awaits.
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       const message = socket.sentMessages
         .map((payload) => JSON.parse(payload))
         .find((payload) => payload.type === type);

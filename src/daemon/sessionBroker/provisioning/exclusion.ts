@@ -175,6 +175,9 @@ type RegistryState = LoadedSnapshot | AbsentSnapshot | UnreadableSnapshot | File
 // Shared by every exclusion view in this process; each registry path warns only once.
 const warnedUnsupportedPaths = new Set<string>();
 
+// Other views may still hold the same handle after its first reader closes it.
+const unsupportedRegistries = new WeakMap<BindingRegistry, BindingRegistrySchemaUnsupportedError>();
+
 /** Generic allocation stays strict for read failures, but unknown schemas use claim files. */
 export async function refreshAllocationBindingExclusion(
   exclusion: Pick<BindingExclusion, "refresh">,
@@ -340,6 +343,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
       throw this.unsupportedSchema;
     }
     let entries: ManagedDeviceEntry[];
+    let registry: BindingRegistry | undefined;
     if (this.registry === undefined && !this.registryExists()) {
       // A host that never served a managed binding has no registry: nothing is managed, and reading
       // must not create the file. This is "absent", not a successful read of the registry.
@@ -348,10 +352,13 @@ export class RegistryBindingExclusion implements BindingExclusion {
       return;
     }
     try {
-      entries = await (await this.openRegistryOnce()).snapshotManagedDevices();
+      registry = await this.openRegistryOnce();
+      await registry.assertSupportedSchema();
+      entries = await registry.snapshotManagedDevices();
     } catch (error) {
       if (error instanceof BindingRegistrySchemaUnsupportedError) {
         this.unsupportedSchema = error;
+        await this.dropUnsupportedRegistry(registry, error);
         throw error;
       }
       if (error instanceof BindingRegistryUpgradePendingError) {
@@ -390,34 +397,85 @@ export class RegistryBindingExclusion implements BindingExclusion {
     this.readFailed = false;
   }
 
-  private openRegistryOnce(): Promise<BindingRegistry> {
+  private async openRegistryOnce(): Promise<BindingRegistry> {
     this.registry ??= this.openRegistry().catch((error: unknown) => {
       // Let the next refresh retry the open instead of caching the failure.
       this.registry = undefined;
       throw error;
     });
-    return this.registry;
+    const registry = await this.registry;
+    const unsupported = unsupportedRegistries.get(registry);
+    if (unsupported) {
+      throw unsupported;
+    }
+    return registry;
+  }
+
+  private async dropUnsupportedRegistry(
+    registry: BindingRegistry | undefined,
+    error: BindingRegistrySchemaUnsupportedError,
+  ): Promise<void> {
+    this.registry = undefined;
+    if (!registry) {
+      return;
+    }
+    if (sharedHostRegistry?.handle === registry) {
+      sharedHostRegistry = undefined;
+    }
+    if (unsupportedRegistries.has(registry)) {
+      return;
+    }
+    unsupportedRegistries.set(registry, error);
+    try {
+      await registry.close();
+    } catch (closeError) {
+      // Preserve the typed schema refusal even if releasing the incompatible handle fails.
+      logger.warn("[Bindings] Failed to close unsupported registry", closeError);
+    }
   }
 }
 
-let sharedHostRegistry: Promise<BindingRegistry> | undefined;
+interface HostRegistryCache {
+  promise: Promise<BindingRegistry>;
+  handle?: BindingRegistry;
+}
+
+let sharedHostRegistry: HostRegistryCache | undefined;
 
 /**
  * The daemon's default: the host-wide SQLite registry, opened lazily on first use and shared by
  * every pool in this process. A failed open is retried on the next refresh.
  */
-export function createDefaultBindingExclusion(timer: Pick<Timer, "now">): BindingExclusion {
+export function createDefaultBindingExclusion(
+  timer: Pick<Timer, "now">,
+  sources: {
+    openRegistry?: () => Promise<BindingRegistry>;
+    registryExists?: () => boolean;
+  } = {},
+): BindingExclusion {
   return new RegistryBindingExclusion(
     () => {
-      sharedHostRegistry ??= openSqliteBindingRegistry({ migrate: false }).catch(
-        (error: unknown) => {
-          sharedHostRegistry = undefined;
-          throw error;
-        },
-      );
-      return sharedHostRegistry;
+      if (!sharedHostRegistry) {
+        const cached: HostRegistryCache = {
+          promise: (sources.openRegistry?.() ?? openSqliteBindingRegistry({ migrate: false })).then(
+            (registry) => {
+              cached.handle = registry;
+              return registry;
+            },
+            (error: unknown) => {
+              if (sharedHostRegistry === cached) {
+                sharedHostRegistry = undefined;
+              }
+              throw error;
+            },
+          ),
+        };
+        sharedHostRegistry = cached;
+      }
+      return sharedHostRegistry.promise;
     },
     timer,
-    () => sharedHostRegistry !== undefined || bindingRegistryFileExists(),
+    () =>
+      sharedHostRegistry !== undefined || (sources.registryExists ?? bindingRegistryFileExists)(),
   );
 }

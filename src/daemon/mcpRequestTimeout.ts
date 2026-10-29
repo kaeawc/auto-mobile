@@ -38,6 +38,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
+import { staticToolDeclaresDeviceResourceBudget } from "./staticToolDefinitions";
 import {
   asRecord,
   MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
@@ -530,16 +531,12 @@ function resolveLegacyStartDeviceBudgetMs(
   );
 }
 
-const DEVICE_RESOURCE_TOOLS: ReadonlySet<string> = new Set([
-  "setDeviceResources",
-  "reconcileDeviceResources",
-]);
-
+// The `deviceResourceBudget` trait (#15672) read from the committed tool definitions.
 function resolveDeviceResourceToolBudgetMs(
   toolName: unknown,
   argumentsRecord: Record<string, unknown>,
 ): number | undefined {
-  return DEVICE_RESOURCE_TOOLS.has(String(toolName))
+  return staticToolDeclaresDeviceResourceBudget(String(toolName))
     ? resolveDeviceResourceBudgetMs(argumentsRecord)
     : undefined;
 }

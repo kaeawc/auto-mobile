@@ -65,7 +65,11 @@ import {
   type UpdateBindingStateOptions,
   type UpdateBindingStateResult,
 } from "./bindingRegistry";
-import { assertBindingRegistryCurrent, migrateBindingRegistry } from "./bindingRegistryMigrations";
+import {
+  assertBindingRegistryCurrent,
+  assertSupportedRegistrySchema,
+  migrateBindingRegistry,
+} from "./bindingRegistryMigrations";
 import {
   assertOpenPhase,
   AssignmentRow,
@@ -221,7 +225,7 @@ export async function openSqliteBindingRegistry(
     }
     throw error;
   }
-  return new SqliteBindingRegistry(db, options);
+  return new SqliteBindingRegistry(db, options, dbPath);
 }
 
 export class SqliteBindingRegistry implements BindingRegistry {
@@ -231,9 +235,14 @@ export class SqliteBindingRegistry implements BindingRegistry {
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     options: SqliteBindingRegistryOptions = {},
+    private readonly dbPath: string = ":memory:",
   ) {
     this.timer = options.timer ?? defaultTimer;
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
+  }
+
+  assertSupportedSchema(): Promise<void> {
+    return assertSupportedRegistrySchema(this.db, this.dbPath);
   }
 
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */

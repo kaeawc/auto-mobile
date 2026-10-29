@@ -42893,6 +42893,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/deviceResourceBudget": true
     }
   },
   {
@@ -49304,6 +49307,9 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "automobile/deviceResourceBudget": true
     }
   },
   {

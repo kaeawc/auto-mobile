@@ -6,6 +6,7 @@ import {
   refreshAllocationBindingExclusion,
   bindingRefusal,
   RegistryBindingExclusion,
+  createDefaultBindingExclusion,
   runAsBindingReconciler,
 } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
@@ -39,6 +40,104 @@ describe("RegistryBindingExclusion", () => {
     opens++;
     return registry;
   };
+
+  test("a cached readable handle flips to files_only before another managed-device read", async () => {
+    await assignBindingDevice(registry, "ios", "BROKER");
+    const exclusion = exclusionOver(openFake);
+    const read = spyOn(registry, "snapshotManagedDevices");
+    const close = spyOn(registry, "close");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await exclusion.refresh();
+      expect(exclusion.holderOf({ platform: "ios", stableIds: ["BROKER"] })).toBeDefined();
+      const error = new BindingRegistrySchemaUnsupportedError("/fake/cached-flip.sqlite", [
+        "future",
+      ]);
+      registry.schemaError = error;
+      await exclusion.refresh();
+      await exclusion.refresh();
+      expect(exclusion.degraded()).toMatchObject({ ...error.toPayload(), mode: "files_only" });
+      expect(exclusion.holderOf({ platform: "ios", stableIds: ["BROKER"] })).toBeUndefined();
+      expect([...exclusion.stableIdsFor("ios")]).toEqual([]);
+      expect(exclusion.lastReadFailed()).toBe(false);
+      expect(registry.schemaProbes).toBe(2);
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(registry.isClosed()).toBe(true);
+      expect(opens).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      read.mockRestore();
+      close.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test.each(["requireCurrent", "refuseUpgradePending"] as const)(
+    "a cached handle becoming unsupported refuses %s and closes it",
+    async (option) => {
+      const exclusion = exclusionOver(openFake);
+      await exclusion.refresh();
+      const error = new BindingRegistrySchemaUnsupportedError(`/fake/cached-${option}.sqlite`, [
+        "future",
+      ]);
+      registry.schemaError = error;
+      await expect(exclusion.refresh({ [option]: true })).rejects.toBe(error);
+      expect(error).toMatchObject({ code: "registry_schema_unsupported", retryable: false });
+      expect(error.toPayload()).not.toHaveProperty("retryAfterMs");
+      expect(registry.isClosed()).toBe(true);
+      expect(opens).toBe(1);
+    },
+  );
+
+  test("readable handles are probed on loads and cached across repeated refreshes", async () => {
+    const exclusion = exclusionOver(openFake);
+    await exclusion.refresh();
+    await exclusion.refresh({ maxAgeMs: 1_000 });
+    expect(registry.schemaProbes).toBe(1);
+    timer.advanceTime(1_000);
+    await exclusion.refresh({ maxAgeMs: 1_000 });
+    await exclusion.refresh({ fresh: true });
+    expect(registry.schemaProbes).toBe(3);
+    expect(opens).toBe(1);
+    expect(registry.isClosed()).toBe(false);
+  });
+
+  test("dropping a shared handle clears the host cache and other views refuse before using the closed handle", async () => {
+    const error = new BindingRegistrySchemaUnsupportedError("/fake/shared-flip.sqlite", ["future"]);
+    const sources = {
+      openRegistry: async (): Promise<BindingRegistry> => {
+        opens++;
+        if (opens > 1) {
+          throw error;
+        }
+        return registry;
+      },
+      registryExists: () => true,
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const close = spyOn(registry, "close");
+    try {
+      const first = createDefaultBindingExclusion(timer, sources);
+      const second = createDefaultBindingExclusion(timer, sources);
+      await first.refresh();
+      await second.refresh();
+      expect(opens).toBe(1);
+      registry.schemaError = error;
+      await first.refresh();
+      expect(registry.isClosed()).toBe(true);
+      await expect(second.refresh({ requireCurrent: true })).rejects.toBe(error);
+      expect(registry.schemaProbes).toBe(3);
+      expect(close).toHaveBeenCalledTimes(1);
+      await expect(
+        createDefaultBindingExclusion(timer, sources).refresh({ requireCurrent: true }),
+      ).rejects.toBe(error);
+      expect(opens).toBe(2);
+    } finally {
+      close.mockRestore();
+      warn.mockRestore();
+    }
+  });
 
   test("unknown migrations use files only, warn once per path, and stay degraded until restart", async () => {
     const error = new BindingRegistrySchemaUnsupportedError("/fake/files-only.sqlite", [

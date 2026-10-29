@@ -39,6 +39,10 @@ Every simulator on the Mac shares these devices:
 - With one loopback device as both default input and output, a simulator's own playback also
   reaches its microphone.
 
+AutoMobile starts each emulator it boots with a gRPC port (`-grpc`) on a free host port from 8554
+to 8653, held while that emulator runs, so no extra launch flags are needed. A `-grpc` flag you
+pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments is used as given.
+
 ## injectAudioInput
 
 Plays audio into the microphone and returns as soon as it starts.

@@ -664,12 +664,14 @@ const ABSENT = {
   "ios-simulator": "99999999-2222-3333-4444-555555555555",
   "ios-physical": "00008110-001A2B3C4D5E6F78",
 } as const;
-const ALL_SOURCES: DiscoverySource[] = ["android", "ios-simulator", "ios-physical"];
+// The Android and iOS inventory sources this parity covers; watches have their own listing.
+const ALL_SOURCES = ["android", "ios-simulator", "ios-physical"] as const;
+type InventorySource = (typeof ALL_SOURCES)[number];
 
 interface Host {
   host: string;
-  notInstalled: DiscoverySource[];
-  failing: DiscoverySource[];
+  notInstalled: readonly InventorySource[];
+  failing: readonly InventorySource[];
 }
 
 type RowKind =
@@ -696,7 +698,7 @@ const hosts: Host[] = [
   { host: "everything failing", notInstalled: [], failing: ALL_SOURCES },
 ];
 
-const works = (host: Host, source: DiscoverySource) =>
+const works = (host: Host, source: InventorySource) =>
   !host.notInstalled.includes(source) && !host.failing.includes(source);
 
 // A transitional simulator needs a simctl that lists it; a probe failure needs an adb that listed
@@ -903,7 +905,7 @@ describe("every inventory surface gives one answer per discovery-source outcome 
         invalidateDeviceList: () => {},
       },
     });
-    const selectAbsent = (source: DiscoverySource) =>
+    const selectAbsent = (source: InventorySource) =>
       select({ deviceId: ABSENT[source], sessionUuid: "selection" }).then(
         () => [`${source}:selected`],
         (error: unknown) =>
@@ -976,7 +978,8 @@ describe("every inventory surface gives one answer per discovery-source outcome 
     );
     const notInstalled = cell.notInstalled.filter((source) => !vanished.includes(source));
     const complete = incomplete.length === 0;
-    const deviceListed = device !== undefined && !incomplete.includes(sourceOf(device));
+    const deviceListed =
+      device !== undefined && !incomplete.some((source) => source === sourceOf(device));
     const count = deviceListed ? (held ? 0 : 1) : complete ? 0 : "unknown";
     const refusal = { exit: 1, code: "discovery_incomplete" };
     const cli = (json: boolean) =>

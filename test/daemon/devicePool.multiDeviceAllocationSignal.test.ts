@@ -13,7 +13,8 @@ import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
  * Multi-device allocation runs under the caller's explicit signal, not the ambient one (#15671):
  * the entry point is the allocation's only ambient read (a caller passing no signal falls back to
  * it), and the chosen signal reaches the retry wait and each criteria attempt. A cancel mid-wait
- * ends the allocation at once; a call with no signal anywhere allocates as before.
+ * ends the allocation at once, and an attempt that succeeds after an abort its waits did not race
+ * rolls back (#15870); a call with no signal anywhere allocates as before.
  */
 for (const byCriteria of [false, true]) {
   describe(`${byCriteria ? "criteria" : "platform"} multi-device allocation signal`, () => {
@@ -130,6 +131,43 @@ for (const byCriteria of [false, true]) {
       expect(allocation.settled).toBe(true);
       expect(allocation.outcome).toEqual(new Map([["a", "d1"]]));
     });
+
+    arranged(
+      "an abort during a same-session release wait rolls back the succeeded attempt",
+      async () => {
+        // Hold the create's release wait, which does not race the caller's signal (#15870).
+        let settleReleaseWait: (settled: boolean) => void = () => {};
+        const releaseWait = spyOn(sessions, "waitForSessionReleaseWithin").mockImplementation(
+          () =>
+            new Promise<boolean>((resolve) => {
+              settleReleaseWait = resolve;
+            }),
+        );
+        try {
+          const controller = new AbortController();
+          const reason = new Error("cancelled during release wait");
+          const allocation = observe(allocate(controller.signal));
+          await drainUntilQuiescent(timer);
+          expect(releaseWait).toHaveBeenCalledTimes(1);
+          expect(allocation.settled).toBe(false);
+
+          controller.abort(reason);
+          await drainUntilQuiescent(timer);
+          expect(allocation.settled).toBe(false);
+          // The release settles while the session is still current: the attempt itself succeeds.
+          expect(sessions.getSession("a")?.assignedDevice).toBe("d1");
+          settleReleaseWait(true);
+          await drainUntilQuiescent(timer);
+
+          expect(allocation.settled).toBe(true);
+          expect(allocation.outcome).toBe(reason);
+          expect(sessions.getSession("a")).toBeNull();
+          expect(pool.getDevice("d1")?.sessionId).toBeNull();
+        } finally {
+          releaseWait.mockRestore();
+        }
+      },
+    );
 
     if (byCriteria) {
       arranged("each criteria attempt receives the caller's signal", async () => {

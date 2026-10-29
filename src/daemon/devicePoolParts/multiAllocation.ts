@@ -262,6 +262,9 @@ export class DevicePoolMultiAllocation {
       let result: Awaited<ReturnType<typeof allocate>>;
       try {
         result = await allocate();
+        // An abort that arrived during a wait the attempt does not race (a same-session release
+        // wait) must not keep the claims (#15870): the catch below rolls them back.
+        throwIfAllocationAborted(signal);
       } catch (error) {
         await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         throw error;
@@ -522,6 +525,9 @@ export class DevicePoolMultiAllocation {
               `  - Increase device allocation timeout`,
           );
         }
+        // A success whose signal aborted during an un-raced wait (a same-session release wait)
+        // rolls back through the finally below instead of keeping its claims (#15870).
+        throwIfAllocationAborted(signal);
         allocationCompleted = true;
       } finally {
         if (!allocationCompleted) {

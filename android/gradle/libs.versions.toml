@@ -9,7 +9,7 @@ build-android-compileSdk = "37"            # Used in playground Android modules
 build-android-minSdk = "24"                # Used in playground Android modules
 build-android-targetSdk = "37"             # Used in playground Android modules
 build-robolectric-maxSdk = "35"             # Highest SDK that runs on JDK 21 without extra JVM flags (Robolectric 4.17 registers 37, but SDK 36+ fails in ApplicationSharedMemory); raise when fixed
-build-android-agp = "9.4.1"
+build-android-agp = "9.5.0"
 
 # Kotlin versions
 build-kotlin = "2.4.21"

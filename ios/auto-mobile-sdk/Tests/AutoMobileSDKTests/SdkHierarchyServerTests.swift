@@ -522,7 +522,8 @@ final class SdkHierarchyServerTests: XCTestCase {
             receive()
         }
         connection.start(queue: queue)
-        wait(for: [responded], timeout: 5)
+        // A 1 MiB body can take several seconds on a loaded CI runner; the bound only caps a failure.
+        wait(for: [responded], timeout: 15)
         connection.cancel()
 
         return String(data: response.withLock { $0 }, encoding: .utf8) ?? ""

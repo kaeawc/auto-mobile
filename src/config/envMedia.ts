@@ -115,6 +115,12 @@ export const MEDIA_ENV = {
     default: "unset",
     doc: "Absolute path to a locally built screen-capture-helper.",
   },
+  IOS_AUDIO_LOOPBACK_HELPER: {
+    name: "AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER",
+    kind: "path",
+    default: "unset",
+    doc: "Absolute path to an audio-loopback-helper executable, for iOS Simulator audio tools.",
+  },
   ACTION_OBSERVATION_SKIP_SCREENSHOT: {
     name: "AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT",
     kind: "string",

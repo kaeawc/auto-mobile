@@ -1,0 +1,56 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "library": {
+        "recent": [],
+        "ticket": {},
+        "saved": {}
+      }
+    },
+    "state": {
+      "saveStatus": ""
+    },
+    "requires": {
+      "platform": ["mediaLibrary"],
+      "permissions": [
+        {
+          "name": "photos",
+          "purpose": "Show your recent photos"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Save ticket",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "mediaLibrary.save",
+              "args": {
+                "media": {
+                  "data": "/data/library/ticket"
+                },
+                "album": {
+                  "value": "Tickets"
+                }
+              },
+              "into": "/data/library/saved",
+              "statusKey": "saveStatus"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].call",
+  "expectedMessage": "Platform call mediaLibrary.save requires permission photosAdd in requires.permissions"
+}

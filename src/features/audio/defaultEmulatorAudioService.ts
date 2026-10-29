@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
+import { ENV } from "../../config/env";
 import { ActionableError } from "../../models/ActionableError";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
@@ -8,6 +9,8 @@ import { Http2GrpcTransport } from "../../utils/android-cmdline-tools/emulatorGr
 import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { audioSourceTooLarge, EmulatorAudioService } from "./EmulatorAudioService";
+import { HostLoopbackAudioSession } from "./HostLoopbackAudioSession";
+import { audioLoopbackHelperPath, spawnLoopbackHelper } from "./audioLoopbackHelper";
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -50,7 +53,10 @@ export async function readRegularFileCapped(path: string, maxBytes: number): Pro
   }
 }
 
-/** The service over each emulator's real gRPC endpoint, as discovered on this host. */
+/**
+ * The service over each emulator's real gRPC endpoint, as discovered on this host, and over the host
+ * loopback devices for iOS Simulators.
+ */
 export function createEmulatorAudioService(): EmulatorAudioService {
   const fs = new DefaultFileSystem();
   return new EmulatorAudioService({
@@ -59,6 +65,11 @@ export function createEmulatorAudioService(): EmulatorAudioService {
       new EmulatorAudioClient(
         new Http2GrpcTransport(endpoint.address),
         createGrpcAuthorizer(endpoint.auth, fs),
+      ),
+    createHostLoopbackSession: () =>
+      new HostLoopbackAudioSession(
+        { helperPath: () => audioLoopbackHelperPath(), launchHelper: spawnLoopbackHelper },
+        ENV.IOS_AUDIO_LOOPBACK_HELPER.name,
       ),
     readFile: readRegularFileCapped,
     ids: defaultIdGenerator,

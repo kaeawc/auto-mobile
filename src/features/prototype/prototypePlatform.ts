@@ -14,6 +14,7 @@ import {
   prototypeMediaReadValid,
   prototypeVideoPlayerError,
 } from "./prototypeMedia";
+import { prototypeMapError } from "./prototypeMap";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
 import {
@@ -189,6 +190,7 @@ const sortedKeys = (value: Raw): string[] =>
 export type PrototypePlatformUse =
   | { kind: "requires"; path: string }
   | { kind: "declared"; path: string; module: string }
+  | { kind: "node"; path: string; module: string }
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string }
   | { kind: "call"; path: string; action: Raw }
@@ -206,6 +208,10 @@ function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypeP
       path,
       action: { type: "platform", call: "clipboard.paste", into: object.into },
     });
+  }
+  if (object.type === "map") {
+    // A map node draws through the map module (#14309), so its gate names the node.
+    uses.push({ kind: "node", path, module: "map" });
   }
   if (object.type === "platform" && typeof object.call === "string") {
     uses.push({ kind: "call", path, action: object });
@@ -627,6 +633,7 @@ function rootBlockError(
     prototypeMediaError(root) ??
     prototypeMediaQueueError(root, check) ??
     prototypeVideoPlayerError(root) ??
+    prototypeMapError(root) ??
     prototypeMediaCaptionsError(root, check) ??
     requiresError(root)
   );
@@ -636,6 +643,7 @@ function rootBlockError(
 function usedModule(use: PrototypePlatformUse): string | undefined {
   switch (use.kind) {
     case "declared":
+    case "node":
       return use.module;
     case "handler":
       return prototypePlatformEventModule(use.event);

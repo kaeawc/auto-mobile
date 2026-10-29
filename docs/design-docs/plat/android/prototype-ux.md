@@ -309,6 +309,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | image           | neutral  | neutral  | —     |
 | list            | material | material | —     |
 | listItem        | material | material | —     |
+| map             | neutral  | neutral  | —     |
 | menu            | material | material | —     |
 | pager           | neutral  | neutral  | —     |
 | pasteButton     | native   | material | —     |
@@ -3686,14 +3687,13 @@ in `PrototypeEffectShaders`.
 
 ## Maps (#14308, design for the `map` node)
 
-The `map` node (#14309) is not in the contract yet; these are the owner-decided rules its contract and
-renderers (#14310, #14311) follow.
+These are the owner-decided rules the `map` node (#14309) and its renderers (#14310, #14311) follow.
 
 - **Backends.** A spec never names a tile URL or SDK. An optional `backend` defaults to `auto`: MapLibre on
   Android, MapKit on iOS. Google Maps is an Android opt-in backend, offered only when the runtime holds a
   host-configured key, because a disposable app's package and signature change per prototype and a key cannot
   be pre-restricted to them. MapLibre on iOS stays optional, for the offline style and pixel parity.
-- **Styles.** `style` is a closed list, never a URL. `plain` is the default: offline and deterministic (a
+- **Styles.** `mapStyle` is a closed list, never a URL (`style` is the shared node style). `plain` is the default: offline and deterministic (a
   background colour, an optional grid and graticule, then markers and polylines), with no network. CI and every
   screenshot test use it. `streets` draws tiles from the runtime's configured source. `satellite` is not offered
   until a source for it is chosen. On iOS, MapKit always fetches Apple tiles, so `plain` there is drawn by
@@ -3708,6 +3708,45 @@ renderers (#14310, #14311) follow.
   prototypes (#13622). With the switch off, `streets` falls back to `plain` with a visible "offline map" chip.
   Only the configured tile origin is contacted, and the runtime draws the data attribution outside spec
   control.
+
+The `map` node (#14309, contract only: no renderer draws it and no runtime advertises
+`prototype_platform_map_v1`) needs `map` in `requires.platform`:
+
+```json
+{
+  "type": "map",
+  "style": { "height": { "dp": 360 } },
+  "camera": { "data": "/camera" },
+  "markers": {
+    "path": "/drivers",
+    "as": "driver",
+    "id": "{driver.id}",
+    "lat": "{driver.lat}",
+    "lng": "{driver.lng}",
+    "title": "{driver.name}"
+  },
+  "onMarkerTap": [{ "type": "setState", "key": "selected", "value": "{driver.id}" }]
+}
+```
+
+- `camera` is a literal `{lat, lng, zoom, bearing?, tilt?}` (lat -90 to 90, lng -180 to 180, zoom 0 to
+  22, bearing 0 to 360, tilt 0 to 60) or `{data}`, a `/data` pointer to such an object. `fit` is `none`,
+  `markers` or `route`; `mapStyle` is `plain` (default) or `streets`.
+- `markers` draws one marker per item of the `/data` array at `path`, bound under `as`. `id`, `lat`, `lng`,
+  `title` (also the accessibility label) and the optional `heading` (degrees clockwise from north) are
+  templates resolved per item. `icon` is a Material icon name. `animateMs` (0 to 2000) eases a moved marker.
+  Every marker is an accessibility node with the identifier `<mapId>/marker/<id>`, so `observe` and `tapOn`
+  reach it.
+- `polylines` (1 to 8) each draw the `{lat, lng}` points of the `/data` array at `path`, with an optional
+  `width` (1 to 16) and `color`.
+- `onMarkerTap` runs with the tapped marker's item bound under `as`. `onCameraIdle.into` is a `/data/<pointer>`
+  path that receives the settled camera.
+- `showUserLocation: true` reads the `location` module, so it also needs `location` in `requires.platform`
+  and the `location` permission in `requires.permissions`.
+- The `map` module has no calls or state. Its events `map.markerTap` and `map.cameraIdle` exist so a
+  simulation can deliver them.
+- Checked when the map is drawn, not at validation: at most 500 markers and 2000 polyline points in total,
+  and marker ids unique within the resolved data.
 
 ## Charts (#14209, not device-verified)
 

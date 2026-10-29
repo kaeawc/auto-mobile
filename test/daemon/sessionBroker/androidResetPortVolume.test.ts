@@ -7,6 +7,7 @@ import type {
   MutationValue,
 } from "../../../src/daemon/sessionBroker/mutations/types";
 import { createExecResult } from "../../../src/utils/execResult";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 const KEY_PRESS_LEVELS: Record<string, number> = {
@@ -14,11 +15,12 @@ const KEY_PRESS_LEVELS: Record<string, number> = {
   notification: 5,
   system: 7,
   assistant: 5,
+  tts: 11,
+  accessibility: 6,
   voice_call: 4,
   ring: 5,
   alarm: 6,
   music: 9,
-  accessibility: 6,
 };
 
 const WITHOUT_MUSIC = Object.fromEntries(
@@ -39,7 +41,7 @@ describe("AndroidDeviceMutationResetPort volume (#14364)", () => {
 
   beforeEach(() => {
     adb = new FakeAdbExecutor();
-    port = new AndroidDeviceMutationResetPort(adb);
+    port = new AndroidDeviceMutationResetPort(adb, new FakeTimer());
     context = {
       scope: { deviceId: "emulator-5554", incarnation: "resource", sessionUuid: "session" },
       signal: new AbortController().signal,
@@ -53,9 +55,9 @@ describe("AndroidDeviceMutationResetPort volume (#14364)", () => {
     expect(port.canRevert(mutation)).toBe(true);
     expect(androidBaselineCleanCovers(mutation)).toBe(false);
     await port.revert(mutation, context);
-    expect(adb.getExecutedCommands()).toEqual([
-      `shell sh -c 'cmd media_session volume --stream 2 --set 5 >/dev/null 2>&1; cmd media_session volume --stream 2 --get 2>/dev/null | grep -q "volume is 5 in range" && echo volume-restored'`,
-    ]);
+    const [command] = adb.getExecutedCommands();
+    expect(command).toContain("cmd audio set-volume 2 5");
+    expect(command).toContain('grep -q "volume is 5 in range" && echo volume-restored');
   });
 
   test("a level that does not read back fails the revert", async () => {
@@ -65,25 +67,30 @@ describe("AndroidDeviceMutationResetPort volume (#14364)", () => {
     );
   });
 
-  test("a key press sets every stream, aliases before music, and only verifies accessibility", async () => {
+  test("a key press sets every stream including TTS and accessibility, aliases before music", async () => {
     adb.setCommandResponse("volume --stream", createExecResult("volume-restored", ""));
     const mutation = row("volume:key-press", KEY_PRESS_LEVELS);
     expect(port.canRevert(mutation)).toBe(true);
     await port.revert(mutation, context);
     const [command] = adb.getExecutedCommands();
-    const sets = [...command!.matchAll(/--stream (\d+) --set (\d+)/g)].map((m) => [m[1], m[2]]);
+    const sets = [...command!.matchAll(/cmd audio set-volume (\d+) (\d+)/g)].map((m) => [
+      m[1],
+      m[2],
+    ]);
     expect(sets).toEqual([
       ["6", "7"],
       ["5", "5"],
       ["1", "7"],
       ["11", "5"],
+      ["9", "11"],
+      ["10", "6"],
       ["0", "4"],
       ["2", "5"],
       ["4", "6"],
       ["3", "9"],
     ]);
     const checks = [...command!.matchAll(/--stream (\d+) --get[^|]*\| grep -q "volume is (\d+) /g)];
-    expect(checks.map((m) => [m[1], m[2]])).toEqual([...sets, ["10", "6"]]);
+    expect(checks.map((m) => [m[1], m[2]])).toEqual(sets);
   });
 
   test.each<[string, string, MutationValue]>([
@@ -101,6 +108,16 @@ describe("AndroidDeviceMutationResetPort volume (#14364)", () => {
       "a key press missing a stream",
       "volume:key-press",
       { state: "present", value: WITHOUT_MUSIC },
+    ],
+    [
+      "an older key press without TTS",
+      "volume:key-press",
+      {
+        state: "present",
+        value: Object.fromEntries(
+          Object.entries(KEY_PRESS_LEVELS).filter(([stream]) => stream !== "tts"),
+        ),
+      },
     ],
     [
       "a key press with an extra stream",

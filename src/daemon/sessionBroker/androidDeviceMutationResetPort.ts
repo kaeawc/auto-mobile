@@ -46,7 +46,7 @@ interface AndroidRevertCommand {
   wakeSleptScreen?: boolean;
 }
 
-/** A key-press volume revert runs one `cmd media_session` per stream set and per read-back. */
+/** A key-press volume revert sets and reads every stream, with a legacy setter fallback. */
 const VOLUME_REVERT_TIMEOUT_MS = 10_000;
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
 type AndroidRevertAdapter = (mutation: DeviceMutationInput) => AndroidRevertCommand[] | null;

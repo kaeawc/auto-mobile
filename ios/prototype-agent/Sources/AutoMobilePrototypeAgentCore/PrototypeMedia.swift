@@ -18,14 +18,17 @@ enum PrototypeMedia {
         }
     }
 
-    /// Ids of node-scoped players: every `videoPlayer` with an inline `source`, keyed by its id. The
-    /// walk may visit literal JSON too; an id it adds there only widens the names a call may use.
+    /// Ids of node-scoped players: every `videoPlayer` with an inline `source`, keyed by its id.
+    /// `{value}` literals and opaque fields (an emit `payload`, `data`, a request `body`) are not
+    /// walked, so a videoPlayer-shaped value an action carries never declares a player.
     static func inlinePlayers(_ value: JSONValue) -> Set<String> {
         switch value {
         case let .array(items):
             return items.reduce(into: Set<String>()) { $0.formUnion(inlinePlayers($1)) }
         case let .object(fields):
-            var found = fields.values.reduce(into: Set<String>()) { $0.formUnion(inlinePlayers($1)) }
+            if fields.count == 1, fields["value"] != nil { return [] }
+            var found = fields.filter { !PrototypeContractValidator.stringOpaqueFields.contains($0.key) }
+                .values.reduce(into: Set<String>()) { $0.formUnion(inlinePlayers($1)) }
             if fields["type"] == .string("videoPlayer"), fields["source"] != nil,
                let id = fields["id"]?.stringValue { found.insert(id) }
             return found

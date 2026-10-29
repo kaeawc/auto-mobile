@@ -991,6 +991,7 @@
     "media-video-player-bad-autoplay.json",
     "media-video-player-bad-content-scale.json",
     "media-video-player-both-sources.json",
+    "media-video-player-ghost-payload.json",
     "media-video-player-inline-id-not-key.json",
     "media-video-player-inline-id-repeats-player.json",
     "media-video-player-inline-without-id.json",

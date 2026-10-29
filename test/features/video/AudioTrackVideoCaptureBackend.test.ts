@@ -31,10 +31,22 @@ function config(audio: boolean): VideoCaptureConfig {
   };
 }
 
-function setup(
-  options: { muxFails?: boolean; ffmpegMissing?: boolean; innerStartFails?: boolean } = {},
-) {
+interface SetupOptions {
+  muxFails?: boolean;
+  ffmpegMissing?: boolean;
+  innerStartFails?: boolean;
+  audioStopFails?: boolean;
+  pcmWriteFails?: boolean;
+  /** Holds the video stop until the returned release is called. */
+  holdVideoStop?: boolean;
+}
+
+function setup(options: SetupOptions = {}) {
   const events: string[] = [];
+  let releaseVideoStop: () => void = () => {};
+  const videoStopHeld = new Promise<void>((resolve) => {
+    releaseVideoStop = resolve;
+  });
   let clock = 1_000;
   const files = new Map<string, number[]>();
   const removed: string[] = [];
@@ -55,6 +67,9 @@ function setup(
     },
     stop: async (handle): Promise<RecordingResult> => {
       events.push("video-stop");
+      if (options.holdVideoStop) {
+        await videoStopHeld;
+      }
       return { recordingId: handle.recordingId, outputPath: handle.outputPath, sizeBytes: 42 };
     },
     forceStop: async () => {
@@ -71,6 +86,9 @@ function setup(
           sampleRate: 48_000,
           stop: async () => {
             events.push("audio-stop");
+            if (options.audioStopFails) {
+              throw new Error("emulator refused capture");
+            }
           },
         };
       },
@@ -92,7 +110,13 @@ function setup(
       files.set(path, []);
       return {
         write: (chunk) => files.get(path)?.push(...chunk),
-        close: async () => files.get(path)?.length ?? 0,
+        close: async () => {
+          events.push("pcm-close");
+          if (options.pcmWriteFails) {
+            throw new Error("ENOSPC: no space left on device");
+          }
+          return files.get(path)?.length ?? 0;
+        },
       };
     },
     removeFile: async (path) => {
@@ -106,6 +130,7 @@ function setup(
     files,
     removed,
     muxed,
+    releaseVideoStop,
     emit: (bytes: number[]) => sink?.(Uint8Array.from(bytes)),
   };
 }
@@ -130,6 +155,7 @@ describe("AudioTrackVideoCaptureBackend", () => {
       "video-start",
       "video-stop",
       "audio-stop",
+      "pcm-close",
     ]);
     expect(muxed).toEqual([
       {
@@ -163,7 +189,7 @@ describe("AudioTrackVideoCaptureBackend", () => {
   test("a video that fails to start stops the audio and removes its file", async () => {
     const { backend, events, removed } = setup({ innerStartFails: true });
     await expect(backend.start(config(true))).rejects.toThrow("screenrecord failed");
-    expect(events).toEqual(["audio-start:emulator-5554", "video-start", "audio-stop"]);
+    expect(events).toEqual(["audio-start:emulator-5554", "video-start", "audio-stop", "pcm-close"]);
     expect(removed).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
   });
 
@@ -171,7 +197,44 @@ describe("AudioTrackVideoCaptureBackend", () => {
     const { backend, events, removed } = setup();
     const handle = await backend.start(config(true));
     await backend.forceStop(handle);
-    expect(events.slice(-2)).toEqual(["audio-stop", "video-force-stop"]);
+    expect(events.slice(-3)).toEqual(["audio-stop", "pcm-close", "video-force-stop"]);
     expect(removed).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
+  });
+
+  test("an audio stop that fails still closes the PCM file before removing it", async () => {
+    const { backend, events, removed, muxed } = setup({ audioStopFails: true });
+    const result = await backend.stop(await backend.start(config(true)));
+    expect(result.hasAudioTrack).toBe(false);
+    expect(result.warnings).toEqual(["The recording has no audio track: emulator refused capture"]);
+    expect(events.slice(-2)).toEqual(["audio-stop", "pcm-close"]);
+    expect(removed).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
+    expect(muxed).toEqual([]);
+  });
+
+  test("a failed PCM write is reported instead of muxing a short track", async () => {
+    const { backend, muxed } = setup({ pcmWriteFails: true });
+    const result = await backend.stop(await backend.start(config(true)));
+    expect(result.hasAudioTrack).toBe(false);
+    expect(result.warnings).toEqual([
+      "The recording has no audio track: ENOSPC: no space left on device",
+    ]);
+    expect(muxed).toEqual([]);
+  });
+
+  test("a force stop while the video is still stopping stops the audio right away", async () => {
+    const { backend, events, removed, muxed, releaseVideoStop } = setup({ holdVideoStop: true });
+    const handle = await backend.start(config(true));
+    const stopping = backend.stop(handle);
+    await Promise.resolve();
+    await backend.forceStop(handle);
+    expect(events.slice(-3)).toEqual(["audio-stop", "pcm-close", "video-force-stop"]);
+    expect(removed).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
+    releaseVideoStop();
+    const result = await stopping;
+    expect(result.hasAudioTrack).toBe(false);
+    expect(result.warnings).toEqual([
+      "The recording has no audio track: it was force-stopped while stopping.",
+    ]);
+    expect(muxed).toEqual([]);
   });
 });

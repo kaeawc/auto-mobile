@@ -82,7 +82,12 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   track padded with silence to the video's length (`apad` + `-shortest`). An empty capture becomes
   `anullsrc`. The muxed file replaces the original.
 - A failed capture or mux keeps the video, sets `hasAudioTrack: false` and adds a warning; a failed
-  start or a force stop discards the PCM file.
+  start or a force stop discards the PCM file. A `streamAudio` call that ends with a status other
+  than OK or CANCELLED is a failed capture even after some audio arrived, and so is a PCM file
+  write error (kept from the first failed write and raised at close). The PCM file is closed
+  before it is removed on every path, including a failed audio stop.
+- A force stop that arrives while the video is still finalizing stops the audio and discards its
+  file right away; the pending stop then reports `hasAudioTrack: false`.
 - ffmpeg is probed at start, so a host without it is refused before anything is captured.
 - Segmented Android recordings (over 180 s) refuse `audio`: the track would need stitching across
   segments.

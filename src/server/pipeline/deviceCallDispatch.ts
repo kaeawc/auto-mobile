@@ -227,7 +227,12 @@ export async function unidentifiedToolTargetRow(
     return undefined;
   }
   const knownDevice = input.device ?? pool.getDevice(input.deviceId);
-  if (input.platform === "ios" || knownDevice?.platform === "ios") {
+  // Only an Android transport id needs a synthetic row; iOS and watch ids never do.
+  if (
+    input.platform === "ios" ||
+    input.platform === "watchos" ||
+    (knownDevice && knownDevice.platform !== "android")
+  ) {
     return undefined;
   }
   const synthetic: BootedDevice = {

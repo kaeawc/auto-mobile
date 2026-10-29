@@ -94,7 +94,8 @@ export class DeviceAutoStart {
     deadlineMs: number,
     platform?: Platform,
   ): Promise<number> {
-    if (!platform || requiredCount <= 0) {
+    // Watches start only through an explicit startDevice, never as pool capacity (#14908).
+    if (!platform || platform === "watchos" || requiredCount <= 0) {
       return 0;
     }
 

@@ -67,4 +67,12 @@ describe("DevicePool with an Apple Watch", () => {
   test("a watch request takes the watch", async () => {
     expect(await pool.assignDeviceToSession("watch-1", "watchos")).toBe(WATCH.deviceId);
   });
+
+  test("auto-start never boots watches as pool capacity", async () => {
+    const started = await pool.testHooks.startAdditionalDevices(1, timer.now() + 1_000, "watchos");
+
+    expect(started).toBe(0);
+    expect(utils.getListDeviceImagesCalls()).toEqual([]);
+    expect(utils.getGetDeviceImagesDetailedCalls()).toEqual([]);
+  });
 });

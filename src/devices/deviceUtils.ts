@@ -928,7 +928,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: BootedDevice,
     options?: DeviceShutdownOptions,
   ): Promise<BootedDevice | void> {
-    switch (device.platform) {
+    switch (requireAndroidOrIosPlatform(device.platform, "killDevice")) {
       case "android":
         return this.emulator.killDevice(device, options);
       case "ios":

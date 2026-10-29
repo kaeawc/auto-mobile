@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import {
   openSqliteBindingRegistry,
@@ -38,7 +38,17 @@ describe("idle pool expiry", () => {
   let options: SessionBrokerOptions;
   let broker: SessionBroker;
 
-  beforeEach(async () => {
+  // The first broker cycle in a process pays one-time module and SQLite warm-up; run it here so
+  // the timed tests measure only their own work.
+  beforeAll(async () => {
+    await setUp();
+    await pooled("warm-up");
+    await tearDown();
+  });
+
+  beforeEach(() => setUp());
+
+  async function setUp(): Promise<void> {
     timer = new FakeTimer();
     registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
@@ -67,12 +77,14 @@ describe("idle pool expiry", () => {
       timer,
     };
     broker = new SessionBroker(options);
-  });
+  }
 
-  afterEach(async () => {
+  async function tearDown(): Promise<void> {
     await broker.close();
     await registry.close();
-  });
+  }
+
+  afterEach(() => tearDown());
 
   async function pooled(requestId: string, platform?: "ios" | "android"): Promise<string> {
     const result = await broker.prepare(config(requestId, platform), "owner-token");

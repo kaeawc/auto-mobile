@@ -525,7 +525,12 @@ export function registerNetworkTools(): void {
     "Control network capture and error simulation.",
     networkSchema,
     createNetworkHandler(state),
-    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: networkResultSchema },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      outputSchema: networkResultSchema,
+      changesHostSideState: true,
+    },
   );
 
   // --- mockNetwork ---
@@ -558,7 +563,12 @@ export function registerNetworkTools(): void {
         ...deviceSyncFields(syncResult),
       });
     },
-    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: mockNetworkResultSchema },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      outputSchema: mockNetworkResultSchema,
+      changesHostSideState: true,
+    },
   );
 
   // --- clearMockNetwork ---
@@ -594,7 +604,12 @@ export function registerNetworkTools(): void {
         ...deviceSyncFields(syncResult),
       });
     },
-    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: clearMockNetworkResultSchema },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      outputSchema: clearMockNetworkResultSchema,
+      changesHostSideState: true,
+    },
   );
 
   // --- getNetworkGraph ---

@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 
 /** Failures throw, so these results always describe a completed call. */
-const route = z.literal("emulator-grpc");
+const route = z.enum(["emulator-grpc", "host-loopback"]);
 
 export const injectAudioInputResultSchema = z
   .object({

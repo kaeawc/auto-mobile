@@ -1,0 +1,67 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "library": {
+        "recent": [],
+        "ticket": {},
+        "saved": {}
+      }
+    },
+    "state": {
+      "saveStatus": ""
+    },
+    "requires": {
+      "platform": ["mediaLibrary"],
+      "permissions": [
+        {
+          "name": "photos",
+          "purpose": "Show your recent photos"
+        },
+        {
+          "name": "photosAdd",
+          "purpose": "Save your ticket to Photos"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Save ticket",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "mediaLibrary.save",
+              "args": {
+                "media": {
+                  "data": "/data/library/ticket"
+                },
+                "album": {
+                  "value": "Tickets"
+                }
+              },
+              "into": "/data/library/saved",
+              "statusKey": "saveStatus"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_platform_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_mediaLibrary_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_mediaLibrary_save_v1"
+}

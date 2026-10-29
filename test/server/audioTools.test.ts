@@ -28,7 +28,11 @@ import { FakeEmulatorAudioSession } from "../fakes/FakeEmulatorAudioSession";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const emulator: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
-const simulator: BootedDevice = { name: "sim", platform: "ios", deviceId: "UDID-1" };
+const physicalIos: BootedDevice = {
+  name: "iPhone",
+  platform: "ios",
+  deviceId: "00008110-001A2B3C4D5E801E",
+};
 
 function structured(response: unknown): unknown {
   return (response as { structuredContent?: unknown }).structuredContent;
@@ -143,13 +147,13 @@ describe("audio tools (#13628, #13629)", () => {
     expect(sessions).toHaveLength(0);
   });
 
-  test("iOS is refused for injection and capture", async () => {
-    await expect(createInjectAudioInputHandler(deps)(simulator, { tone: {} })).rejects.toThrow(
-      "Android emulators only",
-    );
-    await expect(createCaptureAudioHandler(deps)(simulator, { seconds: 1 })).rejects.toThrow(
-      "Android emulators only",
-    );
+  test("a physical iOS device has no route for injection or capture", async () => {
+    await expect(
+      createInjectAudioInputHandler(deps)(physicalIos, { tone: {} }),
+    ).rejects.toMatchObject({ code: "audio_injection_unsupported" });
+    await expect(
+      createCaptureAudioHandler(deps)(physicalIos, { seconds: 1 }),
+    ).rejects.toMatchObject({ code: "audio_capture_unsupported" });
   });
 
   test("a session's injection stops when the session is released", async () => {
@@ -199,7 +203,7 @@ describe("audio tools (#13628, #13629)", () => {
     await manager.releaseSession("session-1", "explicit-release");
     await expect(
       createInjectAudioInputHandler(deps)(emulator, { tone: {}, sessionUuid: "session-1" }),
-    ).rejects.toThrow("Cannot inject emulator audio");
+    ).rejects.toThrow("Cannot inject audio");
     expect(sessions).toHaveLength(0);
   });
 

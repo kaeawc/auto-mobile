@@ -1,0 +1,89 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "library": {
+        "recent": [],
+        "ticket": {},
+        "saved": {}
+      }
+    },
+    "state": {
+      "saveStatus": ""
+    },
+    "requires": {
+      "platform": ["mediaLibrary"],
+      "permissions": [
+        {
+          "name": "photos",
+          "purpose": "Show your recent photos"
+        },
+        {
+          "name": "photosAdd",
+          "purpose": "Save your ticket to Photos"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Recent",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "mediaLibrary.query",
+              "args": {
+                "media": {
+                  "value": "audio"
+                },
+                "limit": {
+                  "value": 24
+                }
+              },
+              "into": "/data/library/recent"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Choose more photos",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "mediaLibrary.manageLimitedSelection",
+              "args": {}
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Save ticket",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "mediaLibrary.save",
+              "args": {
+                "media": {
+                  "data": "/data/library/ticket"
+                },
+                "album": {
+                  "value": "Tickets"
+                }
+              },
+              "into": "/data/library/saved",
+              "statusKey": "saveStatus"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].args.media.value"
+}

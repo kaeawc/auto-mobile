@@ -205,10 +205,11 @@ object PrototypeSpecValidator {
           else
             storedStateError(stored, stateRule, value, keyframeKeys)
               // Node rules run before binding checks, as platform rules do in full validation.
-              ?: JsonObject(value + ("state" to stored)).let {
-                PrototypeMedia.videoPlayerError(it, videoPlayers)
-                  ?: PrototypeCameraPreview.error(it, cameraPreviews)
-              }
+              ?: mediaNodeError(
+                JsonObject(value + ("state" to stored)),
+                videoPlayers,
+                cameraPreviews,
+              )
               ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")
@@ -216,6 +217,15 @@ object PrototypeSpecValidator {
       }
     }
   }
+
+  /** The state-dependent media node rules: a videoPlayer positionKey and cameraPreview keys. */
+  private fun mediaNodeError(
+    root: JsonObject,
+    videoPlayers: List<PrototypeStateChecks.Located>,
+    cameraPreviews: List<PrototypeStateChecks.Located>,
+  ): PrototypeSpecError? =
+    PrototypeMedia.videoPlayerError(root, videoPlayers)
+      ?: PrototypeCameraPreview.error(root, cameraPreviews)
 
   /** The verdict for a decoded state write against the spec it replaces the state of. */
   private fun storedStateError(

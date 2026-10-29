@@ -55,6 +55,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_window_controls_v1",
             // Contract only; the keyboard dismiss runtime is owed (#14320).
             "prototype_hide_keyboard_v1",
+            // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
+            "prototype_platform_cast_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
             // Contract only; the Keychain-backed secure storage runtime is owed (#14321).
@@ -65,6 +67,9 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_notifications_v1",
             // Contract only; the media players and video renderers are owed (#14255, #14256).
             "prototype_platform_media_v1",
+            "prototype_platform_camera_capture_v1",
+            // Contract only; the live camera runtime is owed (#14203, #14204).
+            "prototype_platform_camera_video_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

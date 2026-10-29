@@ -559,6 +559,28 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
   prototype_platform_camera_v1: {
     minimalSpec: {
       ...base,
+      requires: {
+        platform: ["camera"],
+        permissions: [{ name: "camera", purpose: "Take a photo" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "camera.takePhoto", args: { preview: { value: "vf" } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_camera_capture_v1: {
+    minimalSpec: {
+      ...base,
       requires: { platform: ["camera"] },
       root: {
         ...base.root,
@@ -573,7 +595,33 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       },
     },
     ops: [],
-    with: ["prototype_platform_v1"],
+    with: ["prototype_platform_v1", "prototype_platform_camera_v1"],
+  },
+  prototype_platform_camera_video_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["camera"],
+        permissions: [{ name: "camera", purpose: "Record a clip" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "camera.startRecording",
+                args: { preview: { value: "vf" } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_camera_v1"],
   },
   prototype_platform_audioRecorder_v1: {
     minimalSpec: {
@@ -624,6 +672,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
             onTap: [{ type: "platform", call: "media.play", args: { player: { value: "main" } } }],
           },
         ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_cast_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["cast"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, onTap: [{ type: "platform", call: "cast.stop", args: {} }] }],
       },
     },
     ops: [],

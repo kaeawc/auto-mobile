@@ -329,6 +329,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | textField       | material | material | —     |
 | timePicker      | native   | material | —     |
 | topAppBar       | material | material | —     |
+| videoPlayer     | material | material | —     |
 
 ### Light and dark values
 
@@ -2121,11 +2122,12 @@ reports `fallback`. The result has no `handler`. The Simulator has no Phone or M
 permission and write device media items (see "Device media items") to `into`.
 `mediaLibrary` (`prototype_platform_mediaLibrary_v1`) has `mediaLibrary.pick` with `media` (required:
 `images`, `videos` or `imagesAndVideos`) and `maxItems` (optional whole number 1-64, default 1; 1 writes one
-item, more writes an array; Android clamps it to `MediaStore.getPickImagesMaxLimit()`). `camera`
-(`prototype_platform_camera_v1`) has `camera.capture` with `media` (required: `image` or `video`) and
-`maxDurationMs` (optional whole number 1-600000, used only for video). They are separate modules, so a
-device that has a picker but no camera (an iOS Simulator) advertises only `mediaLibrary`. Both calls are
-`sensitive` and have no events or `/platform` state. A cancel leaves `into` untouched and runs `onError`
+item, more writes an array; Android clamps it to `MediaStore.getPickImagesMaxLimit()`). `camera.capture`
+has `media` (required: `image` or `video`) and `maxDurationMs` (optional whole number 1-600000, used
+only for video), and needs `prototype_platform_camera_capture_v1` on top of the `camera` module's
+`prototype_platform_camera_v1`. A device with a picker but no system camera (an iOS Simulator)
+advertises `mediaLibrary` and not the capture capability. Both calls are `sensitive`;
+`mediaLibrary` has no events or `/platform` state. A cancel leaves `into` untouched and runs `onError`
 with `cancelled`; other codes are `unavailable` (no camera; detail `missing_usage_description` when the iOS
 plist key is missing), `platform_error` (detail `media_limit` or `io`) and `too_many_in_flight` (one
 system-UI call per prototype at a time). No production runtime advertises either module yet.
@@ -2265,8 +2267,52 @@ Its events are `media.statusChanged`, `media.ended` and `media.error`. State is 
 `/platform/media/players/<id>/<key>`: `playing`, `positionMs`, `durationMs` (`-1` while unknown),
 `buffering`, `status` (`idle`, `loading`, `ready`, `ended`, `error`) and `error`
 (`source_not_found`, `decode`, `network`, `unsupported_format`, `blocked_egress`). A read must name
-a declared player and one of those keys. The `videoPlayer` node, the asset transport and the
-renderers are separate slices; no production runtime advertises the module yet.
+a declared player and one of those keys. The asset transport and the renderers are separate
+slices; no production runtime advertises the module yet.
+
+The `videoPlayer` node renders exactly one of a declared `player` or an inline `source` (the same
+one-key union), which is a node-scoped player released when the node leaves composition:
+
+```json
+{ "type": "videoPlayer", "player": "main", "autoplay": "whenVisible", "muted": true }
+```
+
+- An inline player is addressed by the node `id`, which must be a state key that no declared
+  player uses; `media.*` calls and `/platform/media/players/<id>` reads accept it like a declared
+  id.
+- Optional fields: `poster` (an image asset id), `controls` (`builtin` or `none`), `contentScale`
+  (`fit`, `crop`, `fill`), `autoplay` (`true`, `false` or `"whenVisible"`), `muted`, `loop`,
+  `startMs` (0-86400000) and `positionKey`, a declared number state key the device mirrors the
+  position into; a slider bound to it holds device writes while it is dragged and seeks on release.
+- Every `videoPlayer` needs `media` in `requires.platform`. Authored controls are ordinary nodes
+  calling `media.*`.
+
+**Live camera (#14202, calls only).** The `camera` module also drives an in-app viewfinder:
+`camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
+`maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes
+`preview`, the id of the viewfinder it acts on, needs `camera` in `requires.permissions` and is
+`sensitive`; the viewfinder node itself is a separate slice. Recording also needs
+`prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
+`/platform/camera/status` state report `starting`, `ready`, `capturing`, `recording`, `unavailable`,
+`permission_denied` or `error`; `/platform/camera/flashAvailable`, `recordingMs` and `source`
+(`camera` or `injected`, the fake frame source on a Simulator) complete the state.
+
+**Per-call capabilities.** A `platformModules` call may name a `capability` it needs on top of its
+module's, named `prototype_platform_<module>_<op>_vN`. The host, Kotlin and Swift validators add it to
+a spec's required capabilities wherever the call appears, so a runtime can offer a module but refuse
+one of its operations (camera recording, system capture, media queues).
+
+**Casting (#14239, module only).** The `cast` module (`prototype_platform_cast_v1`) covers Google
+Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote-only controls:
+`cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
+app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
+`media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
+`unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
+`sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
+`receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
+`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
+cast `media` player id) and `volume`. CtrlProxy never advertises the module; the `castButton` node is a
+separate slice.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

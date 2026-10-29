@@ -40,3 +40,26 @@ export const prototypeMediaSchema = z
   })
   .strict();
 export type PrototypeMedia = z.infer<typeof prototypeMediaSchema>;
+
+/**
+ * The `videoPlayer` node's own fields (#14253): exactly one of a declared `player` or an inline
+ * `source` (checked in `prototypeMedia.ts`), plus how it is drawn and started.
+ */
+const videoPlayerShape = {
+  type: z.enum(["videoPlayer"]),
+  player: keySchema.optional(),
+  source: prototypeMediaSourceSchema.optional(),
+  poster: z.string().min(1).max(128).optional(),
+  controls: z.enum(["builtin", "none"]).optional(),
+  contentScale: z.enum(["fit", "crop", "fill"]).optional(),
+  autoplay: z.union([z.boolean(), z.literal("whenVisible")]).optional(),
+  muted: z.boolean().optional(),
+  loop: z.boolean().optional(),
+  startMs: z.number().int().min(0).max(86_400_000).optional(),
+  positionKey: keySchema.optional(),
+};
+
+/** The `videoPlayer` node schema: the shared node fields plus its own. */
+export function prototypeVideoPlayerSchema<T extends z.ZodRawShape>(common: T) {
+  return z.object({ ...common, ...videoPlayerShape }).strict();
+}

@@ -392,6 +392,7 @@ never readied: reads use what is already installed, and control is refused.
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
 | `accessibility`         | Yes                                         | Yes                                         |
+| `captureAudio`          | No: booted-only verification                | No: booted-only verification                |
 | `clipboard`             | Yes                                         | Yes                                         |
 | `compareScreenshot`     | Yes                                         | Yes                                         |
 | `displayConfig`         | Yes                                         | Yes                                         |

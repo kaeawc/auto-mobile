@@ -44,6 +44,14 @@ is only worth building if some supported environment cannot reach the gRPC port.
 - `loop`, `startDelayMs` and `maxDurationMs` are client-side. `stop()` cancels the stream
   (RST_STREAM CANCEL) rather than half-closing it, because a write can be blocked on
   back-pressure. It is idempotent and resolves with the frames sent.
+- `EmulatorAudioService` owns live injections, one gRPC connection each, keyed by injection id
+  and recording the starting session. Session release and unbind stop that session's injections
+  as pending device cleanup, and a session acquiring a device stops the sessionless ones on it,
+  so the next owner never gets a microphone still being fed. A start that finishes after its
+  session's release committed is stopped by the tool itself. The last 64 ended injections keep
+  their result (or failure) for a later `stopAudioInput`, which must name the same device.
+- Source files are read through a handle with a byte cap and must be regular files, so a device
+  file or a file that grows while being read cannot exceed the 50 MB limit.
 
 ## Capture
 

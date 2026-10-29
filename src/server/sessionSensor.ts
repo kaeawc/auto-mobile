@@ -7,6 +7,19 @@ export type SessionSensorHost = Pick<
   "getSession" | "isAdmittedForAutomation" | "trackSessionSetup"
 >;
 
+/** How the refusals name the change; the sensor wording is the default. */
+export interface SessionMutationWording {
+  /** Completes "Cannot …": e.g. "change an emulator sensor". */
+  action: string;
+  /** Names the change: e.g. "sensor change". */
+  change: string;
+}
+
+const SENSOR_WORDING: SessionMutationWording = {
+  action: "change an emulator sensor",
+  change: "sensor change",
+};
+
 /**
  * Admit a `setSensor` write against the session's device and track it as session
  * setup (#14114), as `runSessionLocationMutation` does for location: release
@@ -19,6 +32,7 @@ export async function runSessionSensorMutation<T>(
   sessionUuid: string | undefined,
   deviceId: string,
   mutation: (owner?: string) => Promise<T>,
+  wording: SessionMutationWording = SENSOR_WORDING,
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
     return mutation();
@@ -30,7 +44,7 @@ export async function runSessionSensorMutation<T>(
     session.assignedDevice !== deviceId
   ) {
     throw new ActionableError(
-      "Cannot change an emulator sensor: session is released, releasing, rebound, or replaced.",
+      `Cannot ${wording.action}: session is released, releasing, rebound, or replaced.`,
     );
   }
   let completed = false;
@@ -41,7 +55,7 @@ export async function runSessionSensorMutation<T>(
   });
   if (!completed) {
     throw new ActionableError(
-      "Session began releasing or rebinding before the sensor change started; nothing was changed.",
+      `Session began releasing or rebinding before the ${wording.change} started; nothing was changed.`,
     );
   }
   return result;

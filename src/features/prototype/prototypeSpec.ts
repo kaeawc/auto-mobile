@@ -2,7 +2,7 @@ import { buildAdaptiveSchema, adaptiveChildren, type AdaptiveSlots } from "./pro
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
 import { prototypeAuthSchema } from "./prototypeAuthSchema";
 import { prototypeLocationBlockSchema } from "./prototypeLocationBlockSchema";
-import { prototypeMediaSchema } from "./prototypeMediaSchema";
+import { prototypeMediaSchema, prototypeVideoPlayerSchema } from "./prototypeMediaSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
@@ -549,6 +549,7 @@ const progressBaseSchema = z
   })
   .strict();
 const chartBaseSchema = z.object({ ...commonNodeShape, ...prototypeChartShape }).strict();
+const videoPlayerBaseSchema = prototypeVideoPlayerSchema(commonNodeShape);
 const dialogBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -741,6 +742,7 @@ export type PrototypeNode =
   | z.infer<typeof dividerBaseSchema>
   | z.infer<typeof badgeBaseSchema>
   | z.infer<typeof progressBaseSchema>
+  | z.infer<typeof videoPlayerBaseSchema>
   | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof tooltipBaseSchema>
@@ -823,6 +825,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       dividerBaseSchema,
       badgeBaseSchema,
       progressBaseSchema,
+      videoPlayerBaseSchema,
       chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       tooltipBaseSchema,

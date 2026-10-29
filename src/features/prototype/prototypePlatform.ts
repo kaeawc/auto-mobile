@@ -10,6 +10,7 @@ import {
   prototypeMediaError,
   prototypeMediaPlayers,
   prototypeMediaReadValid,
+  prototypeVideoPlayerError,
 } from "./prototypeMedia";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
@@ -74,6 +75,11 @@ export interface PrototypePlatformCall {
   background: string[];
   /** Calls and events touching personal data, for the threat model (#14293). */
   sensitive: boolean;
+  /**
+   * A capability the call needs on top of its module's, so a runtime can offer a module but
+   * refuse one of its operations (camera recording, media queues).
+   */
+  capability?: string;
 }
 /** One key of a module's read-only `/platform/<module>` state (#15245). */
 export interface PrototypePlatformStateEntry {
@@ -609,6 +615,7 @@ function rootBlockError(root: Raw): PrototypePlatformError | undefined {
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
     prototypeMediaError(root) ??
+    prototypeVideoPlayerError(root) ??
     requiresError(root)
   );
 }
@@ -699,8 +706,45 @@ export function prototypePlatformUnsupportedMessage(
   return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, "the platform vocabulary");
 }
 
-/** One generated gate per module in the `platformModules` table. */
-export const PROTOTYPE_PLATFORM_MODULE_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(
+/** Authored paths of calls whose definition names `capability` on top of its module's. */
+export function prototypePlatformCallCapabilityFields(spec: unknown, capability: string): string[] {
+  return unique(
+    authoredUses(spec)
+      .filter(
+        (use) =>
+          use.kind === "call" &&
+          prototypePlatformCall(use.action.call)?.definition.capability === capability,
+      )
+      .map((use) => use.path),
+  );
+}
+
+/** The per-call capabilities in module order, each with the calls that need it. */
+const callCapabilities = (): { capability: string; calls: string[] }[] => {
+  const byCapability = new Map<string, string[]>();
+  for (const [name, definition] of Object.entries(PROTOTYPE_PLATFORM_MODULES)) {
+    for (const [op, call] of Object.entries(definition.calls)) {
+      if (call.capability) {
+        byCapability.set(call.capability, [
+          ...(byCapability.get(call.capability) ?? []),
+          `${name}.${op}`,
+        ]);
+      }
+    }
+  }
+  return [...byCapability].map(([capability, calls]) => ({ capability, calls }));
+};
+
+/** One generated gate per per-call capability, after the module gates. */
+const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, calls }) => ({
+  capability,
+  fields: (spec: unknown) => prototypePlatformCallCapabilityFields(spec, capability),
+  unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+    unsupported(fields, platform, capability, calls.map((call) => `\`${call}\``).join(" or ")),
+}));
+
+/** One generated gate per module in the `platformModules` table, then one per call capability. */
+const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(
   ([name, definition]) => [
     {
       capability: definition.capability,
@@ -725,6 +769,11 @@ export const PROTOTYPE_PLATFORM_MODULE_GATES = Object.entries(PROTOTYPE_PLATFORM
       : []),
   ],
 );
+
+export const PROTOTYPE_PLATFORM_MODULE_GATES = [
+  ...PROTOTYPE_PLATFORM_MODULE_ONLY_GATES,
+  ...PROTOTYPE_PLATFORM_CALL_GATES,
+];
 
 function argumentValueError(
   action: Raw,

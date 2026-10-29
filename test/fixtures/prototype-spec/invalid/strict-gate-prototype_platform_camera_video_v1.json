@@ -1,0 +1,73 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "photo": {},
+        "clip": {}
+      }
+    },
+    "state": {
+      "camStatus": ""
+    },
+    "requires": {
+      "platform": ["camera"],
+      "permissions": [
+        {
+          "name": "camera",
+          "purpose": "Take a photo for your story"
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "camera.statusChanged": [
+          {
+            "type": "emit",
+            "name": "camera_status"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Record",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "camera.startRecording",
+              "args": {
+                "preview": {
+                  "value": "vf"
+                },
+                "audio": {
+                  "value": false
+                },
+                "maxDurationMs": {
+                  "value": 15000
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_platform_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_camera_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_camera_video_v1"
+}

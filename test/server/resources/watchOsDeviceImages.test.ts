@@ -141,15 +141,11 @@ describe("watchOS device images", () => {
   test("an iOS read is unchanged by watch runtimes and models on the host", async () => {
     simctl.setRuntimes(capturedRuntimes);
     simctl.setDeviceTypes(capturedDeviceTypes);
-    const { lastUpdated: _before, ...withoutWatch } = await handler().getDeviceImagesForPlatforms([
-      "ios",
-    ]);
+    const withoutWatch = await handler().getDeviceImagesForPlatforms(["ios"]);
     hostWithWatchCatalog();
-    const { lastUpdated: _after, ...withWatch } = await handler().getDeviceImagesForPlatforms([
-      "ios",
-    ]);
+    const withWatch = await handler().getDeviceImagesForPlatforms(["ios"]);
 
-    expect(withWatch).toEqual(withoutWatch);
+    expect({ ...withWatch, lastUpdated: "" }).toEqual({ ...withoutWatch, lastUpdated: "" });
     expect(withWatch).not.toHaveProperty("watchosCount");
   });
 

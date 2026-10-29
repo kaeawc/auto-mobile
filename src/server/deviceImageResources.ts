@@ -255,6 +255,21 @@ interface DeviceImageResourcesDependencies {
 }
 
 /**
+ * Tests often inject only the Android/device seam. Avoid creating a real simctl client in those
+ * partial fakes; production construction always includes it.
+ */
+function simulatorSources(deps: Partial<DeviceImageResourcesDependencies> | undefined): {
+  simctl: DeviceImageResourcesDependencies["simctl"] | undefined;
+  watchInventory: DeviceImageResourcesDependencies["watchInventory"] | undefined;
+} {
+  if (deps) {
+    return { simctl: deps.simctl, watchInventory: deps.watchInventory };
+  }
+  const simctl = new SimCtlClient();
+  return { simctl, watchInventory: new WatchSimulatorInventory(simctl) };
+}
+
+/**
  * Create a DeviceImageResourcesHandler with injected dependencies.
  * Constructor injection is the single DI seam for this resource handler:
  * production wiring passes real implementations, tests pass fakes.
@@ -268,12 +283,7 @@ export function createDeviceImageResourcesHandler(
 } {
   const deviceManager = deps?.deviceManager ?? PlatformDeviceManagerFactory.getInstance();
   const avdManager = deps?.avdManager ?? new AvdManagerService();
-  // Tests often inject only the Android/device seam. Avoid creating a real simctl
-  // client in those partial fakes; production construction always includes it.
-  const productionSimctl = deps ? undefined : new SimCtlClient();
-  const simctl = deps?.simctl ?? productionSimctl;
-  const watchInventory =
-    deps?.watchInventory ?? (productionSimctl && new WatchSimulatorInventory(productionSimctl));
+  const { simctl, watchInventory } = simulatorSources(deps);
   const timer = deps?.timer ?? defaultTimer;
   const androidCatalogBudgetMs =
     deps?.androidCatalogBudgetMs ?? ANDROID_PROVISIONING_CATALOG_BUDGET_MS;
@@ -298,9 +308,7 @@ export function createDeviceImageResourcesHandler(
               timer,
               androidCatalogBudgetMs,
             )
-          : platform === "ios"
-            ? await buildIosResourceResult(deviceManager, simctl)
-            : await buildWatchOsResourceResult(watchInventory),
+          : await buildSimulatorResourceResult(platform, deviceManager, simctl, watchInventory),
       );
     }
     const images = platformResults.flatMap((result) => result.images);
@@ -469,6 +477,17 @@ async function buildIosResourceResult(
     catalogObservation: catalog.observation,
     inventoryObservation: images.observation,
   };
+}
+
+function buildSimulatorResourceResult(
+  platform: "ios" | "watchos",
+  deviceManager: DeviceImageDiscoveryManager,
+  simctl: DeviceImageResourcesDependencies["simctl"] | undefined,
+  watchInventory: DeviceImageResourcesDependencies["watchInventory"] | undefined,
+): Promise<PlatformResourceResult> {
+  return platform === "ios"
+    ? buildIosResourceResult(deviceManager, simctl)
+    : buildWatchOsResourceResult(watchInventory);
 }
 
 /** Apple Watch simulators and their catalog; read only for `automobile:devices/images/watchos`. */

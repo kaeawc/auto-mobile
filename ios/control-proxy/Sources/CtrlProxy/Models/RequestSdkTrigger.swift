@@ -11,3 +11,13 @@ public struct RequestSdkTrigger: Decodable, Sendable {
 }
 
 extension RequestSdkTrigger: CommandPayload {}
+
+/// `request_sdk_action`: perform one observation-bridge action in the foreground app's in-app SDK
+/// (#5159). `actionJson` is one JSON-encoded `AutoMobileAction`, relayed as a string like
+/// `RequestSdkTrigger.payloadJson`, so the request wire stays flat.
+public struct RequestSdkAction: Decodable, Sendable {
+    public var requestId: String?
+    public var actionJson: String?
+}
+
+extension RequestSdkAction: CommandPayload {}

@@ -31,6 +31,7 @@ portable test/utils/coreSimulatorDeviceSetEnvConstant.test.ts            # sourc
 portable test/utils/ios-cmdline-tools/DeviceAppManagerLaunchPreconditions.drift.test.ts # drift guard that reads source
 portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo wire scanner plus a Windows path-separator guard
 portable test/features/observe/ios/observationBridgeState.test.ts        # pure parser plus the capability probe over fakes
+portable test/features/observe/ios/CtrlProxySdkObservation.test.ts      # delegate and decoder over the delegate harness
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
 portable test/features/storage/iosStorageDiscovery.test.ts           # pure parsing of the SDK storage capability payload

@@ -196,6 +196,10 @@ export interface WebSocketMessage {
   capabilities?: string[];
   /** sdk_capabilities_result: the app's observation-bridge state (#5159), parsed by the probe. */
   observationBridge?: unknown;
+  /** sdk_observation_result / sdk_action_result (#5159): the relayed bridge values and failure code. */
+  observation?: unknown;
+  result?: unknown;
+  failure?: string;
   data?: XCTestHierarchy;
   /** True when a hierarchy response contains a previous runner capture. */
   servedFromCache?: boolean;
@@ -539,6 +543,27 @@ export interface CtrlProxySdkTriggerResult extends BaseResult {
   reason?: string;
   registeredModules?: string[];
   supportedTriggers?: string[];
+}
+
+/** `request_sdk_observation` (#5159): the foreground app's observation-bridge snapshot. */
+export interface CtrlProxySdkObservationResult extends BaseResult {
+  /** False when no bridge answered; a runner that predates the command also sets `unsupported`. */
+  available: boolean;
+  observation?: import("./sdkObservationBridge").IosSdkObservation;
+  failure?: import("./sdkObservationBridge").IosSdkBridgeFailure;
+  unsupported?: boolean;
+}
+
+/**
+ * `request_sdk_action` (#5159): the bridge's result for one action. A bridge rejection (stale
+ * observation, element not actionable, unsupported action, overload, cancellation) is a `result`
+ * with `success: false`, never a `failure`.
+ */
+export interface CtrlProxySdkActionResult extends BaseResult {
+  available: boolean;
+  result?: import("./sdkObservationBridge").IosSdkActionResult;
+  failure?: import("./sdkObservationBridge").IosSdkBridgeFailure;
+  unsupported?: boolean;
 }
 
 /** Direct SDK responder call; no VoiceOver gesture or enabled-state requirement. */

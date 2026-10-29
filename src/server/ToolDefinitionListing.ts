@@ -5,6 +5,20 @@ import { serverConfig } from "../utils/ServerConfig";
 import { RegisteredTool, ToolListingOptions, withItemsEnum } from "./toolRegistryTypes";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import { TOOL_ANNOTATIONS } from "./toolAnnotations";
+/**
+ * Registration flags advertised as `true` under a `_meta` key: plan-only, debug-only and
+ * embedded-SDK-only gating, plus the traits the daemon reads from the committed definitions.
+ */
+const BOOLEAN_META_FLAGS = [
+  ["planOnly", "automobile/planOnly"],
+  ["debugOnly", "automobile/debugOnly"],
+  ["embeddedSdkOnly", "automobile/embeddedSdkOnly"],
+  ["deviceResourceBudget", "automobile/deviceResourceBudget"],
+  ["hostInventory", "automobile/hostInventory"],
+  ["changesHostSideState", "automobile/hostSideState"],
+  ["changesOpaquePersistentState", "automobile/opaquePersistentState"],
+] as const satisfies readonly (readonly [keyof RegisteredTool, string])[];
+
 export class ToolDefinitionListing {
   constructor(
     private readonly getAllTools: (options: ToolListingOptions) => RegisteredTool[],
@@ -64,6 +78,8 @@ export class ToolDefinitionListing {
           "automobile/deviceReadOnly"?: boolean;
           "automobile/deviceResourceBudget"?: boolean;
           "automobile/hostInventory"?: boolean;
+          "automobile/hostSideState"?: boolean;
+          "automobile/opaquePersistentState"?: boolean;
           "automobile/deviceReadOnlyArgs"?: readonly DeviceReadOnlyArgShape[];
           ui?: { resourceUri: string };
         };
@@ -87,24 +103,13 @@ export class ToolDefinitionListing {
       if (alwaysLoad) {
         definition._meta = { ...definition._meta, "anthropic/alwaysLoad": true };
       }
-      // The committed static catalog includes unavailable tools for schema
-      // completeness. Preserve enough generated metadata for the proxy to
-      // exclude plan-only tools after a live connection is available.
-      if (tool.planOnly) {
-        definition._meta = { ...definition._meta, "automobile/planOnly": true };
-      }
-      if (tool.debugOnly) {
-        definition._meta = { ...definition._meta, "automobile/debugOnly": true };
-      }
-      if (tool.embeddedSdkOnly) {
-        definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
-      }
-      // Request-budget trait for processes that cannot load the registry (#15672).
-      if (tool.deviceResourceBudget) {
-        definition._meta = { ...definition._meta, "automobile/deviceResourceBudget": true };
-      }
-      if (tool.hostInventory) {
-        definition._meta = { ...definition._meta, "automobile/hostInventory": true };
+      // Boolean registration flags advertised as `_meta` keys, in this order. The committed static
+      // catalog includes unavailable tools for schema completeness; these keys let processes that
+      // cannot load the registry (the proxy, the daemon) read gating and trait flags (#15672).
+      for (const [flag, key] of BOOLEAN_META_FLAGS) {
+        if (tool[flag]) {
+          definition._meta = { ...definition._meta, [key]: true };
+        }
       }
       // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
       if (tool.deviceReadOnly === true) {

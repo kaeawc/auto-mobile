@@ -103,6 +103,20 @@ such as a double tap (`fallbackReason: unsupported`). Every other result fails c
 bridge's reason: `stale_observation`, `unknown_element`, `element_not_actionable`,
 `action_in_flight`, `action_queue_overloaded`, `action_cancelled`, `app_not_active`, `bad_reply`,
 and a timeout after the action may have run. Tapping whatever XCTest now finds at those
-coordinates could act on a different element. A focus tap issued by `sendKeys` is not routed yet.
+coordinates could act on a different element.
+
+**sendKeys.** When the field `sendKeys` focused is a bridge node, its text entry goes through the
+bridge's `insertText` and its clear (the `clear` command and the clear before a replace) through
+`clearText`, under the same fallback and fail-closed rules as `tapOn`. Each command result reports
+`backend` and, for an XCTest stand-in, `fallbackReason`; a command that used both reports the
+fallback. The focus tap itself stays on XCTest, so an XCTest stand-in finds the field focused as
+usual, and the typed text is verified by read-back as for XCTest typing. IME actions have no
+bridge form: on a bridge field they run through XCTest and report `fallbackReason: unsupported`.
+`sendKeys` without a selector has no resolved field, so it stays on XCTest.
+
+Any capture moves the bridge's current observation, and the bridge rejects an action naming an older
+one. So sendKeys keeps the field's element id, takes the capture identity of every observation it
+reads and of every accepted action, and reads the screen once before its first bridge action if
+nothing has been read since focus.
 
 WKWebView DOM nodes (#5162) extend the same observation under their WKWebView node.

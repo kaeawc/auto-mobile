@@ -156,8 +156,9 @@ screen position, so with two or more the pairing is ambiguous and they stay XCTe
 visible DOM element of the merged snapshot is attached as a
 child of its `WKWebView` node, offset by the web view's origin, clipped to it and rounded to whole
 points; one wholly outside the web view is dropped. Elements map onto the existing attributes
-(`label` → `content-desc`, `value` → `text`, `role` → `class`; `enabled` elements are `clickable`)
-and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
+(`label` → `content-desc`, `value` → `text`, `role` → `class`; `enabled` elements are `clickable`;
+text entry roles such as `input` and `textarea` report `role: textfield`, so focus and `sendKeys`
+targeting treat them as editable) and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
 `web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with
 the same bounds and the same label or value as a DOM element are removed as duplicates. A web view
 without a snapshot (none posted yet, a disallowed origin, a terminated process) keeps only its

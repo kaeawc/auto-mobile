@@ -20,6 +20,19 @@ export { WEB_SNAPSHOT_ID_ATTRIBUTE };
 export const WEB_ELEMENT_ID_ATTRIBUTE = "web-element-id";
 export const WEB_ORIGIN_ATTRIBUTE = "web-origin";
 
+/**
+ * DOM roles of text entry fields. They are reported with `role: textfield`, as an XCTest text field
+ * would be, so focus and sendKeys targeting still treat a merged field as editable after its XCTest
+ * duplicate is removed. A snapshot carries no input type, so a non-text `<input>` counts too.
+ */
+const EDITABLE_WEB_ROLES: ReadonlySet<string> = new Set([
+  "input",
+  "textarea",
+  "textbox",
+  "searchbox",
+  "combobox",
+]);
+
 /** The class CtrlProxy reports for a WKWebView in the XCTest hierarchy. */
 const WEB_VIEW_CLASS = "WKWebView";
 
@@ -140,7 +153,7 @@ function convertElement(
   return {
     $: {
       class: role,
-      role,
+      role: EDITABLE_WEB_ROLES.has(role) ? "textfield" : role,
       bounds,
       enabled: String(element.enabled),
       [WEB_VIEW_ID_ATTRIBUTE]: webViewId,

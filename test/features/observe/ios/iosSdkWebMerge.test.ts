@@ -6,7 +6,8 @@ import {
 } from "../../../../src/features/observe/ios/iosSdkWebMerge";
 import type { IosSdkWebSnapshot } from "../../../../src/features/observe/ios/sdkWebViewBridge";
 import { hashHierarchyForSettle } from "../../../../src/features/observe/wait/WaitSettle";
-import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
+import type { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
+import { isFocusEditableElement } from "../../../../src/features/utility/ElementResolverNodes";
 import { hierarchyFingerprint } from "../../../../src/utils/hierarchyFingerprint";
 
 const webViewBounds = { left: 0, top: 100, right: 400, bottom: 800 };
@@ -161,5 +162,32 @@ describe("web snapshot identity and change detection (#5162)", () => {
       { webViewId: "checkout", snapshot: snapshot([{ ...submit, label: "Paid" }]) },
     ]);
     expect(hierarchyFingerprint(moved)).not.toBe(hierarchyFingerprint(first));
+  });
+});
+
+describe("editable DOM fields (#5162)", () => {
+  test("text entry roles stay editable for focus and sendKeys targeting", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "email", role: "input", label: "Email", bounds: [0, 0, 200, 40] },
+          { ...submit, id: "notes", role: "textarea", label: "Notes", bounds: [0, 50, 200, 40] },
+          { ...submit, id: "pay", role: "button", label: "Pay", bounds: [0, 100, 200, 40] },
+        ]),
+      },
+    ]);
+    const roles = attached(findWebViewNodes(hierarchy)[0]).map((element) => [
+      element.class,
+      element.role,
+    ]);
+    expect(roles).toEqual([
+      ["input", "textfield"],
+      ["textarea", "textfield"],
+      ["button", "button"],
+    ]);
+    const [email] = attached(findWebViewNodes(hierarchy)[0]);
+    expect(isFocusEditableElement(email as Element)).toBe(true);
   });
 });

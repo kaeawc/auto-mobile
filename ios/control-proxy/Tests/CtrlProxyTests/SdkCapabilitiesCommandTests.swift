@@ -390,6 +390,42 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
         XCTAssertNil(json["rejectedMockIds"])
     }
 
+    // MARK: - Observation-bridge discovery (#5159)
+
+    func testCapabilitiesCarryTheSdkObservationBridgeState() async throws {
+        let bridge = ObservationBridgeState(available: true, supportedActions: ["tap", "back"])
+        let sdk = FakeSdkHierarchyClient(
+            serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app", observationBridge: bridge)
+        )
+        let response = try await handler(foregroundBundleId: "com.example.app", sdkClient: sdk).handle(
+            request(#"{"type":"get_sdk_capabilities"}"#)
+        ) as? SdkCapabilitiesResponse
+        XCTAssertEqual(response?.observationBridge, bridge)
+    }
+
+    func testOldSdkOmitsTheObservationBridgeFromTheReply() async throws {
+        let sdk = FakeSdkHierarchyClient(serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"))
+        let response = try await handler(foregroundBundleId: "com.example.app", sdkClient: sdk).handle(
+            request(#"{"type":"get_sdk_capabilities"}"#)
+        ) as? SdkCapabilitiesResponse
+        let encoded = try JSONEncoder().encode(XCTUnwrap(response))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNil(object["observationBridge"])
+    }
+
+    func testServerInfoDecodesTheBridgeAndToleratesAMalformedOne() throws {
+        let bridgeJson = #"{"schemaVersion":1,"available":false,"reason":"NOT_REGISTERED","supportedActions":[]}"#
+        let valid = Data((#"{"status":"ok","bundleId":"a","observationBridge":"# + bridgeJson + "}").utf8)
+        XCTAssertEqual(
+            try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: valid).observationBridge,
+            .notRegistered
+        )
+        let malformed = Data(#"{"status":"ok","bundleId":"a","observationBridge":{"available":"yes"}}"#.utf8)
+        let info = try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: malformed)
+        XCTAssertNil(info.observationBridge)
+        XCTAssertEqual(info.bundleId, "a")
+    }
+
     func testOldSdkDoesNotAdvertiseMagicTap() async throws {
         let sdk = FakeSdkHierarchyClient(serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"))
         let response = try await handler(foregroundBundleId: "com.example.app", sdkClient: sdk).handle(

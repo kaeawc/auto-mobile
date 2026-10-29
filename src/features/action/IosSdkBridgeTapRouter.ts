@@ -5,8 +5,14 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import type { IosSdkBridgeClient } from "../observe/ios/IosSdkBridgeReader";
 import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
+import { iosSdkWebTarget } from "../observe/ios/iosSdkWebMerge";
 import type { IosSdkAction } from "../observe/ios/sdkObservationBridge";
 import type { CtrlProxySdkActionResult } from "../observe/ios/types";
+import {
+  performIosSdkWebAction,
+  webTapAction,
+  type IosSdkWebActionClient,
+} from "./IosSdkWebActionRouter";
 
 /**
  * Routes `tapOn` on a node merged from the iOS SDK observation bridge through the bridge (#5159).
@@ -99,6 +105,8 @@ export function iosSdkBridgeActionOutcome(
 
 export interface IosSdkBridgeTapperOptions {
   client: () => Pick<IosSdkBridgeClient, "requestSdkActionForIos"> | null;
+  /** The web-view bridge client for DOM elements (#5162); without one they tap with XCTest. */
+  webClient?: () => IosSdkWebActionClient | null;
   enabled?: () => boolean;
 }
 
@@ -106,6 +114,19 @@ export function createIosSdkBridgeTapper(options: IosSdkBridgeTapperOptions): Io
   const enabled = options.enabled ?? (() => serverConfig.isIosSdkObservationBridgeEnabled());
   return {
     async tap(request) {
+      const web = iosSdkWebTarget(request.element);
+      if (web && enabled() && request.action !== "focus") {
+        const action = webTapAction(request.action, web);
+        return action
+          ? performIosSdkWebAction(
+              options.webClient?.() ?? null,
+              web,
+              action,
+              "click",
+              request.signal,
+            )
+          : { backend: "xctest", fallbackReason: "unsupported" };
+      }
       const target = iosSdkBridgeTarget(request.element);
       // A focus tap stays on XCTest: sendKeys sends its text and clear through the bridge, and an
       // XCTest fallback for those needs the field focused the usual way.
@@ -135,5 +156,6 @@ export function deviceIosSdkBridgeTapper(
 ): IosSdkBridgeTapper {
   return createIosSdkBridgeTapper({
     client: () => IOSCtrlProxyClient.getExistingInstance(device.deviceId),
+    webClient: () => IOSCtrlProxyClient.getExistingInstance(device.deviceId),
   });
 }

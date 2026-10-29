@@ -30,6 +30,11 @@ export type LoopbackOperation = "inject" | "capture";
 export interface RunningLoopbackHelper {
   process: LoopbackHelperProcess;
   exited: Promise<number | null>;
+  /**
+   * Settles once stdout has ended. A process can report its exit before the pipe has delivered its
+   * last bytes, so output is complete only after this.
+   */
+  outputEnded: Promise<void>;
   /** The error the helper reported, as a typed tool error. */
   failure(): EmulatorAudioError;
 }
@@ -120,9 +125,15 @@ export async function startLoopbackHelper(options: {
       resolve(null);
     });
   });
+  const outputEnded = new Promise<void>((resolve) => {
+    child.stdout.once("end", resolve);
+    child.stdout.once("close", resolve);
+    child.stdout.once("error", () => resolve());
+  });
   const helper: RunningLoopbackHelper = {
     process: child,
     exited,
+    outputEnded,
     failure: () => loopbackError(options.operation, report, exitCode),
   };
   await waitForReady(helper, ready, options, () => report);

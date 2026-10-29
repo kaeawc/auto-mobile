@@ -41,6 +41,7 @@ describe("audio tools (#13628, #13629)", () => {
   let service: EmulatorAudioService;
   let saved: Array<{ deviceId: string; bytes: Uint8Array }>;
   let readPaths: string[];
+  let onCreateSession: () => void;
   let deps: Parameters<typeof createInjectAudioInputHandler>[0];
 
   beforeEach(() => {
@@ -51,6 +52,7 @@ describe("audio tools (#13628, #13629)", () => {
     sessions = [];
     saved = [];
     readPaths = [];
+    onCreateSession = () => {};
     service = new EmulatorAudioService({
       discovery: {
         findByConsolePort: async (port) => ({
@@ -62,6 +64,7 @@ describe("audio tools (#13628, #13629)", () => {
         }),
       },
       createSession: (endpoint) => {
+        onCreateSession();
         const session = new FakeEmulatorAudioSession(endpoint);
         session.captureSamples = sineTone({ durationMs: 500 }).samples;
         sessions.push(session);
@@ -173,6 +176,16 @@ describe("audio tools (#13628, #13629)", () => {
         sessionUuid: "session-1",
       }),
     ).rejects.toThrow("released while the audio injection was starting");
+    expect(service.activeInjectionIds(emulator.deviceId)).toEqual([]);
+  });
+
+  test("a sessionless start cancelled while connecting is stopped, not left playing", async () => {
+    const controller = new AbortController();
+    // A session acquiring the device cancels the sessionless call mid-start.
+    onCreateSession = () => controller.abort();
+    await expect(
+      createInjectAudioInputHandler(deps)(emulator, { tone: {} }, undefined, controller.signal),
+    ).rejects.toThrow("cancelled while the audio injection was starting");
     expect(service.activeInjectionIds(emulator.deviceId)).toEqual([]);
   });
 

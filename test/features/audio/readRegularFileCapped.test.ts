@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -30,4 +31,14 @@ describe("readRegularFileCapped", () => {
   test("refuses anything that is not a regular file", async () => {
     await expect(readRegularFileCapped(dir, 1_000)).rejects.toThrow("not a regular file");
   });
+
+  // Named pipes need mkfifo; Windows has neither.
+  test.skipIf(process.platform === "win32")(
+    "refuses a FIFO with no writer instead of blocking on open",
+    async () => {
+      const fifo = path.join(dir, "pipe.wav");
+      execFileSync("mkfifo", [fifo]);
+      await expect(readRegularFileCapped(fifo, 1_000)).rejects.toThrow("not a regular file");
+    },
+  );
 });

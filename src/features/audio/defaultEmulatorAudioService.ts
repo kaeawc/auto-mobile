@@ -1,4 +1,5 @@
-import { open } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import { ActionableError } from "../../models/ActionableError";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
@@ -14,11 +15,20 @@ const READ_CHUNK_BYTES = 64 * 1024;
  * Reads a regular file of at most `maxBytes`. The cap applies to the bytes actually read, so a
  * file that grows after it is opened cannot exceed it; device files are refused outright.
  */
+function notRegularFile(path: string): ActionableError {
+  return new ActionableError(`Audio file ${path} is not a regular file.`);
+}
+
 export async function readRegularFileCapped(path: string, maxBytes: number): Promise<Uint8Array> {
-  const handle = await open(path, "r");
+  // Check the type before opening: opening a FIFO with no writer blocks. Non-blocking open and a
+  // second check on the handle cover a path swapped for a special file in between.
+  if (!(await stat(path)).isFile()) {
+    throw notRegularFile(path);
+  }
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   try {
     if (!(await handle.stat()).isFile()) {
-      throw new ActionableError(`Audio file ${path} is not a regular file.`);
+      throw notRegularFile(path);
     }
     const chunks: Uint8Array[] = [];
     let length = 0;

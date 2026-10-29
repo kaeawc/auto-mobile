@@ -125,40 +125,46 @@ export function createToolOutputsWavSaver(
 }
 
 /**
- * A release can commit after its setup drain times out while the start is still connecting; its
- * cleanup then found nothing to stop. Re-check once the injection exists, and stop it if the
- * session no longer holds the device.
+ * Why a just-started injection must not keep playing, or undefined when it may. The call can be
+ * aborted while the start connects (a session acquiring the device cancels sessionless calls, and
+ * acquisition cleanup found nothing to stop yet), and a release can commit after its setup drain
+ * times out (its cleanup likewise found nothing). Checked once the injection exists.
  */
-async function stopIfSessionEnded(
+function startOutlivedBy(
   sessionManager: AudioSessionHost | undefined,
   sessionUuid: string | undefined,
   deviceId: string,
-  started: { injectionId: string },
-  service: Pick<EmulatorAudioService, "stopInjection">,
-): Promise<void> {
+  signal: AbortSignal | undefined,
+): string | undefined {
+  if (signal?.aborted) {
+    return "The call was cancelled while the audio injection was starting";
+  }
   if (!sessionManager || !sessionUuid) {
-    return;
+    return undefined;
   }
   const session = sessionManager.findSession(sessionUuid);
-  if (
+  const holds =
     session &&
     sessionManager.isAdmittedForAutomation(session) &&
-    session.assignedDevice === deviceId
-  ) {
-    return;
-  }
+    session.assignedDevice === deviceId;
+  return holds ? undefined : "The session was released while the audio injection was starting";
+}
+
+async function stopAndRefuse(
+  reason: string,
+  started: { injectionId: string },
+  service: Pick<EmulatorAudioService, "stopInjection">,
+): Promise<never> {
   await service.stopInjection(started.injectionId).catch((error: unknown) => {
     // The injection is ended either way; the refusal below is what the caller needs.
     logger.warn(`Failed to stop audio injection ${started.injectionId}: ${errorMessage(error)}`);
   });
-  throw new ActionableError(
-    "The session was released while the audio injection was starting; the injection was stopped.",
-  );
+  throw new ActionableError(`${reason}; the injection was stopped.`);
 }
 
 export const createInjectAudioInputHandler =
   (deps: AudioToolDependencies = {}): DeviceToolHandler<typeof injectAudioInputInput> =>
-  async (device, args) => {
+  async (device, args, _progress, signal) => {
     assertAndroid(device, "injectAudioInput");
     const source = sourceFrom(args);
     const sessionManager = args.sessionUuid
@@ -180,7 +186,10 @@ export const createInjectAudioInputHandler =
         }),
       { action: "inject emulator audio", change: "audio injection" },
     );
-    await stopIfSessionEnded(sessionManager, args.sessionUuid, device.deviceId, started, service);
+    const outlived = startOutlivedBy(sessionManager, args.sessionUuid, device.deviceId, signal);
+    if (outlived) {
+      await stopAndRefuse(outlived, started, service);
+    }
     return createStructuredToolResponse({
       success: true,
       message:

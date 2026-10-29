@@ -37,6 +37,11 @@ export type SwipeGestureRequest = {
   perf?: PerformanceTracker;
   boomerang?: BoomerangConfig;
   signal?: AbortSignal;
+  /**
+   * iOS: the observation the swipe was resolved against, so it can go through the SDK observation
+   * bridge (#5159). Omitted for edge swipes and scroll searches, which stay on XCTest.
+   */
+  sdkObservation?: Pick<ObserveResult, "viewHierarchy">;
 };
 
 export type BoomerangGestureRequest = Omit<

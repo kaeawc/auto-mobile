@@ -142,6 +142,16 @@ function screenBounds(element: IosSdkWebElement, webView: Box): Box | null {
   return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 
+/** Element ids that occur more than once in a snapshot. */
+function duplicateIds(elements: readonly IosSdkWebElement[]): Set<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const { id } of elements) {
+    (seen.has(id) ? duplicates : seen).add(id);
+  }
+  return duplicates;
+}
+
 function convertElement(
   element: IosSdkWebElement,
   bounds: Box,
@@ -200,8 +210,11 @@ export function mergeIosSdkWebSnapshots(
       return;
     }
     const origin = originOf(snapshot.url);
+    const ambiguous = duplicateIds(snapshot.elements);
     const converted = snapshot.elements.flatMap((element) => {
-      const bounds = element.visible ? screenBounds(element, webViewBox) : null;
+      // An action names its element by id; with two elements sharing one, it could act on either.
+      const bounds =
+        element.visible && !ambiguous.has(element.id) ? screenBounds(element, webViewBox) : null;
       return bounds ? [{ element, bounds }] : [];
     });
     if (converted.length === 0) {

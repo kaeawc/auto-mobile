@@ -191,3 +191,22 @@ describe("editable DOM fields (#5162)", () => {
     expect(isFocusEditableElement(email as Element)).toBe(true);
   });
 });
+
+describe("ambiguous DOM element ids (#5162)", () => {
+  test("elements sharing an id are not attached, so no action can name the wrong one", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "e0", label: "Inserted", bounds: [0, 0, 100, 40] },
+          { ...submit, id: "e0", label: "Original", bounds: [0, 50, 100, 40] },
+          { ...submit, id: "e1", label: "Pay", bounds: [0, 100, 100, 40] },
+        ]),
+      },
+    ]);
+    expect(
+      attached(findWebViewNodes(hierarchy)[0]).map((element) => element["content-desc"]),
+    ).toEqual(["Pay"]);
+  });
+});

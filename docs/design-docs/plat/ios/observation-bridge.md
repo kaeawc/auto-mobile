@@ -155,7 +155,7 @@ registration to its native view, and the registry orders web views by registrati
 screen position, so with two or more the pairing is ambiguous and they stay XCTest-only. Each
 visible DOM element of the merged snapshot is attached as a
 child of its `WKWebView` node, offset by the web view's origin, clipped to it and rounded to whole
-points; one wholly outside the web view is dropped. Elements map onto the existing attributes
+points; one wholly outside the web view is dropped, as are elements whose id occurs more than once in the snapshot, since an action naming that id could reach either. Elements map onto the existing attributes
 (`label` → `content-desc`, `value` → `text`, `role` → `class`; `enabled` elements are `clickable`;
 text entry roles such as `input` and `textarea` report `role: textfield`, so focus and `sendKeys`
 targeting treat them as editable) and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,

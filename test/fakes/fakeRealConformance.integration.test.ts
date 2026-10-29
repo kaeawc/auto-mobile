@@ -46,6 +46,7 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeVideoRecordingConfigRepository.ts:FakeVideoRecordingConfigRepository": "ConfigRepository",
   "FakeVideoRecordingRepository.ts:FakeVideoRecordingRepository": "VideoRecordingRepository",
   "FakeWebSocket.ts:FakeWebSocket": "CtrlSocket",
+  "FakeWatchSimctl.ts:FakeWatchLifecycleSimctl": "WatchLifecycleSimctl",
 };
 
 function exportedFakeClassesWithoutContracts(fileName: string): Array<{

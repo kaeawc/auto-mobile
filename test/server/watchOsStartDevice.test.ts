@@ -13,6 +13,7 @@ import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRe
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -28,6 +29,25 @@ isolateToolRegistry();
 
 // startDevice on an Apple Watch simulator boots (or adopts) it and binds a pooled session at
 // readiness "booted", with no automation-runner step anywhere on the way (#14908).
+
+/** This daemon's watch claim store, with every claim publish held until the test lets it land. */
+class GatedWatchClaims implements ForeignDeviceOwnership {
+  readonly held = new Set<string>();
+  readonly pending: Array<() => void> = [];
+
+  async refresh(): Promise<void> {}
+  foreignOwnerPid(): number | undefined {
+    return undefined;
+  }
+  async claim(deviceId: string): Promise<boolean> {
+    await new Promise<void>((land) => this.pending.push(land));
+    this.held.add(deviceId);
+    return true;
+  }
+  release(deviceId: string): void {
+    this.held.delete(deviceId);
+  }
+}
 
 const WATCH_UDID = watchDevice().udid;
 const WATCH_NAME = watchDevice().name;
@@ -56,7 +76,10 @@ describe("startDevice on an Apple Watch simulator", () => {
 
   async function arrange(
     devices: AppleDevice[] = [watchDevice()],
-    { listingFollowsBoot = true }: { listingFollowsBoot?: boolean } = {},
+    {
+      listingFollowsBoot = true,
+      ownership,
+    }: { listingFollowsBoot?: boolean; ownership?: ForeignDeviceOwnership } = {},
   ) {
     restoreEnv = ToolRegistry.setPipelineOverridesForTesting({ env });
     const simctl = new FakeWatchLifecycleSimctl(devices);
@@ -82,6 +105,7 @@ describe("startDevice on an Apple Watch simulator", () => {
         env,
         timer,
         deviceManager: deviceUtils,
+        ...(ownership ? { watchForeignDeviceOwnership: ownership } : {}),
       }),
     );
     // A watch booted before the call is already a pooled, idle row.
@@ -134,6 +158,41 @@ describe("startDevice on an Apple Watch simulator", () => {
         readiness: { level: "booted", checks: ["bootCompleted", "sessionBound"] },
       });
       expect(startDeviceOutputSchema.safeParse(result).success).toBe(true);
+    },
+  );
+
+  // A cancellation that lands after the bind minted the session, while it still publishes its
+  // claim, must take the session back: the client never receives its UUID.
+  test.each(["0", "1"])(
+    "autolock %s: a start cancelled during its bind releases the watch session it minted",
+    async (autolock) => {
+      env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
+      const claims = new GatedWatchClaims();
+      const { pool, sessions } = await arrange([watchDevice()], { ownership: claims });
+      const request = new AbortController();
+
+      const outcome = ToolRegistry.getTool("startDevice")!
+        .handler(
+          { __mcpSessionId: "client-a", platform: "watchos", deviceId: WATCH_UDID },
+          undefined,
+          request.signal,
+        )
+        .then(
+          () => "delivered",
+          () => "refused",
+        );
+      for (let turn = 0; turn < 5_000 && claims.pending.length === 0; turn++) {
+        await Promise.resolve();
+      }
+      expect(claims.pending).toHaveLength(1);
+      expect(sessions.getAllSessions()).toHaveLength(1);
+      request.abort();
+      claims.pending[0]!();
+
+      expect(await outcome).toBe("refused");
+      expect(pool.getDevice(WATCH_UDID)?.sessionId ?? null).toBeNull();
+      expect(sessions.getAllSessions()).toEqual([]);
+      expect(claims.held.size).toBe(0);
     },
   );
 

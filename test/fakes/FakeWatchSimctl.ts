@@ -1,5 +1,6 @@
 import type { WatchSimulatorSimctl } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type { BootedDevice } from "../../src/models";
+import type { WatchLifecycleSimctl } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import type {
   AppleDevice,
   AppleDeviceRuntime,
@@ -87,7 +88,7 @@ export const IPHONE_UDID = "1B2C3D4E-5F60-4718-8293-A1B2C3D4E5F6";
  * turns the device `Booted` (labelled "ios", as the shared boot path does) and a shutdown turns it
  * `Shutdown`. Every boot/shutdown command is logged in `commands`.
  */
-export class FakeWatchLifecycleSimctl extends FakeWatchSimctl {
+export class FakeWatchLifecycleSimctl extends FakeWatchSimctl implements WatchLifecycleSimctl {
   readonly commands: string[] = [];
   onStateChange: (() => void) | undefined;
 

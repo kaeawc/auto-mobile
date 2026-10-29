@@ -1,10 +1,12 @@
 import { z } from "zod/v4";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
 import {
+  bindUndoneIfUndelivered,
   getDeviceToolsDependencies,
   initializedDevicePool,
   mergeLegacyStartDevicePayload,
   reserveStableDeviceLifecycle,
+  runOperationWithinDeadline,
   watchStartDeviceSchema,
   type DeviceToolsDependencies,
   type WatchStartDeviceArgs,
@@ -74,14 +76,48 @@ export async function startWatchDevice(
             timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
           });
           stage.current = "binding the device session";
-          const sessionId = await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
-            achievedReadiness: "booted",
-          });
+          const sessionId = await bindWatchSession(
+            { watch, boot, rawArgs },
+            bindSession,
+            deps.timer,
+            deadlineMs,
+            requestSignal,
+          );
           return watchStartResponse(watch, boot, sessionId, deps.timer.now() - startedAtMs);
         } finally {
           lease.release();
         }
       }),
+  );
+}
+
+/**
+ * The bind as a deadline-bound operation on the request's acquisition receipt, like the ordinary
+ * start path: a request cancelled or timed out once the bind minted a session never delivers that
+ * session's UUID, so the session it minted (and its claim) is released again (#11565).
+ */
+async function bindWatchSession(
+  { watch, boot, rawArgs }: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object },
+  bindSession: BindBootedSession,
+  timer: DeviceToolsDependencies["timer"],
+  deadlineMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  return await runOperationWithinDeadline(
+    timer,
+    deadlineMs,
+    signal,
+    () =>
+      new ActionableError(
+        `startDevice timed out while binding the device session; target=watchos:${watch.deviceId}`,
+      ),
+    bindUndoneIfUndelivered(
+      async (receipt) =>
+        await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
+          achievedReadiness: "booted",
+          receipt,
+        }),
+    ),
   );
 }
 

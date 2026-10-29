@@ -14,6 +14,7 @@ import {
   DefaultEmulatorLauncher,
   type EmulatorLauncherHost,
 } from "../../../src/utils/android-cmdline-tools/EmulatorLauncher";
+import { EmulatorLaunchCancelledError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import {
   DefaultEmulatorPortReservations,
   resetEmulatorLaunchReservations,
@@ -85,6 +86,7 @@ describe("DefaultEmulatorLauncher pre-flight", () => {
 function startupHarness(
   probe: EmulatorLauncherHost["isEmulatorSerialListed"] = async () => false,
   onSpawn?: (args: readonly string[]) => void,
+  throwIfLaunchCancelled: EmulatorLauncherHost["throwIfLaunchCancelled"] = () => {},
 ) {
   resetEmulatorLaunchReservations();
   const timer = new FakeTimer();
@@ -105,7 +107,7 @@ function startupHarness(
     validateAvdMemory: () => {},
     checkArchitectureCompatibility: async () => ({ compatible: true, hostArch: "arm64" }),
     emulatorAudioArguments: () => [],
-    throwIfLaunchCancelled: () => {},
+    throwIfLaunchCancelled,
     releaseReservationIfLaunchCancelled: () => {},
     emulatorPath: () => "fake-emulator",
     spawnFn: () => (_command, args) => {
@@ -128,7 +130,7 @@ function startupHarness(
     isEmulatorSerialListed: probe,
   } satisfies Partial<EmulatorLauncherHost>;
   const launcher = new DefaultEmulatorLauncher(createHost(overrides));
-  return { timer, child, launcher };
+  return { timer, child, launcher, reservations };
 }
 
 async function launchStartup(
@@ -373,4 +375,80 @@ describe("existing stdout startup markers", () => {
       expectNoStartupTimers(harness.timer);
     });
   }
+});
+
+describe("DefaultEmulatorLauncher gRPC port", () => {
+  test("pre-spawn cancellation releases the gRPC lease on consecutive launches", async () => {
+    let spawned = false;
+    const harness = startupHarness(
+      async () => false,
+      () => {
+        spawned = true;
+      },
+      (avdName, isCancelled) => {
+        if (isCancelled?.()) {
+          throw new EmulatorLaunchCancelledError(avdName, null);
+        }
+      },
+    );
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(
+        harness.launcher.startEmulatorProcess("Pixel_9", { isCancelled: () => true }),
+      ).rejects.toThrow(EmulatorLaunchCancelledError);
+      const lease = await harness.reservations.reserveEmulatorGrpcPort();
+      try {
+        expect(lease.port).toBe(8554);
+      } finally {
+        lease.release();
+      }
+    }
+    expect(spawned).toBe(false);
+    expectNoStartupTimers(harness.timer);
+  });
+
+  async function bootStartup(extraArgs?: string[]) {
+    const args: string[][] = [];
+    const harness = startupHarness(
+      async () => true,
+      (spawnArgs) => {
+        args.push([...spawnArgs]);
+      },
+    );
+    const launch = harness.launcher.startEmulatorProcess("Pixel_9", {
+      expectedDeviceId: "emulator-5554",
+      requestedExtraArgs: extraArgs,
+    });
+    await drainUntil(() => harness.child.stdout.listenerCount("data") > 0, {
+      description: "grpc port startup",
+    });
+    harness.child.stdout.emit("data", Buffer.from("emulator-5554"));
+    await harness.timer.advanceTimeAsync(500);
+    await launch;
+    return { args: args[0], child: harness.child };
+  }
+
+  test("a daemon-booted emulator is launched with a leased -grpc port", async () => {
+    const { args } = await bootStartup();
+    const index = args.indexOf("-grpc");
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(args[index + 1]).toBe("8554");
+  });
+
+  test("a caller-supplied -grpc port is passed through and no second port is added", async () => {
+    const { args } = await bootStartup(["-grpc", "8600"]);
+    expect(args.filter((arg) => arg === "-grpc" || arg.startsWith("-grpc="))).toEqual(["-grpc"]);
+    expect(args[args.indexOf("-grpc") + 1]).toBe("8600");
+  });
+
+  test("a running emulator keeps its gRPC port leased from other launches", async () => {
+    await bootStartup();
+
+    const reservations = new DefaultEmulatorPortReservations({
+      timer: () => new FakeTimer(),
+      adbFactory: () => new FakeAdbClientFactory(),
+      hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+    });
+    expect((await reservations.reserveEmulatorGrpcPort()).port).toBe(8555);
+  });
 });

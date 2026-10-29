@@ -73,11 +73,14 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
 
 - Before the video capture starts it opens an open-ended capture on the device's route (gRPC
   `streamAudio` with no deadline, or the loopback helper's `--until-stopped`) and appends the PCM to
-  `<recording>.audio.pcm`, so a long recording never sits in memory.
+  `<recording>.audio.pcm`, so a long recording never sits in memory. A silent guest sends no
+  packets, so the gRPC route writes silence for the time between packets (from the packet
+  timestamps, or arrival time when a timestamp disagrees with the host clock by over 10 s) to keep
+  the track in step with the video.
 - At stop, after the video is final, it ends the capture and muxes with ffmpeg: video copied, audio
-  AAC, the audio captured before the video started skipped (`-ss`), and the track padded with
-  silence to the video's length (`apad` + `-shortest`). A silent guest sends no packets, so an
-  empty capture becomes `anullsrc`. The muxed file replaces the original.
+  AAC, the audio captured between the stream opening and the video launch skipped (`-ss`), and the
+  track padded with silence to the video's length (`apad` + `-shortest`). An empty capture becomes
+  `anullsrc`. The muxed file replaces the original.
 - A failed capture or mux keeps the video, sets `hasAudioTrack: false` and adds a warning; a failed
   start or a force stop discards the PCM file.
 - ffmpeg is probed at start, so a host without it is refused before anything is captured.

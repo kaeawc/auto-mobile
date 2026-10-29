@@ -65,6 +65,7 @@ function setup(
     source: {
       startStream: async (deviceId, onPcm) => {
         events.push(`audio-start:${deviceId}`);
+        clock += 500;
         sink = onPcm;
         return {
           sampleRate: 48_000,
@@ -136,7 +137,8 @@ describe("AudioTrackVideoCaptureBackend", () => {
         pcmPath: "/rec/rec-1.mp4.audio.pcm",
         pcmBytes: 4,
         sampleRate: 48_000,
-        leadMs: 250,
+        // Neither the audio stream's setup nor the video's start-up wait is audio before the video.
+        leadMs: 0,
       },
     ]);
     expect(result).toMatchObject({ hasAudioTrack: true, sizeBytes: undefined });

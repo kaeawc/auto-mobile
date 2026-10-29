@@ -14,6 +14,7 @@ import {
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorAudioMessages";
 import { GrpcStatus } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/grpcFraming";
 import { analyzeLevels, sineTone, type PcmAudio } from "../../../../src/utils/audio/pcm";
+import { SilenceFiller } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/SilenceFiller";
 import { FakeGrpcTransport } from "../../../fakes/FakeGrpcTransport";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
@@ -277,6 +278,36 @@ describe("EmulatorAudioClient.streamCapture", () => {
     };
     const stream = await client.streamCapture(() => {});
     await expect(stream.stop()).rejects.toMatchObject({ code: "audio_capture_unsupported" });
+  });
+});
+
+describe("SilenceFiller", () => {
+  const START_US = 1_700_000_000_000_000;
+  /** 20 ms of 16 kHz mono PCM. */
+  const packet = (timestampUs?: number) => ({ timestampUs, audio: new Uint8Array(640) });
+
+  test("a quiet stretch between packets becomes silence of the same length", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    expect(filler.before(packet(START_US))).toBeUndefined();
+    nowUs = START_US + 2_020_000;
+    expect(filler.before(packet(START_US + 2_020_000))?.byteLength).toBe(64_000);
+  });
+
+  test("silence before the first packet is kept, and jitter is not", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    nowUs += 1_000_000;
+    expect(filler.before(packet(nowUs))?.byteLength).toBe(32_000);
+    nowUs += 30_000;
+    expect(filler.before(packet(nowUs))).toBeUndefined();
+  });
+
+  test("a timestamp that disagrees with the host clock falls back to arrival time", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    nowUs += 500_000;
+    expect(filler.before(packet(42))?.byteLength).toBe(16_000);
   });
 });
 

@@ -13,6 +13,7 @@ import {
 import { captureError, injectionError } from "./EmulatorAudioError";
 import { GrpcStatus } from "./grpcFraming";
 import type { GrpcCall, GrpcTransport } from "./grpcTransport";
+import { SilenceFiller } from "./SilenceFiller";
 
 const SERVICE = "/android.emulation.control.EmulatorController";
 export const INJECT_AUDIO_METHOD = `${SERVICE}/injectAudio`;
@@ -22,7 +23,6 @@ export const STREAM_AUDIO_METHOD = `${SERVICE}/streamAudio`;
 const INJECT_PACKET_MS = 20;
 /** How long capture waits past the requested duration before reporting what it has. */
 const CAPTURE_GRACE_MS = 2_000;
-
 /** Mono 16-bit PCM at a rate the emulator accepts, the one format injection sends. */
 export function prepareForInjection(pcm: PcmAudio): PcmAudio {
   const mono = toMono(pcm);
@@ -220,7 +220,8 @@ export class EmulatorAudioClient {
 
   /**
    * Streams the emulator's audio output to `sink` until stopped, for recordings of any length. A
-   * silent guest sends no packets, so the PCM can be shorter than the wall-clock time.
+   * silent guest sends no packets, so its quiet stretches are filled with silence to keep the PCM
+   * in step with the wall clock.
    */
   async streamCapture(
     sink: (pcm: Uint8Array) => void,
@@ -235,13 +236,18 @@ export class EmulatorAudioClient {
       encodeAudioFormat({ samplingRate: sampleRate, channels: "mono", format: "s16" }),
     );
     call.end();
+    const filler = new SilenceFiller(sampleRate, () => this.timer.now() * 1000);
     let delivered = 0;
     const pump = (async () => {
       try {
         for await (const message of call.messages()) {
-          const audio = decodeAudioPacket(message).audio;
-          delivered += audio.byteLength;
-          sink(audio);
+          const packet = decodeAudioPacket(message);
+          const silence = filler.before(packet);
+          if (silence) {
+            sink(silence);
+          }
+          delivered += packet.audio.byteLength;
+          sink(packet.audio);
         }
       } catch (error) {
         // The call status, read at stop, says whether this was the cancel or a failure.

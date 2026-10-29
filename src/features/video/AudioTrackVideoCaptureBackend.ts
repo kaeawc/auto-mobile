@@ -91,7 +91,6 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     await this.deps.muxer.ensureAvailable();
     const pcmPath = `${config.outputPath}.audio.pcm`;
     const file = this.deps.openPcmFile(pcmPath);
-    const audioStartedAt = this.deps.now();
     let stream: AudioStream;
     try {
       stream = await this.deps.source.startStream(deviceId, (chunk) => file.write(chunk));
@@ -99,14 +98,18 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
       await this.discardFile(file, pcmPath);
       throw error;
     }
+    // The PCM starts once the stream is open, and the video once its capture is launched; any
+    // settle wait inside the video start is not counted as audio captured before the video.
+    const audioStartedAt = this.deps.now();
     let handle: RecordingHandle;
+    const videoStartedAt = this.deps.now();
     try {
       handle = await this.inner.start(config);
     } catch (error) {
       await this.discard({ stream, file, pcmPath, leadMs: 0 });
       throw error;
     }
-    const leadMs = Math.max(0, this.deps.now() - audioStartedAt);
+    const leadMs = Math.max(0, videoStartedAt - audioStartedAt);
     this.tracks.set(handle.recordingId, { stream, file, pcmPath, leadMs });
     return handle;
   }

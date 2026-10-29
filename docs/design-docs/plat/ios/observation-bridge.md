@@ -203,8 +203,19 @@ bridge's `insertText` and its clear (the `clear` command and the clear before a 
 `backend` and, for an XCTest stand-in, `fallbackReason`; a command that used both reports the
 fallback. The focus tap itself stays on XCTest, so an XCTest stand-in finds the field focused as
 usual, and the typed text is verified by read-back as for XCTest typing. IME actions have no
-bridge form: on a bridge field they run through XCTest and report `fallbackReason: unsupported`.
-`sendKeys` without a selector has no resolved field, so it stays on XCTest.
+native bridge form: on a native bridge field they run through XCTest and report
+`fallbackReason: unsupported`. `sendKeys` without a selector has no resolved field, so it stays on
+XCTest.
+
+A focused DOM element merged from a web view routes the same way through the web view's bounded
+actions: a clear is `clear`, and IME `done` is `submit` (the field's form, if it has one). Text
+entry is `setValue`, which replaces the value, so it is used only after the command cleared the
+field through the web view (a replace); typing that appends at the caret stays on XCTest and
+reports `fallbackReason: unsupported`, as do the other IME actions. The field keeps its web view
+and element id (stable across the document's snapshots) and takes the snapshot id of every
+observation that shows it; when the fresh read before its first action no longer shows it (the
+element left, or no snapshot merged), XCTest stands in and the result reports
+`fallbackReason: unavailable`. A rejected web action fails closed.
 
 Any capture moves the bridge's current observation, and the bridge rejects an action naming an older
 one. So sendKeys keeps the field's element id, takes the capture identity of every observation it

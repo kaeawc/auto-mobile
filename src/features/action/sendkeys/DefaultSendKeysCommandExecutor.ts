@@ -36,12 +36,12 @@ import {
 import { isSemanticKey, validateImeKeyEventsText } from "./SendKeysSupport";
 import { isSendKeysBudgetExhausted } from "./SendKeysRequestBudget";
 import { IosTyper } from "./IosTyper";
-import { IosSdkTextRouting, iosBackendFields } from "./IosSdkTextRouting";
+import { IosSdkTextRouting, iosBackendFields, type IosSdkTextTarget } from "./IosSdkTextRouting";
+import { deviceIosSdkWebTextRouter, type IosSdkWebTextRouter } from "../IosSdkWebTextRouter";
 import {
   deviceIosSdkBridgeTextRouter,
   type IosSdkBridgeTextRouter,
 } from "../IosSdkBridgeTextRouter";
-import type { IosSdkBridgeTarget } from "../../observe/ios/iosSdkObservationMerge";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { clearIosFieldWithVerification } from "../iosClearVerification";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
@@ -84,6 +84,7 @@ export interface SendKeysPlatformDependencies {
   inputKey?: SendKeysInputKey;
   /** Routes iOS text entry and clear on an SDK bridge field (#5159). */
   iosSdkTextRouter?: IosSdkBridgeTextRouter;
+  iosSdkWebTextRouter?: IosSdkWebTextRouter;
   imeSpanService?: Pick<
     ImeSpanService,
     "imeSpan" | "withImeSpan" | "acquireImeSpan" | "restoreImeSpan"
@@ -114,7 +115,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.targetPasswordField = passwordField;
   }
 
-  setIosSdkTextTarget(target: IosSdkBridgeTarget | undefined): void {
+  setIosSdkTextTarget(target: IosSdkTextTarget | undefined): void {
     this.iosSdkText.setTarget(target);
   }
 
@@ -170,6 +171,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.timer = dependencies.timer ?? defaultTimer;
     this.iosSdkText = new IosSdkTextRouting({
       router: dependencies.iosSdkTextRouter ?? deviceIosSdkBridgeTextRouter(device),
+      webRouter: dependencies.iosSdkWebTextRouter ?? deviceIosSdkWebTextRouter(device),
       observe: (signal) => this.observer.execute({ hierarchyOnly: true, signal }),
     });
     this.clearVerifier = this.createClearVerifier();
@@ -606,13 +608,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           };
         }
       }
-      const result = await this.textClient.ime(command.key, signal, onDispatch);
+      const key = command.key;
+      const result =
+        this.device.platform === "ios"
+          ? await this.iosSdkText.tracked(() =>
+              this.iosSdkText.ime(
+                key,
+                signal,
+                () => this.textClient.ime(key, signal, onDispatch),
+                onDispatch,
+              ),
+            )
+          : await this.textClient.ime(key, signal, onDispatch);
       return {
         index: -1,
         action: "key",
         key: command.key,
         modifiers,
-        ...(this.device.platform === "ios" ? this.iosSdkText.imeFields() : {}),
+        ...("iosBackend" in result ? iosBackendFields(result.iosBackend) : {}),
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
         ...(result.warning ? { warning: result.warning } : {}),

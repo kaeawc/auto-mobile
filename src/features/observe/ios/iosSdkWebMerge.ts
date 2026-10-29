@@ -95,6 +95,33 @@ export function iosSdkWebTarget(attributes: Record<string, unknown>): IosSdkWebT
   return { webViewId, snapshotId, elementId };
 }
 
+/**
+ * The web identity of the merged DOM element with this web view and element id in `hierarchy`,
+ * carrying the snapshot id it was merged from there; null when no such element was merged.
+ * Element ids are stable across a document's snapshots, so this finds the same element in a newer
+ * snapshot.
+ */
+export function findIosSdkWebTarget(
+  hierarchy: ViewHierarchyResult | undefined,
+  webViewId: string,
+  elementId: string,
+): IosSdkWebTarget | null {
+  const root: unknown = hierarchy?.hierarchy?.node;
+  const pending: ViewHierarchyNode[] = Array.isArray(root)
+    ? [...(root as ViewHierarchyNode[])]
+    : root && typeof root === "object"
+      ? [root as ViewHierarchyNode]
+      : [];
+  for (let node = pending.pop(); node; node = pending.pop()) {
+    const target = iosSdkWebTarget(nodeAttributes(node));
+    if (target && target.webViewId === webViewId && target.elementId === elementId) {
+      return target;
+    }
+    pending.push(...childrenOf(node));
+  }
+  return null;
+}
+
 interface Box {
   left: number;
   top: number;

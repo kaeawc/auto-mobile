@@ -125,7 +125,7 @@ the stroke XCTest would have run, so swiping up gives a positive `y`. A screen s
 that carries bridge nodes goes through the bridge's `swipe` with the same start, end and duration,
 naming the capture the swipe was resolved against. Edge swipes reach system UI the bridge cannot
 see and stay on XCTest without a `backend`. A boomerang has no bridge form, so XCTest runs it and
-reports `fallbackReason: unsupported`. Other fallbacks and fail-closed results follow `tapOn`. The
+reports `fallbackReason: unsupported`. Other fallbacks and fail-closed results follow `tapOn`. A bridge scroll has no timed stroke, so its result marks the duration as ignored (`durationIgnored`, with a warning when `durationMs` was passed). The display fence is checked right before the bridge dispatch, as it is before an XCTest swipe. The
 bridge budget is the gesture's duration plus 3 s, and never less than 5 s. Scroll searches
 (`lookFor`) stay on XCTest.
 

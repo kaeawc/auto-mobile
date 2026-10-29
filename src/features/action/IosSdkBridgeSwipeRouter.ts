@@ -72,6 +72,21 @@ function bridgeGesture(
   return { action: { swipe }, verb: "swipe" };
 }
 
+export const IOS_SDK_SCROLL_DURATION_WARNING =
+  "durationMs was ignored: the app's SDK observation bridge scrolls the container by an offset " +
+  "with no timed stroke, so the reported duration is a nominal value.";
+
+/** A bridge scroll has no stroke: its duration is nominal, and flagged when it was requested. */
+function withIgnoredScrollDuration(result: SwipeResult, request: SwipeGestureRequest): SwipeResult {
+  return {
+    ...result,
+    durationIgnored: true,
+    ...(request.gestureOptions?.durationExplicit
+      ? { warnings: [IOS_SDK_SCROLL_DURATION_WARNING] }
+      : {}),
+  };
+}
+
 export interface IosSdkBridgeSwipeRunnerOptions {
   client: () => Pick<IosSdkBridgeClient, "requestSdkActionForIos"> | null;
   enabled?: () => boolean;
@@ -100,10 +115,21 @@ export class IosSdkBridgeSwipeRunner implements VoiceOverSwipeRunner {
     const outcome =
       gesture === "unsupported"
         ? ({ backend: "xctest", fallbackReason: "unsupported" } as const)
-        : await this.dispatch(gesture, durationMs, request.signal);
+        : await this.dispatch(gesture, durationMs, request);
     if (outcome.backend === "sdk") {
       const { x1, y1, x2, y2 } = request;
-      return { success: true, x1, y1, x2, y2, duration: durationMs, backend: "sdk" };
+      const result: SwipeResult = {
+        success: true,
+        x1,
+        y1,
+        x2,
+        y2,
+        duration: durationMs,
+        backend: "sdk",
+      };
+      return gesture !== "unsupported" && gesture.verb === "scroll"
+        ? withIgnoredScrollDuration(result, request)
+        : result;
     }
     const result = await this.xctest.executeSwipeGesture(request);
     return { ...result, backend: "xctest", fallbackReason: outcome.fallbackReason };
@@ -112,8 +138,12 @@ export class IosSdkBridgeSwipeRunner implements VoiceOverSwipeRunner {
   private async dispatch(
     gesture: { action: IosSdkAction; verb: string },
     durationMs: number,
-    signal: AbortSignal | undefined,
+    request: SwipeGestureRequest,
   ): Promise<IosSdkTapOutcome> {
+    // The XCTest route checks the display fence right before dispatch; the bridge's capture check
+    // does not replace it, because the bridge keeps its capture until the next observation.
+    request.gestureOptions?.displayFence?.assertCurrent();
+    const signal = request.signal;
     const client = this.options.client();
     if (!client) {
       return { backend: "xctest", fallbackReason: "unavailable" };

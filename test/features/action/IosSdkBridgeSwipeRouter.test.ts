@@ -226,6 +226,37 @@ describe("IosSdkBridgeSwipeRunner (#5159)", () => {
     expect(unknown.xctest.requests).toEqual([]);
   });
 
+  test("a bridge scroll reports its duration as ignored, and warns when one was requested", async () => {
+    const { swipe } = runner();
+    const scrolled = await swipe.executeSwipeGesture(
+      request({
+        containerElement: bridgeList,
+        sdkObservation: bridgeScreen,
+        gestureOptions: { duration: 100, durationExplicit: true },
+      }),
+    );
+    expect(scrolled).toMatchObject({ durationIgnored: true });
+    expect(scrolled.warnings?.[0]).toContain("durationMs was ignored");
+    const swiped = await swipe.executeSwipeGesture(request({ sdkObservation: bridgeScreen }));
+    expect(swiped.durationIgnored).toBeUndefined();
+  });
+
+  test("a display change before dispatch stops the bridge swipe, as it stops XCTest", async () => {
+    const { xctest, client, swipe } = runner();
+    const displayFence = {
+      assertCurrent: () => {
+        throw new Error("display changed");
+      },
+    };
+    await expect(
+      swipe.executeSwipeGesture(
+        request({ sdkObservation: bridgeScreen, gestureOptions: { duration: 300, displayFence } }),
+      ),
+    ).rejects.toThrow("display changed");
+    expect(client.actions).toEqual([]);
+    expect(xctest.requests).toEqual([]);
+  });
+
   test("the bridge budget covers the gesture plus headroom", () => {
     expect(iosSdkBridgeSwipeTimeoutMs(300)).toBe(5000);
     expect(iosSdkBridgeSwipeTimeoutMs(10000)).toBe(13000);

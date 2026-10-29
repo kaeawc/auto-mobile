@@ -181,9 +181,11 @@ export class DevicePoolRefresh {
       this.logDiscoveryEnvironment();
 
       perf.startOperation("deviceDiscovery");
+      // The pool is the one "either" reader that also tracks Apple Watch simulators (#14908).
       const discovery = await this.pool.getDeviceManager().getBootedDevicesDetailed("either", {
         bypassAndroidDeviceListCache: true,
         bypassIosDeviceListCache: true,
+        includeWatchOs: true,
       });
       perf.endOperation("deviceDiscovery");
       const bootedDevices = this.discoveryNeedsTransportNormalization(discovery.devices)

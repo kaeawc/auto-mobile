@@ -26,6 +26,7 @@ function pageScript(): string {
 
 interface FakeElement {
   tagName: string;
+  value?: string;
   dataset: Record<string, string>;
   textContent: string;
   disabled: boolean;
@@ -56,7 +57,13 @@ function element(tagName: string, text: string): FakeElement {
 
 interface Posted {
   name: string;
-  elements?: Array<{ id: string; label: string; visible: boolean; bounds: number[] }>;
+  elements?: Array<{
+    id: string;
+    label: string;
+    value: string | null;
+    visible: boolean;
+    bounds: number[];
+  }>;
 }
 
 function page(options: { mainFrame?: boolean } = {}) {
@@ -155,5 +162,20 @@ describe("WKWebView bridge page script (#15877)", () => {
     p.flushTimers();
     expect(p.snapshots()).toHaveLength(2);
     expect(p.snapshots().at(-1)?.elements?.[0].bounds[1]).toBe(-400);
+  });
+
+  test("typing or committing a value posts a fresh snapshot with it", () => {
+    const p = page();
+    const field = element("input", "");
+    p.elements.push(field);
+    p.fire("load");
+    expect(p.snapshots().at(-1)?.elements?.[0].value).toBeNull();
+    // Assigning a value changes no DOM attribute, so only the input event announces it.
+    field.value = "typed";
+    p.fire("input");
+    p.fire("change");
+    p.flushTimers();
+    expect(p.snapshots()).toHaveLength(2);
+    expect(p.snapshots().at(-1)?.elements?.[0].value).toBe("typed");
   });
 });

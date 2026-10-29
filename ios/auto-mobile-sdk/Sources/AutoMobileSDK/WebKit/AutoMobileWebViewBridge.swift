@@ -469,7 +469,17 @@ extension AutoMobileWebAction {
                 )))
                 return
             }
-            webView?.evaluateJavaScript(source) { _, error in
+            guard let webView else {
+                // The web view is held weakly; without one there is nothing to run the action in,
+                // and the completion must still be called (#15868).
+                completion(.failure(NSError(
+                    domain: "AutoMobileWebViewBridge",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "No web view is attached"]
+                )))
+                return
+            }
+            webView.evaluateJavaScript(source) { _, error in
                 if let error { completion(.failure(error)) } else { completion(.success(())) }
             }
         }
@@ -487,8 +497,17 @@ extension AutoMobileWebAction {
         ) }
         public func webView(_ webView: WKWebView, didCommit _: WKNavigation!) {
             let url = webView.url
-            pageState.withLock { $0.loaded(url: url) }
+            documentCommitted(url: url)
             emit(name: "navigation_committed", url: url)
+        }
+
+        /// A main-frame navigation committed, so the page is a new document, even on a reload of
+        /// the same URL (#15868). The old snapshots describe elements that are gone, and their ids
+        /// (such as `e0`) can name unrelated elements in the new page, so they are dropped: the
+        /// snapshot route answers `no_snapshot`, and actions naming them are `stale_snapshot`.
+        nonisolated func documentCommitted(url: URL?) {
+            pageState.withLock { $0.loaded(url: url) }
+            policy.forgetSnapshots()
         }
 
         public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -540,6 +559,12 @@ extension AutoMobileWebAction {
             let bridgeAction = AutoMobileWebAction(action)
             return await withCheckedContinuation { continuation in
                 Task { @MainActor in
+                    // A deallocated or detached web view answers here rather than leaving the
+                    // request suspended until the daemon times out (#15868).
+                    guard self.webView != nil else {
+                        continuation.resume(returning: .rejected(AutoMobileWebActionResult.webProcessUnavailableReason))
+                        return
+                    }
                     self.perform(bridgeAction) { result in
                         switch result {
                         case .success: continuation.resume(returning: AutoMobileWebActionResult(status: .accepted))

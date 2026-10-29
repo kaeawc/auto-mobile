@@ -251,3 +251,62 @@ final class AutoMobileWebViewPolicyRejectionTests: XCTestCase {
         }
     }
 }
+
+#if canImport(WebKit)
+    /// Bridge behavior that needs no WKWebView attached (#15868).
+    @MainActor
+    final class AutoMobileWebViewBridgeLifecycleTests: XCTestCase {
+        private func bridge() -> AutoMobileWebViewBridge {
+            AutoMobileWebViewBridge(
+                configuration: .init(allowedOrigins: ["https://fixture.local"]),
+                emitEvent: { _ in }
+            )
+        }
+
+        func testACommittedNavigationDropsTheOldDocumentsSnapshots() throws {
+            let bridge = bridge()
+            try bridge.documentCommitted(url: XCTUnwrap(URL(string: "https://fixture.local/a")))
+            _ = bridge.policy.accept(AutoMobileWebSnapshot(
+                snapshotId: "s1",
+                elements: [AutoMobileWebElement(id: "e0")]
+            ))
+            XCTAssertNotNil(bridge.latestSnapshot)
+
+            // Even a reload of the same URL is a new document whose `e0` is another element.
+            try bridge.documentCommitted(url: XCTUnwrap(URL(string: "https://fixture.local/a")))
+            XCTAssertNil(bridge.latestSnapshot)
+            XCTAssertEqual(bridge.policy.rejection(for: .click(snapshotId: "s1", elementId: "e0")), "stale_snapshot")
+            XCTAssertTrue(bridge.contentProcessAvailable)
+        }
+
+        func testAnActionWithNoWebViewAttachedAnswersInsteadOfHanging() async throws {
+            let bridge = bridge()
+            try bridge.documentCommitted(url: XCTUnwrap(URL(string: "https://fixture.local/")))
+            _ = bridge.policy.accept(AutoMobileWebSnapshot(
+                snapshotId: "s1",
+                elements: [AutoMobileWebElement(id: "e0")]
+            ))
+
+            let result = await bridge.perform(AutoMobileWebControlAction.click(snapshotId: "s1", elementId: "e0"))
+
+            XCTAssertEqual(result, .rejected(AutoMobileWebActionResult.webProcessUnavailableReason))
+        }
+
+        func testTheCompletionBasedPerformCallsBackWithNoWebViewAttached() throws {
+            let bridge = bridge()
+            try bridge.documentCommitted(url: XCTUnwrap(URL(string: "https://fixture.local/")))
+            _ = bridge.policy.accept(AutoMobileWebSnapshot(
+                snapshotId: "s1",
+                elements: [AutoMobileWebElement(id: "e0")]
+            ))
+            let answered = expectation(description: "completion called")
+
+            bridge.perform(.click(snapshotId: "s1", elementId: "e0")) { result in
+                if case .success = result { XCTFail("an action with no web view must fail") }
+                answered.fulfill()
+            }
+
+            wait(for: [answered], timeout: 1)
+        }
+    }
+#endif

@@ -203,11 +203,13 @@ object PrototypeSpecValidator {
           val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
           else
-            storedStateError(stored, stateRule, value, checked, keyframeKeys)
+            storedStateError(stored, stateRule, value, keyframeKeys)
+              // Node rules run before binding checks, as platform rules do in full validation.
               ?: JsonObject(value + ("state" to stored)).let {
                 PrototypeMedia.videoPlayerError(it, videoPlayers)
                   ?: PrototypeCameraPreview.error(it, cameraPreviews)
               }
+              ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")
         }
@@ -220,7 +222,6 @@ object PrototypeSpecValidator {
     stored: JsonElement,
     stateRule: JsonObject,
     value: JsonObject,
-    checked: Context,
     keyframeKeys: List<Pair<String, String>>,
   ): PrototypeSpecError? =
     walk(stored, stateRule, "state", Context(), 0)
@@ -232,7 +233,6 @@ object PrototypeSpecValidator {
       ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
       // A secure key must keep holding a string after the write.
       ?: PrototypeSecureStorageRules.blockError(JsonObject(value + ("state" to stored)))
-      ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
 
   private val stateWriteActionTypes =
     setOf("setState", "toggle", "increment", "decrement", "request", "platform")

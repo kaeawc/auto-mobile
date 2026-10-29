@@ -6,6 +6,7 @@ import {
   type SessionRecoveryTarget,
 } from "../sessionManager";
 import { BootedDevice, Platform } from "../../models";
+import { matchesPlatformSelector } from "../../models/Platform";
 import { isUnresolvedAndroidEmulatorName } from "../../devices/deviceIdentityEvidence";
 import { didSourceSucceedForDevice, type DiscoveryCompleteness } from "../../utils/discoverySource";
 import type { PooledDevice } from "../devicePoolTypes";
@@ -261,9 +262,12 @@ export class DevicePoolRecoveryEvidence {
     );
   }
 
+  /** No platform means "either": Android and iOS devices, never a watch (#14908). */
   getDevicesByPlatform(platform?: Platform): PooledDevice[] {
     if (!platform) {
-      return this.callbacks.getAllDevices();
+      return this.callbacks
+        .getAllDevices()
+        .filter((device) => matchesPlatformSelector(device.platform, undefined));
     }
     return this.state.devices.byPlatform(platform);
   }

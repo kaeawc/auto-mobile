@@ -10,9 +10,12 @@ import {
   ANDROID_BASELINE_FILE_ROOTS,
   ANDROID_DOWNLOAD_ENTRIES_KEY,
   ANDROID_USER_FILES_ROOT,
+  androidAccountDigest,
+  androidAccountKey,
   captureAndroidUsers,
   isAndroidResetFile,
   observeSettings,
+  parseAndroidAccountDigests,
   parseAndroidBaselinePackages,
   parseDisplayOverride,
   parseNightMode,
@@ -276,6 +279,70 @@ class AndroidBaselineCleaner {
     await this.cleanFiles();
     for (const directory of this.userFilesNamespaces) {
       await this.removeNamespaceDirectory(directory);
+    }
+    await this.cleanTimezone();
+    await this.verifyLocale();
+    await this.verifyAccounts(users);
+  }
+
+  private baselineString(kind: string, key: string): string | undefined {
+    const value = this.prior.get(`${kind}:${key}`);
+    return value?.state === "present" && typeof value.value === "string" ? value.value : undefined;
+  }
+
+  /**
+   * Puts back the baseline `persist.sys.timezone` with the `clock:timezone` revert (`cmd alarm
+   * set-timezone`, read back) when the zone changed outside the journal. A baseline without a
+   * zone cannot be restored, so a changed zone then fails cleaning.
+   */
+  private async cleanTimezone(): Promise<void> {
+    const prior = this.baselineString("clock", "timezone");
+    if ((await this.command("shell getprop persist.sys.timezone")) === prior) {
+      return;
+    }
+    if (!prior) {
+      throw new ActionableError("Android cleaning cannot restore a time zone the baseline lacks");
+    }
+    await this.restore("clock", "timezone", { state: "present", value: prior });
+  }
+
+  /**
+   * The device-wide locale has no in-place restore (a raw `system_locales` row does not apply
+   * it), so a `persist.sys.locale` that differs from the baseline fails cleaning.
+   */
+  private async verifyLocale(): Promise<void> {
+    const prior = this.baselineString("device-setting", "locale");
+    if (prior === undefined || (await this.command("shell getprop persist.sys.locale")) !== prior) {
+      throw new ActionableError("Android cleaning found a changed device locale");
+    }
+  }
+
+  /**
+   * AccountManager accounts can be neither removed nor added back from an unrooted shell, so a
+   * user whose account set differs from the baseline fails cleaning. This runs after package
+   * cleaning: uninstalling a session-installed authenticator drops that app's accounts. A user
+   * the baseline did not list compares against an empty set; an unreadable list fails cleaning.
+   */
+  private async verifyAccounts(users: readonly number[]): Promise<void> {
+    const baselineUsers = this.baseline.observations
+      .filter((observation) => observation.kind === "account" && /^user:\d+$/.test(observation.key))
+      .map((observation) => Number(observation.key.slice("user:".length)));
+    if (baselineUsers.length === 0) {
+      throw new ActionableError("Android baseline has no per-user account inventory");
+    }
+    const current = parseAndroidAccountDigests(await this.command("shell dumpsys account"), users);
+    const empty = androidAccountDigest([]);
+    const changed = [...new Set([...baselineUsers, ...users])]
+      .sort((left, right) => left - right)
+      .filter(
+        (user) =>
+          (this.baselineString("account", androidAccountKey(user)) ?? empty) !==
+          (current.get(user) ?? empty),
+      );
+    if (changed.length > 0) {
+      throw new ActionableError(
+        `Android cleaning found changed accounts for user ${changed.join(", ")}; accounts cannot be restored in place`,
+      );
     }
   }
 

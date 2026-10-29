@@ -60,6 +60,21 @@ Preferences are skipped by replay and require fallback unless their JSON key
 identifies an app absent from the readable baseline inventory, which cleaning
 uninstalls with its data.
 
+Android cleaning ends by comparing three baseline observations the session may change
+outside the journal. The time zone (`persist.sys.timezone`) is restored in place with the
+`clock:timezone` revert, `cmd alarm set-timezone` followed by a property read-back that
+must match; a baseline without a zone, or a failed read-back, fails cleaning. The same
+verified revert replays a journaled `clock:timezone` row (changeLocalization `timeZone`)
+whose prior was readable. The device locale (`persist.sys.locale`) has no in-place restore
+(cleaning a raw `system_locales` row does not apply it), so any difference fails cleaning.
+AccountManager accounts are observed per user as a SHA-256 of the sorted `Account {...}`
+rows `dumpsys account` lists (names never reach the journal); an unrooted shell can neither
+remove nor re-add accounts, so a user whose set differs, an account list that cannot be
+read at capture or reset, or a baseline without per-user account digests fails cleaning.
+The check runs after package cleaning, because uninstalling a session-installed
+authenticator removes its accounts; a user absent from the baseline compares against an
+empty set.
+
 Android volume rows hold live audio levels, which raw settings cleaning cannot
 reach (AudioService persists `volume_*` rows but never reloads them), so they
 require their journal revert. `mediaSession` volume journals `volume:<stream>`
@@ -239,7 +254,8 @@ capture like other admission work.
   not unknown). For the standalone runner every `DEVICE_MUTATION_KINDS` entry must
   be complete or explicitly unobservable; omission, missing/changing inventories,
   duplicate keys and unobservable state prevent its certification even when values
-  match. None of this gates or forces fallback in keep-booted resets.
+  match. Apart from the Android time zone, locale and account checks above, none of
+  this gates or forces fallback in keep-booted resets.
 - Complete device settings cover all default-setting keys plus locale/appearance.
   Adapters must report blind spots (app data/containers, changes induced by UI, raw
   commands or the app under test) rather than call a partial scan complete; a cheap

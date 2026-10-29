@@ -9,6 +9,7 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
   getStaticToolDefinitions,
   getConnectedStaticToolDefinitions,
+  staticToolDeclaresDeviceResourceBudget,
   staticToolDeclaresInput,
 } from "../../src/daemon/staticToolDefinitions";
 import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
@@ -57,6 +58,7 @@ describe("getStaticToolDefinitions", () => {
       delete meta["automobile/debugOnly"];
       delete meta["automobile/embeddedSdkOnly"];
       delete meta["automobile/planOnly"];
+      delete meta["automobile/deviceResourceBudget"];
       if (Object.keys(meta).length) {
         definition._meta = meta;
       } else {
@@ -244,5 +246,27 @@ describe("staticToolDeclaresInput", () => {
     expect(staticToolDeclaresInput("tapOn", "force")).toBe(false);
     expect(staticToolDeclaresInput("killDevice", "noSuchInput")).toBe(false);
     expect(staticToolDeclaresInput("noSuchTool", "force")).toBe(false);
+  });
+});
+
+describe("staticToolDeclaresDeviceResourceBudget (#15672)", () => {
+  test("the device-resource tools declare the budget trait in the committed definitions", () => {
+    expect(staticToolDeclaresDeviceResourceBudget("setDeviceResources")).toBe(true);
+    expect(staticToolDeclaresDeviceResourceBudget("reconcileDeviceResources")).toBe(true);
+  });
+
+  test("other tools, including those with a timeoutMs input, do not declare it", () => {
+    expect(staticToolDeclaresDeviceResourceBudget("startDevice")).toBe(false);
+    expect(staticToolDeclaresDeviceResourceBudget("provisionDevice")).toBe(false);
+    expect(staticToolDeclaresDeviceResourceBudget("tapOn")).toBe(false);
+    expect(staticToolDeclaresDeviceResourceBudget("noSuchTool")).toBe(false);
+  });
+
+  test("the trait key is internal and never leaves the cold wire payload", () => {
+    for (const tools of [getStaticToolDefinitions(), getConnectedStaticToolDefinitions()]) {
+      for (const tool of tools) {
+        expect(Object.hasOwn(tool._meta ?? {}, "automobile/deviceResourceBudget")).toBe(false);
+      }
+    }
   });
 });

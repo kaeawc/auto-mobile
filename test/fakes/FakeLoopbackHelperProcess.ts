@@ -37,9 +37,12 @@ export class FakeLoopbackHelperProcess extends EventEmitter implements LoopbackH
     this.stderr.write(`audio-loopback-error: ${code} ${message}\n`);
   }
 
+  /** Exits, then closes stdout a turn later, as a real process's pipe may still be draining. */
   exit(code: number | null): void {
-    // Stderr is delivered before exit, as a real process's buffered pipe would be.
-    setImmediate(() => this.emit("exit", code));
+    setImmediate(() => {
+      this.emit("exit", code);
+      setImmediate(() => this.stdout.end());
+    });
   }
 
   kill(signal?: NodeJS.Signals): boolean {

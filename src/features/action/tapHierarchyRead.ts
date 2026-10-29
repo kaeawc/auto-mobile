@@ -11,6 +11,11 @@ import {
   mergeIosSdkBridgeInto,
   type IosSdkBridgeReader,
 } from "../observe/ios/IosSdkBridgeReader";
+import {
+  deviceIosSdkWebReader,
+  mergeIosSdkWebInto,
+  type IosSdkWebReader,
+} from "../observe/ios/IosSdkWebReader";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 
 /** Hierarchy-read helpers shared by TapOnElement and TapAnyElement (#11832). */
@@ -50,6 +55,8 @@ export interface FreshHierarchyReadDeps {
   actionLabel: string;
   /** The app's SDK observation bridge (#5159); defaults to the device's runner client. */
   sdkBridge?: IosSdkBridgeReader;
+  /** The app's opted-in WKWebView bridges (#5162); defaults to the device's runner client. */
+  sdkWeb?: IosSdkWebReader;
 }
 
 /** Read one fresh hierarchy for the device platform within `timeoutMs`; null when none arrived. */
@@ -99,12 +106,14 @@ export async function readFreshPlatformHierarchy(
         Object.assign(rawHierarchy, { [iosHierarchyAcquisition]: acquisition });
       }
       const prepared = deps.prepareForResponse(rawHierarchy, screenSize);
-      // Merge the bridge exactly as observe does, so a revalidated target keeps its bridge identity.
+      // Merge the bridges exactly as observe does, so a revalidated target keeps its bridge or
+      // web identity.
       await mergeIosSdkBridgeInto(
         prepared,
         deps.sdkBridge ?? deviceIosSdkBridgeReader(device),
         signal,
       );
+      await mergeIosSdkWebInto(prepared, deps.sdkWeb ?? deviceIosSdkWebReader(device), signal);
       return prepared;
     }
     default:

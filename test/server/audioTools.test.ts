@@ -16,7 +16,8 @@ import {
   stopAudioInputResultSchema,
 } from "../../src/server/audioToolOutputSchemas";
 import type { BootedDevice } from "../../src/models";
-import { parseWav, sineTone } from "../../src/utils/audio/pcm";
+import { encodeWav, parseWav, sineTone } from "../../src/utils/audio/pcm";
+import { isAbsolute } from "node:path";
 import { CountingIdGenerator } from "../../src/utils/CountingIdGenerator";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -36,6 +37,7 @@ describe("audio tools (#13628, #13629)", () => {
   let sessions: FakeEmulatorAudioSession[];
   let service: EmulatorAudioService;
   let saved: Array<{ deviceId: string; bytes: Uint8Array }>;
+  let readPaths: string[];
   let deps: Parameters<typeof createInjectAudioInputHandler>[0];
 
   beforeEach(() => {
@@ -45,6 +47,7 @@ describe("audio tools (#13628, #13629)", () => {
     });
     sessions = [];
     saved = [];
+    readPaths = [];
     service = new EmulatorAudioService({
       discovery: {
         findByConsolePort: async (port) => ({
@@ -61,7 +64,10 @@ describe("audio tools (#13628, #13629)", () => {
         sessions.push(session);
         return session;
       },
-      readFile: async () => new Uint8Array(0),
+      readFile: async (path) => {
+        readPaths.push(path);
+        return encodeWav({ sampleRate: 16_000, channels: 1, samples: new Int16Array(160) });
+      },
       fileSize: async () => 0,
       ids: new CountingIdGenerator("inj"),
     });
@@ -100,6 +106,24 @@ describe("audio tools (#13628, #13629)", () => {
       structured(await stop(emulator, { injectionId: started.injectionId })),
     );
     expect(stopped).toMatchObject({ injectionId: "inj-1", reason: "stopped", framesSent: 7 });
+  });
+
+  test("stopAudioInput refuses an injection running on another emulator", async () => {
+    const started = injectAudioInputResultSchema.parse(
+      structured(await createInjectAudioInputHandler(deps)(emulator, { tone: {} })),
+    );
+    const other: BootedDevice = { name: "emu2", platform: "android", deviceId: "emulator-5556" };
+    await expect(
+      createStopAudioInputHandler(deps)(other, { injectionId: started.injectionId }),
+    ).rejects.toThrow("is on emulator-5554, not emulator-5556");
+    expect(service.activeInjectionIds(emulator.deviceId)).toEqual([started.injectionId]);
+  });
+
+  test("a relative WAV path is resolved to an absolute launch-directory path", async () => {
+    await createInjectAudioInputHandler(deps)(emulator, { file: "fixtures/voice.wav" });
+    expect(readPaths).toHaveLength(1);
+    expect(isAbsolute(readPaths[0])).toBe(true);
+    expect(readPaths[0].replaceAll("\\", "/").endsWith("fixtures/voice.wav")).toBe(true);
   });
 
   test("passing both file and tone is refused before any device work", async () => {

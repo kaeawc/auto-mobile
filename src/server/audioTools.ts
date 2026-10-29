@@ -19,6 +19,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import { createStructuredToolResponse } from "../utils/toolUtils";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 /** Capture stays well under the daemon's 30 s default request timeout, including its 2 s grace. */
 export const MAX_CAPTURE_SECONDS = 20;
@@ -91,7 +92,10 @@ function sourceFrom(args: {
   if (args.file && args.tone) {
     throw new ActionableError("Pass either file or tone to injectAudioInput, not both.");
   }
-  return args.file ? { kind: "file", path: args.file } : { kind: "tone", ...args.tone };
+  // The daemon runs from the home directory; a relative path means the launch directory.
+  return args.file
+    ? { kind: "file", path: resolvePathFromDaemonLaunchWorkingDirectory(args.file) }
+    : { kind: "tone", ...args.tone };
 }
 
 /** Writes beside the other tool outputs; binary files are returned by host path, never inlined. */
@@ -146,9 +150,9 @@ export const createInjectAudioInputHandler =
 
 export const createStopAudioInputHandler =
   (deps: AudioToolDependencies = {}): DeviceToolHandler<typeof stopAudioInputInput> =>
-  async (_device, args) => {
+  async (device, args) => {
     const service = deps.service ?? defaultEmulatorAudioService;
-    const stopped = await service.stopInjection(args.injectionId);
+    const stopped = await service.stopInjection(args.injectionId, device.deviceId);
     return createStructuredToolResponse({
       success: true,
       message: `Audio injection ${stopped.injectionId} ended (${stopped.reason}) after ${stopped.framesSent} frames.`,

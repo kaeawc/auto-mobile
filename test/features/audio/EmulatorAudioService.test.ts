@@ -126,6 +126,24 @@ describe("EmulatorAudioService injection", () => {
     });
   });
 
+  test("a stop aimed at another device is refused, before and after the injection ends", async () => {
+    const { service, sessions } = setup();
+    const { injectionId } = await service.startInjection("emulator-5554", {
+      source: { kind: "tone" },
+    });
+    await expect(service.stopInjection(injectionId, "emulator-5556")).rejects.toThrow(
+      "is on emulator-5554, not emulator-5556",
+    );
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([injectionId]);
+    expect(await service.stopInjection(injectionId, "emulator-5554")).toMatchObject({
+      reason: "stopped",
+    });
+    await expect(service.stopInjection(injectionId, "emulator-5556")).rejects.toThrow(
+      "is on emulator-5554",
+    );
+    expect(sessions[0].closed).toBe(1);
+  });
+
   test("an unknown injection id is an actionable error", async () => {
     const { service } = setup();
     await expect(service.stopInjection("nope")).rejects.toThrow(/No audio injection 'nope'/);

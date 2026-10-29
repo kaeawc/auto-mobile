@@ -95,6 +95,14 @@ export interface EmulatorAudioServiceDeps {
   ids: IdGenerator;
 }
 
+function assertSameDevice(injectionId: string, owner: string, requested: string | undefined): void {
+  if (requested !== undefined && owner !== requested) {
+    throw new ActionableError(
+      `Audio injection '${injectionId}' is on ${owner}, not ${requested}. Stop it on ${owner}.`,
+    );
+  }
+}
+
 function unsupported(code: EmulatorAudioErrorCode, reason: string): EmulatorAudioError {
   return new EmulatorAudioError(code, reason);
 }
@@ -107,7 +115,10 @@ function unsupported(code: EmulatorAudioErrorCode, reason: string): EmulatorAudi
 export class EmulatorAudioService {
   private readonly active = new Map<string, ActiveInjection>();
   /** Settled results (success or failure) of ended injections, newest last. */
-  private readonly finished = new Map<string, Promise<StoppedInjection>>();
+  private readonly finished = new Map<
+    string,
+    { deviceId: string; result: Promise<StoppedInjection> }
+  >();
 
   constructor(private readonly deps: EmulatorAudioServiceDeps) {}
 
@@ -135,7 +146,7 @@ export class EmulatorAudioService {
     this.active.set(injectionId, { deviceId, owner: request.sessionId, injection, result });
     const retire = () => {
       this.active.delete(injectionId);
-      this.finished.set(injectionId, result);
+      this.finished.set(injectionId, { deviceId, result });
       while (this.finished.size > FINISHED_INJECTIONS_KEPT) {
         this.finished.delete(this.finished.keys().next().value as string);
       }
@@ -154,11 +165,16 @@ export class EmulatorAudioService {
     };
   }
 
-  /** Ends an injection. Idempotent: a finished or already-stopped id returns its result. */
-  async stopInjection(injectionId: string): Promise<StoppedInjection> {
+  /**
+   * Ends an injection. Idempotent: a finished or already-stopped id returns its result. With
+   * `deviceId`, an injection on another device is refused, so a caller authorized for one
+   * emulator cannot stop audio on another by its id.
+   */
+  async stopInjection(injectionId: string, deviceId?: string): Promise<StoppedInjection> {
     const done = this.finished.get(injectionId);
     if (done) {
-      return done;
+      assertSameDevice(injectionId, done.deviceId, deviceId);
+      return done.result;
     }
     const active = this.active.get(injectionId);
     if (!active) {
@@ -166,6 +182,7 @@ export class EmulatorAudioService {
         `No audio injection '${injectionId}'. It may belong to a server that has since restarted; start a new injection.`,
       );
     }
+    assertSameDevice(injectionId, active.deviceId, deviceId);
     await active.injection.stop().catch((error: unknown) => {
       // The settled result below carries the failure to the caller.
       logger.debug(`audio injection ${injectionId} stop: ${errorMessage(error)}`);

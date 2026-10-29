@@ -110,8 +110,10 @@
             session = next
             if let selected = expandedSelect {
                 let root = next.spec?.root
-                let blocker = root?.openModals(state: next.state, pages: next.pages)
-                    .last { $0.blocksUnderlyingPage }
+                let blocker = root?.openModals(
+                    state: next.state, pages: next.pages, stacks: next.stacks, data: next.data
+                )
+                .last { $0.blocksUnderlyingPage }
                 if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
                     (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
                 {
@@ -183,8 +185,8 @@
             )
         }
 
-        /// The window frame a modal bottom sheet lays out and draws its scrim in: the placement's
-        /// frame for a `sheet` or `floating` window, the whole window otherwise, shortened above a
+        /// The renderer-local frame a modal bottom sheet lays out and draws its scrim in: the placement's
+        /// frame for a `sheet` or `floating` window, the whole renderer otherwise, shortened above a
         /// software keyboard that does not move the window itself.
         var modalSheetContainer: PrototypeRect {
             let placement = spec?.window.placement
@@ -202,13 +204,19 @@
                 contentFrame: content,
                 windowWidth: Double(windowSize.width),
                 windowHeight: Double(windowSize.height),
+                rendererFrame: keyboardContainerFrame.map {
+                    PrototypeRect(
+                        x: $0.minX - windowOrigin.x, y: $0.minY - windowOrigin.y,
+                        width: $0.width, height: $0.height
+                    )
+                },
                 lift: keyboardLift,
                 keyboardTop: top
             )
         }
 
         /// Window-space rects that accept touches; everything else passes through to the app.
-        @ObservationIgnored var hitRects = PrototypeHitRects()
+        @ObservationIgnored let hitRects = PrototypeHitRects()
 
         @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
         @ObservationIgnored var onEmbeddedEvent: (@MainActor (PrototypeEvent) -> Void)?
@@ -340,7 +348,12 @@
         /// Re-arms snackbar timeouts against the snackbars the session now has open.
         private func syncSnackbarTimeouts() {
             let open = session.spec?.root
-                .openModals(state: session.state, pages: session.pages, stacks: session.stacks, data: session.spec?.data) ?? []
+                .openModals(
+                    state: session.state,
+                    pages: session.pages,
+                    stacks: session.stacks,
+                    data: session.spec?.data
+                ) ?? []
             snackbarTimeouts.sync(openModals: open)
         }
 
@@ -510,7 +523,7 @@
 
         @discardableResult
         func popTopmostStack() -> Bool {
-            if spec?.root.openModals(state: state, pages: pages, stacks: stacks)
+            if spec?.root.openModals(state: state, pages: pages, stacks: stacks, data: spec?.data)
                 .contains(where: { $0.type == "drawer" }) == true
             {
                 apply { $0.popTopmostStack() }

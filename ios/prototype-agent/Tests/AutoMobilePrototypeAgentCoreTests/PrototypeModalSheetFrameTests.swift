@@ -22,6 +22,55 @@ final class PrototypeModalSheetFrameTests: XCTestCase {
         )
     }
 
+    func testEmbeddedSheetUsesRendererBoundsInsteadOfWindowBounds() {
+        XCTAssertEqual(
+            PrototypeModalSheetFrame.container(
+                placementType: "sheet", edge: nil, height: 300, contentFrame: nil,
+                windowWidth: 600, windowHeight: 800,
+                rendererFrame: PrototypeRect(x: 40, y: 150, width: 320, height: 400),
+                lift: 0, keyboardTop: nil
+            ),
+            PrototypeRect(x: 0, y: 100, width: 320, height: 300)
+        )
+    }
+
+    func testEmbeddedFloatingConvertsWindowContentFrameToRendererCoordinates() {
+        XCTAssertEqual(
+            PrototypeModalSheetFrame.container(
+                placementType: "floating", edge: nil, height: nil,
+                contentFrame: PrototypeRect(x: 60, y: 250, width: 200, height: 250),
+                windowWidth: 600, windowHeight: 800,
+                rendererFrame: PrototypeRect(x: 40, y: 150, width: 320, height: 400),
+                lift: 0, keyboardTop: 300
+            ),
+            PrototypeRect(x: 20, y: 100, width: 200, height: 200)
+        )
+    }
+
+    func testEmbeddedBottomSheetUsesRendererLocalKeyboardLift() {
+        XCTAssertEqual(
+            PrototypeModalSheetFrame.container(
+                placementType: "sheet", edge: nil, height: 300, contentFrame: nil,
+                windowWidth: 600, windowHeight: 800,
+                rendererFrame: PrototypeRect(x: 40, y: 150, width: 320, height: 400),
+                lift: 100, keyboardTop: 300
+            ),
+            PrototypeRect(x: 0, y: 0, width: 320, height: 300)
+        )
+    }
+
+    func testEmbeddedFullscreenStopsAtRendererLocalKeyboardTop() {
+        XCTAssertEqual(
+            PrototypeModalSheetFrame.container(
+                placementType: "fullscreen", edge: nil, height: nil, contentFrame: nil,
+                windowWidth: 600, windowHeight: 800,
+                rendererFrame: PrototypeRect(x: 40, y: 150, width: 320, height: 400),
+                lift: 0, keyboardTop: 300
+            ),
+            PrototypeRect(x: 0, y: 0, width: 320, height: 300)
+        )
+    }
+
     func testBottomSheetPlacementRisesWithTheKeyboardLift() {
         XCTAssertEqual(
             container("sheet", height: 300, lift: 250, keyboardTop: 550),

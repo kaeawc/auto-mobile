@@ -1033,6 +1033,7 @@
         @ViewBuilder
         private func sheet(_ node: PrototypeNode, index: Int) -> some View {
             let box = model.modalSheetContainer
+            let rendererHeight = Double(model.keyboardContainerFrame?.height ?? model.windowSize.height)
             let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
             let duration = PrototypeKeyboardLift.animationDuration(
                 keyboardDuration: model.keyboardDuration, motion: motion
@@ -1050,13 +1051,18 @@
                 // Fullscreen windows do not move: the sheet's room ends at the keyboard.
                 content
                     .reportFrame(key: "modal.\(index)", model: model)
-                    .padding(.bottom, box.height > 0 ? CGFloat(max(Double(model.windowSize.height) - box.height, 0)) : 0)
+                    .padding(.bottom, box.height > 0 ? CGFloat(max(rendererHeight - box.height, 0)) : 0)
                     .animation(duration.map { .easeInOut(duration: $0) }, value: box)
             }
         }
 
         var body: some View {
-            let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks, data: model.spec?.data) ?? []
+            let modals = model.spec?.root.openModals(
+                state: model.state,
+                pages: model.pages,
+                stacks: model.stacks,
+                data: model.spec?.data
+            ) ?? []
             let displayed = modals + retainedDrawers.filter { old in !modals.contains { $0 === old } }
             ZStack {
                 ForEach(Array(displayed.enumerated()), id: \.element.identity) { index, node in

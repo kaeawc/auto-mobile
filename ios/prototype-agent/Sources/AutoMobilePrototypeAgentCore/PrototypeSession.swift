@@ -777,7 +777,7 @@ struct PrototypeSession {
 
     var stackPopTarget: String? {
         guard let spec else { return nil }
-        return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks)
+        return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks, data: data)
     }
 
     func stackTransition(_ id: String) -> PrototypeStackTransition {
@@ -785,7 +785,7 @@ struct PrototypeSession {
     }
 
     mutating func popTopmostStack() -> [PrototypeEvent] {
-        if let drawer = spec?.root.openModals(state: state, pages: pages, stacks: stacks)
+        if let drawer = spec?.root.openModals(state: state, pages: pages, stacks: stacks, data: data)
             .last(where: { $0.type == "drawer" }) { return closeModal(drawer) }
         guard let id = stackPopTarget else { return [] }
         return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }

@@ -48,8 +48,10 @@ final class PrototypeLazyModalRows {
 enum PrototypeModalSheetFrame {
     /// - Parameters:
     ///   - contentFrame: the floating root's reported window frame, when it has one.
+    ///   - rendererFrame: embedded renderer bounds in window coordinates; nil uses the whole window.
     ///   - lift: the placement's keyboard lift (nonzero only for a bottom-edge `sheet`, which moves whole).
-    ///   - keyboardTop: the software keyboard's top edge in window coordinates, nil without one.
+    ///   - keyboardTop: the software keyboard's top edge in renderer-local coordinates, nil without one.
+    /// - Returns: the modal container in renderer-local coordinates.
     static func container(
         placementType: String,
         edge: String?,
@@ -57,24 +59,32 @@ enum PrototypeModalSheetFrame {
         contentFrame: PrototypeRect?,
         windowWidth: Double,
         windowHeight: Double,
+        rendererFrame: PrototypeRect? = nil,
         lift: Double,
         keyboardTop: Double?
     )
         -> PrototypeRect
     {
-        let window = PrototypeRect(x: 0, y: 0, width: windowWidth, height: windowHeight)
+        let width = rendererFrame?.width ?? windowWidth
+        let heightAvailable = rendererFrame?.height ?? windowHeight
+        let window = PrototypeRect(x: 0, y: 0, width: width, height: heightAvailable)
         let base: PrototypeRect
         switch placementType {
         case "sheet":
             let moves = PrototypeKeyboardLift.appliesTo(placementType: placementType, edge: edge)
             base = PrototypeSheetFrame.rect(
-                containerWidth: windowWidth, containerHeight: windowHeight, edge: edge, height: height,
+                containerWidth: width, containerHeight: heightAvailable, edge: edge, height: height,
                 lift: moves ? lift : 0
             )
             // A bottom-edge sheet window already rose above the keyboard.
             if moves { return base }
         case "floating":
-            base = contentFrame ?? window
+            base = contentFrame.map {
+                PrototypeRect(
+                    x: $0.x - (rendererFrame?.x ?? 0), y: $0.y - (rendererFrame?.y ?? 0),
+                    width: $0.width, height: $0.height
+                )
+            } ?? window
         default:
             base = window
         }

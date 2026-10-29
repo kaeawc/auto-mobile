@@ -98,11 +98,13 @@ enum PrototypeStacks {
     /// priority over inline stacks. Hidden screens never compete for Back.
     static func popTarget(
         root: PrototypeNode, state: [String: JSONValue], pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot]
+        stacks: [String: PrototypeStackSnapshot], data: [String: JSONValue]?
     )
         -> String?
     {
-        if root.openModals(state: state, pages: pages, stacks: stacks).contains(where: { $0.type == "drawer" }) {
+        if root.openModals(state: state, pages: pages, stacks: stacks, data: data)
+            .contains(where: { $0.type == "drawer" })
+        {
             return nil
         }
         var target: String?

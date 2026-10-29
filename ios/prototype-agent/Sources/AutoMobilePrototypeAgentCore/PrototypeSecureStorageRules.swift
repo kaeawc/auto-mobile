@@ -95,9 +95,26 @@ enum PrototypeSecureStorageRules {
         }
     }
 
-    /// The secure key a `{key}` text placeholder names.
+    /// The secure key a `{key}` text placeholder names. A placeholder may hold repeat placeholders, as in
+    /// `{tok{row.id}}`, which repeat binding turns into `{token}` before the request reads state, so each
+    /// balanced `{...}` group is matched as a template whose inner groups may stand for any text.
     private static func placeholderKey(_ text: String, secure: [String]) -> String? {
-        secure.first { $0.hasPrefix("state:") && text.contains("{\($0.dropFirst("state:".count))}") }
+        let scalars = Array(text.unicodeScalars)
+        var depth = 0
+        var start = 0
+        for (index, scalar) in scalars.enumerated() {
+            if scalar == "{" {
+                depth += 1
+                if depth == 1 { start = index + 1 }
+            } else if scalar == "}", depth > 0 {
+                depth -= 1
+                guard depth == 0 else { continue }
+                var group = String.UnicodeScalarView()
+                group.append(contentsOf: scalars[start ..< index])
+                if let key = secureKey(for: String(group), secure: secure) { return key }
+            }
+        }
+        return nil
     }
 
     /// The first secure `state:` key a context state reference can read. A repeat template such as

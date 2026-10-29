@@ -116,9 +116,28 @@ internal object PrototypeSecureStorageRules {
     return null
   }
 
-  /** The secure key a `{key}` text placeholder names. */
-  private fun placeholderKey(text: String, secure: List<String>): String? = secure.firstOrNull {
-    it.startsWith("state:") && "{${it.removePrefix("state:")}}" in text
+  /**
+   * The secure key a `{key}` text placeholder names. A placeholder may hold repeat placeholders, as
+   * in `{tok{row.id}}`, which repeat binding turns into `{token}` before the request reads state,
+   * so each balanced `{...}` group is matched as a template whose inner groups may stand for any
+   * text.
+   */
+  private fun placeholderKey(text: String, secure: List<String>): String? {
+    var depth = 0
+    var start = 0
+    for ((index, char) in text.withIndex()) {
+      if (char == '{') {
+        depth += 1
+        if (depth == 1) start = index + 1
+      } else if (char == '}' && depth > 0) {
+        depth -= 1
+        if (depth == 0)
+          secureKeyFor(text.substring(start, index), secure)?.let {
+            return it
+          }
+      }
+    }
+    return null
   }
 
   /**

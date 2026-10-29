@@ -139,9 +139,27 @@ function bindingKey(value: unknown, secure: string[]): string | undefined {
   return typeof key === "string" ? secureKeyFor(key, secure) : undefined;
 }
 
-/** The secure key a `{key}` text placeholder names. */
+/**
+ * The secure key a `{key}` text placeholder names. A placeholder may hold repeat placeholders, as in
+ * `{tok{row.id}}`, which repeat binding turns into `{token}` before the request reads state, so each
+ * balanced `{...}` group is matched as a template whose inner groups may stand for any text.
+ */
 function placeholderKey(text: string, secure: string[]): string | undefined {
-  return secure.find((entry) => entry.startsWith("state:") && text.includes(`{${entry.slice(6)}}`));
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === "{") {
+      depth += 1;
+      start = depth === 1 ? index + 1 : start;
+    } else if (text[index] === "}" && depth > 0) {
+      depth -= 1;
+      const key = depth === 0 ? secureKeyFor(text.slice(start, index), secure) : undefined;
+      if (key) {
+        return key;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**

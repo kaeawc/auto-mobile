@@ -34,16 +34,24 @@ export const startDeviceReadinessSchema = z.object({
 
 export type StartDeviceReadiness = z.infer<typeof startDeviceReadinessSchema>;
 
+/** An Apple Watch simulator has no automation runner: booted and session-bound is all (#14908). */
+const watchStartDeviceReadinessSchema = z.object({
+  level: z.literal("booted"),
+  checks: z.array(z.enum(["bootCompleted", "sessionBound"])),
+  elapsedMs: z.number().nonnegative(),
+});
+
 /** Shared acquisition description plus startDevice's successful structured result. */
 export const startDeviceOutputSchema = z
   .object({
     ...deviceDescriptionSchema.partial().shape,
+    platform: z.enum(["android", "ios", "watchos"]).optional(),
     message: z.string(),
     deviceIdentity: z.unknown().optional(),
     processId: z.number().nullable().optional(),
     isReady: z.literal(true).optional(),
     acquisition: z.enum(["already-booted", "cold-boot"]).optional(),
-    readiness: startDeviceReadinessSchema.optional(),
+    readiness: z.union([startDeviceReadinessSchema, watchStartDeviceReadinessSchema]).optional(),
     disabledResources: disabledResourcesSchema.optional(),
     // PerformanceTracker emits nested arrays/records rather than a flat numeric map.
     timing: z.unknown().optional(),

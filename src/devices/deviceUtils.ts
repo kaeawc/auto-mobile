@@ -28,6 +28,7 @@ import {
 import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecycleBackend";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import { WatchSimulatorLifecycle } from "../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import {
   appendAndroidBootedDiscovery,
   appendIosBootedDiscovery,
@@ -890,7 +891,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: BootedDevice,
     options?: DeviceShutdownOptions,
   ): Promise<BootedDevice | void> {
-    switch (requireAndroidOrIosPlatform(device.platform, "killDevice")) {
+    switch (device.platform) {
       case "android":
         return this.emulator.killDevice(device, options);
       case "ios":
@@ -900,7 +901,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           device,
           options,
         );
+      case "watchos":
+        return this.watchLifecycle().shutdown(device, options);
     }
+  }
+
+  /** Apple Watch simulator boot/shutdown over this manager's simctl and watch listing (#14908). */
+  private watchLifecycle(): WatchSimulatorLifecycle {
+    if (!this.watchSimulators) {
+      throw new ActionableError("Apple Watch simulator inventory is not available on this host.");
+    }
+    return new WatchSimulatorLifecycle(this.simctl, this.watchSimulators);
   }
 
   async destroyDevice(device: DeviceInfo, options?: DeviceDestroyOptions): Promise<void> {

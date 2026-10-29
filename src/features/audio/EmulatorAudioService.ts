@@ -81,7 +81,8 @@ const FINISHED_INJECTIONS_KEPT = 64;
 
 interface ActiveInjection {
   deviceId: string;
-  sessionId?: string;
+  /** The session that started the injection, if any. */
+  owner?: string;
   injection: AudioInjection;
   result: Promise<StoppedInjection>;
 }
@@ -131,7 +132,7 @@ export class EmulatorAudioService {
     }
     const injectionId = this.deps.ids.next();
     const result = this.settle(injectionId, injection, session);
-    this.active.set(injectionId, { deviceId, sessionId: request.sessionId, injection, result });
+    this.active.set(injectionId, { deviceId, owner: request.sessionId, injection, result });
     const retire = () => {
       this.active.delete(injectionId);
       this.finished.set(injectionId, result);
@@ -183,7 +184,7 @@ export class EmulatorAudioService {
    */
   stopOwnedBy(deviceId: string, sessionId: string): Promise<number> | undefined {
     const owned = (entry: ActiveInjection) =>
-      entry.deviceId === deviceId && entry.sessionId === sessionId;
+      entry.deviceId === deviceId && entry.owner === sessionId;
     return [...this.active.values()].some(owned) ? this.stopMatching(owned) : undefined;
   }
 

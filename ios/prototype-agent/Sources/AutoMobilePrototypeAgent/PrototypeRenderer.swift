@@ -1549,13 +1549,21 @@
             }
         }
 
+        /// Page dots are laid out after the pages (a row below a horizontal pager, a column beside a
+        /// vertical one), so they never cover a page. They stay out of the accessibility tree.
         var body: some View {
-            content.overlay(alignment: layout.vertical ? .trailing : .bottom) {
-                if PrototypeCarousel.showsIndicator(node) { indicator }
+            if PrototypeCarousel.showsIndicator(node) {
+                switch PrototypeCarousel.indicatorSide(vertical: layout.vertical) {
+                case .below:
+                    VStack(spacing: 0) { content; indicator }
+                case .beside:
+                    HStack(spacing: 0) { content; indicator }
+                }
+            } else {
+                content
             }
         }
 
-        /// Page dots are decoration: they draw over the pages and stay out of the accessibility tree.
         @ViewBuilder private var indicator: some View {
             let dots = PrototypeCarousel.indicatorDots(count: pages.count, selected: selection.wrappedValue)
             let layoutDots = layout.vertical

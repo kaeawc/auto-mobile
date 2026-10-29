@@ -25,6 +25,13 @@ final class PrototypeCardShapeTests: XCTestCase {
         )
     }
 
+    func testCardOutlineSpansTheNodeOnlyWhenWidthIsFill() {
+        XCTAssertTrue(PrototypeCardLayout.outlineSpansWidth(.fill))
+        XCTAssertFalse(PrototypeCardLayout.outlineSpansWidth(.wrap))
+        XCTAssertFalse(PrototypeCardLayout.outlineSpansWidth(.points(120)))
+        XCTAssertFalse(PrototypeCardLayout.outlineSpansWidth(nil))
+    }
+
     func testCardContentIsNotClippedSoOutlineAndShadowSurvive() {
         XCTAssertFalse(PrototypeStyleCorners.clipsContent(nodeType: "card"))
     }

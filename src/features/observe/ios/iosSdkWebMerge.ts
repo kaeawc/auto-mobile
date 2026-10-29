@@ -166,7 +166,8 @@ function convertElement(
     $: {
       // A covered XCTest leaf's attributes fill in what the DOM element does not say itself.
       ...inherited,
-      class: role,
+      // A replaced XCTest leaf's native class wins: field detection and verification key on it.
+      class: typeof inherited["class"] === "string" ? inherited["class"] : role,
       role: editable ? "textfield" : role,
       // The input properties the shared field detectors read, as a native text field reports them.
       ...(editable ? { focusable: "true", "input-type": "text" } : {}),

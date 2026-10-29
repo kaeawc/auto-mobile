@@ -258,7 +258,7 @@ describe("covered XCTest leaves (#5162)", () => {
     const element = webElements(findWebViewNodes(hierarchy)[0])[0];
     expect(element).toMatchObject({
       "resource-id": "submit-order",
-      class: "button",
+      class: "XCUIElementTypeButton",
       "content-desc": "Submit",
       bounds: { left: 10, top: 120, right: 110, bottom: 160 },
       "web-element-id": "e0",
@@ -283,5 +283,26 @@ describe("replacement in place (#5162)", () => {
     expect(children[0].$).toMatchObject({ "resource-id": "submit-order", "web-element-id": "e0" });
     // Not also appended under the web view.
     expect(attached(findWebViewNodes(hierarchy)[0])).toEqual([]);
+  });
+});
+
+describe("native field semantics on replacement (#5162)", () => {
+  test("a blank native text field replaced by a DOM input still skips text verification", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "UITextField",
+        text: "Email",
+        "content-desc": "Email",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    mergeIosSdkWebSnapshots(hierarchy, [
+      { webViewId: "checkout", snapshot: snapshot([{ ...submit, role: "input", label: "Email" }]) },
+    ]);
+    const element = webElements(findWebViewNodes(hierarchy)[0])[0] as Element;
+    expect(element.class).toBe("UITextField");
+    const detector = new FieldTypeDetector();
+    expect(detector.shouldSkipVerification(element, detector.detect(element))).toBe(true);
   });
 });

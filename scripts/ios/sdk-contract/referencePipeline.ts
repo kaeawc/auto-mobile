@@ -22,8 +22,9 @@ import {
 import { registerNetworkResources } from "../../../src/server/networkResources";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
+import { networkRecordKey } from "./networkSlice";
 
-/** What the production TypeScript path makes of the SDK's bytes, keyed by SDK request id. */
+/** What the production TypeScript path makes of the SDK's bytes, keyed by `networkRecordKey`. */
 export interface ReferenceNetworkRecord {
   row: NetworkEventWithId;
   detail: Record<string, unknown>;
@@ -102,8 +103,9 @@ export async function replayNetworkBatch(options: {
   });
   const records = new Map<string, ReferenceNetworkRecord>();
   for (const row of await getNetworkEvents({ deviceId, limit: MAX_REPLAYED_EVENTS }, db)) {
-    if (row.requestId) {
-      records.set(row.requestId, { row, detail: await readRequestResource(row.id) });
+    const key = networkRecordKey({ requestId: row.requestId, url: row.url, method: row.method });
+    if (key !== undefined) {
+      records.set(key, { row, detail: await readRequestResource(row.id) });
     }
   }
   return records;

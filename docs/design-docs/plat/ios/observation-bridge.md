@@ -106,12 +106,12 @@ cannot be expressed: the runner rejects it as `invalid_action` and the SDK as `4
 CtrlProxy calls the SDK only when `/health` lists a web view (for an action, the named one).
 Failures add these to the observation commands' codes:
 
-| `failure`                 | Meaning                                                              |
-| ------------------------- | -------------------------------------------------------------------- |
-| `disallowed_origin`       | the page's origin or frame is not allowed by the bridge's policy     |
-| `web_process_unavailable` | the web content process terminated and the page has not loaded again |
-| `message_too_large`       | the request or snapshot exceeds the bridge's `maxMessageBytes`       |
-| `no_snapshot`             | the page has not posted a snapshot yet                               |
+| `failure`                 | Meaning                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `disallowed_origin`       | the page's origin is not allowed by the bridge's policy (each snapshot's frame was checked when posted) |
+| `web_process_unavailable` | the web content process terminated and the page has not loaded again; its snapshots are discarded       |
+| `message_too_large`       | the request or snapshot exceeds the bridge's `maxMessageBytes`                                          |
+| `no_snapshot`             | the page has not posted a snapshot yet                                                                  |
 
 `invalid_action` also covers a missing `webViewId`. An action's own rejection is a result with
 `success: false`: `stale_snapshot` (the snapshot is not one of the web view's four most recent),

@@ -130,15 +130,27 @@ public final class AutoMobileWebViewPolicy: Sendable {
     }
 
     public func allows(url: URL?, frameId: String?) -> Bool {
+        let frameAllowed = frameId
+            .map { configuration.allowedFrames.isEmpty || configuration.allowedFrames.contains($0) } ?? configuration
+            .allowedFrames.isEmpty
+        return allowsOrigin(url: url) && frameAllowed
+    }
+
+    /// Whether the page's origin is allowed, regardless of frame (#5162). The routes check the page
+    /// with this; each snapshot's frame was already checked by ``allows(url:frameId:)`` when the
+    /// page posted it.
+    func allowsOrigin(url: URL?) -> Bool {
         guard let url, let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
             return false
         }
         let origin = "\(scheme)://\(url.host ?? "")\(url.port.map { ":\($0)" } ?? "")"
-        let originAllowed = configuration.allowedOrigins.contains(origin)
-        let frameAllowed = frameId
-            .map { configuration.allowedFrames.isEmpty || configuration.allowedFrames.contains($0) } ?? configuration
-            .allowedFrames.isEmpty
-        return originAllowed && frameAllowed
+        return configuration.allowedOrigins.contains(origin)
+    }
+
+    /// Drops every recent snapshot, so none from a terminated page is served or acted on (#5162).
+    func forgetSnapshots() {
+        lock.withLock { $0.removeAll() }
+        latest.withLock { $0 = nil }
     }
 
     public func accept(_ snapshot: AutoMobileWebSnapshot) -> AutoMobileWebSnapshot {
@@ -220,6 +232,30 @@ public final class AutoMobileWebViewPolicy: Sendable {
     }
 }
 
+/// A web view's page as the routes see it (#5162): the last URL and whether its content process
+/// is alive. Only a load or a fresh snapshot from the page restores a terminated process;
+/// reattaching after termination does not.
+struct AutoMobileWebPageState: Equatable, Sendable {
+    private(set) var url: URL?
+    private(set) var contentProcessAvailable = true
+
+    /// The bridge attached, or reattached after termination: record the URL only.
+    mutating func attached(url: URL?) {
+        if let url { self.url = url }
+    }
+
+    /// A navigation committed or finished, or the page posted a message: the process is alive.
+    mutating func loaded(url: URL?) {
+        if let url { self.url = url }
+        contentProcessAvailable = true
+    }
+
+    mutating func terminated(url: URL?) {
+        if let url { self.url = url }
+        contentProcessAvailable = false
+    }
+}
+
 extension AutoMobileWebAction {
     /// The bridge action for a controller action (#5162). Every controller action is bounded.
     init(_ action: AutoMobileWebControlAction) {
@@ -255,9 +291,7 @@ extension AutoMobileWebAction {
         private weak var webView: WKWebView?
         private let requestLock = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
         /// The last committed URL and whether the web content process is alive, readable off-main.
-        private let pageState = OSAllocatedUnfairLock<(url: URL?, processAvailable: Bool)>(
-            initialState: (nil, true)
-        )
+        private let pageState = OSAllocatedUnfairLock<AutoMobileWebPageState>(initialState: .init())
 
         public init(
             webViewId: String = UUID().uuidString,
@@ -276,7 +310,7 @@ extension AutoMobileWebAction {
 
         public func attach(to webView: WKWebView) {
             self.webView = webView
-            notePage(url: webView.url, processAvailable: true)
+            pageState.withLock { $0.attached(url: webView.url) }
             let controller = webView.configuration.userContentController
             controller.removeScriptMessageHandler(forName: "automobile")
             let world = WKContentWorld.world(name: configuration.contentWorldName)
@@ -369,7 +403,7 @@ extension AutoMobileWebAction {
                   let name = body["name"] as? String else { return }
             let url = webView?.url
             guard policy.allows(url: url, frameId: body["frameId"] as? String) else { return }
-            notePage(url: url, processAvailable: true)
+            pageState.withLock { $0.loaded(url: url) }
             var metadata = body.compactMapValues { value -> String? in
                 guard !(value is [Any]), !(value is [String: Any]) else { return nil }
                 return String(describing: value)
@@ -440,7 +474,7 @@ extension AutoMobileWebAction {
         }
 
         public func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
-            notePage(url: webView.url, processAvailable: true)
+            pageState.withLock { $0.loaded(url: webView.url) }
             emit(name: "navigation_finished", url: webView.url)
         }
 
@@ -450,19 +484,16 @@ extension AutoMobileWebAction {
             metadata: ["error": error.localizedDescription]
         ) }
         public func webView(_ webView: WKWebView, didCommit _: WKNavigation!) {
-            notePage(url: webView.url, processAvailable: true)
+            pageState.withLock { $0.loaded(url: webView.url) }
             emit(name: "navigation_committed", url: webView.url)
         }
 
         public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            notePage(url: webView.url, processAvailable: false)
+            pageState.withLock { $0.terminated(url: webView.url) }
+            policy.forgetSnapshots()
             emit(name: "content_process_terminated", url: webView.url)
             attach(to: webView)
             webView.reload()
-        }
-
-        private func notePage(url: URL?, processAvailable: Bool) {
-            pageState.withLock { $0 = (url ?? $0.url, processAvailable) }
         }
 
         // MARK: AutoMobileWebViewControlling (#5162)
@@ -473,7 +504,7 @@ extension AutoMobileWebAction {
                 webViewId: webViewId,
                 url: page.url?.absoluteString,
                 allowedOrigins: policy.allowedOrigins,
-                contentProcessAvailable: page.processAvailable
+                contentProcessAvailable: page.contentProcessAvailable
             )
         }
 
@@ -482,11 +513,11 @@ extension AutoMobileWebAction {
         var maxMessageBytes: Int { policy.maxMessageBytes }
 
         var originAllowed: Bool {
-            policy.allows(url: pageState.withLock { $0.url }, frameId: nil)
+            policy.allowsOrigin(url: pageState.withLock { $0.url })
         }
 
         var contentProcessAvailable: Bool {
-            pageState.withLock { $0.processAvailable }
+            pageState.withLock { $0.contentProcessAvailable }
         }
 
         func perform(_ action: AutoMobileWebControlAction) async -> AutoMobileWebActionResult {

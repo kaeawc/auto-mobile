@@ -192,6 +192,42 @@ final class AutoMobileWebViewPolicyRejectionTests: XCTestCase {
         XCTAssertEqual(policy.latestSnapshot?.snapshotId, "s1")
     }
 
+    func testRouteAccessChecksTheOriginEvenWithAFrameAllowlist() throws {
+        let policy = AutoMobileWebViewPolicy(configuration: .init(
+            allowedOrigins: ["https://fixture.local"], allowedFrames: ["https://fixture.local/frame"]
+        ))
+        let page = try XCTUnwrap(URL(string: "https://fixture.local/index.html"))
+        XCTAssertTrue(policy.allowsOrigin(url: page))
+        XCTAssertFalse(policy.allowsOrigin(url: URL(string: "https://other.local/")))
+        // Messages still need an allowed frame.
+        XCTAssertTrue(policy.allows(url: page, frameId: "https://fixture.local/frame"))
+        XCTAssertFalse(policy.allows(url: page, frameId: "https://fixture.local/other"))
+        XCTAssertFalse(policy.allows(url: page, frameId: nil))
+    }
+
+    func testTerminationForgetsSnapshotsSoNoneIsServedOrActedOn() {
+        let policy = AutoMobileWebViewPolicy(configuration: .init(allowedOrigins: ["https://fixture.local"]))
+        _ = policy.accept(AutoMobileWebSnapshot(snapshotId: "s1", elements: [AutoMobileWebElement(id: "ok")]))
+        policy.forgetSnapshots()
+        XCTAssertNil(policy.latestSnapshot)
+        XCTAssertEqual(policy.rejection(for: .click(snapshotId: "s1", elementId: "ok")), "stale_snapshot")
+    }
+
+    func testOnlyALoadRestoresATerminatedProcess() throws {
+        let page = try XCTUnwrap(URL(string: "https://fixture.local/"))
+        var state = AutoMobileWebPageState()
+        state.attached(url: page)
+        XCTAssertTrue(state.contentProcessAvailable)
+        state.terminated(url: nil)
+        // Reattaching before the reload must not advertise a live process.
+        state.attached(url: page)
+        XCTAssertFalse(state.contentProcessAvailable)
+        XCTAssertEqual(state.url, page)
+        state.loaded(url: nil)
+        XCTAssertTrue(state.contentProcessAvailable)
+        XCTAssertEqual(state.url, page)
+    }
+
     func testLatestSnapshotIsTheRedactedOne() {
         let policy = AutoMobileWebViewPolicy(configuration: .init(redactText: true))
         _ = policy.accept(AutoMobileWebSnapshot(

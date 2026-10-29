@@ -518,7 +518,13 @@
   "nodeProgress": {
     "type": "progress"
   },
-  "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
+  "nodeVideoPlayer": {
+    "type": "videoPlayer",
+    "id": "clip",
+    "source": {
+      "sample": "countdown"
+    }
+  },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {
@@ -907,6 +913,7 @@
     "into": "/data/response",
     "statusKey": "status",
     "via": "host",
+    "allowSecureInRequest": false,
     "timeoutMs": 1000,
     "onSuccess": [
       {

@@ -8,12 +8,14 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /**
  * Secure storage rules (#14321) the contract cannot express, the twin of TypeScript's
  * `prototypeSecureStorage.ts`: `storage.secure` needs the `secureStorage` module, each key is a
  * declared string state key not also in `storage.keys`, a `secureAuth` entry names a secure key and
- * needs the `biometric` module, and no secure key may leave the device through an emit context.
+ * needs the `biometric` module, and no secure key may leave the device through an emit context or
+ * through a `request` that does not opt in with `allowSecureInRequest: true`.
  */
 internal object PrototypeSecureStorageRules {
   fun blockError(root: JsonObject): PrototypeSpecError? {
@@ -64,6 +66,51 @@ internal object PrototypeSecureStorageRules {
       )
     }
     return null
+  }
+
+  /**
+   * A `request` that sends a secure key without `allowSecureInRequest: true`: a `{state}` binding
+   * in a header, query value or body (a whole body, a form entry or a multipart value), or a
+   * `{key}` placeholder in the URL, a header or a query value. Members are checked in sorted order.
+   */
+  fun requestError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
+    val secure = root.member("storage")?.strings("secure").orEmpty()
+    if (action.text("type") != "request" || secure.isEmpty()) return null
+    if ((action["allowSecureInRequest"] as? JsonPrimitive)?.booleanOrNull == true) return null
+    val body = action.member("body")
+    fun members(value: JsonObject?, at: String) =
+      value
+        .orEmpty()
+        .entries
+        .sortedBy { it.key }
+        .map { (name, member) -> member to keyPath(at, name) }
+    val candidates =
+      listOf(action["url"] to "$path.url") +
+        members(action.member("headers"), "$path.headers") +
+        members(action.member("query"), "$path.query") +
+        listOf(action["body"] to "$path.body") +
+        members(body?.member("form"), "$path.body.form") +
+        (body?.get("multipart") as? JsonArray).orEmpty().mapIndexed { index, part ->
+          (part as? JsonObject)?.get("value") to "$path.body.multipart[$index].value"
+        }
+    for ((value, at) in candidates) {
+      val key =
+        (value as? JsonPrimitive)
+          ?.takeIf { it.isString }
+          ?.let { placeholderKey(it.content, secure) }
+          ?: (value as? JsonObject)?.text("state")?.let { secureKeyFor(it, secure) }
+      if (key != null)
+        return fail(
+          at,
+          "Secure storage key $key cannot be sent in a request without allowSecureInRequest",
+        )
+    }
+    return null
+  }
+
+  /** The secure key a `{key}` text placeholder names. */
+  private fun placeholderKey(text: String, secure: List<String>): String? = secure.firstOrNull {
+    it.startsWith("state:") && "{${it.removePrefix("state:")}}" in text
   }
 
   /**

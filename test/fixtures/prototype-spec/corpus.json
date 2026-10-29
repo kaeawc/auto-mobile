@@ -244,6 +244,8 @@
     "search-bar-docked.json",
     "search-bar-minimal.json",
     "search-bar.json",
+    "secure-storage-request-opt-in.json",
+    "secure-storage-request-other-keys.json",
     "secure-storage.json",
     "select-dropdown.json",
     "selection-controls.json",
@@ -1591,6 +1593,13 @@
     "secure-storage-emit-context-template.json",
     "secure-storage-emit-context.json",
     "secure-storage-non-string.json",
+    "secure-storage-request-body.json",
+    "secure-storage-request-follow-up.json",
+    "secure-storage-request-form.json",
+    "secure-storage-request-header-binding.json",
+    "secure-storage-request-query-text.json",
+    "secure-storage-request-repeat-template.json",
+    "secure-storage-request-url-placeholder.json",
     "secure-storage-too-many.json",
     "secure-storage-undeclared-module.json",
     "secure-storage-undeclared-state.json",
@@ -3183,6 +3192,24 @@
     "notify-channel-blocked-read.json": [
       "prototype_platform_notifications_v1",
       "prototype_platform_v1"
+    ],
+    "secure-storage-request-opt-in.json": [
+      "prototype_emit_context_v1",
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
+    ],
+    "secure-storage-request-other-keys.json": [
+      "prototype_emit_context_v1",
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
     ]
   }
 }

@@ -99,7 +99,9 @@ internal object PrototypePlatformRules {
         }
     }
     for ((action, path) in context.actions) {
-      (emitNameError(action, path) ?: PrototypeSecureStorageRules.emitError(action, path, root))
+      (emitNameError(action, path)
+          ?: PrototypeSecureStorageRules.emitError(action, path, root)
+          ?: PrototypeSecureStorageRules.requestError(action, path, root))
         ?.let {
           return it
         }

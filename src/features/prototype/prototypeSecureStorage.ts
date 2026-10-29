@@ -7,8 +7,9 @@ import type { PrototypePlatformError } from "./prototypePlatform";
  * the runtime keeps in the Android Keystore or the iOS Keychain instead of plaintext storage:
  * the list needs the `secureStorage` module, each key is a declared string state key that is not
  * also in `storage.keys`, a `secureAuth` entry names a secure key and needs the `biometric` module,
- * and no secure key may leave the device through an emit context. Kotlin and Swift
- * `PrototypeSecureStorageRules` mirror these checks.
+ * and no secure key may leave the device through an emit context, or through a `request` that does
+ * not opt in with `allowSecureInRequest: true`. Kotlin and Swift `PrototypeSecureStorageRules`
+ * mirror these checks.
  */
 export function prototypeSecureStorageError(root: Raw): PrototypePlatformError | undefined {
   const storage = record(root.storage);
@@ -82,6 +83,65 @@ export function prototypeSecureStorageEmitError(
     }
   }
   return undefined;
+}
+
+/**
+ * A `request` that sends a secure key without `allowSecureInRequest: true`: a `{state}` binding in a
+ * header, query value or body (a whole body, a form entry or a multipart value), or a `{key}`
+ * placeholder in the URL, a header or a query value. Members are checked in sorted order.
+ */
+export function prototypeSecureStorageRequestError(
+  action: Raw,
+  path: string,
+  root: Raw,
+): PrototypePlatformError | undefined {
+  const secure = strings(record(root.storage)?.secure);
+  if (action.type !== "request" || action.allowSecureInRequest === true || secure.length === 0) {
+    return undefined;
+  }
+  const leak = (value: unknown, at: string): PrototypePlatformError | undefined => {
+    const key =
+      typeof value === "string" ? placeholderKey(value, secure) : bindingKey(value, secure);
+    return key
+      ? {
+          path: at,
+          message: `Secure storage key ${key} cannot be sent in a request without allowSecureInRequest`,
+        }
+      : undefined;
+  };
+  const body = record(action.body);
+  const members = (value: unknown, at: string) =>
+    Object.keys(record(value) ?? {})
+      .sort()
+      .map((name) => [record(value)![name], memberPath(at, name)] as const);
+  const candidates: (readonly [unknown, string])[] = [
+    [action.url, `${path}.url`],
+    ...members(action.headers, `${path}.headers`),
+    ...members(action.query, `${path}.query`),
+    [action.body, `${path}.body`],
+    ...members(body?.form, `${path}.body.form`),
+    ...(Array.isArray(body?.multipart) ? body.multipart : []).map(
+      (part, index) => [record(part)?.value, `${path}.body.multipart[${index}].value`] as const,
+    ),
+  ];
+  for (const [value, at] of candidates) {
+    const error = leak(value, at);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+/** The secure key a `{state}` value binding reads, a repeat template matching any row. */
+function bindingKey(value: unknown, secure: string[]): string | undefined {
+  const key = record(value)?.state;
+  return typeof key === "string" ? secureKeyFor(key, secure) : undefined;
+}
+
+/** The secure key a `{key}` text placeholder names. */
+function placeholderKey(text: string, secure: string[]): string | undefined {
+  return secure.find((entry) => entry.startsWith("state:") && text.includes(`{${entry.slice(6)}}`));
 }
 
 /**

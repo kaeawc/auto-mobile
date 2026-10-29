@@ -2637,6 +2637,12 @@
               },
               "optional": true
             },
+            "allowSecureInRequest": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
             "timeoutMs": {
               "rule": {
                 "kind": "number",
@@ -22611,7 +22617,10 @@
               "optional": true,
               "value": {
                 "kind": "array",
-                "item": { "kind": "enum", "values": ["name", "phone", "email"] },
+                "item": {
+                  "kind": "enum",
+                  "values": ["name", "phone", "email"]
+                },
                 "min": 1,
                 "max": 3,
                 "unique": true
@@ -23613,7 +23622,9 @@
         },
         "blocked": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "boolean" }
+          "value": {
+            "kind": "boolean"
+          }
         }
       }
     },

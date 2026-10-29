@@ -92,7 +92,7 @@ function convertNode(
 }
 
 /** Hierarchy children may arrive as one object rather than an array (XML-shaped nodes). */
-function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
+export function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
   const children: unknown = node.node;
   if (Array.isArray(children)) {
     return children;
@@ -100,7 +100,7 @@ function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
   return children && typeof children === "object" ? [children as ViewHierarchyNode] : [];
 }
 
-function boundsKey(value: unknown): string | null {
+export function boundsKey(value: unknown): string | null {
   if (value === null || typeof value !== "object") {
     return null;
   }
@@ -144,8 +144,11 @@ function isCoveredLeaf(node: ViewHierarchyNode, signatures: Set<string>): boolea
   });
 }
 
-/** Removes XCTest leaves a bridge node already covers: same bounds and the same label or id. */
-function removeCoveredLeaves(node: ViewHierarchyNode, signatures: Set<string>): number {
+/**
+ * Removes XCTest leaves a bridge node already covers: same bounds and the same label or id. Each
+ * signature is `boundsKey|name`.
+ */
+export function removeCoveredLeaves(node: ViewHierarchyNode, signatures: Set<string>): number {
   const children = childrenOf(node);
   if (children.length === 0) {
     return 0;

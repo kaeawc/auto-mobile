@@ -127,8 +127,8 @@ Failures add these to the observation commands' codes:
 `success: false`: `stale_snapshot` (the snapshot is not one of the current document's four most
 recent), `element_not_actionable` (missing, disabled or hidden in that snapshot), `disallowed_origin`,
 `web_process_unavailable` (also when the web view has been deallocated or detached), or
-`javascript_error` when the bounded script raised. These commands do
-not yet feed `observe` or the action tools.
+`javascript_error` when the bounded script raised. The snapshot command feeds `observe` (below); the
+action tools do not use the action command yet.
 
 ## Backend selection
 
@@ -145,6 +145,24 @@ same label or id as a bridge node are removed as duplicates. Bridge nodes carry 
 sdkBridge` in `extras`. The result reports `backend: sdk`, or `backend: xctest` with
 `fallbackReason: unavailable` when a registered bridge did not answer. A failed discovery probe
 reports neither.
+
+**Observe: web views.** When the projected hierarchy contains a `WKWebView` node, the collector
+also reads the app's opted-in web views: one unnamed snapshot read answers with the registered list
+and the first web view's snapshot, and each further web view is read by id (2 s budget each). A
+screen without a `WKWebView` makes no read. Registered web views pair with the outermost
+`WKWebView` nodes in tree order, and only when the counts match; otherwise the pairing is ambiguous
+and the web views stay XCTest-only. Each visible DOM element of a paired snapshot is attached as a
+child of its `WKWebView` node, offset by the web view's origin, clipped to it and rounded to whole
+points; one wholly outside the web view is dropped. Elements map onto the existing attributes
+(`label` → `content-desc`, `value` → `text`, `role` → `class`; `enabled` elements are `clickable`)
+and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
+`web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with
+the same bounds and the same label or value as a DOM element are removed as duplicates. A web view
+without a snapshot (none posted yet, a disallowed origin, a terminated process) keeps only its
+XCTest nodes. A merge reports `backend: sdk` unless the native bridge already set `backend`. The
+snapshot id is the DOM elements' capture identity: the web view rejects an action naming one that
+is no longer among its four most recent as `stale_snapshot`, as the native bridge rejects a stale
+observation.
 
 The tap-time fresh read merges the bridge the same way, so a revalidated target keeps its bridge
 identity. Cached hierarchy reads outside observe are XCTest-only: a target resolved from one has no

@@ -32,11 +32,13 @@ enum PrototypeMediaQueue {
         else { throw PrototypeLimits.violation(path, "queue must point to a /data array") }
         let base = PrototypeDataPointer.tokens(String(queue.dropFirst(5)))
             .reduce("data") { PrototypeContractValidator.keyPath($0, $1) }
-        var seen: Set<String> = []
+        // Exact UTF-16 code units, as the host and Kotlin compare: a Swift String set would merge
+        // canonically equivalent ids such as "\u{e9}" and "e\u{301}".
+        var seen: Set<[UInt16]> = []
         for (index, item) in items.enumerated() {
             let at = "\(base)[\(index)]"
             try PrototypeContractValidator.validateValue(item, rule: itemRule, path: at)
-            if let itemId = item.objectFields?["id"]?.stringValue, !seen.insert(itemId).inserted {
+            if let itemId = item.objectFields?["id"]?.stringValue, !seen.insert(Array(itemId.utf16)).inserted {
                 throw PrototypeLimits.violation("\(at).id", "Duplicate queue item id")
             }
         }

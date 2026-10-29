@@ -9,7 +9,7 @@
     "podcast": {
       "episodes": [
         {
-          "id": "ep1",
+          "id": "\u00e9",
           "title": "Pilot",
           "artist": "Host",
           "album": "Season 1",
@@ -20,7 +20,7 @@
           "durationMs": 60000
         },
         {
-          "id": "ep2",
+          "id": "e\u0301",
           "title": "Follow-up",
           "source": {
             "sample": "silence"

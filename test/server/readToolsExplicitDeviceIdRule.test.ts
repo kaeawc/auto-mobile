@@ -79,10 +79,12 @@ const readArgs: Record<string, Record<string, unknown>> = {
   sqlQuery: { query: "SELECT 1" },
   prototype: { action: "inspect" },
   statusBar: { action: "get" },
+  captureAudio: { seconds: 1 },
 };
 // All handler bodies are stubbed, so even platform-specific reads can exercise resolution.
 const EXPECTED = [
   "accessibility",
+  "captureAudio",
   "clipboard",
   "compareScreenshot",
   "displayConfig",
@@ -509,12 +511,14 @@ const READS_THAT_READY_UNHELD = {
 };
 const READS_WITHOUT_UNHELD_READINESS = {
   android: [
+    "captureAudio", // Declares booted readiness; emulator gRPC only.
     "inspectPackageSigning", // Declares booted readiness; no CtrlProxy setup.
     "listApps", // Declares booted readiness; no CtrlProxy setup.
     "mediaSession", // Declares booted readiness; plain adb only.
     "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
   ],
   ios: [
+    "captureAudio", // Declares booted readiness; refused on iOS before any device work.
     "inspectPackageSigning", // Declares booted readiness; no runner setup.
     "listApps", // Declares booted readiness; no runner setup.
     "mediaSession", // Declares booted readiness; no runner setup.

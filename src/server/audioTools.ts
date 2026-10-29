@@ -195,7 +195,12 @@ const injectAudioInputTool = defineDeviceTool({
     "microphone; [audio_injection_unsupported] the device is not a local emulator with gRPC audio. " +
     "Physical devices and iOS are refused.",
   input: injectAudioInputInput,
-  options: { defaultEnabled: false, outputSchema: injectAudioInputResultSchema },
+  options: {
+    defaultEnabled: false,
+    // gRPC only: no CtrlProxy or runner setup.
+    deviceReadiness: "booted",
+    outputSchema: injectAudioInputResultSchema,
+  },
 });
 
 const stopAudioInputTool = defineDeviceTool({
@@ -204,7 +209,12 @@ const stopAudioInputTool = defineDeviceTool({
     "Stop an audio injection started by injectAudioInput. Idempotent: an injection that already " +
     "ended returns its result (frames sent and why it ended).",
   input: stopAudioInputInput,
-  options: { defaultEnabled: false, outputSchema: stopAudioInputResultSchema },
+  options: {
+    defaultEnabled: false,
+    // gRPC only: no CtrlProxy or runner setup.
+    deviceReadiness: "booted",
+    outputSchema: stopAudioInputResultSchema,
+  },
 });
 
 const captureAudioTool = defineDeviceTool({
@@ -216,7 +226,13 @@ const captureAudioTool = defineDeviceTool({
     "returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts " +
     "can glitch real-time audio. Physical devices and iOS are refused.",
   input: captureAudioInput,
-  options: { defaultEnabled: false, deviceReadOnly: true, outputSchema: captureAudioResultSchema },
+  options: {
+    defaultEnabled: false,
+    // gRPC only: no CtrlProxy or runner setup.
+    deviceReadiness: "booted",
+    deviceReadOnly: true,
+    outputSchema: captureAudioResultSchema,
+  },
 });
 
 export const injectAudioInputSchema = injectAudioInputTool.schema;

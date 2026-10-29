@@ -45,7 +45,6 @@
           {
             "type": "text",
             "text": "{props.value}",
-            "contentDescription": "{props.label}: {props.value} {props.unit}",
             "style": {
               "textSize": 56,
               "fontWeight": 700,

@@ -14,7 +14,6 @@
     "watchRow": {
       "root": {
         "type": "row",
-        "contentDescription": "{props.title}, {props.detail}",
         "onTap": [
           {
             "type": "emit",

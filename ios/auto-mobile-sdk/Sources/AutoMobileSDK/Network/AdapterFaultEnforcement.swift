@@ -48,11 +48,19 @@ enum AdapterFaultOutcome: Equatable, Sendable {
         case .proceed:
             [:]
         case let .delay(faultId, delayMs):
-            ["fault_id": faultId, "fault_action": NetworkFaultAction.latency.rawValue,
-             "fault_outcome": "delayed", "fault_delay_ms": String(delayMs)]
+            [
+                "fault_id": faultId,
+                "fault_action": NetworkFaultAction.latency.rawValue,
+                "fault_outcome": "delayed",
+                "fault_delay_ms": String(delayMs),
+            ]
         case let .fail(faultId, action, _, delayMs):
-            ["fault_id": faultId, "fault_action": action.rawValue,
-             "fault_outcome": "failed", "fault_delay_ms": String(delayMs)]
+            [
+                "fault_id": faultId,
+                "fault_action": action.rawValue,
+                "fault_outcome": "failed",
+                "fault_delay_ms": String(delayMs),
+            ]
         case let .unsupported(faultId, action):
             ["fault_id": faultId, "fault_action": action.rawValue, "fault_outcome": "unsupported"]
         }
@@ -115,7 +123,7 @@ struct WebSocketOperations: Sendable {
 
 extension WebSocketOperations {
     init(task: URLSessionWebSocketTask) {
-        url = (task.originalRequest ?? task.currentRequest)?.url?.absoluteString ?? ""
+        url = Self.webSocketURL((task.originalRequest ?? task.currentRequest)?.url)
         send = { payload, done in
             task.send(payload.message) { error in done(error) }
         }
@@ -129,6 +137,23 @@ extension WebSocketOperations {
                 task.cancel(with: .goingAway, reason: Data(reason.utf8))
             }
         }
+    }
+}
+
+extension WebSocketOperations {
+    /// The task's URL with its WebSocket scheme. URLSession can report a `ws`/`wss` task's request
+    /// with `http`/`https`, so records would otherwise carry a different URL than the app opened.
+    static func webSocketURL(_ url: URL?) -> String {
+        guard let url else { return "" }
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        switch components.scheme?.lowercased() {
+        case "http": components.scheme = "ws"
+        case "https": components.scheme = "wss"
+        default: break
+        }
+        return components.url?.absoluteString ?? url.absoluteString
     }
 }
 

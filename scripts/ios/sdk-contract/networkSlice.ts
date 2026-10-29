@@ -17,6 +17,8 @@ export interface NetworkCaseObservation {
   live: JsonRecord | undefined;
   /** Whether CtrlProxy still queued the event; probed only when `live` is absent. */
   queuedInCtrlProxy: boolean | undefined;
+  /** The slice findings are reported under; defaults to the network slice. */
+  slice?: string;
 }
 
 /** Scalar fields a scenario asserts; the SDK spells `protocol` as `protocolName` on the wire. */
@@ -31,6 +33,7 @@ const SCALAR_FIELDS = [
   ["requestBodySize", "requestBodySize"],
   ["responseBodySize", "responseBodySize"],
   ["responseBody", "responseBody"],
+  ["error", "error"],
 ] as const satisfies ReadonlyArray<readonly [keyof ExpectedNetworkEvent, string]>;
 
 type FieldSpelling = "wire" | "surface";
@@ -51,7 +54,10 @@ export function networkFieldMismatches(
   for (const [expectedKey, surfaceKey] of SCALAR_FIELDS) {
     const want = expected[expectedKey];
     const key = spelling === "wire" ? expectedKey : surfaceKey;
-    if (want !== undefined && actual[key] !== want) {
+    // `null` asserts absence: the SDK omits the key and the surface reports null.
+    const differs =
+      want === null ? actual[key] !== null && actual[key] !== undefined : actual[key] !== want;
+    if (want !== undefined && differs) {
       mismatches.push(
         `${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(actual[key])}`,
       );
@@ -90,30 +96,35 @@ export function recordDifferences(reference: JsonRecord, live: JsonRecord): stri
 }
 
 function finding(
-  expected: ExpectedNetworkEvent,
+  observation: NetworkCaseObservation,
   boundary: ContractBoundary,
   message: string,
 ): ContractFinding {
-  return { slice: NETWORK_SLICE, caseName: expected.caseName, boundary, message };
+  return {
+    slice: observation.slice ?? NETWORK_SLICE,
+    caseName: observation.expected.caseName,
+    boundary,
+    message,
+  };
 }
 
 function judgeDownstreamOfSdk(observation: NetworkCaseObservation): ContractFinding | undefined {
   const { expected, reference, live } = observation;
   if (!reference) {
     return finding(
-      expected,
+      observation,
       "ios-client",
       "the production iOS ingestor did not persist the SDK's own bytes",
     );
   }
   const rowMismatches = networkFieldMismatches(expected, reference.row, "surface");
   if (rowMismatches.length > 0) {
-    return finding(expected, "ios-client", `persisted row differs: ${rowMismatches.join("; ")}`);
+    return finding(observation, "ios-client", `persisted row differs: ${rowMismatches.join("; ")}`);
   }
   const detailMismatches = networkFieldMismatches(expected, reference.detail, "surface");
   if (detailMismatches.length > 0) {
     return finding(
-      expected,
+      observation,
       "mcp-surface",
       `request resource differs: ${detailMismatches.join("; ")}`,
     );
@@ -121,19 +132,19 @@ function judgeDownstreamOfSdk(observation: NetworkCaseObservation): ContractFind
   if (!live) {
     return observation.queuedInCtrlProxy
       ? finding(
-          expected,
+          observation,
           "ios-client",
           "CtrlProxy still holds the event; the iOS client never drained it",
         )
       : finding(
-          expected,
+          observation,
           "sdk-endpoint",
           "the SDK encoded the event but neither CtrlProxy's queue nor the daemon has it",
         );
   }
   const transportDifferences = recordDifferences(reference.detail, live);
   if (transportDifferences.length > 0) {
-    return finding(expected, "ctrlproxy-command", transportDifferences.join("; "));
+    return finding(observation, "ctrlproxy-command", transportDifferences.join("; "));
   }
   return undefined;
 }
@@ -148,7 +159,11 @@ export function judgeNetworkCase(
 ): ContractFinding | undefined {
   const { expected, sdkPayload } = observation;
   if (!sdkPayload) {
-    return finding(expected, "sdk-serialization", "the SDK never encoded an event for this case");
+    return finding(
+      observation,
+      "sdk-serialization",
+      "the SDK never encoded an event for this case",
+    );
   }
   const leaked = forbiddenSubstrings.filter((secret) =>
     JSON.stringify(sdkPayload).includes(secret),
@@ -158,9 +173,14 @@ export function judgeNetworkCase(
     ...leaked.map((secret) => `payload carries the unredacted value ${JSON.stringify(secret)}`),
   ];
   if (mismatches.length > 0) {
-    return finding(expected, "sdk-serialization", mismatches.join("; "));
+    return finding(observation, "sdk-serialization", mismatches.join("; "));
   }
   return judgeDownstreamOfSdk(observation);
+}
+
+/** Treats an omitted key and an explicit null as the same "not set". */
+function sameOptional(actual: unknown, want: unknown): boolean {
+  return (actual ?? undefined) === (want ?? undefined);
 }
 
 /** Pairs each expected case with the SDK payload that represents it. */
@@ -174,38 +194,62 @@ export function matchSdkPayload(
   return payloads.find(
     (payload) =>
       payload.url === expected.url &&
-      payload.protocolName === expected.protocolName &&
-      payload.direction === expected.direction &&
-      payload.connectionId === expected.connectionId,
+      payload.method === expected.method &&
+      sameOptional(payload.protocolName, expected.protocolName) &&
+      sameOptional(payload.direction, expected.direction) &&
+      sameOptional(payload.connectionId, expected.connectionId),
   );
 }
 
+/**
+ * The key one network record is joined on across the SDK payload, the replay and the live
+ * resource. Adapter records carry an SDK request id; `URLProtocol` records carry none, so they
+ * are keyed by URL and method, which the run's unique `/contract/<runId>/<case>` path makes
+ * unique.
+ */
+export function networkRecordKey(record: JsonRecord): string | undefined {
+  if (typeof record.requestId === "string" && record.requestId.length > 0) {
+    return record.requestId;
+  }
+  if (typeof record.url === "string" && typeof record.method === "string") {
+    return `url:${record.method} ${record.url}`;
+  }
+  return undefined;
+}
+
 /** Findings that concern the whole run rather than one case. */
-export function judgeManifest(manifest: SdkContractManifest): ContractFinding[] {
+export function judgeManifest(
+  manifest: SdkContractManifest,
+  slice: string = NETWORK_SLICE,
+): ContractFinding[] {
   const findings: ContractFinding[] = [];
-  const runCase = { caseName: "run" } as const;
+  const runCase = { slice, caseName: "run" } as const;
   if (manifest.status === "failed") {
     findings.push({
-      slice: NETWORK_SLICE,
       ...runCase,
       boundary: "fixture-host",
       message: manifest.failure ?? "the scenario failed without a reason",
     });
-  } else if (manifest.network.length === 0) {
+  } else if (!hasScenarioOutput(manifest, slice)) {
     findings.push({
-      slice: NETWORK_SLICE,
       ...runCase,
       boundary: "fixture-host",
-      message: "the scenario completed without any expected network cases",
+      message: `the ${slice} scenario completed without recording any cases`,
     });
   }
   if (manifest.undecodableBatches > 0) {
     findings.push({
-      slice: NETWORK_SLICE,
       ...runCase,
       boundary: "sdk-serialization",
       message: `the SDK posted ${manifest.undecodableBatches} batch(es) its public SdkEventBatch type cannot decode`,
     });
   }
   return findings;
+}
+
+function hasScenarioOutput(manifest: SdkContractManifest, slice: string): boolean {
+  if (slice === NETWORK_SLICE) {
+    return manifest.network.length > 0;
+  }
+  return manifest.faults.length > 0 || manifest.capabilities !== undefined;
 }

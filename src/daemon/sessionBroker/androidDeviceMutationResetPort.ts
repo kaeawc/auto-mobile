@@ -569,7 +569,11 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   }: DeviceMutationInput): AndroidRevertCommand[] | null {
     const prior = priorValue.state === "present" ? priorValue.value : undefined;
     return key === "timezone" && typeof prior === "string" && prior.length > 0
-      ? [{ command: `shell cmd alarm set-timezone ${shellQuote(prior)}` }]
+      ? [
+          { command: `shell cmd alarm set-timezone ${shellQuote(prior)}` },
+          // The prior was read from this property, so only an identical read-back proves restore.
+          { command: "shell getprop persist.sys.timezone", success: prior },
+        ]
       : null;
   }
 

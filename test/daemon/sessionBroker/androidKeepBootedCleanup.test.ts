@@ -364,11 +364,11 @@ describe("Android unconditional keep-booted cleaning", () => {
     expect(commands).toContain("shell settings --user 0 list secure");
     expect(commands).toContain("shell cmd clipboard clear");
     expect(commands.some((command) => command.includes("pm clear"))).toBe(false);
-    expect(
-      commands.some(
-        (command) => command.includes("sha256sum") || command.includes("dumpsys account"),
-      ),
-    ).toBe(false);
+    expect(commands.some((command) => command.includes("sha256sum"))).toBe(false);
+    expect(commands).toContain("shell getprop persist.sys.timezone");
+    expect(commands).toContain("shell getprop persist.sys.locale");
+    expect(commands).toContain("shell dumpsys account");
+    expect(commands.some((command) => command.includes("set-timezone"))).toBe(false);
     expect(
       adb
         .getCommandCalls()
@@ -399,7 +399,11 @@ describe("Android unconditional keep-booted cleaning", () => {
       );
     }
     reply("shell pm uninstall", "Success");
-    await reset();
+    reply(
+      "shell dumpsys account",
+      [0, 10, 11].map((user) => `User UserInfo{${user}:Owner:c13}:\n  Accounts: 0`).join("\n"),
+    );
+    expect(await reset()).toMatchObject({ outcome: "clean" });
     const commands = adb.getExecutedCommands();
     for (const user of [0, 10, 11]) {
       expect(commands).toContain(`shell pm uninstall --user ${user} 'com.example.new'`);
@@ -964,4 +968,166 @@ test("persistent non-critical restore failures escalate and name every still-dir
   expect(result.fallbackReason).toContain("global:dirty_a, global:dirty_b");
   expect(result.fallbackReason).not.toContain("now_clean");
   expect(fallbacks).toBe(1);
+});
+
+describe("Android keep-booted accounts, time zone and device locale (#14364)", () => {
+  const ACCOUNT = "    Account {name=user@example.com, type=com.example.auth}";
+
+  async function fallbackRig(
+    configureBaseline?: (reply: (command: string, stdout: string) => void) => void,
+  ) {
+    let fallbacks = 0;
+    const result = await rig(
+      [0],
+      {
+        reset: async () => {
+          fallbacks++;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+      configureBaseline,
+    );
+    return { ...result, fallbacks: () => fallbacks };
+  }
+
+  test.each([
+    ["added", undefined, `User UserInfo{0:Owner:c13}:\n  Accounts: 1\n${ACCOUNT}`],
+    [
+      "removed",
+      `User UserInfo{0:Owner:c13}:\n  Accounts: 1\n${ACCOUNT}`,
+      "User UserInfo{0:Owner:c13}:\n  Accounts: 0",
+    ],
+  ])("an account %s during the session escalates", async (_label, before, after) => {
+    const { reply, reset, fallbacks } = await fallbackRig((baselineReply) => {
+      if (before) {
+        baselineReply("shell dumpsys account", before);
+      }
+    });
+    reply("shell dumpsys account", after);
+    const result = await reset();
+    expect(result.outcome).toBe("fallback:snapshot");
+    expect(result.fallbackReason).toContain("changed accounts for user 0");
+    expect(result.fallbackReason).not.toContain("user@example.com");
+    expect(fallbacks()).toBe(1);
+  });
+
+  test("an unreadable account list at reset escalates", async () => {
+    const { reply, reset } = await fallbackRig();
+    reply("shell dumpsys account", "Can't find service: account");
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("account inventory is unreadable"),
+    });
+  });
+
+  test("accounts are read after uninstalling session apps, whose authenticator accounts go with them", async () => {
+    const { adb, reply, reset } = await rig();
+    reply(
+      "shell pm list packages -3 --user 0",
+      "package:com.example.probe\npackage:com.example.auth",
+    );
+    reply(
+      "shell pm list packages --user 0",
+      "package:android\npackage:com.example.probe\npackage:com.example.auth",
+    );
+    reply("shell pm uninstall", "Success");
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    const commands = adb.getExecutedCommands();
+    expect(commands.indexOf("shell dumpsys account")).toBeGreaterThan(
+      commands.indexOf("shell pm uninstall --user 0 'com.example.auth'"),
+    );
+  });
+
+  test("an out-of-band time zone change is restored in place and read back", async () => {
+    const { adb, reset } = await rig();
+    adb.setCommandResponseSequence("shell getprop persist.sys.timezone", [
+      createExecResult("Asia/Tokyo", ""),
+      createExecResult("America/Chicago", ""),
+    ]);
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(adb.getExecutedCommands()).toContain("shell cmd alarm set-timezone 'America/Chicago'");
+  });
+
+  test("a time zone that does not read back after restore escalates", async () => {
+    const { adb, reset } = await fallbackRig();
+    adb.setCommandResponse(
+      "shell getprop persist.sys.timezone",
+      createExecResult("Asia/Tokyo", ""),
+    );
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(adb.getExecutedCommands()).toContain("shell cmd alarm set-timezone 'America/Chicago'");
+  });
+
+  test("a changed time zone escalates when the baseline had none", async () => {
+    const { adb, reply, reset } = await fallbackRig((baselineReply) =>
+      baselineReply("shell getprop persist.sys.timezone", ""),
+    );
+    reply("shell getprop persist.sys.timezone", "Asia/Tokyo");
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("time zone the baseline lacks"),
+    });
+    expect(adb.getExecutedCommands().some((command) => command.includes("set-timezone"))).toBe(
+      false,
+    );
+  });
+
+  test("a journaled changeLocalization time zone with a readable prior reverts in place", async () => {
+    const { adb, journal, reset } = await rig();
+    for (const row of deviceToolMutations(
+      "changeLocalization",
+      { timeZone: "Asia/Tokyo" },
+      "android",
+    )) {
+      await journal.record(SCOPE, {
+        ...row,
+        priorValue: { state: "present", value: "America/Chicago" },
+        toolName: "changeLocalization",
+      });
+    }
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(adb.getExecutedCommands()).toContain("shell cmd alarm set-timezone 'America/Chicago'");
+  });
+
+  test("a journaled time zone with an unreadable prior escalates", async () => {
+    const { journal, reset } = await fallbackRig();
+    await journal.record(SCOPE, {
+      kind: "clock",
+      key: "timezone",
+      priorValue: { state: "unobservable" },
+      toolName: "changeLocalization",
+    });
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("clock:timezone (changeLocalization)"),
+    });
+  });
+
+  test("a journaled device-wide locale change never reports clean, even with a readable prior", async () => {
+    const { journal, reset } = await fallbackRig();
+    for (const row of deviceToolMutations("changeLocalization", { locale: "fr-FR" }, "android")) {
+      await journal.record(SCOPE, {
+        ...row,
+        priorValue: { state: "present", value: "en-US" },
+        toolName: "changeLocalization",
+      });
+    }
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("device-setting:locale (changeLocalization)"),
+    });
+  });
+
+  test("an out-of-band device locale change escalates even when the system_locales row is restored", async () => {
+    const { adb, reply, reset } = await fallbackRig();
+    reply("shell settings --user 0 list system", "font_scale=1.0\nsystem_locales=fr-FR");
+    reply("shell getprop persist.sys.locale", "fr-FR");
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("changed device locale"),
+    });
+    expect(adb.getExecutedCommands()).toContain(
+      "shell settings --user 0 put system system_locales 'en-US'",
+    );
+  });
 });

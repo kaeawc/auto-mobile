@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { prototypeSpecSchema } from "../../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const track = (id: string, source: Record<string, unknown>) => ({
@@ -59,5 +60,12 @@ describe("videoPlayer captions", () => {
       success: false,
       error: { path: "data.cues.en[0].endMs", message: "A caption cue must end after it starts" },
     });
+  });
+
+  test("track ids are kept as authored, so the checked ids are the parsed ids", () => {
+    const padded = spec([track(" en ", { asset: "x" }), track("en", { asset: "y" })]);
+    expect(validatePrototypeSpec(padded).success).toBe(true);
+    const parsed = prototypeSpecSchema.parse(padded);
+    expect(JSON.stringify(parsed)).toContain('"id":" en "');
   });
 });

@@ -41,12 +41,19 @@ export const prototypeMediaSchema = z
   .strict();
 export type PrototypeMedia = z.infer<typeof prototypeMediaSchema>;
 
+/** A nonblank string kept as authored: trimming would change ids after their semantic checks. */
+const nonblank = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .refine((value) => !prototypeContractPatterns.blankText.test(value));
+
 /** A `videoPlayer` caption track (#14259): an uploaded WebVTT asset or `/data` cues. */
 const prototypeMediaCaptionSchema = z
   .object({
-    id: z.string().trim().min(1).max(64),
-    language: z.string().trim().min(1).max(35),
-    label: z.string().trim().min(1).max(64),
+    id: nonblank(64),
+    language: nonblank(35),
+    label: nonblank(64),
     source: z.union([
       z.object({ asset: z.string().min(1).max(128) }).strict(),
       z.object({ data: pointerSchema }).strict(),

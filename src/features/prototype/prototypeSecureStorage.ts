@@ -140,20 +140,19 @@ function bindingKey(value: unknown, secure: string[]): string | undefined {
 }
 
 /**
- * The secure key a `{key}` text placeholder names. A placeholder may hold repeat placeholders, as in
- * `{tok{row.id}}`, which repeat binding turns into `{token}` before the request reads state, so each
- * balanced `{...}` group is matched as a template whose inner groups may stand for any text.
+ * The secure key a `{key}` text placeholder names. Every `{...}` group that closes is checked, at
+ * every depth: request text resolves an inner `{token}` even when an outer brace never closes
+ * (`{{token}`), and a group may hold repeat placeholders, as in `{tok{row.id}}`, which repeat
+ * binding turns into `{token}`, so a group is matched as a template whose inner groups may stand
+ * for any text.
  */
 function placeholderKey(text: string, secure: string[]): string | undefined {
-  let depth = 0;
-  let start = 0;
+  const open: number[] = [];
   for (let index = 0; index < text.length; index++) {
     if (text[index] === "{") {
-      depth += 1;
-      start = depth === 1 ? index + 1 : start;
-    } else if (text[index] === "}" && depth > 0) {
-      depth -= 1;
-      const key = depth === 0 ? secureKeyFor(text.slice(start, index), secure) : undefined;
+      open.push(index + 1);
+    } else if (text[index] === "}" && open.length > 0) {
+      const key = secureKeyFor(text.slice(open.pop(), index), secure);
       if (key) {
         return key;
       }

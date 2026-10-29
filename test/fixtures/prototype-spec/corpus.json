@@ -1603,6 +1603,7 @@
     "secure-storage-request-query-text.json",
     "secure-storage-request-repeat-template.json",
     "secure-storage-request-repeat-text.json",
+    "secure-storage-request-unbalanced-text.json",
     "secure-storage-request-url-placeholder.json",
     "secure-storage-too-many.json",
     "secure-storage-undeclared-module.json",

@@ -117,25 +117,20 @@ internal object PrototypeSecureStorageRules {
   }
 
   /**
-   * The secure key a `{key}` text placeholder names. A placeholder may hold repeat placeholders, as
-   * in `{tok{row.id}}`, which repeat binding turns into `{token}` before the request reads state,
-   * so each balanced `{...}` group is matched as a template whose inner groups may stand for any
-   * text.
+   * The secure key a `{key}` text placeholder names. Every `{...}` group that closes is checked, at
+   * every depth: request text resolves an inner `{token}` even when an outer brace never closes
+   * (`{{token}`), and a group may hold repeat placeholders, as in `{tok{row.id}}`, which repeat
+   * binding turns into `{token}`, so a group is matched as a template whose inner groups may stand
+   * for any text.
    */
   private fun placeholderKey(text: String, secure: List<String>): String? {
-    var depth = 0
-    var start = 0
+    val open = ArrayDeque<Int>()
     for ((index, char) in text.withIndex()) {
-      if (char == '{') {
-        depth += 1
-        if (depth == 1) start = index + 1
-      } else if (char == '}' && depth > 0) {
-        depth -= 1
-        if (depth == 0)
-          secureKeyFor(text.substring(start, index), secure)?.let {
-            return it
-          }
-      }
+      if (char == '{') open.addLast(index + 1)
+      else if (char == '}' && open.isNotEmpty())
+        secureKeyFor(text.substring(open.removeLast(), index), secure)?.let {
+          return it
+        }
     }
     return null
   }

@@ -95,20 +95,17 @@ enum PrototypeSecureStorageRules {
         }
     }
 
-    /// The secure key a `{key}` text placeholder names. A placeholder may hold repeat placeholders, as in
-    /// `{tok{row.id}}`, which repeat binding turns into `{token}` before the request reads state, so each
-    /// balanced `{...}` group is matched as a template whose inner groups may stand for any text.
+    /// The secure key a `{key}` text placeholder names. Every `{...}` group that closes is checked, at every
+    /// depth: request text resolves an inner `{token}` even when an outer brace never closes (`{{token}`), and
+    /// a group may hold repeat placeholders, as in `{tok{row.id}}`, which repeat binding turns into `{token}`,
+    /// so a group is matched as a template whose inner groups may stand for any text.
     private static func placeholderKey(_ text: String, secure: [String]) -> String? {
         let scalars = Array(text.unicodeScalars)
-        var depth = 0
-        var start = 0
+        var open: [Int] = []
         for (index, scalar) in scalars.enumerated() {
             if scalar == "{" {
-                depth += 1
-                if depth == 1 { start = index + 1 }
-            } else if scalar == "}", depth > 0 {
-                depth -= 1
-                guard depth == 0 else { continue }
+                open.append(index + 1)
+            } else if scalar == "}", let start = open.popLast() {
                 var group = String.UnicodeScalarView()
                 group.append(contentsOf: scalars[start ..< index])
                 if let key = secureKey(for: String(group), secure: secure) { return key }

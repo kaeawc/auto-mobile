@@ -1,4 +1,5 @@
 import { isAndroidHintText } from "./androidHintText";
+import { VALUE_REDACTED_ATTRIBUTE } from "../../models/Element";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -491,7 +492,8 @@ export class SetUIStateFields {
   ): boolean {
     switch (fieldType) {
       case "text":
-        if (fieldSpec.value !== undefined) {
+        // A redacted value is unknown, not empty, so it is never already correct.
+        if (fieldSpec.value !== undefined && element[VALUE_REDACTED_ATTRIBUTE] !== "true") {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
           return (
             currentValue === fieldSpec.value ||

@@ -12,6 +12,11 @@ import {
   mergeIosSdkBridgeInto,
   type IosSdkBridgeReader,
 } from "../ios/IosSdkBridgeReader";
+import {
+  deviceIosSdkWebReader,
+  mergeIosSdkWebInto,
+  type IosSdkWebReader,
+} from "../ios/IosSdkWebReader";
 
 /** Platform-specific hierarchy collection and metadata derivation for iOS observations. */
 export interface IosObservationCollector {
@@ -24,6 +29,8 @@ export interface IosObservationCollectorDeps {
   device: () => BootedDevice;
   /** The app's SDK observation bridge (#5159); defaults to the device's runner client. */
   sdkBridge?: () => IosSdkBridgeReader;
+  /** The app's opted-in WKWebView bridges (#5162); defaults to the device's runner client. */
+  sdkWeb?: () => IosSdkWebReader;
 }
 
 export class DefaultIosObservationCollector implements IosObservationCollector {
@@ -56,6 +63,7 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     this.applyIosInsetsAndRotation(result);
     this.projectIosObservationHierarchy(result);
     await this.mergeSdkBridgeObservation(result, signal);
+    await this.mergeSdkWebSnapshots(result, signal);
 
     let sdkScreenIdentity: ScreenIdentity | undefined;
     try {
@@ -95,6 +103,24 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     }
     if (merged.fallbackReason) {
       result.fallbackReason = merged.fallbackReason;
+    }
+  }
+
+  /**
+   * Merge opted-in web views' allowed-origin DOM elements under their WKWebView nodes (#5162). A
+   * screen without a web view, or an app that registered none, observes exactly as before.
+   */
+  private async mergeSdkWebSnapshots(
+    result: ObserveResult,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (!result.viewHierarchy) {
+      return;
+    }
+    const reader = this.deps.sdkWeb?.() ?? deviceIosSdkWebReader(this.deps.device());
+    const merged = await mergeIosSdkWebInto(result.viewHierarchy, reader, signal);
+    if (merged && !result.backend) {
+      result.backend = "sdk";
     }
   }
 

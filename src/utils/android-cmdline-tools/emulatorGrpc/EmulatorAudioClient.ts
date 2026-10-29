@@ -60,7 +60,7 @@ export interface InjectionResult {
   /** Frames handed to the gRPC stream. Flow control lets this run far ahead of playback, so it is not audio heard. */
   framesQueued: number;
   /**
-   * Frames the emulator should have rendered by the time streaming ended: wall-clock time since the
+   * Frames the emulator should have rendered by the time streaming ended: monotonic-clock time since the
    * first packet at the clip rate, capped at framesQueued. An estimate; the emulator reports no ack.
    */
   framesPlayed: number;
@@ -116,7 +116,7 @@ interface InjectionRun {
   options: InjectAudioOptions;
   control: InjectionControl;
   framesQueued: number;
-  /** Clock time (ms) when the first packet was written; playback is measured from here. */
+  /** Monotonic clock time (ms) when the first packet was written; playback is measured from here. */
   playbackStartMs?: number;
 }
 
@@ -139,7 +139,10 @@ export class EmulatorAudioClient {
   constructor(
     private readonly transport: GrpcTransport,
     private readonly authorizer: GrpcAuthorizer,
-    private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout"> = defaultTimer,
+    private readonly timer: Pick<
+      Timer,
+      "now" | "monotonicNow" | "setTimeout" | "clearTimeout"
+    > = defaultTimer,
   ) {}
 
   async injectAudio(source: PcmAudio, options: InjectAudioOptions = {}): Promise<AudioInjection> {
@@ -284,12 +287,16 @@ export class EmulatorAudioClient {
     });
   }
 
+  private playbackNowMs(): number {
+    return this.timer.monotonicNow?.() ?? this.timer.now();
+  }
+
   /** Frames the emulator has rendered by now at the clip rate, never more than were queued. */
   private framesPlayed(run: InjectionRun): number {
     if (run.playbackStartMs === undefined) {
       return 0;
     }
-    const elapsedMs = Math.max(0, this.timer.now() - run.playbackStartMs);
+    const elapsedMs = Math.max(0, this.playbackNowMs() - run.playbackStartMs);
     const rendered = Math.floor((elapsedMs * run.pcm.sampleRate) / 1000);
     return Math.min(run.framesQueued, rendered);
   }
@@ -308,7 +315,7 @@ export class EmulatorAudioClient {
         return false;
       }
       const audio = pcmBytes(pcm.samples.subarray(start, start + packetSamples));
-      run.playbackStartMs ??= this.timer.now();
+      run.playbackStartMs ??= this.playbackNowMs();
       // Only the first packet's format is honored by the emulator.
       await run.call.write(
         encodeAudioPacket({

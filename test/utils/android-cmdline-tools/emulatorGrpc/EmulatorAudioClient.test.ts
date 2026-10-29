@@ -185,7 +185,7 @@ describe("EmulatorAudioClient.injectAudio", () => {
     expect(transport.calls[0].cancelled).toBe(true);
   });
 
-  test("framesPlayed follows the wall clock at real-time pace and never exceeds framesQueued", async () => {
+  test("framesPlayed follows the monotonic clock at real-time pace and never exceeds framesQueued", async () => {
     const { client, transport, timer } = setup();
     transport.onOpen = (call) => {
       call.onWrite = (index) => {
@@ -198,6 +198,28 @@ describe("EmulatorAudioClient.injectAudio", () => {
       await Promise.resolve();
     }
     // Three 10ms steps elapsed: 480 frames at 16 kHz, of the 640 frames queued.
+    expect(await injection.stop()).toEqual({
+      framesQueued: 640,
+      framesPlayed: 480,
+      reason: "stopped",
+    });
+  });
+
+  test.each([60_000, -60_000])("framesPlayed ignores a %i ms wall-clock step", async (stepMs) => {
+    const { client, transport, timer } = setup();
+    // Start with distinct clock origins so mixing time sources also fails this test.
+    timer.stepWallClock(5_000);
+    transport.onOpen = (call) => {
+      call.onWrite = (index) => {
+        timer.advanceTime(10);
+        return index === 2 ? new Promise<void>(() => {}) : undefined;
+      };
+    };
+    const injection = await client.injectAudio(CLIP);
+    while (transport.calls[0].written.length < 3) {
+      await Promise.resolve();
+    }
+    timer.stepWallClock(stepMs);
     expect(await injection.stop()).toEqual({
       framesQueued: 640,
       framesPlayed: 480,

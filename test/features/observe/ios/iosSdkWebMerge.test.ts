@@ -8,6 +8,8 @@ import type { IosSdkWebSnapshot } from "../../../../src/features/observe/ios/sdk
 import { hashHierarchyForSettle } from "../../../../src/features/observe/wait/WaitSettle";
 import type { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
 import { isFocusEditableElement } from "../../../../src/features/utility/ElementResolverNodes";
+import { isEditableElementProperties } from "../../../../src/features/utility/elementProperties";
+import { FieldTypeDetector } from "../../../../src/features/action/FieldTypeDetector";
 import { hierarchyFingerprint } from "../../../../src/utils/hierarchyFingerprint";
 
 const webViewBounds = { left: 0, top: 100, right: 400, bottom: 800 };
@@ -189,6 +191,8 @@ describe("editable DOM fields (#5162)", () => {
     ]);
     const [email] = attached(findWebViewNodes(hierarchy)[0]);
     expect(isFocusEditableElement(email as Element)).toBe(true);
+    expect(isEditableElementProperties(email)).toBe(true);
+    expect(new FieldTypeDetector().detect(email as Element)).not.toBe("unknown");
   });
 });
 

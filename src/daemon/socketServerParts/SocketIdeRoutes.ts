@@ -238,8 +238,7 @@ export class SocketIdeRoutes {
       this.callbacks.assertDeviceActionable(deviceId, purpose),
     assertBrokerConnectionControl: (socketSessionId, action, target) =>
       this.callbacks.assertBrokerConnectionControl(socketSessionId, action, target),
-    admitInputAsControlCall: (execution, deviceId, holderSessionUuid) =>
-      this.callbacks.admitInputAsControlCall(execution, deviceId, holderSessionUuid),
+    admitInputAsControlCall: (...args) => this.callbacks.admitInputAsControlCall(...args),
     listBootedDevicesForIdeAction: (platform, serial, signal) =>
       this.callbacks.listBootedDevicesForIdeAction(platform, serial, signal),
     resolveIdeActionDevices: (platform, serial, signal) =>
@@ -588,11 +587,13 @@ export class SocketIdeRoutes {
     execution: ActiveExecution,
     deviceId: string,
     holderSessionUuid: string | undefined,
+    ownerSignal: AbortSignal | undefined,
   ): Promise<void> {
     return await this.inputDeviceGating.admitInputAsControlCall(
       execution,
       deviceId,
       holderSessionUuid,
+      ownerSignal,
     );
   }
   async answeringSessionRelease<T>(

@@ -1,4 +1,3 @@
-import { getAbortSignal } from "../utils/AbortContext";
 import type { Platform } from "../models";
 import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
 import {
@@ -193,12 +192,18 @@ function admitsIssuedSessions<T extends object>(manager: T): manager is T & Inpu
  * released at the owner-reconnect timeout, which cuts an input in flight with the typed refusal),
  * and it stamps neither the owner lease nor the activity clocks. The input's END is tool use, as
  * it was before admission existed: the tracker reports it and the idle window restarts there.
+ *
+ * `signal` is the caller's explicit cancellation, not the ambient one (#15671): the input's tracked
+ * execution signal, plus the frame's or `ide/*` route's own where it has one. A release, teardown
+ * or client cancel that lands while admission waits (for example on restart recovery) stops that
+ * wait. `undefined` admits without cancellation.
  */
 export async function admitInputOnHolderSession(input: {
   deviceId: string;
   holderSessionUuid: string;
   sessionManager: object | undefined;
   execution: SessionExecutionMetadata;
+  signal: AbortSignal | undefined;
 }): Promise<void> {
   const { sessionManager, holderSessionUuid, deviceId } = input;
   if (!sessionManager || !admitsIssuedSessions(sessionManager)) {
@@ -207,7 +212,7 @@ export async function admitInputOnHolderSession(input: {
   const admitted = await sessionManager.admitIssuedSessionForAutomation(
     holderSessionUuid,
     input.execution,
-    { access: "non-owner-control", signal: getAbortSignal() },
+    { access: "non-owner-control", signal: input.signal },
   );
   if (admitted?.assignedDevice !== deviceId) {
     // Typed session_no_longer_owns_device (#11351): clients branch on the code, not this wording.

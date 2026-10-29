@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "id": "n4",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "postStatus": ""
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Tell you about new messages"
+        }
+      ]
+    },
+    "root": {
+      "type": "button",
+      "label": "Notify",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "notifications.post",
+          "args": {
+            "id": {
+              "value": "a"
+            },
+            "channel": {
+              "value": "messages"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.title"
+}

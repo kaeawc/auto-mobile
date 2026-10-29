@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "f4",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "recipient": {}
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["contacts"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "contacts.pick",
+          "args": {
+            "fields": {
+              "value": ["name", "phone", "email", "name"]
+            }
+          },
+          "into": "/data/recipient",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.fields.value"
+}

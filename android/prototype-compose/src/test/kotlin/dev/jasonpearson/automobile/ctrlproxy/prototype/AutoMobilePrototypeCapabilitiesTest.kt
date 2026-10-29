@@ -86,6 +86,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_secureStorage_v1",
       // Contract only; the voice-note recorder runtimes are owed (#14194).
       "prototype_platform_audioRecorder_v1",
+      // Contract only; the local notification runtime is owed (#14281).
+      "prototype_platform_notifications_v1",
     )
 
   @Test

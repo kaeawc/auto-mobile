@@ -36960,6 +36960,86 @@
               "additionalProperties": false,
               "description": "Foreground location updates for /platform/location/current (prototype_platform_location_v1); needs location in requires.platform and requires.permissions"
             },
+            "media": {
+              "type": "object",
+              "properties": {
+                "players": {
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["video", "audio"]
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "asset": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128
+                                  }
+                                },
+                                "required": ["asset"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "type": "string",
+                                    "maxLength": 2048,
+                                    "pattern": "^https?:\\/\\/[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
+                                  }
+                                },
+                                "required": ["url"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "data": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                                  }
+                                },
+                                "required": ["data"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "sample": {
+                                    "type": "string",
+                                    "enum": ["tone440", "silence", "colorBars", "countdown"]
+                                  }
+                                },
+                                "required": ["sample"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "loop": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["kind", "source"],
+                        "additionalProperties": false
+                      },
+                      "propertyNames": {
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      }
+                    }
+                  ]
+                }
+              },
+              "required": ["players"],
+              "additionalProperties": false
+            },
             "derive": {
               "type": "object",
               "additionalProperties": {

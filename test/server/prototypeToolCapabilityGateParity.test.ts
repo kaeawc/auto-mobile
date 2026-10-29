@@ -611,6 +611,24 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_media_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["media"] },
+      media: { players: { main: { kind: "audio", source: { sample: "tone440" } } } },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "media.play", args: { player: { value: "main" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_contacts_v1: {
     minimalSpec: {
       ...base,

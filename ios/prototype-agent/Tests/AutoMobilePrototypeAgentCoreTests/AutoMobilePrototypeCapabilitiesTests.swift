@@ -63,6 +63,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audioRecorder_v1",
             // Contract only; the Viewer notification runtime is owed (#14282).
             "prototype_platform_notifications_v1",
+            // Contract only; the media players and video renderers are owed (#14255, #14256).
+            "prototype_platform_media_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
             "prototype_motion_v2", "prototype_choreography_v1",

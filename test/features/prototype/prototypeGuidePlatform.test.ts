@@ -22,10 +22,16 @@ describe("platform guide section", () => {
       for (const event of Object.keys(module.events)) {
         expect(guide).toContain(`\`${name}.${event}\``);
       }
+      const scope = name === "media" ? "players/<id>/" : "";
       for (const key of Object.keys(module.state ?? {})) {
-        expect(guide).toContain(`\`/${name}/${key}\``);
+        expect(guide).toContain(`\`/${name}/${scope}${key}\``);
       }
     }
+  });
+
+  test("names media state under its declared player, never as a module-level key", () => {
+    expect(guide).toContain("`/media/players/<id>/positionMs`");
+    expect(guide).not.toContain("`/media/positionMs`");
   });
 
   test("keeps the test placeholder out of the guide", () => {

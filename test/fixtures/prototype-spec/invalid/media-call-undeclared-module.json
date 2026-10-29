@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "m",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "feed": [
+        {
+          "video": {
+            "url": "https://example.com/clip.mp4"
+          }
+        }
+      ]
+    },
+    "state": {
+      "scrub": 0
+    },
+    "requires": {
+      "platform": ["haptics"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Play",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.play",
+              "args": {
+                "player": {
+                  "value": "main"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].call",
+  "expectedMessage": "Platform module media is not declared in requires.platform"
+}

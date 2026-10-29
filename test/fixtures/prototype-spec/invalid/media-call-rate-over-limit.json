@@ -1,0 +1,230 @@
+{
+  "spec": {
+    "id": "m",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "feed": [
+        {
+          "video": {
+            "url": "https://example.com/clip.mp4"
+          }
+        }
+      ]
+    },
+    "state": {
+      "scrub": 0
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          },
+          "loop": false
+        },
+        "stream": {
+          "kind": "video",
+          "source": {
+            "url": "https://example.com/live/master.m3u8"
+          }
+        },
+        "feedItem": {
+          "kind": "video",
+          "source": {
+            "data": "/feed/0/video"
+          }
+        },
+        "podcast": {
+          "kind": "audio",
+          "source": {
+            "sample": "tone440"
+          },
+          "loop": true
+        }
+      }
+    },
+    "platform": {
+      "on": {
+        "media.ended": [
+          {
+            "type": "platform",
+            "call": "media.seek",
+            "args": {
+              "player": {
+                "event": "/player"
+              },
+              "positionMs": {
+                "value": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{platform:/media/players/main/positionMs} / {platform:/media/players/main/durationMs}"
+        },
+        {
+          "type": "button",
+          "label": "Play",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setRate",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "rate": {
+                  "value": 4.5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Seek",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.seek",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "positionMs": {
+                  "state": "scrub"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Back 10s",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.seekBy",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "deltaMs": {
+                  "value": -10000
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Speed",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setRate",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "rate": {
+                  "value": 1.5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Quiet",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setVolume",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "volume": {
+                  "value": 0.5
+                }
+              }
+            },
+            {
+              "type": "platform",
+              "call": "media.setMuted",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "muted": {
+                  "value": true
+                }
+              }
+            },
+            {
+              "type": "platform",
+              "call": "media.setLoop",
+              "args": {
+                "player": {
+                  "value": "main"
+                },
+                "loop": {
+                  "value": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Stop",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.play",
+              "args": {
+                "player": {
+                  "value": "main"
+                }
+              }
+            },
+            {
+              "type": "platform",
+              "call": "media.pause",
+              "args": {
+                "player": {
+                  "value": "main"
+                }
+              }
+            },
+            {
+              "type": "platform",
+              "call": "media.stop",
+              "args": {
+                "player": {
+                  "value": "main"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].args.rate.value"
+}

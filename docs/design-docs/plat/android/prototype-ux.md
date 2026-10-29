@@ -2234,6 +2234,40 @@ injected agent never does. The validators do not yet check the top-level `notifi
 that `channel` names a declared channel, unique action ids, or that `cancel` names exactly one target. No
 production runtime advertises the module yet.
 
+**Media players (#14253, contract only).** The root `media` block declares long-lived players
+that outlive a screen (mini-player, background audio, picture-in-picture):
+
+```json
+{
+  "requires": { "platform": ["media"] },
+  "media": {
+    "players": {
+      "main": { "kind": "video", "source": { "asset": "trailer" }, "loop": false },
+      "podcast": { "kind": "audio", "source": { "sample": "tone440" } }
+    }
+  }
+}
+```
+
+- At most `MAX_PROTOTYPE_MEDIA_PLAYERS` (4) players; each id is a state key. `kind` is `video` or
+  `audio`; `loop` is optional.
+- `source` is exactly one of `{asset: id}` (an uploaded media asset or a device `media:` id),
+  `{url}` (an absolute `http` or `https` URL, the `mediaUrl` pattern), `{data: "/pointer"}` (resolved
+  at runtime) or `{sample}`: `tone440` and `silence` are synthesized audio, `colorBars` and
+  `countdown` are generated video.
+- The block needs `media` in `requires.platform`, so `prototype_platform_media_v1` gates it.
+
+The `media` module (`prototype_platform_media_v1`) has the calls `play`, `pause`, `toggle`, `stop`,
+`seek` (`positionMs`, 0-86400000), `seekBy` (`deltaMs`, ±86400000), `setRate` (`rate`, 0.25-4),
+`setVolume` (`volume`, 0-1, the player's own volume, never the device stream), `setMuted` and
+`setLoop`. Every call takes a `player` argument; a literal `{value}` must name a declared player.
+Its events are `media.statusChanged`, `media.ended` and `media.error`. State is per player at
+`/platform/media/players/<id>/<key>`: `playing`, `positionMs`, `durationMs` (`-1` while unknown),
+`buffering`, `status` (`idle`, `loading`, `ready`, `ended`, `error`) and `error`
+(`source_not_found`, `decode`, `network`, `unsupported_format`, `blocked_egress`). A read must name
+a declared player and one of those keys. The `videoPlayer` node, the asset transport and the
+renderers are separate slices; no production runtime advertises the module yet.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

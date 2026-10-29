@@ -12,6 +12,10 @@ enum PrototypePlatformValidator {
         case string([String: JSONValue])
         case boolean
         case integer(min: Double, max: Double)
+        /// A contract number without `integer`, such as a playback rate or a 0-1 volume.
+        case number(min: Double, max: Double)
+        /// A state key name (the contract's `key` kind), such as a media player or camera preview id.
+        case key
         case enumeration(Set<String>)
         /// Any other contract rule (arrays, objects), checked by the shared contract walk.
         case contract(JSONValue)
@@ -75,7 +79,11 @@ enum PrototypePlatformValidator {
             } else {
                 preconditionFailure("platform enum argument without values")
             }
-        case "number": .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        case "key": .key
+        case "number" where rule["integer"] == .bool(true):
+            .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        case "number":
+            .number(min: rule["min"]?.numberValue ?? -.infinity, max: rule["max"]?.numberValue ?? .infinity)
         default: .contract(.object(rule))
         }
     }
@@ -115,12 +123,14 @@ enum PrototypePlatformValidator {
         var hasAuth = false
         /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
         var secureKeys: [String] = []
+        var players: Set<String> = []
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
         requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
-        storage: JSONValue? = nil, location: JSONValue? = nil, root: JSONValue, state: [String: JSONValue]
+        storage: JSONValue? = nil, location: JSONValue? = nil, media: JSONValue? = nil, root: JSONValue,
+        state: [String: JSONValue]
     )
         throws
     {
@@ -128,10 +138,12 @@ enum PrototypePlatformValidator {
         try PrototypeAuthRules.validateBlock(auth, requires: requires)
         try PrototypeSecureStorageRules.validateBlock(storage, requires: requires, state: state)
         try PrototypeLocationRules.validateBlock(location, requires: requires)
+        try PrototypeMedia.validate(media, requires: requires)
         var declared = try validateRequires(requires)
         declared.channels = channels?.objectFields ?? [:]
         declared.hasAuth = auth?.objectFields != nil
         declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
+        declared.players = PrototypeMedia.players(media)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
@@ -342,8 +354,11 @@ enum PrototypePlatformValidator {
         guard declared.modules.contains(name) else { throw notDeclared(path, name) }
         if let state = modules[name]?.state {
             let tokens = PrototypeDataPointer.tokens(pointer)
-            let valid = name == "realtime" ? tokens.count == 3 && declared.channels[tokens[1]] != nil && state
-                .contains(tokens[2]) : tokens.count == 2 && state.contains(tokens[1])
+            let valid = switch name {
+            case "realtime": tokens.count == 3 && declared.channels[tokens[1]] != nil && state.contains(tokens[2])
+            case "media": PrototypeMedia.validRead(tokens, players: declared.players, state: state)
+            default: tokens.count == 2 && state.contains(tokens[1])
+            }
             guard valid else {
                 throw fail(path, "Unknown platform state \(pointer)")
             }
@@ -422,6 +437,7 @@ enum PrototypePlatformValidator {
         }
         try PrototypeChannels.call(action, path: path, channels: declared.channels)
         try PrototypeAuthRules.validateCall(call, path: path, hasAuth: declared.hasAuth)
+        try PrototypeMedia.call(action, path: path, players: declared.players)
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)
         }
@@ -473,6 +489,14 @@ enum PrototypePlatformValidator {
         case let .integer(min, max):
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")
+            }
+        case let .number(min, max):
+            guard case let .number(value) = literal, value.isFinite, (min ... max).contains(value) else {
+                throw fail(path, "Invalid number value")
+            }
+        case .key:
+            guard let text = literal.stringValue, PrototypeRepeat.isFieldName(text) else {
+                throw fail(path, "Invalid key value")
             }
         case let .enumeration(values):
             guard case let .string(value) = literal, values.contains(value) else {

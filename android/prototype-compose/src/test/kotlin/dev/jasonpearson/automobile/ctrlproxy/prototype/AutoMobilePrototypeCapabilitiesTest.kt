@@ -88,6 +88,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audioRecorder_v1",
       // Contract only; the local notification runtime is owed (#14281).
       "prototype_platform_notifications_v1",
+      // Contract only; the media players and video renderers are owed (#14255, #14256).
+      "prototype_platform_media_v1",
     )
 
   @Test

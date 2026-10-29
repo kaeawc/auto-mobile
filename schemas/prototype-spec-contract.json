@@ -15,7 +15,8 @@
     "uploadDisposition": "^[^\\u0000-\\u001F\\u007F-\\u009F\"]+$(?![\\s\\S])",
     "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])",
     "openUrl": "^(?:https?|mailto|tel|sms|geo|maps):[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
-    "reservedEmail": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])"
+    "reservedEmail": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])",
+    "mediaUrl": "^https?://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -84,7 +85,8 @@
     "MAX_PROTOTYPE_SHARE_FILES": 4,
     "MAX_PROTOTYPE_UPLOAD_BYTES": 10485760,
     "MAX_PROTOTYPE_UPLOAD_PARTS": 16,
-    "MAX_PROTOTYPE_KEYFRAME_NODES": 16
+    "MAX_PROTOTYPE_KEYFRAME_NODES": 16,
+    "MAX_PROTOTYPE_MEDIA_PLAYERS": 4
   },
   "definitions": {
     "authAccount": {
@@ -15457,6 +15459,13 @@
             }
           },
           "optional": true
+        },
+        "media": {
+          "rule": {
+            "kind": "ref",
+            "name": "media"
+          },
+          "optional": true
         }
       }
     },
@@ -21347,6 +21356,100 @@
           "optional": false
         }
       }
+    },
+    "mediaSource": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "object",
+          "fields": {
+            "asset": {
+              "rule": {
+                "kind": "string",
+                "max": 128
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "url": {
+              "rule": {
+                "kind": "string",
+                "pattern": "mediaUrl",
+                "max": 2048
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "sample": {
+              "rule": {
+                "kind": "enum",
+                "values": ["tone440", "silence", "colorBars", "countdown"]
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
+    "mediaPlayer": {
+      "kind": "object",
+      "fields": {
+        "kind": {
+          "rule": {
+            "kind": "enum",
+            "values": ["video", "audio"]
+          },
+          "optional": false
+        },
+        "source": {
+          "rule": {
+            "kind": "ref",
+            "name": "mediaSource"
+          },
+          "optional": false
+        },
+        "loop": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
+    },
+    "media": {
+      "kind": "object",
+      "fields": {
+        "players": {
+          "rule": {
+            "kind": "map",
+            "maxEntries": 4,
+            "item": {
+              "kind": "ref",
+              "name": "mediaPlayer"
+            }
+          },
+          "optional": false
+        }
+      }
     }
   },
   "eventKinds": [
@@ -22827,6 +22930,250 @@
               "limited",
               "restricted",
               "unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "media": {
+      "capability": "prototype_platform_media_v1",
+      "calls": {
+        "play": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "pause": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "toggle": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "stop": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "seek": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "positionMs": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": 0,
+                "max": 86400000
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "seekBy": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "deltaMs": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "integer": true,
+                "min": -86400000,
+                "max": 86400000
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "setRate": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "rate": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "min": 0.25,
+                "max": 4
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "setVolume": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "volume": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "min": 0,
+                "max": 1
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "setMuted": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "muted": {
+              "optional": false,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "setLoop": {
+          "args": {
+            "player": {
+              "optional": false,
+              "value": {
+                "kind": "key"
+              }
+            },
+            "loop": {
+              "optional": false,
+              "value": {
+                "kind": "boolean"
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "statusChanged": {
+          "sensitive": false
+        },
+        "ended": {
+          "sensitive": false
+        },
+        "error": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "playing": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "positionMs": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 86400000
+          }
+        },
+        "durationMs": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "integer": true,
+            "min": -1,
+            "max": 86400000
+          }
+        },
+        "buffering": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "boolean"
+          }
+        },
+        "status": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["idle", "loading", "ready", "ended", "error"]
+          }
+        },
+        "error": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": [
+              "source_not_found",
+              "decode",
+              "network",
+              "unsupported_format",
+              "blocked_egress"
             ]
           }
         }

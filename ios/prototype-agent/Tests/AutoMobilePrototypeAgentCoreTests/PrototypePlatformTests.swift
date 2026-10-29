@@ -63,6 +63,13 @@ final class PrototypePlatformTests: XCTestCase {
                         XCTAssertEqual(rule["integer"] as? Bool, true, arg)
                         XCTAssertEqual(rule["min"] as? Double, min, arg)
                         XCTAssertEqual(rule["max"] as? Double, max, arg)
+                    case let .number(min, max):
+                        XCTAssertEqual(rule["kind"] as? String, "number", arg)
+                        XCTAssertNotEqual(rule["integer"] as? Bool, true, arg)
+                        XCTAssertEqual(rule["min"] as? Double ?? -.infinity, min, arg)
+                        XCTAssertEqual(rule["max"] as? Double ?? .infinity, max, arg)
+                    case .key:
+                        XCTAssertEqual(rule["kind"] as? String, "key", arg)
                     case let .enumeration(values):
                         XCTAssertEqual(rule["kind"] as? String, "enum", arg)
                         XCTAssertEqual(Set(rule["values"] as? [String] ?? []), values, arg)
@@ -132,6 +139,17 @@ final class PrototypePlatformTests: XCTestCase {
             guard case let PrototypeLoadError.invalidSpec(path, _) = error else { return XCTFail("\(error)") }
             XCTAssertEqual(path, "root.children[0].onTap[0].args.message")
         }
+    }
+
+    func testKeyAndFractionalNumberArgumentsCheckLikeTheContract() {
+        let key = PrototypePlatformValidator.Rule.key
+        XCTAssertNoThrow(try PrototypePlatformValidator.check(.string("main"), key, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.string("not-a-key"), key, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.number(1), key, path: "p"))
+        let volume = PrototypePlatformValidator.Rule.number(min: 0, max: 1)
+        XCTAssertNoThrow(try PrototypePlatformValidator.check(.number(0.5), volume, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.number(1.5), volume, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.string("0.5"), volume, path: "p"))
     }
 
     func testPlatformPlaceholdersScanLikeDataPlaceholders() {

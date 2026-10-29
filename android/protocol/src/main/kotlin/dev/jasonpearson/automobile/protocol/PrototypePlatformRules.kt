@@ -53,6 +53,7 @@ internal object PrototypePlatformRules {
         .mapNotNull { (it as? JsonObject)?.text("name") }
         .toSet()
     val channels = root.member("channels") ?: JsonObject(emptyMap())
+    val players = PrototypeMedia.players(root)
     val background = requires.strings("background").toSet()
   }
 
@@ -63,6 +64,7 @@ internal object PrototypePlatformRules {
       PrototypeAuthRules::blockError,
       PrototypeSecureStorageRules::blockError,
       PrototypeLocationRules::blockError,
+      PrototypeMedia::error,
       ::requiresError,
     )
 
@@ -82,6 +84,7 @@ internal object PrototypePlatformRules {
           ?: (if (use is Use.Call)
             PrototypeChannels.callError(use.action, use.path, root)
               ?: PrototypeAuthRules.callError(use.action, use.path, root)
+              ?: PrototypeMedia.callError(use.action, use.path, declared.players)
           else null))
         ?.let {
           return it
@@ -140,8 +143,11 @@ internal object PrototypePlatformRules {
       name !in declared.modules -> notDeclared(use.path, name)
       module(name)?.member("state")?.let { state ->
         val tokens = PrototypeDataPointer.tokens(use.pointer)
-        if (name == "realtime") !PrototypeChannels.validRead(use.pointer, declared.channels)
-        else tokens.size != 2 || tokens[1] !in state
+        when (name) {
+          "realtime" -> !PrototypeChannels.validRead(use.pointer, declared.channels)
+          "media" -> !PrototypeMedia.validRead(use.pointer, declared.players)
+          else -> tokens.size != 2 || tokens[1] !in state
+        }
       } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
       else -> comparisonError(use)
     }

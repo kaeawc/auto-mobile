@@ -206,9 +206,23 @@ describe("AndroidDeviceMutationResetPort", () => {
     ).toBe(false);
   });
 
-  test("restores timezone via the platform alarm service", async () => {
+  test("restores timezone via the platform alarm service and reads it back", async () => {
+    adb.setCommandResponse(
+      "shell getprop persist.sys.timezone",
+      createExecResult("America/Chicago\n", ""),
+    );
     await port.revert(mutation("clock", "timezone", present("America/Chicago")), context);
-    expect(adb.getExecutedCommands()).toEqual(["shell cmd alarm set-timezone 'America/Chicago'"]);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd alarm set-timezone 'America/Chicago'",
+      "shell getprop persist.sys.timezone",
+    ]);
+  });
+
+  test("a timezone that does not read back after restore fails the revert", async () => {
+    adb.setCommandResponse("shell getprop persist.sys.timezone", createExecResult("UTC\n", ""));
+    await expect(
+      port.revert(mutation("clock", "timezone", present("America/Chicago")), context),
+    ).rejects.toThrow("failed to confirm success");
   });
 
   test("removes a journaled mock provider and clears an originally empty clipboard", async () => {

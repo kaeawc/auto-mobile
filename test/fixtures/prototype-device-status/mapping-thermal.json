@@ -1,0 +1,23 @@
+{
+  "description": "Thermal status to /platform/power/thermal. Android PowerManager.THERMAL_STATUS_* 0 is nominal, 1-2 fair, 3 serious, 4-6 critical; iOS ProcessInfo.ThermalState maps one to one. null means the key is left absent.",
+  "android": [
+    [0, "nominal"],
+    [1, "fair"],
+    [2, "fair"],
+    [3, "serious"],
+    [4, "critical"],
+    [5, "critical"],
+    [6, "critical"],
+    [7, null],
+    [-1, null],
+    [1.5, null]
+  ],
+  "ios": [
+    [0, "nominal"],
+    [1, "fair"],
+    [2, "serious"],
+    [3, "critical"],
+    [4, null],
+    [-1, null]
+  ]
+}

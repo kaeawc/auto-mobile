@@ -123,6 +123,11 @@ Separate opt-in, default off. `androidResetMode` requires
 fallback. `androidKeepBootedMaxUses` and `androidKeepBootedFallback` are rejected
 outside `keep-booted`.
 
+`androidIdleTtlMs` (optional, positive integer milliseconds; requires an
+`androidResetMode`) destroys an Android device that has sat idle in the pool for that
+long. Both modes keep the emulator booted while idle (several GB of RSS each), so it
+applies to either. Omitted, an idle device stays booted until it is evicted or drained.
+
 ```json
 {
   "reuseAndroidCleanDevices": true,
@@ -137,7 +142,8 @@ outside `keep-booted`.
   "reuseAndroidCleanDevices": true,
   "androidResetMode": "keep-booted",
   "androidKeepBootedMaxUses": 20,
-  "androidKeepBootedFallback": "snapshot"
+  "androidKeepBootedFallback": "snapshot",
+  "androidIdleTtlMs": 900000
 }
 ```
 
@@ -258,6 +264,16 @@ never evicted for an idle target. The `daemon/drainBrokerPool` operator method
 destroys every idle pooled device through the same durable destroy journal, without
 an acquisition; each device reports `destroyed` or `cleanup_pending`, and a replay
 drains only what is still idle.
+
+Idle expiry runs on the broker's recovery pass (every 5 s), so a device is destroyed
+between the TTL and the TTL plus one pass after it went idle. The idle clock is held in
+daemon memory per resource revision: reuse (which changes the revision) restarts it,
+and a daemon restart restarts every clock from the first pass, so an idle device can
+outlive one restart by up to one TTL. Expiry claims a device only while it is still idle
+at the revision the pass observed, in a write transaction serialized with admission; a device
+an acquisition reserved first, or one that is held, resetting or already destroying, is
+never expired. Claimed devices are destroyed through the drain's destroy journal and
+are joined on shutdown; iOS has no idle TTL.
 
 ### Worked sizing example
 

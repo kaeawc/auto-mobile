@@ -6,6 +6,7 @@ import type {
 import type { Timer } from "../../utils/SystemTimer";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import type { BrokerLimits } from "./admission";
+import type { IdlePoolTtlMs } from "./idlePoolExpiry";
 import type { SessionBrokerDevicePort } from "./devicePort";
 import type { SessionLiveness } from "./sessionDisposition";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
@@ -25,6 +26,8 @@ export interface SessionBrokerOptions {
   reuseCleanDevices?: boolean;
   /** Opt in to Android reuse only after its native reset strategy passes contamination tests. */
   reuseAndroidCleanDevices?: boolean;
+  /** Idle pooled devices of a listed platform are destroyed after this long idle; omitted keeps them. */
+  idleTtlMs?: IdlePoolTtlMs;
   /** How long a terminal receipt keeps answering replay; defaults to the broker retention window. */
   receiptRetentionMs?: number;
   /** Maximum pin age for an unacknowledged export. */

@@ -290,6 +290,7 @@ export async function openSessionBrokerService(
       sessionDisposition: options.sessionDisposition,
       reuseCleanDevices: reuse.mode !== "off",
       reuseAndroidCleanDevices: options.config.reuseAndroidCleanDevices,
+      idleTtlMs: { android: options.config.androidIdleTtlMs },
     });
     await broker.recoverReceipts();
     const recoverMutationRecorder = (sessionUuid: string) =>
@@ -906,6 +907,7 @@ export class SessionBrokerService {
       } catch (error) {
         logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
       }
+      await this.expireIdlePool();
       if (this.stopped) {
         return;
       }
@@ -914,6 +916,19 @@ export class SessionBrokerService {
         await this.pruneIfDue();
       }
       firstPass = false;
+    }
+  }
+
+  /** Idle expiry rides the recovery cadence, so its precision is one recovery interval. */
+  private async expireIdlePool(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+    try {
+      await this.broker.expireIdlePool();
+    } catch (error) {
+      // Expiry is housekeeping: an idle device left in the pool stays reusable for the next pass.
+      logger.warn(`Session broker idle expiry failed: ${errorMessage(error)}`, error);
     }
   }
 

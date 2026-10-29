@@ -76,16 +76,33 @@ reply is stall evidence for runner recovery: a slow host executor is not a stall
 
 ## Backend selection
 
-Routing through the bridge must follow these rules:
+The `ios-sdk-observation-bridge` feature flag (default on) gates routing. With it off, or for an app
+with no registered bridge, iOS observe and actions are XCTest-only and carry neither field below.
 
-- When the bridge is available, `observe` and the action tools route through it, and results carry
-  `backend: sdk | xctest`.
-- An action uses the backend of the observation it was resolved against.
-- XCTest runs only when the bridge is unavailable or answers `unsupported` (an action kind outside
-  `supportedActions`, or an element type it cannot handle). The result then carries
-  `fallbackReason: unavailable | unsupported`.
-- `stale_observation`, `element_not_actionable`, cancellation and `action_queue_overloaded` fail
-  closed with their typed error. XCTest never retries them: tapping whatever is now at a stale
-  element's position would act on a different element.
+**Observe.** After the XCTest hierarchy is projected, the iOS collector asks the bridge for a
+snapshot (2 s budget) and merges it in place under the `XCUIApplication` node, so system UI, alerts
+and the keyboard stay observable. Each visible bridge node maps onto the existing attributes (`id`
+→ `resource-id` and `test-tag`, `label` → `content-desc`, `value` → `text`, `role` → `class`;
+`enabled` nodes are `clickable`) and carries `sdk-element-id` and `sdk-capture-identity`, so the
+shared selector schema and resolver match it unchanged. XCTest leaves with the same bounds and the
+same label or id as a bridge node are removed as duplicates. Bridge nodes carry `sdk.source:
+sdkBridge` in `extras`. The result reports `backend: sdk`, or `backend: xctest` with
+`fallbackReason: unavailable` when a registered bridge did not answer. A failed discovery probe
+reports neither.
+
+The tap-time fresh read merges the bridge the same way, so a revalidated target keeps its bridge
+identity. Cached hierarchy reads outside observe are XCTest-only: a target resolved from one has no
+bridge identity and taps through XCTest.
+
+**tapOn.** A target that carries a bridge identity is tapped through the bridge, naming the
+observation it came from: `tap` maps to the bridge's tap and `longPress` to its long press with the
+press duration. The result reports `backend: sdk`, and an accepted tap is never repeated through
+XCTest by the retry-if-no-change path. XCTest stands in only when the bridge is unavailable
+(`fallbackReason: unavailable`) or answers `unsupported_action`, or the action has no bridge form
+such as a double tap (`fallbackReason: unsupported`). Every other result fails closed with the
+bridge's reason: `stale_observation`, `unknown_element`, `element_not_actionable`,
+`action_in_flight`, `action_queue_overloaded`, `action_cancelled`, `app_not_active`, `bad_reply`,
+and a timeout after the action may have run. Tapping whatever XCTest now finds at those
+coordinates could act on a different element. A focus tap issued by `sendKeys` is not routed yet.
 
 WKWebView DOM nodes (#5162) extend the same observation under their WKWebView node.

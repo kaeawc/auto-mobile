@@ -7,6 +7,11 @@ import { resolveIosObserveRotation } from "../iosObserveRotation";
 import { deriveIosScreenIdentity } from "../ios/IosScreenIdentity";
 import type { PlatformCollectionContext } from "./AndroidObservationCollector";
 import type { HierarchyCollectorPort } from "./collectorPorts";
+import {
+  deviceIosSdkBridgeReader,
+  mergeIosSdkBridgeInto,
+  type IosSdkBridgeReader,
+} from "../ios/IosSdkBridgeReader";
 
 /** Platform-specific hierarchy collection and metadata derivation for iOS observations. */
 export interface IosObservationCollector {
@@ -17,6 +22,8 @@ export interface IosObservationCollectorDeps {
   hierarchyCollector: () => HierarchyCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
+  /** The app's SDK observation bridge (#5159); defaults to the device's runner client. */
+  sdkBridge?: () => IosSdkBridgeReader;
 }
 
 export class DefaultIosObservationCollector implements IosObservationCollector {
@@ -48,6 +55,7 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     this.applyIosScreenMetadata(result);
     this.applyIosInsetsAndRotation(result);
     this.projectIosObservationHierarchy(result);
+    await this.mergeSdkBridgeObservation(result, signal);
 
     let sdkScreenIdentity: ScreenIdentity | undefined;
     try {
@@ -67,6 +75,27 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
       : (sdkScreenIdentity ?? hierarchyScreenIdentity);
 
     perf.end();
+  }
+
+  /**
+   * Merge a registered SDK observation bridge's nodes under the app node (#5159). An app without a
+   * bridge, or with routing disabled, observes exactly as before.
+   */
+  private async mergeSdkBridgeObservation(
+    result: ObserveResult,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (!result.viewHierarchy) {
+      return;
+    }
+    const reader = this.deps.sdkBridge?.() ?? deviceIosSdkBridgeReader(this.deps.device());
+    const merged = await mergeIosSdkBridgeInto(result.viewHierarchy, reader, signal);
+    if (merged.backend) {
+      result.backend = merged.backend;
+    }
+    if (merged.fallbackReason) {
+      result.fallbackReason = merged.fallbackReason;
+    }
   }
 
   private applyIosScreenMetadata(result: ObserveResult): void {

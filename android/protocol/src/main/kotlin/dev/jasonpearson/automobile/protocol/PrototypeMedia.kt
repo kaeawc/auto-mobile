@@ -69,6 +69,27 @@ internal object PrototypeMedia {
         ?.let { fail("$path.positionKey", "positionKey must name a declared number state key") }
   }
 
+  /**
+   * The first `castButton` node rule a spec breaks (#14239): it needs `cast` in
+   * `requires.platform` and its `player` names a declared or inline media player.
+   */
+  fun castButtonError(root: JsonObject, nodes: List<Located>): PrototypeSpecError? {
+    val cast =
+      (root.member("requires")?.get("platform") as? JsonArray)?.contains(JsonPrimitive("cast")) ==
+        true
+    val players = players(root, nodes)
+    return nodes
+      .filter { it.value.text("type") == "castButton" }
+      .firstNotNullOfOrNull { (node, path) ->
+        when {
+          !cast -> fail(path, "castButton requires cast in requires.platform")
+          node.text("player")?.let { it !in players } == true ->
+            fail("$path.player", "Unknown media player")
+          else -> null
+        }
+      }
+  }
+
   private fun isNumber(value: JsonPrimitive): Boolean =
     !value.isString && value.doubleOrNull != null
 

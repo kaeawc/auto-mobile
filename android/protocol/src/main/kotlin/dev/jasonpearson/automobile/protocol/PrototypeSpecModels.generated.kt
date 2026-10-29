@@ -1889,6 +1889,9 @@ data class PrototypeVideoPlayerNode(
 @SerialName("map")
 @Serializable
 data class PrototypeMapNode(
+@SerialName("castButton")
+@Serializable
+data class PrototypeCastButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
@@ -1919,6 +1922,8 @@ data class PrototypeMapNode(
   val showUserLocation: Boolean? = null,
   val onMarkerTap: List<PrototypeAction>? = null,
   val onCameraIdle: PrototypeNodeMapOnCameraIdle? = null,
+  val player: String,
+  val protocols: List<String>? = null,
 ) : PrototypeNode()
 
 @Serializable

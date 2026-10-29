@@ -4,6 +4,9 @@ import { prototypeRootBlockFields } from "./prototypeRootBlockSchemas";
 import { prototypeBadgeShape, prototypeDividerShape } from "./prototypeLeafNodeShapes";
 import { prototypeMapSchema } from "./prototypeMapSchema";
 import { prototypeMediaSchema, prototypeVideoPlayerSchema } from "./prototypeMediaSchema";
+import { prototypeAuthSchema } from "./prototypeAuthSchema";
+import { prototypeLocationBlockSchema } from "./prototypeLocationBlockSchema";
+import { prototypeMediaNodeSchemas, prototypeMediaSchema } from "./prototypeMediaSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
@@ -544,6 +547,7 @@ const progressBaseSchema = z
 const chartBaseSchema = z.object({ ...commonNodeShape, ...prototypeChartShape }).strict();
 const videoPlayerBaseSchema = prototypeVideoPlayerSchema(commonNodeShape);
 const mapBaseSchema = prototypeMapSchema(commonNodeShape, actionListSchema);
+const mediaNodeSchemas = prototypeMediaNodeSchemas(commonNodeShape);
 const dialogBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -738,6 +742,7 @@ export type PrototypeNode =
   | z.infer<typeof progressBaseSchema>
   | z.infer<typeof videoPlayerBaseSchema>
   | z.infer<typeof mapBaseSchema>
+  | z.infer<(typeof mediaNodeSchemas)[number]>
   | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof tooltipBaseSchema>
@@ -822,6 +827,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       progressBaseSchema,
       videoPlayerBaseSchema,
       mapBaseSchema,
+      ...mediaNodeSchemas,
       chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       tooltipBaseSchema,

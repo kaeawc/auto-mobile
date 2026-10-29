@@ -1,0 +1,48 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "clip",
+          "source": {
+            "sample": "countdown"
+          }
+        },
+        {
+          "type": "castButton",
+          "id": "castMain",
+          "player": "main",
+          "contentDescription": "Cast trailer"
+        },
+        {
+          "type": "castButton",
+          "player": "clip",
+          "protocols": ["googleCast", "airplay"]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1]",
+  "expectedMessage": "castButton requires cast in requires.platform"
+}

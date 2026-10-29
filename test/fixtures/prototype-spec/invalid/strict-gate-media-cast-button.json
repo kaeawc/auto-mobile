@@ -1,0 +1,59 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["media", "cast"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "clip",
+          "source": {
+            "sample": "countdown"
+          }
+        },
+        {
+          "type": "castButton",
+          "id": "castMain",
+          "player": "main",
+          "contentDescription": "Cast trailer"
+        },
+        {
+          "type": "castButton",
+          "player": "clip",
+          "protocols": ["googleCast", "airplay"]
+        },
+        {
+          "type": "text",
+          "text": "{platform:/cast/state}"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_platform_v1",
+      "prototype_platform_media_v1",
+      "prototype_data_model_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_cast_v1"
+}

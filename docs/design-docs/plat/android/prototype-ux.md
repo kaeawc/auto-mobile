@@ -291,6 +291,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | button          | native   | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
+| castButton      | material | material | —     |
 | chart           | material | material | —     |
 | checkbox        | material | material | —     |
 | chip            | material | material | —     |
@@ -2379,8 +2380,12 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 `sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
 `receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
 `connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module; the `castButton` node is a
-separate slice.
+cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+
+The `castButton` node is the system route picker that starts a session; there is no start call. Its
+required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
+`protocols` (1-2 unique of `googleCast`, `airplay`) limits the routes it offers. Every `castButton`
+needs `cast` in `requires.platform`. No renderer draws it yet.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

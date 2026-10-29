@@ -8,6 +8,7 @@ import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
 import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
 import {
+  prototypeCastButtonError,
   prototypeMediaCallError,
   prototypeMediaError,
   prototypeMediaPlayers,
@@ -675,6 +676,20 @@ function rootBlockError(
     }
   }
   return undefined;
+  return (
+    prototypeChannelsError(root) ??
+    prototypeAuthBlockError(root) ??
+    prototypeSecureStorageError(root) ??
+    prototypeLocationBlockError(root) ??
+    prototypeNotificationsBlockError(root) ??
+    prototypeMediaError(root) ??
+    prototypeMediaQueueError(root, check) ??
+    prototypeVideoPlayerError(root) ??
+    prototypeMapError(root) ??
+    prototypeMediaCaptionsError(root, check) ??
+    prototypeCastButtonError(root) ??
+    requiresError(root)
+  );
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */

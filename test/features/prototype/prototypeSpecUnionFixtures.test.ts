@@ -9,6 +9,7 @@ for (const [name, value] of unionFixtures) {
     const spec = {
       id: "models",
       requires: { platform: ["test", "clipboard", "media", "map"] },
+      requires: { platform: ["test", "clipboard", "media", "cast"] },
       state: {
         enabled: true,
         text: "Text",
@@ -20,6 +21,7 @@ for (const [name, value] of unionFixtures) {
         status: "idle",
       },
       data: { points: [{ value: 1 }], items: [], value: 1 },
+      media: { players: { main: { kind: "video", source: { sample: "countdown" } } } },
       window: { placement: { type: "fullscreen" }, opacity: 100 },
       root: {
         type: "column",

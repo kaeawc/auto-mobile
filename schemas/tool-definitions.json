@@ -1465,13 +1465,13 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Record up to 20 s of an Android emulator's audio output and report its level: rmsDbfs, peakDbfs, the share of 20 ms windows with sound (activeRatio), and silent. A guest that plays nothing returns silent: true rather than an error. saveArtifact writes a WAV and returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts can glitch real-time audio. Physical devices and iOS are refused.",
+    "description": "Record up to 20 s of an Android emulator's or iOS Simulator's audio output and report its level: rmsDbfs, peakDbfs, the share of 20 ms windows with sound (activeRatio), and silent. A guest that plays nothing returns silent: true rather than an error. saveArtifact writes a WAV and returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts can glitch real-time audio. A simulator is read from the host's loopback default output, which mixes every simulator on the host. Physical devices are refused.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "seconds": {
-          "description": "How long to record the emulator's audio output.",
+          "description": "How long to record the device's audio output.",
           "type": "number",
           "minimum": 0.1,
           "maximum": 20
@@ -1539,7 +1539,7 @@
         },
         "route": {
           "type": "string",
-          "const": "emulator-grpc"
+          "enum": ["emulator-grpc", "host-loopback"]
         },
         "path": {
           "type": "string"
@@ -14449,7 +14449,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Play a WAV file or a built-in tone into an Android emulator's microphone, so an app under test records known audio (voice notes, voice search, calls). Streams through the emulator's own gRPC audio API, so each emulator is isolated and no host audio device is needed. Returns an injectionId once streaming starts; stop it with stopAudioInput. Session release stops it. Errors lead with a code: [audio_injection_busy] another injection holds this emulator's microphone; [audio_injection_unsupported] the device is not a local emulator with gRPC audio. Physical devices and iOS are refused.",
+    "description": "Play a WAV file or a built-in tone into an Android emulator's or iOS Simulator's microphone, so an app under test records known audio (voice notes, voice search, calls). An emulator streams through its own gRPC audio API, isolated per emulator. A simulator goes through the host's loopback input device, which every simulator on the host shares, so one simulator injection runs per host. Returns an injectionId once streaming starts; stop it with stopAudioInput. Session release stops it. Errors lead with a code: [audio_injection_busy] another injection holds the microphone; [audio_injection_unsupported] no route (not a local emulator with gRPC audio, or a host without a loopback default input); [audio_loopback_failed] the host loopback helper failed. Physical devices are refused.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -14542,7 +14542,7 @@
         },
         "route": {
           "type": "string",
-          "const": "emulator-grpc"
+          "enum": ["emulator-grpc", "host-loopback"]
         }
       },
       "required": [

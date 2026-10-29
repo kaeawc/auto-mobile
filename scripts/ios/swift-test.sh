@@ -77,6 +77,7 @@ TESTABLE_PACKAGES=(
     "XCTestRunner"
     "screen-capture"
     "network-filter"
+    "audio-loopback"
 )
 
 # Total tests executed in a `swift test` transcript.

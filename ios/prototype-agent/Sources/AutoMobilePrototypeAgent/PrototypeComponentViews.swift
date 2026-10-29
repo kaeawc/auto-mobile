@@ -419,6 +419,12 @@
                 value: node.containerLayoutSignature(state: model.state) { model.holds($0) }
             )
             .frame(minWidth: 0, alignment: .leading)
+            // A `fill` card spans its node, so the outline and fill follow the node's width, not the
+            // content's (the outline hugged the content before).
+            .frame(
+                maxWidth: PrototypeCardLayout.outlineSpansWidth(style?.width) ? .infinity : nil,
+                alignment: .topLeading
+            )
             // An authored gradient is painted behind the card, over the authored background, by the
             // node's own style; the card's fill would cover it.
             .background(shape.fill(

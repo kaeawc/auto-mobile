@@ -13,6 +13,26 @@ enum PrototypeNamespacePolicy {
         osMajor >= minimumOS ? requested : nil
     }
 
+    /// The button chrome a variant draws. `outlined` is its own case: it must not share `tonal`'s
+    /// bordered fill, which made an outlined button render as a filled capsule.
+    enum ButtonChrome: Equatable {
+        case filled
+        case tonal
+        case outlined
+        case elevated
+        case text
+    }
+
+    static func buttonChrome(_ variant: String?) -> ButtonChrome {
+        switch variant {
+        case "outlined": .outlined
+        case "tonal": .tonal
+        case "elevated": .elevated
+        case "text": .text
+        default: .filled
+        }
+    }
+
     static func ignoredFields(_ namespace: IosNamespace, isButton: Bool) -> [String] {
         var fields: [String] = []
         if namespace.tab != nil { fields.append("tab.role") }

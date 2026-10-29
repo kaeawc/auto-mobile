@@ -77,6 +77,16 @@ const MANIFEST_WAIT_MS = 90_000;
 const LIVE_WAIT_MS = 60_000;
 const POLL_INTERVAL_MS = 2_000;
 const TOOL_TIMEOUT_MS = 180_000;
+/**
+ * The CLI idle window each call declares for the session. The default (2 min) is shorter than the
+ * harness's quiet stretches between tool calls (app install, launch, the manifest wait), and a
+ * session that idles past it is released and cannot be reused.
+ */
+const CLI_SESSION_IDLE_TIMEOUT_MS = 15 * 60_000;
+const CLI_ENV = {
+  ...process.env,
+  AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS: String(CLI_SESSION_IDLE_TIMEOUT_MS),
+};
 /** Traffic rows older than the launch minus this skew belong to earlier runs. */
 const CLOCK_SKEW_MS = 60_000;
 
@@ -114,7 +124,7 @@ async function callTool(
   const { stdout } = await execFileAsync(
     "auto-mobile",
     ["--debug", "--embedded-sdk", "--cli", ...session, tool, ...flags],
-    { maxBuffer: 64 * 1024 * 1024, timeout: TOOL_TIMEOUT_MS },
+    { maxBuffer: 64 * 1024 * 1024, timeout: TOOL_TIMEOUT_MS, env: CLI_ENV },
   );
   return parseToolOutput(stdout);
 }

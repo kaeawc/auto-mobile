@@ -238,6 +238,52 @@ describe("LaunchApp", () => {
     expect(detectorSpy).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    ["automotive", 10, undefined, 10],
+    ["automotive", 10, 0, 0],
+    ["automotive", 10, 11, 11],
+    ["automotive", 0, undefined, 0],
+    ["phone", 10, undefined, 0],
+    ["tablet", 10, undefined, 0],
+  ] as const)(
+    "%s current user %i with explicit user %s launches as user %i",
+    async (formFactor, currentUser, explicitUser, expectedUser) => {
+      fakeTimer.enableAutoAdvance();
+      device = { ...device, formFactor };
+      fakeAdb.setCommandResponse(
+        "shell am get-current-user",
+        createExecResult(String(currentUser), ""),
+      );
+      fakeAdb.setCommandResponse("shell am start", createExecResult("Starting: Intent", ""));
+      fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: expectedUser });
+      fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+      launchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+        installedAppsProvider: {
+          listInstalledApps: async () => ({ apps: [packageName], successful: true }),
+        },
+        cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      });
+      launchApp.awaitIdle = fakeAwaitIdle;
+      launchApp.observeScreen = fakeObserveScreen;
+      launchApp.window = fakeWindow;
+
+      const result = await launchApp.execute(packageName, {
+        userId: explicitUser,
+        clearAppData: false,
+        coldBoot: false,
+      });
+
+      expect(result).toMatchObject({ success: true, userId: expectedUser });
+      const commands = fakeAdb.getExecutedCommands();
+      expect(
+        commands.some((command) => command.startsWith(`shell am start --user ${expectedUser} `)),
+      ).toBe(true);
+      expect(commands.filter((command) => command === "shell am get-current-user")).toHaveLength(
+        formFactor === "automotive" && explicitUser === undefined ? 1 : 0,
+      );
+    },
+  );
+
   test("returns observation when app is already in foreground", async () => {
     const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });

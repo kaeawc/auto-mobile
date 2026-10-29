@@ -5,9 +5,9 @@ car SystemUI and an accessibility tree like any other Android image. This guide 
 what to expect, and what is out of scope.
 
 > [!WARNING]
-> **Not yet verified on a device.** The host and CtrlProxy code described here is built and unit tested
-> against fakes. The baseline run on a real AAOS emulator (#14916) has not happened, so every behaviour
-> below that depends on the emulator is marked **unverified**. This page is updated as the matrix lands.
+> **Image support varies.** Some emulator interactions below remain unverified. Vehicle conditions
+> check the effective driving or night state before reporting success; a command accepted by the car
+> service alone does not confirm that the requested state took effect.
 
 ## Create the emulator by hand
 
@@ -49,8 +49,9 @@ of this as unverified.
 
 Most AAOS images run a headless system user (user 0 has no UI) and the driver is a secondary user,
 often user 10. On an automotive device AutoMobile reads the foreground user with `am get-current-user`
-and targets that user when it installs, enables and rebinds CtrlProxy and grants its permissions, and
-when it reads the accessibility state to check the binding. Other devices issue exactly the commands they
+and targets that user when it installs, enables and rebinds CtrlProxy and grants its permissions,
+when it reads the accessibility state to check the binding, and when launching apps without an explicit
+`userId`. An explicit `userId` always wins. Other devices issue exactly the commands they
 always did. If the foreground user cannot be read you get an error that names the user problem.
 
 The gate uses the AVD's form factor, so a physical head unit is not covered.
@@ -68,10 +69,14 @@ by default. The `vehicle` family supports emulators:
 - `vehicle.motion`: `parked` or `driving` (gear, speed and parking brake are set together), or `unset`.
 - `vehicle.nightMode`: `on`, `off`, or `unset`.
 
-Values are injected through the car service (`cmd car_service inject-vhal-event`) and restored to what
-they were before the first change when you `unset`, call `reset`, release the session or the lease
-expires. The change result includes the car service's driving state when it can be read. Phones, physical
-head units and iOS return `unsupported`. The VHAL property ids and command syntax are unverified.
+Motion uses gear and parking-brake events with continuous speed events that renew while driving is
+active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;
+parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/night override and checks
+the effective UI night mode. A state that cannot be confirmed returns `unsupported`.
+
+When you `unset`, call `reset`, release the session or the lease expires, motion returns to the values
+before the first change and night mode returns to automatic sensor control. Motion reset can take about
+ten seconds while the last speed events expire. Phones, physical head units and iOS return `unsupported`.
 
 ## Rotary input
 

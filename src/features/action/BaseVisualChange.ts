@@ -1030,6 +1030,7 @@ export class BaseVisualChange {
       window: this.window,
       adb: this.adb,
       deviceId: this.device.deviceId,
+      formFactor: this.device.formFactor,
       timer: this.timer,
     }).verify(options);
   }

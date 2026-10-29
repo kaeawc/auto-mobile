@@ -1,11 +1,15 @@
-import type { BootedDevice, Platform } from "../models";
+import type { BootedDevice, Platform, SomePlatform } from "../models";
 import type { DeviceDiscoveryError } from "../models/DeviceDiscoveryError";
 import type { TransitionalSimulator } from "../models/TransitionalSimulator";
 import type { DiscoverySource } from "../utils/discoverySource";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
-import { type BootedDeviceDiscovery, iosSucceededSources } from "./deviceDiscoveryContracts";
+import {
+  type BootedDeviceDiscovery,
+  type BootedDeviceDiscoveryOptions,
+  iosSucceededSources,
+} from "./deviceDiscoveryContracts";
 
 /** The mutable result one booted-device sweep assembles, source by source. */
 export type BootedDiscoveryAccumulator = BootedDeviceDiscovery & {
@@ -62,6 +66,20 @@ export function appendIosBootedDiscovery(
   for (const deviceId of ios.freshDeviceIds) {
     result.freshDeviceIds.add(deviceId);
   }
+}
+
+/** Which sweeps a booted-device read runs. "Either" is Android and iOS unless the caller opts in. */
+export function bootedSweepsFor(
+  platform: SomePlatform,
+  options: Pick<BootedDeviceDiscoveryOptions, "includeWatchOs">,
+): Record<Platform, boolean> {
+  const either = platform === "either";
+  return {
+    android: either || platform === "android",
+    ios: either || platform === "ios",
+    // Only the pool's own readers ask an "either" read for watches (#14908).
+    watchos: platform === "watchos" || (either && options.includeWatchOs === true),
+  };
 }
 
 /** Booted Apple Watch simulators, or the typed reason the watch sweep has no answer (#14908). */

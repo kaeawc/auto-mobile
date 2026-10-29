@@ -795,11 +795,12 @@ export class DaemonStartup {
         // waiting for a first assignment/refresh. The refresh callback may have
         // minted these already; this is idempotent because the incarnation is
         // unchanged (epic #5256).
-        for (const pooled of this.host.services.devicePool().getAllDevices()) {
-          // The device-session wire is Android and iOS; watches get no epoch yet (#14908).
-          if (!isAndroidOrIosPlatform(pooled.platform)) {
-            continue;
-          }
+        // The device-session wire is Android and iOS; watches get no epoch yet (#14908).
+        const sessionDevices = this.host.services
+          .devicePool()
+          .getAllDevices()
+          .filter((pooled) => isAndroidOrIosPlatform(pooled.platform));
+        for (const pooled of sessionDevices) {
           this.host.services.deviceSessionRegistry().onDeviceConnected({
             deviceId: pooled.id,
             platform: pooled.platform,

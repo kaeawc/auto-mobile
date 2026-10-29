@@ -32,6 +32,7 @@ import {
   appendAndroidBootedDiscovery,
   appendIosBootedDiscovery,
   appendWatchBootedDiscovery,
+  bootedSweepsFor,
   discoverBootedWatches,
 } from "./bootedDiscoveryAppend";
 import { logger } from "../utils/logger";
@@ -403,13 +404,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
     const transitional: { simulators?: TransitionalSimulator[] } = {};
 
-    const either = platform === "either";
-    // "Either" is Android or iOS; only the pool's own readers opt in to watches (#14908).
-    const watchRequested = platform === "watchos" || (either && options.includeWatchOs === true);
+    const sweeps = bootedSweepsFor(platform, options);
     const [android, ios, watch] = await Promise.all([
-      platform === "android" || either ? this.discoverBootedAndroidDevices(options) : undefined,
-      platform === "ios" || either ? this.discoverBootedIosDevices(options) : undefined,
-      watchRequested ? discoverBootedWatches(this.watchSimulators, options.signal) : undefined,
+      sweeps.android ? this.discoverBootedAndroidDevices(options) : undefined,
+      sweeps.ios ? this.discoverBootedIosDevices(options) : undefined,
+      sweeps.watchos ? discoverBootedWatches(this.watchSimulators, options.signal) : undefined,
     ]);
     const result = {
       devices,

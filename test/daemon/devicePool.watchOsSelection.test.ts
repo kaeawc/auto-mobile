@@ -36,7 +36,7 @@ async function poolWithWatch() {
   utils.setBootedDevices("ios", [IPHONE]);
   const pool = makePool(manager, "watch-daemon", { timer, deviceManager: utils });
   await pool.initializeWithDevices([IPHONE, WATCH]);
-  return { timer, pool };
+  return { timer, pool, utils };
 }
 
 describe("DevicePool with an Apple Watch", () => {
@@ -67,5 +67,14 @@ describe("DevicePool with an Apple Watch", () => {
     const { pool } = await poolWithWatch();
 
     expect(await pool.assignDeviceToSession("watch-1", "watchos")).toBe(WATCH.deviceId);
+  });
+
+  test("auto-start never boots watches as pool capacity", async () => {
+    const { pool, timer, utils } = await poolWithWatch();
+    const started = await pool.testHooks.startAdditionalDevices(1, timer.now() + 1_000, "watchos");
+
+    expect(started).toBe(0);
+    expect(utils.getListDeviceImagesCalls()).toEqual([]);
+    expect(utils.getGetDeviceImagesDetailedCalls()).toEqual([]);
   });
 });

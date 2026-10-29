@@ -2254,7 +2254,8 @@ and `progress` is `{value: 0..1}` or `{indeterminate: true}`. `notifications.can
 `all: true`, and `notifications.setBadge` takes `count` (0-9999). `post` and `setBadge` need `notifications`
 in `requires.permissions`; `cancel` does not. Events are `notifications.opened`, `.action`, `.reply` (marked
 sensitive, since it carries typed text) and `.dismissed`. State is `/platform/notifications/{badge, active,
-pending, authorization}`: `active` is at most 24 per prototype, and `authorization` uses the permission
+pending, authorization}` plus `/platform/notifications/channels/<id>/blocked` (a boolean, readable only
+for a declared channel): `active` is at most 24 per prototype, and `authorization` uses the permission
 vocabulary (`granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The
 runtime homes follow the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and
 ProtoViewer advertise the module, the CtrlProxy overlay advertises it as a disclosed preview, and the iOS

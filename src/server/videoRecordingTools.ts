@@ -231,6 +231,20 @@ function createVideoStartResponse(output: {
   });
 }
 
+/** Segmented Android recordings (over 180 s) have no audio track: it would need stitching. */
+function assertAudioFitsOneSegment(
+  platform: string,
+  maxDurationSeconds: number,
+  audio: boolean | undefined,
+): void {
+  if (audio && platform === "android" && maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS) {
+    throw new ActionableError(
+      `audio is supported for Android recordings up to ${ANDROID_SCREENRECORD_MAX_SECONDS} s; ` +
+        "set maxDuration to that or less, or record without audio.",
+    );
+  }
+}
+
 async function startDeviceRecordings(
   ctx: RecordingToolContext,
   device: BootedDevice,
@@ -258,6 +272,7 @@ async function startDeviceRecordings(
       // Android `screenrecord` is hard-capped at 180s. For longer Android
       // recordings, transparently produce ordered segments (<outputName>,
       // <outputName>-seg1, ...) via a timer-driven segmented session.
+      assertAudioFitsOneSegment(target.platform, maxDurationSeconds, args.audio);
       if (target.platform === "android" && maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS) {
         const started: { handle?: string } = {};
         const session: AndroidSegmentedPlanVideoSession = new AndroidSegmentedPlanVideoSession({
@@ -319,6 +334,7 @@ async function startDeviceRecordings(
         ownerSessionUuid,
         abortSignal: signal,
         display: args.display,
+        audio: args.audio,
       });
 
       recordings.push({

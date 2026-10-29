@@ -14,6 +14,7 @@ import {
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorAudioMessages";
 import { GrpcStatus } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/grpcFraming";
 import { analyzeLevels, sineTone, type PcmAudio } from "../../../../src/utils/audio/pcm";
+import { SilenceFiller } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/SilenceFiller";
 import { FakeGrpcTransport } from "../../../fakes/FakeGrpcTransport";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
@@ -294,6 +295,74 @@ describe("EmulatorAudioClient.captureAudio", () => {
     await expect(client.captureAudio({ durationMs: 100 })).rejects.toMatchObject({
       code: "audio_capture_unsupported",
     });
+  });
+});
+
+describe("EmulatorAudioClient.streamCapture", () => {
+  function audioPacket(bytes: number[]): Uint8Array {
+    return encodeAudioPacket({ audio: Uint8Array.from(bytes) });
+  }
+
+  test("forwards PCM until stopped, then cancels the stream", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = undefined;
+      call.onWrite = () => {
+        call.respond(audioPacket([1, 0, 2, 0]));
+        call.respond(audioPacket([3, 0]));
+      };
+    };
+    const received: number[] = [];
+    const stream = await client.streamCapture((pcm) => received.push(...pcm), {
+      sampleRate: 16_000,
+    });
+    while (received.length < 6) {
+      await Promise.resolve();
+    }
+    await stream.stop();
+    await stream.stop();
+    expect(stream.sampleRate).toBe(16_000);
+    expect(received).toEqual([1, 0, 2, 0, 3, 0]);
+    expect(transport.calls[0].cancelled).toBe(true);
+  });
+
+  test("a stream the emulator refuses before any audio fails at stop", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = { code: GrpcStatus.UNIMPLEMENTED, message: "" };
+    };
+    const stream = await client.streamCapture(() => {});
+    await expect(stream.stop()).rejects.toMatchObject({ code: "audio_capture_unsupported" });
+  });
+});
+
+describe("SilenceFiller", () => {
+  const START_US = 1_700_000_000_000_000;
+  /** 20 ms of 16 kHz mono PCM. */
+  const packet = (timestampUs?: number) => ({ timestampUs, audio: new Uint8Array(640) });
+
+  test("a quiet stretch between packets becomes silence of the same length", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    expect(filler.before(packet(START_US))).toBeUndefined();
+    nowUs = START_US + 2_020_000;
+    expect(filler.before(packet(START_US + 2_020_000))?.byteLength).toBe(64_000);
+  });
+
+  test("silence before the first packet is kept, and jitter is not", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    nowUs += 1_000_000;
+    expect(filler.before(packet(nowUs))?.byteLength).toBe(32_000);
+    nowUs += 30_000;
+    expect(filler.before(packet(nowUs))).toBeUndefined();
+  });
+
+  test("a timestamp that disagrees with the host clock falls back to arrival time", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    nowUs += 500_000;
+    expect(filler.before(packet(42))?.byteLength).toBe(16_000);
   });
 });
 

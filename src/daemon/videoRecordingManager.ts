@@ -21,7 +21,7 @@ import {
   toActionableError,
 } from "../models";
 import {
-  HybridVideoCaptureBackend,
+  createRecordingCaptureBackend,
   VideoRecorderService,
   parseVideoRecordingConfig,
   type ActiveVideoRecording,
@@ -141,7 +141,7 @@ export function resolveVideoRetentionPolicy(
 /** Shared bound for post-cap host settlement and replaced-device stop waits. */
 export const INCOMPLETE_MARK_GRACE_MS = 5_000;
 
-interface StartVideoRecordingRequest {
+interface StartVideoRecordingRequest extends Pick<StartVideoRecordingOptions, "audio"> {
   device: BootedDevice;
   configOverrides?: VideoRecordingConfigInput;
   outputName?: string;
@@ -450,8 +450,7 @@ const inProgressSizeMonitors = new Map<string, { timer: Timer; handle: NodeJS.Ti
 let retentionSweepTimer: { timer: Timer; handle: NodeJS.Timeout } | null = null;
 
 async function selectBackend(): Promise<VideoCaptureBackend> {
-  logger.debug("[VideoRecording] Using HybridVideoCaptureBackend (iOS FFmpeg, Android platform)");
-  return new HybridVideoCaptureBackend();
+  return createRecordingCaptureBackend();
 }
 
 async function createRecorderService(): Promise<VideoRecorderService> {
@@ -1340,6 +1339,7 @@ function videoRecordingStartOptions(
     display: request.display,
     recordingPanel: recordingDisplay?.panel,
     physicalDisplayId: recordingDisplay?.physicalId,
+    audio: request.audio,
   };
 }
 

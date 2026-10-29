@@ -10,7 +10,8 @@ export function resolveSessionDevicePlatform(
   if (pooledPlatform) {
     return pooledPlatform;
   }
-  if (requestedPlatform === "android" || requestedPlatform === "ios") {
+  // A watch is only ever reached by naming it, so only an explicit request yields "watchos".
+  if (requestedPlatform !== undefined && requestedPlatform !== "either") {
     return requestedPlatform;
   }
   return isIosUdid(deviceId) ? "ios" : "android";

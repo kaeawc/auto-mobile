@@ -82,6 +82,7 @@ export function stopResultEntry(
     codec,
     recordedPanel: metadata.recordedPanel,
     transitions: metadata.transitions,
+    hasAudioTrack: metadata.hasAudioTrack,
     metadata: { ...metadata, durationMs, sizeBytes, codec },
     deviceId: device?.deviceId,
     platform: device?.platform,

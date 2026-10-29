@@ -86,6 +86,12 @@ export const videoRecordingSchema = addDeviceTargetingToSchema(
         .optional()
         .describe("Max duration seconds"),
       outputName: z.string().optional().describe("Recording label"),
+      audio: z
+        .boolean()
+        .optional()
+        .describe(
+          "Also record the device's audio into the file (start only; local emulators and iOS Simulators; needs FFmpeg)",
+        ),
       display: z.string().optional().describe('Android panel key, role, or "active" (start only)'),
       highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
       resourceLink: resourceLinkField(),

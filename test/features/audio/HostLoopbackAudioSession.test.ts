@@ -202,6 +202,22 @@ describe("HostLoopbackAudioSession capture", () => {
     expect(result.timedOut).toBe(false);
   });
 
+  test("an open-ended capture streams PCM until stopped by closing stdin", async () => {
+    const { session, helpers } = setup();
+    const received: number[] = [];
+    const stream = await session.streamCapture((pcm) => received.push(...pcm));
+    expect(helpers[0].args).toEqual(["capture", "--until-stopped", "--sample-rate", "48000"]);
+    helpers[0].stdout.write(pcmBytes([7, 8]));
+    // Closing stdin is the helper's cue to write its last buffer and exit.
+    helpers[0].stdin.on("finish", () => {
+      helpers[0].stdout.write(pcmBytes([9]));
+      helpers[0].exit(0);
+    });
+    await stream.stop();
+    expect(Array.from(new Int16Array(Uint8Array.from(received).buffer))).toEqual([7, 8, 9]);
+    expect(helpers[0].signals).toEqual([]);
+  });
+
   test("less audio than asked for is timedOut, not an error", async () => {
     const { session } = setup((helper) => {
       helper.ready();

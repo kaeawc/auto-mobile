@@ -46,6 +46,23 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
     };
   }
 
+  streamSink: ((pcm: Uint8Array) => void) | undefined;
+  streamStops = 0;
+  streamStopError: Error | undefined;
+
+  async streamCapture(sink: (pcm: Uint8Array) => void, options: { sampleRate?: number } = {}) {
+    this.streamSink = sink;
+    return {
+      sampleRate: options.sampleRate ?? 48_000,
+      stop: async () => {
+        this.streamStops++;
+        if (this.streamStopError) {
+          throw this.streamStopError;
+        }
+      },
+    };
+  }
+
   async close(): Promise<void> {
     this.closed++;
   }

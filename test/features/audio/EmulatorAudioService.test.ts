@@ -279,6 +279,27 @@ describe("EmulatorAudioService session ownership and limits", () => {
 });
 
 describe("EmulatorAudioService capture", () => {
+  test("a stream closes its device session once stopped, even when the stop fails", async () => {
+    const { service, sessions } = setup({}, (session) => {
+      session.streamStopError = new Error("stream broke");
+    });
+    const received: number[] = [];
+    const stream = await service.startStream("emulator-5554", (pcm) => received.push(...pcm));
+    sessions[0].streamSink?.(Uint8Array.from([1, 2]));
+    await expect(stream.stop()).rejects.toThrow("stream broke");
+    await expect(stream.stop()).rejects.toThrow("stream broke");
+    expect(received).toEqual([1, 2]);
+    expect(sessions[0].streamStops).toBe(1);
+    expect(sessions[0].closed).toBe(1);
+  });
+
+  test("a stream on a device with no route is audio_capture_unsupported", async () => {
+    const { service } = setup();
+    await expect(service.startStream("R58M123ABC", () => {})).rejects.toMatchObject({
+      code: "audio_capture_unsupported",
+    });
+  });
+
   test("reports levels with the requested threshold and closes the session", async () => {
     const { service, sessions } = setup({}, (session) => {
       session.captureSamples = sineTone({ durationMs: 100, amplitudeDbfs: -30 }).samples;

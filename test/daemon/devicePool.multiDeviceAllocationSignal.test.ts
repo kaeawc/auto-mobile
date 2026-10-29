@@ -10,6 +10,23 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
 /**
+ * Parks the same-session release wait a create runs after its write (it reads no signal), so a
+ * test can abort the caller's signal while the attempt sits there and then let it settle.
+ */
+class ParkedReleaseWaitSessionManager extends SessionManager {
+  park: Promise<void> | undefined;
+  parkedWaits = 0;
+
+  override async waitForSessionReleaseWithin(sessionId: string, timeoutMs: number) {
+    if (this.park) {
+      this.parkedWaits++;
+      await this.park;
+    }
+    return super.waitForSessionReleaseWithin(sessionId, timeoutMs);
+  }
+}
+
+/**
  * Multi-device allocation runs under the caller's explicit signal, not the ambient one (#15671):
  * the entry point is the allocation's only ambient read (a caller passing no signal falls back to
  * it), and the chosen signal reaches the retry wait and each criteria attempt. A cancel mid-wait
@@ -18,12 +35,12 @@ import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 for (const byCriteria of [false, true]) {
   describe(`${byCriteria ? "criteria" : "platform"} multi-device allocation signal`, () => {
     let timer: FakeTimer;
-    let sessions: SessionManager;
+    let sessions: ParkedReleaseWaitSessionManager;
     let pool: DevicePool;
 
     async function arrangeHarness(): Promise<void> {
       timer = new FakeTimer();
-      sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      sessions = new ParkedReleaseWaitSessionManager(timer, new FakeDeviceSessionPersistence());
       const manager = new FakeDeviceManager();
       const devices = [{ deviceId: "d1", name: "d1", platform: "android" as const }];
       manager.bootedDevices = devices;
@@ -129,6 +146,48 @@ for (const byCriteria of [false, true]) {
 
       expect(allocation.settled).toBe(true);
       expect(allocation.outcome).toEqual(new Map([["a", "d1"]]));
+    });
+
+    arranged(
+      "a cancel during the last attempt's release wait rolls back the devices it claimed",
+      async () => {
+        const gate = Promise.withResolvers<void>();
+        sessions.park = gate.promise;
+        const controller = new AbortController();
+        const reason = new Error("cancelled while the create waited on a release");
+        const allocation = observe(allocate(controller.signal));
+        await drainUntilQuiescent(timer);
+        expect(sessions.parkedWaits).toBe(1);
+        expect(allocation.settled).toBe(false);
+
+        // The release wait ignores the signal: it settles with the session still current.
+        controller.abort(reason);
+        sessions.park = undefined;
+        gate.resolve();
+        await drainUntilQuiescent(timer);
+
+        expect(allocation.settled).toBe(true);
+        expect(allocation.outcome).toBe(reason);
+        expect(sessions.getSession("a")).toBeNull();
+        expect(pool.getDevice("d1")?.sessionId ?? null).toBeNull();
+      },
+    );
+
+    arranged("an uncancelled attempt that waited on a release keeps its devices", async () => {
+      const gate = Promise.withResolvers<void>();
+      sessions.park = gate.promise;
+      const controller = new AbortController();
+      const allocation = observe(allocate(controller.signal));
+      await drainUntilQuiescent(timer);
+      expect(sessions.parkedWaits).toBe(1);
+
+      sessions.park = undefined;
+      gate.resolve();
+      await drainUntilQuiescent(timer);
+
+      expect(allocation.outcome).toEqual(new Map([["a", "d1"]]));
+      expect(sessions.getSession("a")?.assignedDevice).toBe("d1");
+      expect(pool.getDevice("d1")?.sessionId).toBe("a");
     });
 
     if (byCriteria) {

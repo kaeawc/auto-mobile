@@ -27,15 +27,35 @@ struct PrototypeBarScrollState: Equatable {
     }
 }
 
+struct PrototypeNodeSafeInsets {
+    let navInsets: PrototypeSafeInsets
+    let styledInsets: PrototypeSafeInsets
+
+    init(nodeType: String, safeInsets: PrototypeSafeInsets) {
+        let isBottomNav = nodeType == "bottomNav"
+        navInsets = isBottomNav ? safeInsets : PrototypeSafeInsets()
+        styledInsets = isBottomNav ? PrototypeSafeInsets() : safeInsets
+    }
+
+    func navigationSizing(showsLabel: Bool)
+        -> (itemMinHeight: CGFloat, containerMinHeight: CGFloat, topPadding: CGFloat, bottomPadding: CGFloat)
+    {
+        PrototypeBarScroll.navigationSizing(showsLabel: showsLabel, safeInsets: navInsets)
+    }
+}
+
 enum PrototypeBarScroll {
     static func showsNavigationLabel(behavior: String?, fraction: Double) -> Bool {
         behavior != "minimize" || fraction <= 0
     }
 
-    static func navigationSizing(showsLabel: Bool)
+    static func navigationSizing(showsLabel: Bool, safeInsets: PrototypeSafeInsets = PrototypeSafeInsets())
         -> (itemMinHeight: CGFloat, containerMinHeight: CGFloat, topPadding: CGFloat, bottomPadding: CGFloat)
     {
-        showsLabel ? (64, 80, 12, 4) : (56, 56, 0, 0)
+        let itemHeight: CGFloat = showsLabel ? 64 : 56
+        let topPadding: CGFloat = (showsLabel ? 12 : 0) + safeInsets.top
+        let bottomPadding: CGFloat = (showsLabel ? 4 : 0) + safeInsets.bottom
+        return (itemHeight, itemHeight + topPadding + bottomPadding, topPadding, bottomPadding)
     }
 
     static func validate(_ root: JSONValue) throws {

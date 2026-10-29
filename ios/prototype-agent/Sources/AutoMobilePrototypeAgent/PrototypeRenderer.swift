@@ -887,7 +887,9 @@
         private var bottomNavBar: some View {
             let items = node.items ?? []
             let showsLabel = PrototypeBarScroll.showsNavigationLabel(behavior: node.onScroll, fraction: barFraction)
-            let sizing = PrototypeBarScroll.navigationSizing(showsLabel: showsLabel)
+            let layout = safeAreaLayout
+            let insets = layout.navInsets
+            let sizing = layout.navigationSizing(showsLabel: showsLabel)
             return HStack(spacing: 8) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     let selected = index == navSelection
@@ -916,7 +918,8 @@
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.leading, 8 + insets.left)
+            .padding(.trailing, 8 + insets.right)
             .padding(.top, sizing.topPadding)
             .padding(.bottom, sizing.bottomPadding)
             .frame(maxWidth: .infinity, minHeight: sizing.containerMinHeight)
@@ -1012,7 +1015,7 @@
 
         private func styled(_ view: some View) -> some View {
             let padding = style?.padding
-            let insets = safeAreaEdges
+            let insets = safeAreaLayout.styledInsets
             let shape = cornerShape
             return view
                 .animation(styleAnimation.animation("color"), value: palette.color(style?.color))
@@ -1096,10 +1099,14 @@
             )
         }
 
-        private var safeAreaEdges: UIEdgeInsets {
-            guard let edges = node.safeAreaPadding?.edges else { return .zero }
+        private var safeAreaLayout: PrototypeNodeSafeInsets {
+            PrototypeNodeSafeInsets(nodeType: node.type, safeInsets: safeAreaEdges)
+        }
+
+        private var safeAreaEdges: PrototypeSafeInsets {
+            guard let edges = node.safeAreaPadding?.edges else { return PrototypeSafeInsets() }
             let all = model.contentSafeInsets
-            return UIEdgeInsets(
+            return PrototypeSafeInsets(
                 top: edges.contains("top") ? all.top : 0,
                 left: edges.contains("start") ? all.left : 0,
                 bottom: edges.contains("bottom") ? all.bottom : 0,

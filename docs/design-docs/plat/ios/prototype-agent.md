@@ -73,6 +73,13 @@ and a MaterialLook/PlatformLook renderer split are follow-ups. Segmented Picker,
 remain custom-drawn because they cannot preserve per-item identifiers; segmentedButton, tabBar,
 bottomNav, menu and select therefore remain Material.
 
+`bottomNav` applies selected `safeAreaPadding` inside its navigation-container background, so
+the fill covers the home-indicator inset while its items remain above it. This padding is applied
+once; without selected safe-area edges, the bar keeps its ordinary size.
+Authored `style.padding` remains outside this fill and can expose a transparent band;
+`style.background` paints behind the default navigation fill rather than replacing it.
+Custom navigation-container painting requires integrating the style paint layer with the bar's fill.
+
 ## Embedded input validation
 
 `PrototypeSpecStrictValidator.validate(data:supportedCapabilities:library:)` is the reject-only

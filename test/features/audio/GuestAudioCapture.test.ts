@@ -15,8 +15,9 @@ import type {
   EmulatorGrpcEndpoint,
 } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 
-const STATUS = "/proc/asound/card2/pcm3c/sub0/status";
-const RUNNING = "state: RUNNING\nowner_pid   : 4242\n";
+const PROBE = "then echo running;";
+const RUNNING = "running\n";
+const LOG = "/data/local/tmp/automobile-guest-capture-recorder-1.log";
 function result(stdout: string, error?: string): ExecResult {
   return {
     stdout,
@@ -31,9 +32,8 @@ function setup(options: GuestAudioCaptureOptions = {}) {
   const adb = new FakeAdbExecutor();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  adb.setCommandResponse("for status in", result(`${STATUS}\n`));
   adb.setCommandResponse("nohup tinycap", result("4242\n"));
-  adb.setCommandResponse(`cat ${STATUS}`, result(RUNNING));
+  adb.setCommandResponse(PROBE, result(RUNNING));
   adb.setCommandResponse("then echo matched;", result("matched\n"));
   const devices: string[] = [];
   const emulator: EmulatorGrpcEndpoint = {
@@ -79,14 +79,15 @@ describe("AdbGuestAudioCapture", () => {
     expect(adb.getExecutedCommands().filter((command) => command.includes("kill "))).toEqual([]);
   });
 
-  test("selects the capture card/device, verifies its PID through the default settle window, and closes once", async () => {
+  test("verifies a stock-image recorder through the default settle window without ALSA status access", async () => {
     const { capture, adb, timer, devices } = setup();
+    adb.setCommandError("/proc/asound", new Error("Permission denied"));
     const handle = await capture.open("emulator-5554");
     expect(devices).toEqual(["emulator-5554"]);
     expect(timer.monotonicNow()).toBe(3_000);
     const commands = adb.getExecutedCommands();
-    expect(commands[1]).toContain("tinycap /dev/null -D 2 -d 3 -c 1 -r 48000 -b 16");
-    expect(commands.filter((command) => command.includes(`cat ${STATUS}`))).toHaveLength(31);
+    expect(commands[0]).toContain("tinycap /dev/null -D 0 -d 0 -c 1 -r 48000 -b 16");
+    expect(commands.filter((command) => command.includes(PROBE))).toHaveLength(31);
     await handle.close();
     await handle.close();
     const kills = adb.getExecutedCommands().filter((command) => command.includes("kill "));
@@ -94,12 +95,31 @@ describe("AdbGuestAudioCapture", () => {
     expect(kills[0]).toContain("/proc/4242/environ");
     expect(kills[0]).toContain("AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=recorder-1");
     expect(kills[0]).toContain("then kill 4242;");
+    expect(adb.getExecutedCommands().some((command) => command.includes("/proc/asound"))).toBe(
+      false,
+    );
+    expect(adb.getExecutedArgv().some((args) => args[0] === "root")).toBe(false);
+    expect(commands[0]).toContain(LOG);
+    expect(commands[0]).toContain("</dev/null >/dev/null 2>");
+    const probe = commands.find((command) => command.includes(PROBE));
+    expect(probe).toContain("/proc/4242/environ");
+    expect(probe).toContain("grep -Fqx --");
+    expect(probe).toContain("AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=recorder-1");
+    expect(probe).toContain("/proc/4242/stat");
+    expect(probe).toContain("Z|X");
+    for (const call of adb.getCommandCalls()) {
+      expect(call.timeoutMs).toBeLessThanOrEqual(1_000);
+      expect(call.noRetry).toBe(true);
+      if (!call.command.includes("echo matched") && !call.command.includes("kill ")) {
+        expect(call.waitForProcessSettlementAfterAbort).toBe(true);
+      }
+    }
   });
 
   test("skips a recorder PID whose unique process marker no longer matches", async () => {
     const { capture, adb } = setup();
     const handle = await capture.open("emulator-5554");
-    expect(adb.getExecutedCommands()[1]).toContain("AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=recorder-1");
+    expect(adb.getExecutedCommands()[0]).toContain("AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=recorder-1");
     adb.setCommandResponse("then echo matched;", result(""));
     await handle.close();
     expect(adb.getExecutedCommands().filter((command) => command.includes("kill "))).toEqual([]);
@@ -132,31 +152,66 @@ describe("AdbGuestAudioCapture", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  for (const status of [
-    "closed\n",
-    "state: PREPARED\nowner_pid: 4242\n",
-    "state: RUNNING\nowner_pid: 9999\n",
-    "state: RUNNING\n",
-  ]) {
-    test(`refuses unverified capture ${status.trim()} and kills only the launched PID`, async () => {
-      const { capture, adb, timer } = setup({ timeoutMs: 400, settleMs: 200 });
-      adb.setCommandResponse(`cat ${STATUS}`, result(status));
-      await expect(capture.open("emulator-5554")).rejects.toMatchObject({
-        code: "audio_guest_capture_unavailable",
-      });
-      expect(timer.monotonicNow()).toBe(400);
-      expect(adb.getExecutedCommands().at(-1)).toContain("then kill 4242;");
-      expect(adb.getExecutedCommands().at(-1)).not.toContain("9999");
+  test("recorder exit during settling refuses injection with a bounded log tail", async () => {
+    const { capture, adb } = setup({ timeoutMs: 400, settleMs: 200 });
+    adb.setCommandResponseSequence(PROBE, [result(RUNNING), result("exited\n")]);
+    adb.setCommandResponse("tail -n 5", result("cannot open PCM: device busy\n"));
+    adb.setCommandResponse("then echo matched;", result(""));
+    await expect(capture.open("emulator-5554")).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+      message: expect.stringContaining("cannot open PCM: device busy"),
     });
-  }
+    const tail = adb.getExecutedCommands().find((command) => command.includes("tail -n 5"));
+    expect(tail).toContain(LOG);
+    expect(tail).toContain("tail -c 2048");
+    expect(adb.getExecutedCommands().filter((command) => command.includes("kill "))).toEqual([]);
+  });
+
+  test("log diagnostics are truncated and cannot substitute for recorder liveness", async () => {
+    const { capture, adb } = setup({ timeoutMs: 400, settleMs: 200 });
+    adb.setCommandResponse(PROBE, result("exited\n"));
+    adb.setCommandResponse("tail -n 5", result(`${"x".repeat(10_000)}last diagnostic`));
+    const error = await capture.open("emulator-5554").catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) {
+      throw new Error("Expected the recorder to be refused");
+    }
+    expect(error.message).toContain("last diagnostic");
+    expect(error.message.length).toBeLessThan(2_600);
+  });
+
+  test("unreadable diagnostics preserve the capture refusal", async () => {
+    const { capture, adb } = setup({ timeoutMs: 400, settleMs: 200 });
+    adb.setCommandResponse(PROBE, result("exited\n"));
+    adb.setCommandError("tail -n 5", new Error("log unreadable"));
+    await expect(capture.open("emulator-5554")).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+    });
+    expect(adb.wasCommandExecuted("tail -n 5")).toBe(true);
+  });
+
+  test("a reused PID with a different marker refuses injection and is never killed", async () => {
+    const { capture, adb } = setup({ timeoutMs: 400, settleMs: 200 });
+    adb.setCommandResponse(PROBE, result("exited\n"));
+    adb.setCommandResponse("then echo matched;", result(""));
+    await expect(capture.open("emulator-5554")).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+    });
+    expect(adb.getExecutedCommands().filter((command) => command.includes("kill "))).toEqual([]);
+  });
+
+  test("refuses when a continuous settle window cannot finish before the deadline", async () => {
+    const { capture, adb, timer } = setup({ timeoutMs: 400, settleMs: 300 });
+    adb.setCommandResponseSequence(PROBE, [result(RUNNING), result("exited\n"), result(RUNNING)]);
+    await expect(capture.open("emulator-5554")).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+    });
+    expect(timer.monotonicNow()).toBe(400);
+  });
 
   test("requires a continuous RUNNING settle window and rechecks after the delay", async () => {
     const { capture, adb, timer } = setup({ timeoutMs: 1_000, settleMs: 200 });
-    adb.setCommandResponseSequence(`cat ${STATUS}`, [
-      result(RUNNING),
-      result("closed\n"),
-      result(RUNNING),
-    ]);
+    adb.setCommandResponseSequence(PROBE, [result(RUNNING), result("exited\n"), result(RUNNING)]);
     const handle = await capture.open("emulator-5554");
     expect(timer.monotonicNow()).toBe(400);
     await handle.close();
@@ -177,16 +232,9 @@ describe("AdbGuestAudioCapture", () => {
     );
   });
 
-  test("does not launch without a readable capture status path", async () => {
-    const { capture, adb } = setup();
-    adb.setCommandResponse("for status in", result(""));
-    await expect(capture.open("emulator-5554")).rejects.toThrow("no readable ALSA capture status");
-    expect(adb.getExecutedCommands()).toHaveLength(1);
-  });
-
   test("read failures after launch refuse injection and clean up", async () => {
     const { capture, adb } = setup();
-    adb.setCommandError(`cat ${STATUS}`, new Error("Permission denied"));
+    adb.setCommandError(PROBE, new Error("Permission denied"));
     await expect(capture.open("emulator-5554")).rejects.toThrow("Permission denied");
     expect(adb.getExecutedCommands().at(-1)).toContain("then kill 4242;");
     expect(adb.getExecutedCommands().some((command) => command.includes("root"))).toBe(false);
@@ -210,19 +258,32 @@ describe("AdbGuestAudioCapture", () => {
     expect(adb.getExecutedCommands().at(-1)).toContain("then kill 4242;");
   });
 
+  test("cleanup rechecks the marker in the signaling shell after a successful preflight", async () => {
+    const { capture, adb } = setup();
+    const handle = await capture.open("emulator-5554");
+    adb.setCommandResponse("then kill 4242;", result("identity_changed\n"));
+    await handle.close();
+    const command = adb.getExecutedCommands().at(-1);
+    expect(command).toContain("if tr");
+    expect(command).toContain("/proc/4242/environ");
+    expect(command).toContain("grep -Fqx --");
+    expect(command).toContain("AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=recorder-1");
+    expect(command).toContain("then kill 4242; else echo identity_changed; fi");
+  });
+
   test("an invalid launch PID is refused without issuing a kill", async () => {
     const { capture, adb } = setup();
     adb.setCommandResponse("nohup tinycap", result("1; kill 9999\n"));
     await expect(capture.open("emulator-5554")).rejects.toThrow("valid PID");
-    expect(adb.getExecutedCommands()).toHaveLength(2);
+    expect(adb.getExecutedCommands()).toHaveLength(1);
   });
 
   test("an executor typed failure is refused and cleaned up", async () => {
     const { adb, timer, discovery } = setup();
     const failingAdb: Pick<AdbExecutor, "execute"> = {
       execute: async (args, options) =>
-        args.join(" ").includes(`cat ${STATUS}`)
-          ? result("", "cannot read status")
+        args.join(" ").includes(PROBE)
+          ? result("", "cannot probe recorder")
           : adb.execute(args, options),
     };
     const capture = new AdbGuestAudioCapture(
@@ -231,7 +292,7 @@ describe("AdbGuestAudioCapture", () => {
       new CountingIdGenerator("recorder"),
       timer,
     );
-    await expect(capture.open("emulator-5554")).rejects.toThrow("cannot read status");
+    await expect(capture.open("emulator-5554")).rejects.toThrow("cannot probe recorder");
     expect(adb.getExecutedCommands().at(-1)).toContain("then kill 4242;");
   });
 });

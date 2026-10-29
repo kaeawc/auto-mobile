@@ -401,8 +401,12 @@ export function androidImageFamilyFor(formFactor: FormFactor | undefined): Andro
   return HANDHELD_IMAGE_FAMILY;
 }
 
-/** API level suggested in the missing-TV-image hint when the request names no bound. */
-const SUGGESTED_TV_API_LEVEL = 34;
+/**
+ * API level suggested in the missing-TV-image hint when the request names no bound. The SDK
+ * catalog publishes `android-tv` for every host ABI (arm64-v8a, x86_64, x86) at API 36; API 34
+ * has no x86_64 TV image.
+ */
+const SUGGESTED_TV_API_LEVEL = 36;
 
 /** ABIs that can run on the host, best first. */
 export function preferredAbis(architecture: string): string[] {

@@ -337,12 +337,33 @@ describe("pickAndroidSystemImage TV selection (#15881)", () => {
     },
   );
 
+  it.each(["x64", "arm64"])(
+    "the default install hint on %s names a package the SDK catalog publishes",
+    (architecture) => {
+      const published = new Set(
+        parseSystemImages(sdkmanagerListing, undefined, "available").map(
+          (image) => image.packageName,
+        ),
+      );
+      let message = "";
+      try {
+        pickAndroidSystemImage([systemImage(36, "google_apis", "x86_64")], tv, architecture);
+      } catch (error) {
+        message = error instanceof Error ? error.message : "";
+      }
+
+      const suggested = /sdkmanager "([^"]+)"/.exec(message)?.[1];
+      expect(suggested).toBeDefined();
+      expect(published.has(suggested ?? "")).toBe(true);
+    },
+  );
+
   it.each([
-    [{}, "x64", 'sdkmanager "system-images;android-34;android-tv;x86_64"', "x86_64 or x86"],
+    [{}, "x64", 'sdkmanager "system-images;android-36;android-tv;x86_64"', "x86_64 or x86"],
     [
       {},
       "arm64",
-      'sdkmanager "system-images;android-34;android-tv;arm64-v8a"',
+      'sdkmanager "system-images;android-36;android-tv;arm64-v8a"',
       "arm64-v8a or x86_64",
     ],
     [
@@ -1124,7 +1145,7 @@ describe("DefaultDeviceProvisioner", () => {
     });
 
     await expect(provisioner.provision({ platform: "android", formFactor: "tv" })).rejects.toThrow(
-      'sdkmanager "system-images;android-34;android-tv;arm64-v8a"',
+      'sdkmanager "system-images;android-36;android-tv;arm64-v8a"',
     );
     expect(avd.createCalls).toEqual([]);
   });

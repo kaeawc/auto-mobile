@@ -18,7 +18,7 @@ sdkmanager --list | grep -E "android-tv|google-tv"
 ```
 
 ```bash
-sdkmanager "system-images;android-34;android-tv;x86_64"
+sdkmanager "system-images;android-36;android-tv;x86_64"
 ```
 
 On an Apple silicon or other ARM host use `arm64-v8a` in place of `x86_64`. Not every API level
@@ -53,9 +53,9 @@ For another profile such as `tv_4k` or `tv_720p`, call `provisionDevice` with an
 {
   "device": {
     "platform": "android",
-    "name": "tv-34-4k",
+    "name": "tv-36-4k",
     "spec": {
-      "runtime": "system-images;android-34;android-tv;x86_64",
+      "runtime": "system-images;android-36;android-tv;x86_64",
       "deviceType": "tv_4k"
     }
   }
@@ -68,13 +68,13 @@ The Android command-line tools work too:
 
 ```bash
 avdmanager create avd \
-  --name tv-34 \
-  --package "system-images;android-34;android-tv;x86_64" \
+  --name tv-36 \
+  --package "system-images;android-36;android-tv;x86_64" \
   --device tv_1080p
 ```
 
 ```bash
-emulator -avd tv-34
+emulator -avd tv-36
 ```
 
 `avdmanager list device | grep -i tv` lists the TV profiles.

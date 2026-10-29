@@ -73,14 +73,7 @@ internal object PrototypePlatformRules {
     reservedTestTagError(context)?.let {
       return it
     }
-    rootChecks
-      .firstNotNullOfOrNull { it(root) }
-      ?.let {
-        return it
-      }
-    // Node-level media rules need the node list, so they run after the root checks and before
-    // requires, in the host validator's order.
-    (PrototypeMedia.videoPlayerError(root, context.nodes) ?: requiresError(root))?.let {
+    rootError(root, context.nodes)?.let {
       return it
     }
     for (use in uses(root, context)) {
@@ -102,6 +95,16 @@ internal object PrototypePlatformRules {
     }
     return null
   }
+
+  // Node-level media rules need the node list, so they run after the root checks and before
+  // requires, in the host validator's order.
+  private fun rootError(
+    root: JsonObject,
+    nodes: List<PrototypeStateChecks.Located>,
+  ): PrototypeSpecError? =
+    rootChecks.firstNotNullOfOrNull { it(root) }
+      ?: PrototypeMedia.videoPlayerError(root, nodes)
+      ?: requiresError(root)
 
   private fun requiresError(root: JsonObject): PrototypeSpecError? {
     val requires = root.member("requires") ?: return null

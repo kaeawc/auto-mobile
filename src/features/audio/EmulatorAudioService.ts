@@ -1,7 +1,7 @@
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../models/describeUnknownError";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import type {
   AudioInjection,
   CaptureResult,
@@ -334,7 +334,7 @@ export class EmulatorAudioService {
     code: EmulatorAudioErrorCode,
   ): Promise<{ route: AudioRoute; open: () => EmulatorAudioSession }> {
     const hostLoopback = this.deps.createHostLoopbackSession;
-    if (hostLoopback && isIosSimulatorUdid(deviceId)) {
+    if (hostLoopback && resolveIosDeviceKind({ deviceId }) === "simulator") {
       return { route: "host-loopback", open: hostLoopback };
     }
     const endpoint = await this.endpointFor(deviceId, code);

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
-import { ANDROID_CERTIFIABLE_KINDS } from "../../../src/daemon/sessionBroker/androidMutationBaseline";
+import {
+  ANDROID_CERTIFIABLE_KINDS,
+  androidAccountDigest,
+  parseAndroidAccountDigests,
+} from "../../../src/daemon/sessionBroker/androidMutationBaseline";
 import {
   DEVICE_MUTATION_KINDS,
   type DeviceBaseline,
@@ -333,16 +337,40 @@ describe("Android mutation baseline capture", () => {
     );
     const current = await port.capture(context);
     expect(JSON.stringify(current)).not.toContain("private@example.com");
-    expect(observation(current, "account", "inventory")).toMatchObject({
+    expect(observation(current, "account", "user:10")).toMatchObject({
       state: "present",
       value: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     const changes = diffDeviceBaseline(baseline, current).changes;
     expect(changes).toHaveLength(1);
-    expect(changes[0]?.kind).toBe("account");
+    expect(changes[0]).toMatchObject({ kind: "account", key: "user:10" });
     expect(planDeviceMutationRevert([], { dirty: [], changes }, port).status).toBe(
       "non_revertible",
     );
+  });
+
+  test("account digests ignore dumpsys noise and row order, but not the account set", () => {
+    const dump = (rows: string, noise: string) =>
+      `User UserInfo{0:Owner:c13}:\n  Accounts: 2\n${rows}\n\n  Accounts History\n  ${noise}\n  Active Sessions: 0`;
+    const a = "    Account {name=a@example.com, type=com.google}";
+    const b = "    Account {name=b@example.com, type=com.example}";
+    const first = parseAndroidAccountDigests(dump(`${a}\n${b}`, "12:00 add"), [0]);
+    expect(parseAndroidAccountDigests(dump(`${b}\n${a}`, "12:05 remove"), [0])).toEqual(first);
+    expect(
+      parseAndroidAccountDigests(dump(`${a}\n${b.replace("b@", "c@")}`, ""), [0]).get(0),
+    ).not.toBe(first.get(0));
+    expect(
+      parseAndroidAccountDigests("User UserInfo{0:Owner:c13}:\n  Accounts: 0", [0]).get(0),
+    ).toBe(androidAccountDigest([]));
+  });
+
+  test.each([
+    ["missing user section", "User UserInfo{10:Work:c13}:\n  Accounts: 0"],
+    ["missing count", "User UserInfo{0:Owner:c13}:\n  Active Sessions: 0"],
+    ["short row list", "User UserInfo{0:Owner:c13}:\n  Accounts: 2\n    Account {name=a, type=t}"],
+    ["non-account row", "User UserInfo{0:Owner:c13}:\n  Accounts: 1\n  Active Sessions: 0"],
+  ])("an unreadable account list (%s) throws", (_label, output) => {
+    expect(() => parseAndroidAccountDigests(output, [0])).toThrow("Android account inventory");
   });
 
   test("hashes file contents and literal filenames rather than silently accepting overwritten baseline files", async () => {

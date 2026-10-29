@@ -171,6 +171,13 @@ const hostConfig = z
     androidResetTimeoutMs: z.number().int().positive().max(MAX_SETTIMEOUT_DELAY_MS).optional(),
     androidKeepBootedMaxUses: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
     androidKeepBootedFallback: z.enum(["snapshot", "destroy"]).optional(),
+    /** An idle pooled Android device is destroyed after this long unused (#14364); omitted keeps it. */
+    androidIdleTtlMs: z
+      .number()
+      .int("androidIdleTtlMs must be a whole number of milliseconds")
+      .positive("androidIdleTtlMs must be a positive number of milliseconds")
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
     reuse: z.object({ ios: iosReuse }).strict().optional(),
     capabilities: capabilities.default({}),
   })
@@ -192,6 +199,14 @@ const hostConfig = z
         config.androidKeepBootedFallback === undefined) ||
       config.androidResetMode === "keep-booted",
     { message: "Android keep-booted keys require keep-booted mode" },
+  )
+  .refine(
+    (config) => config.androidIdleTtlMs === undefined || config.androidResetMode !== undefined,
+    {
+      path: ["androidIdleTtlMs"],
+      message:
+        "androidIdleTtlMs requires androidResetMode; without a reset mode no Android device is pooled",
+    },
   )
   .refine(
     (config) =>

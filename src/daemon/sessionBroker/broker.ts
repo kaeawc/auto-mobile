@@ -13,6 +13,7 @@ import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { DestructionQueue, type SessionBrokerPoolDrainResult } from "./destructionQueue";
+import { IdlePoolExpiry } from "./idlePoolExpiry";
 import {
   normalizeSessionDeviceRequirement,
   resolveSessionDeviceProfile,
@@ -84,6 +85,7 @@ export class SessionBroker {
 
   private readonly cleanup: RecoveryCleanup;
   private readonly destructions: DestructionQueue;
+  private readonly idleExpiry: IdlePoolExpiry;
   /** A stop leaves them durable for the successor. */
   private readonly queuedRecoveryReleases = new Set<string>();
   private readonly timing: BrokerTimingRecorder;
@@ -92,6 +94,12 @@ export class SessionBroker {
 
   constructor(private readonly options: SessionBrokerOptions) {
     this.destructions = new DestructionQueue(options.store, options.devices);
+    this.idleExpiry = new IdlePoolExpiry(
+      options.idleTtlMs ?? {},
+      options.store,
+      this.destructions,
+      () => this.now(),
+    );
     this.cleanup = new RecoveryCleanup(
       options.cleanupConcurrency,
       options.cleanupWaitMs,
@@ -127,6 +135,14 @@ export class SessionBroker {
       throw new SessionBrokerStoppingError();
     }
     return this.destructions.drainIdlePool();
+  }
+
+  /** Idle-expiry pass (#14364); a stopping broker expires nothing and its successor restarts clocks. */
+  async expireIdlePool(): Promise<SessionBrokerPoolDrainResult> {
+    if (this.stopping) {
+      return { resources: [] };
+    }
+    return this.idleExpiry.sweep();
   }
 
   prepare(

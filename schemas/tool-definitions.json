@@ -34757,17 +34757,14 @@
                         "properties": {
                           "id": {
                             "type": "string",
-                            "minLength": 1,
                             "maxLength": 64
                           },
                           "language": {
                             "type": "string",
-                            "minLength": 1,
                             "maxLength": 35
                           },
                           "label": {
                             "type": "string",
-                            "minLength": 1,
                             "maxLength": 64
                           },
                           "source": {

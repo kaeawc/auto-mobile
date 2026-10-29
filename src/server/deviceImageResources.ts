@@ -31,8 +31,8 @@ import {
 } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import {
-  isAppleWatchDeviceType,
-  isWatchOsSimulatorRuntime,
+  isIosDeviceType,
+  isIosSimulatorRuntime,
 } from "../utils/ios-cmdline-tools/simulatorRuntimeFamily";
 import { describeDevice as describeImageDevice } from "../utils/deviceDescriptionProjection";
 import {
@@ -810,12 +810,13 @@ async function buildIosProvisioningCatalog(
       simctl.getRuntimesChecked(),
       simctl.getDeviceTypesChecked(),
     ]);
-    // Watch runtimes and models belong to the watchOS catalog, never the iOS one (#14901).
+    // Only iOS runtimes and iPhone/iPad models: watch, Apple TV and Vision Pro ones are never
+    // iOS images (#14901, #15885).
     return {
       catalog: buildSimulatorProvisioningCatalogEntries(
         "ios",
-        runtimes.filter((runtime) => !isWatchOsSimulatorRuntime(runtime.identifier)),
-        deviceTypes.filter((deviceType) => !isAppleWatchDeviceType(deviceType)),
+        runtimes.filter((runtime) => isIosSimulatorRuntime(runtime.identifier)),
+        deviceTypes.filter((deviceType) => isIosDeviceType(deviceType)),
       ),
       observation: { catalogComplete: true },
     };

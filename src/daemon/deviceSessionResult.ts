@@ -24,6 +24,9 @@ import {
  * server (`src/server/index.ts`) and the daemon proxy (`DaemonMcpProxy`) must
  * bind the session these tools mint — the proxy additionally heartbeats it so
  * the daemon does not reap a result-minted session (issue #5689).
+ * It stays a name list rather than a tool trait (#15672): it names the hidden `startDevice`, which
+ * `schemas/tool-definitions.json` deliberately omits, so a trait read from the committed definitions
+ * could not reach it.
  */
 export const DEVICE_SESSION_ACQUISITION_TOOLS = [
   "getAndroid",

@@ -23277,6 +23277,98 @@
           }
         }
       }
+    },
+    "cast": {
+      "capability": "prototype_platform_cast_v1",
+      "calls": {
+        "disconnect": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "stop": {
+          "args": {},
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        },
+        "setVolume": {
+          "args": {
+            "volume": {
+              "optional": false,
+              "value": {
+                "kind": "number",
+                "min": 0,
+                "max": 1
+              }
+            }
+          },
+          "permissions": [],
+          "background": [],
+          "sensitive": false
+        }
+      },
+      "events": {
+        "routesChanged": {
+          "sensitive": false
+        },
+        "sessionStarting": {
+          "sensitive": false
+        },
+        "sessionStarted": {
+          "sensitive": false
+        },
+        "sessionEnded": {
+          "sensitive": false
+        },
+        "sessionFailed": {
+          "sensitive": false
+        },
+        "remoteVolume": {
+          "sensitive": false
+        }
+      },
+      "state": {
+        "state": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["unavailable", "noDevices", "notConnected", "connecting", "connected"]
+          }
+        },
+        "deviceName": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 256
+          }
+        },
+        "protocol": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "enum",
+            "values": ["googleCast", "airplay"]
+          }
+        },
+        "player": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "string",
+            "empty": true,
+            "max": 64
+          }
+        },
+        "volume": {
+          "platforms": ["android", "ios"],
+          "value": {
+            "kind": "number",
+            "min": 0,
+            "max": 1
+          }
+        }
+      }
     }
   },
   "platformNamespaces": {

@@ -93,6 +93,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_camera_capture_v1",
       // Contract only; the live camera runtime is owed (#14203, #14204).
       "prototype_platform_camera_video_v1",
+      // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
+      "prototype_platform_cast_v1",
     )
 
   @Test

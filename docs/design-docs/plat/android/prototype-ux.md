@@ -2284,6 +2284,18 @@ module's, named `prototype_platform_<module>_<op>_vN`. The host, Kotlin and Swif
 a spec's required capabilities wherever the call appears, so a runtime can offer a module but refuse
 one of its operations (camera recording, system capture, media queues).
 
+**Casting (#14239, module only).** The `cast` module (`prototype_platform_cast_v1`) covers Google
+Cast on Android and AirPlay on iOS with one vocabulary. Its calls are the remote-only controls:
+`cast.disconnect` (end the session and resume locally), `cast.stop` (end it and stop the receiver
+app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause and seek stay on the
+`media.*` calls. A platform that cannot do an op (AirPlay `disconnect` or `setVolume`) fails with
+`unsupported`. Events are `cast.routesChanged`, `sessionStarting`, `sessionStarted`, `sessionEnded`,
+`sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
+`receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
+`connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
+cast `media` player id) and `volume`. CtrlProxy never advertises the module; the `castButton` node is a
+separate slice.
+
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,
 `success`, `warning`, `error`, `impactLight`, `impactMedium`, `impactHeavy` or `longPress`

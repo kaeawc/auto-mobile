@@ -72,7 +72,7 @@ final class SdkWebViewCommandTests: XCTestCase {
         let infos: [SdkHierarchyServerInfo?] = [
             nil,
             SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"),
-            SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app", webViewBridge: .none),
+            SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app", webViewBridge: WebViewBridgeState.none),
             SdkHierarchyServerInfo(
                 status: "ok", bundleId: "com.example.other", webViewBridge: WebViewBridgeState(webViews: [Self.entry])
             ),

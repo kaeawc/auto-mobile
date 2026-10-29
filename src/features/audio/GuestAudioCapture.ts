@@ -92,6 +92,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     const deadline = this.now() + this.timeoutMs;
     let pid: number | undefined;
     let emulatorPid: number | undefined;
+    let recorderLogPath: string | undefined;
     let recorderMarker: string;
     let closed = false;
     // The executor survives session release, but its serial can resolve to a replacement guest.
@@ -108,6 +109,11 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       closed = true;
       // Never dispatch a kill to a replacement emulator or an unverified recorder PID.
       const identityCheck = matchesRecorder(pid, recorderMarker);
+      // Best-effort: the log name is unique to this lease, and it is removed only with the verified kill.
+      const logCleanup =
+        recorderLogPath === undefined
+          ? ""
+          : ` rm -f -- ${shellQuote(recorderLogPath)} 2>/dev/null;`;
       const cleanupOptions = {
         timeoutMs: 1_000,
         noRetry: true,
@@ -140,7 +146,9 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
             "shell",
             "sh",
             "-c",
-            shellQuote(`if ${identityCheck}; then kill ${pid}; else echo identity_changed; fi`),
+            shellQuote(
+              `if ${identityCheck}; then kill ${pid};${logCleanup} else echo identity_changed; fi`,
+            ),
           ],
           cleanupOptions,
         );
@@ -184,6 +192,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       }
       // Keep lease logs for image temporary-file cleanup, including when identity is lost.
       const logPath = `/data/local/tmp/automobile-guest-capture-${encodeURIComponent(recorderId)}.log`;
+      recorderLogPath = logPath;
       let launchOutput = "";
       const recordPid = (chunk: string) => {
         launchOutput += chunk;
@@ -244,24 +253,25 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     shell: (script: string) => Promise<string>,
   ): Promise<void> {
     let runningSince: number | undefined;
-    let diagnostic: string | undefined;
     while (this.now() < deadline) {
-      const running = (await shell(probe)).trim() === "running";
-      if (!running && diagnostic === undefined) {
-        diagnostic = await this.recorderDiagnostic(deviceId, logPath, shell);
+      const status = (await shell(probe)).trim();
+      if (status !== "running") {
+        // Any exit refuses outright: a recorder that stopped cannot be trusted to have stayed open.
+        const diagnostic = await this.recorderDiagnostic(deviceId, logPath, shell);
+        throw unavailable(
+          deviceId,
+          "the recorder exited before its capture stayed running through the settle window" +
+            (diagnostic ? `; tinycap stderr: ${diagnostic}` : ""),
+        );
       }
       const now = this.now();
-      runningSince = running ? (runningSince ?? now) : undefined;
-      if (runningSince !== undefined && now - runningSince >= this.settleMs && now < deadline) {
+      runningSince = runningSince ?? now;
+      if (now - runningSince >= this.settleMs && now < deadline) {
         return;
       }
       await this.timer.sleep(Math.min(this.pollMs, Math.max(0, deadline - now)));
     }
-    throw unavailable(
-      deviceId,
-      "the recorder did not stay running through the settle window" +
-        (diagnostic ? `; tinycap stderr: ${diagnostic}` : ""),
-    );
+    throw unavailable(deviceId, "the recorder did not stay running through the settle window");
   }
 
   private async recorderDiagnostic(

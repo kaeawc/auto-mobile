@@ -200,21 +200,38 @@ describe("AdbGuestAudioCapture", () => {
     expect(adb.getExecutedCommands().filter((command) => command.includes("kill "))).toEqual([]);
   });
 
-  test("refuses when a continuous settle window cannot finish before the deadline", async () => {
-    const { capture, adb, timer } = setup({ timeoutMs: 400, settleMs: 300 });
-    adb.setCommandResponseSequence(PROBE, [result(RUNNING), result("exited\n"), result(RUNNING)]);
+  test("refuses when the settle window cannot finish before the deadline", async () => {
+    const { capture, timer } = setup({ timeoutMs: 400, settleMs: 300, pollMs: 250 });
     await expect(capture.open("emulator-5554")).rejects.toMatchObject({
       code: "audio_guest_capture_unavailable",
     });
     expect(timer.monotonicNow()).toBe(400);
   });
 
-  test("requires a continuous RUNNING settle window and rechecks after the delay", async () => {
-    const { capture, adb, timer } = setup({ timeoutMs: 1_000, settleMs: 200 });
+  test("an exit sample is final: no later RUNNING sample can revive the capture", async () => {
+    const { capture, adb } = setup({ timeoutMs: 1_000, settleMs: 200 });
     adb.setCommandResponseSequence(PROBE, [result(RUNNING), result("exited\n"), result(RUNNING)]);
+    adb.setCommandResponse("tail -n 5", result(""));
+    adb.setCommandResponse("then echo matched;", result(""));
+    await expect(capture.open("emulator-5554")).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+    });
+    expect(adb.getExecutedCommands().filter((command) => command.includes(PROBE))).toHaveLength(2);
+    expect(adb.getExecutedCommands().filter((command) => command.includes("kill "))).toEqual([]);
+  });
+
+  test("the recorder log is removed only inside the identity-verified kill branch", async () => {
+    const { capture, adb } = setup();
     const handle = await capture.open("emulator-5554");
-    expect(timer.monotonicNow()).toBe(400);
     await handle.close();
+    const kill = adb.getExecutedCommands().find((command) => command.includes("then kill 4242;"));
+    expect(kill).toBeDefined();
+    const killAt = kill?.indexOf("then kill 4242;") ?? -1;
+    const removeAt = kill?.indexOf(`rm -f -- `) ?? -1;
+    const elseAt = kill?.indexOf("else echo identity_changed") ?? -1;
+    expect(removeAt).toBeGreaterThan(killAt);
+    expect(removeAt).toBeLessThan(elseAt);
+    expect(kill).toContain(LOG);
   });
 
   test("executor creation failures use the bracketed guard error", async () => {
@@ -268,7 +285,8 @@ describe("AdbGuestAudioCapture", () => {
     expect(command).toContain("/proc/4242/environ");
     expect(command).toContain("grep -Fqx --");
     expect(command).toContain("AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=recorder-1");
-    expect(command).toContain("then kill 4242; else echo identity_changed; fi");
+    expect(command).toContain("then kill 4242;");
+    expect(command).toContain("else echo identity_changed; fi");
   });
 
   test("an invalid launch PID is refused without issuing a kill", async () => {

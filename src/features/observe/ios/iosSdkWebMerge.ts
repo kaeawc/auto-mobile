@@ -285,9 +285,10 @@ export function mergeIosSdkWebSnapshots(
     const origin = originOf(snapshot.url);
     const ambiguous = duplicateIds(snapshot.elements);
     const converted = snapshot.elements.flatMap((element) => {
-      // An action names its element by id; with two elements sharing one, it could act on either.
-      const bounds =
-        element.visible && !ambiguous.has(element.id) ? screenBounds(element, webViewBox) : null;
+      // An action names its element by id: with none it cannot be routed, and with two elements
+      // sharing one it could act on either.
+      const routable = element.id !== "" && !ambiguous.has(element.id);
+      const bounds = element.visible && routable ? screenBounds(element, webViewBox) : null;
       return bounds ? [{ element, bounds }] : [];
     });
     if (converted.length === 0) {

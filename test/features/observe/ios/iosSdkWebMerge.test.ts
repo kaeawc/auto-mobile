@@ -222,6 +222,22 @@ describe("ambiguous DOM element ids (#5162)", () => {
       attached(findWebViewNodes(hierarchy)[0]).map((element) => element["content-desc"]),
     ).toEqual(["Pay"]);
   });
+
+  test("an element with an empty id is not attached, since no action could name it", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "" },
+          { ...submit, id: "e1", label: "Pay", bounds: [0, 100, 100, 40] },
+        ]),
+      },
+    ]);
+    expect(
+      webElements(findWebViewNodes(hierarchy)[0]).map((element) => element["content-desc"]),
+    ).toEqual(["Pay"]);
+  });
 });
 
 describe("covered XCTest leaves (#5162)", () => {

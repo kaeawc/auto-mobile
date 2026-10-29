@@ -39,6 +39,10 @@ const recorderCall = {
   ...label,
   onTap: [{ type: "platform", call: "audioRecorder.start", args: {} }],
 };
+const notificationsCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "notifications.cancel", args: { all: { value: true } } }],
+};
 const contactsCall = {
   ...label,
   onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
@@ -295,6 +299,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_location_v1: locationCall,
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_audioRecorder_v1: recorderCall,
+  prototype_platform_notifications_v1: notificationsCall,
   prototype_platform_calendar_v1: calendarCall,
   prototype_platform_commerce_v1: commerceCall,
   prototype_platform_auth_v1: authCall,

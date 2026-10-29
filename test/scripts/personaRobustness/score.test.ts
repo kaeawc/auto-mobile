@@ -143,17 +143,42 @@ describe("attribute", () => {
     ).toEqual({ kind: "facets", facets: ["display:cutout=hole"] });
   });
 
-  test("no facet failing alone is an interaction", () => {
+  const failing = { ...base, verdict: "failed" as const, baselineVerdict: "pass" as const };
+
+  test("every facet replayed alone and passing is an interaction", () => {
     expect(
       attribute({
-        ...base,
-        verdict: "failed",
-        baselineVerdict: "pass",
+        ...failing,
+        expectedAblations: 2,
         ablation: [
           { facets: ["kill:x"], verdict: "pass" },
-          { facets: ["display:cutout=hole"], verdict: "error" },
+          { facets: ["display:cutout=hole"], verdict: "recovered" },
         ],
       }).kind,
     ).toBe("interaction");
+  });
+
+  test("an errored facet replay makes the attribution inconclusive, not an interaction", () => {
+    const result = attribute({
+      ...failing,
+      expectedAblations: 2,
+      ablation: [
+        { facets: ["kill:x"], verdict: "pass" },
+        { facets: ["display:cutout=hole"], verdict: "error" },
+      ],
+    });
+    expect(result.kind).toBe("inconclusive");
+    expect(describeAttribution(result)).toContain("errored or did not run");
+  });
+
+  test("facet replays an aborted run never reached make the attribution inconclusive", () => {
+    expect(
+      attribute({
+        ...failing,
+        expectedAblations: 2,
+        ablation: [{ facets: ["kill:x"], verdict: "pass" }],
+      }).kind,
+    ).toBe("inconclusive");
+    expect(attribute({ ...failing, expectedAblations: 2, ablation: [] }).kind).toBe("inconclusive");
   });
 });

@@ -97,13 +97,33 @@ async function call(
   };
 }
 
+/** Tools the harness calls; several are off by default, so the session declares them. */
+export const HARNESS_TOOLS = [
+  "manufacturerProfile",
+  "displayProfile",
+  "killProfile",
+  "keyboard",
+  "executePlan",
+] as const;
+
 async function acquireSession(options: HarnessOptions, deps: HarnessDeps): Promise<string> {
   if (options.session) {
+    const enabled = await call(
+      deps.client,
+      { tool: "setToolEnabled", args: { toolNames: [...HARNESS_TOOLS], enabled: true } },
+      options.session,
+    );
+    if (!enabled.ok) {
+      throw new HarnessAbort(`could not enable the harness tools: ${enabled.error}`);
+    }
     return options.session;
   }
   const outcome = await call(
     deps.client,
-    { tool: "getAndroid", args: options.acquireArgs ?? {} },
+    {
+      tool: "getAndroid",
+      args: { ...options.acquireArgs, enableTools: [...HARNESS_TOOLS] },
+    },
     undefined,
   );
   const session = outcome.envelope ? getDeviceSessionIdFromResult(outcome.envelope) : undefined;
@@ -112,6 +132,21 @@ async function acquireSession(options: HarnessOptions, deps: HarnessDeps): Promi
   }
   deps.log(`session: ${session}`);
   return session;
+}
+
+/**
+ * A displayProfile or manufacturerProfile apply can succeed while an effect is missing (an
+ * overlay the emulator lacks reports `unsupported`, a partial persona `partial`). The replay
+ * would then run without the perturbation it reports, so anything but `applied` is a harness
+ * error. Tools that report no status are judged by success alone.
+ */
+export function incompleteApplication(
+  payload: Record<string, unknown> | undefined,
+): string | undefined {
+  const status = payload?.status;
+  return typeof status === "string" && status !== "applied"
+    ? `perturbation reported status ${status}`
+    : undefined;
 }
 
 /** One replay: apply, run the plan, then always reset. A failed reset aborts the harness. */
@@ -124,15 +159,16 @@ async function replay(
   let score: ReplayScore | undefined;
   for (const step of perturbation.apply) {
     const applied = await call(deps.client, step, session);
-    if (!applied.ok) {
-      score = errorScore(`apply failed: ${applied.error}`);
+    const incomplete = incompleteApplication(applied.payload);
+    if (!applied.ok || incomplete) {
+      score = errorScore(`apply failed: ${applied.error ?? incomplete}`);
       break;
     }
   }
   if (!score) {
     const executed = await call(
       deps.client,
-      { tool: "executePlan", args: { planContent: options.planContent } },
+      { tool: "executePlan", args: { planContent: options.planContent, platform: "android" } },
       session,
     );
     score = executed.payload
@@ -224,7 +260,7 @@ export async function runHarness(
   const baselineVerdict: Verdict = baselineRaw?.verdict ?? "error";
   const withAttribution = (
     result: Omit<PerturbationResult, "attribution">,
-    ablation?: PerturbationResult[],
+    ablation?: { results: PerturbationResult[]; expected: number },
   ): PerturbationResult => ({
     ...result,
     attribution:
@@ -235,13 +271,21 @@ export async function runHarness(
             facets: result.facets,
             singleFacet: singleFacet(result),
             baselineVerdict,
-            ...(ablation ? { ablation } : {}),
+            ...(ablation
+              ? { ablation: ablation.results, expectedAblations: ablation.expected }
+              : {}),
           }),
   });
   const ablations = rawAblations.map((result) => withAttribution(result));
   const results = raw.map((result) => {
     const own = ablations.filter((entry) => entry.parentId === result.id);
-    return withAttribution(result, own.length > 0 ? own : undefined);
+    const ablated = options.ablate && result.kind === "persona" && isOemPersonaId(result.id);
+    return withAttribution(
+      result,
+      ablated
+        ? { results: own, expected: facetAblations(result.id, options.appId).length }
+        : undefined,
+    );
   });
   const baseline = baselineRaw
     ? withAttribution(baselineRaw)

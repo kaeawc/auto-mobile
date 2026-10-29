@@ -1,11 +1,20 @@
 import { prototypeShareArgumentsError } from "./prototypeShare";
-import { prototypePlatformUses } from "./prototypePlatform";
+import { prototypePlatformCall, prototypePlatformUses } from "./prototypePlatform";
+import {
+  isPrototypeDataPointer,
+  prototypeDataPathPointer,
+  prototypeDataPlaceholders,
+} from "./prototypeData";
 import { prototypeShaderFields } from "./prototypeShaders";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-import { repeatKeyInstances } from "./prototypeRepeat";
+import { repeatErrors, repeatFieldReferences, repeatKeyInstances } from "./prototypeRepeat";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-import { mapBindableFields, visitPrototypeHandlerFields } from "./prototypeTemplate";
+import {
+  mapBindableFields,
+  visitPrototypeHandlerFields,
+  type FieldVisitor,
+} from "./prototypeTemplate";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -33,26 +42,167 @@ export function prototypeStrictPolicyError(
   if (assets) {
     return assets;
   }
+  return options.library ? libraryPolicyError(spec, actions) : undefined;
+}
+
+function libraryPolicyError(
+  spec: unknown,
+  actions: readonly Located[],
+): PrototypeValidationError | undefined {
   const window = object(object(spec)?.window);
-  if (options.library) {
-    const shader = prototypeShaderFields(spec)[0];
-    if (shader) {
-      return { path: "$", message: "ProtoViewer bundles refuse custom AGSL shaders" };
-    }
-    if (window?.layer === "system") {
-      return { path: "window.layer", message: "Privileged window layer" };
-    }
-    if (window?.persistence === "device") {
-      return { path: "window.persistence", message: "Privileged window persistence" };
-    }
-    // Located actions exclude opaque data, request bodies and emit payloads.
-    const host = actions.find(({ value }) => value.type === "request" && value.via === "host");
-    if (host) {
-      return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
-    }
-    return hostChannelsError(spec) ?? secureLibraryError(spec);
+  const shader = prototypeShaderFields(spec)[0];
+  if (shader) {
+    return { path: "$", message: "ProtoViewer bundles refuse custom AGSL shaders" };
   }
-  return undefined;
+  if (window?.layer === "system") {
+    return { path: "window.layer", message: "Privileged window layer" };
+  }
+  if (window?.persistence === "device") {
+    return { path: "window.persistence", message: "Privileged window persistence" };
+  }
+  // Located actions exclude opaque data, request bodies and emit payloads.
+  const host = actions.find(({ value }) => value.type === "request" && value.via === "host");
+  if (host) {
+    return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
+  }
+  return hostChannelsError(spec) ?? secureLibraryError(spec) ?? sensitiveLibraryError(spec);
+}
+
+/**
+ * Sink paths (R2) where a `/data` pointer written by a `sensitive` platform call is bound into a
+ * request URL, header, query or body, or a channel URL or header. Every such path is returned in
+ * authored order; the library refusal reports the first one, and MCP-direct shows may warn on all.
+ */
+export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidationError[] {
+  const tainted = sensitiveDataPointers(spec);
+  if (!tainted.length) {
+    return [];
+  }
+  const nodes: { value: Record<string, unknown>; path: string }[] = [];
+  walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
+  const { requests, fields } = libraryFields(spec, nodes, true);
+  fields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const sinkFields = fields.filter(
+    // Key fields name state entries, which a `/data` pointer cannot reach.
+    (field) => !field.key && requestSinkPath(field.path, requests),
+  );
+  // Direct warning callers may precede repeat validation. Keep their authored-text scan
+  // for invalid repeats; the binder (including the budget probe) requires valid repeats.
+  const validRepeats = repeatErrors(spec) === undefined;
+  if (validRepeats) {
+    const budgetError = secureScanBudgetError(spec, sinkFields);
+    if (budgetError) {
+      return [budgetError];
+    }
+  }
+  // Typed data pointers stay literal at runtime, even inside repeat rows. Only text binds.
+  const located = sinkFields.map((field) => ({
+    ...field,
+    value: { stateKey: field.dataPointer ? "" : field.text },
+  }));
+  const instances = validRepeats
+    ? repeatKeyInstances(spec, located)
+    : located.map((field) => ({ located: field, value: field.value }));
+  const texts = new Map<string, string[]>();
+  for (const { value, located: field } of instances) {
+    const at = texts.get(field.path);
+    const text = String(value.stateKey);
+    if (at) {
+      at.push(text);
+    } else {
+      texts.set(field.path, [text]);
+    }
+  }
+  // Data-backed rows are rebuilt from live data. Authored row values cannot rule out a read
+  // of a sensitive write anywhere in the collection, including rows added after validation.
+  const taintedRepeats = nodes.flatMap(({ value, path }) => {
+    const repeat = object(value.repeat);
+    const pointer = object(repeat?.items)?.path;
+    return typeof repeat?.as === "string" &&
+      isPrototypeDataPointer(pointer) &&
+      tainted.some((taint) => pointersOverlap(taint, pointer, false))
+      ? [{ path, alias: repeat.as }]
+      : [];
+  });
+  const errors: PrototypeValidationError[] = [];
+  for (const field of sinkFields) {
+    const readsTaintedRow = taintedRepeats.some(
+      (scope) =>
+        field.path.startsWith(`${scope.path}.children[`) &&
+        (field.itemBinding ||
+          (!field.dataPointer && repeatFieldReferences(field.text, scope.alias).length > 0)),
+    );
+    // Derived fields have no host-side instances. Retain literal data placeholders in their
+    // authored text; the device still resolves those after formatting the derived value.
+    const pointers = field.dataPointer
+      ? [field.text]
+      : (texts.get(field.path) ?? [field.text]).flatMap(prototypeDataPlaceholders);
+    const reached =
+      readsTaintedRow ||
+      pointers.some((pointer) =>
+        tainted.some((taint) => pointersOverlap(taint, pointer, !field.dataPointer)),
+      );
+    if (reached) {
+      errors.push({
+        path: field.path,
+        message: "Sensitive value cannot be bound into a request",
+      });
+    }
+  }
+  return errors;
+}
+
+function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
+  return prototypeSensitiveSinkErrors(spec)[0];
+}
+
+/** The `/data` pointers written by `sensitive` calls, in authored order (`into` of each). */
+function sensitiveDataPointers(spec: unknown): string[] {
+  const pointers: string[] = [];
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind !== "call" || typeof use.action.into !== "string") {
+      continue;
+    }
+    if (!prototypePlatformCall(use.action.call)?.definition.sensitive) {
+      continue;
+    }
+    const pointer = prototypeDataPathPointer(use.action.into);
+    if (pointer !== undefined) {
+      pointers.push(pointer);
+    }
+  }
+  return pointers;
+}
+
+/**
+ * Whether two RFC 6901 pointers name overlapping data: one is a segment-wise prefix of the other
+ * (a binding of a parent object carries its sensitive member). A `{index}` segment in an `into`
+ * path stands for any repeat row, so it matches any segment. Typed sink pointers stay literal;
+ * text sinks conservatively retain index matching when a repeat cannot be expanded on the host.
+ */
+function pointersOverlap(taint: string, pointer: string, pointerIndexWildcard: boolean): boolean {
+  const left = taint.slice(1).split("/");
+  const right = pointer.slice(1).split("/");
+  return left.every(
+    (segment, index) =>
+      index >= right.length ||
+      segment === right[index] ||
+      segment === "{index}" ||
+      (pointerIndexWildcard && right[index] === "{index}"),
+  );
+}
+
+/** Request and channel members a value reaches on the wire: url, headers, query and body. */
+function requestSinkPath(path: string, requests: readonly string[]): boolean {
+  return requests.some(
+    (at) =>
+      path === `${at}.url` ||
+      path === `${at}.body` ||
+      path.startsWith(`${at}.body.`) ||
+      ["headers", "query"].some(
+        (name) => path.startsWith(`${at}.${name}.`) || path.startsWith(`${at}.${name}[`),
+      ),
+  );
 }
 
 function secureScanBudgetError(
@@ -176,38 +326,48 @@ interface LibraryField {
   text: string;
   path: string;
   key: boolean;
+  dataPointer?: boolean;
+  itemBinding?: boolean;
 }
 function libraryFields(
   spec: unknown,
   nodes: readonly Located[],
+  includeDataBindings = false,
 ): { requests: string[]; fields: LibraryField[] } {
   const requests: string[] = [];
-  const fields: { text: string; path: string; key: boolean }[] = [];
-  for (const { value, path } of nodes) {
-    mapBindableFields(value, path, (raw, at, kind) => {
-      if (kind === "request") {
-        requests.push(at);
-      }
-      if (typeof raw === "string" && (kind === "text" || kind === "key")) {
-        fields.push({ text: raw, path: at, key: kind === "key" });
-      }
-      return raw;
-    });
-  }
-  visitPrototypeHandlerFields(spec, (raw, at, kind) => {
+  const fields: LibraryField[] = [];
+  const collect: FieldVisitor = (raw, at, kind) => {
     if (kind === "request") {
       requests.push(at);
     }
     if (typeof raw === "string" && (kind === "text" || kind === "key")) {
       fields.push({ text: raw, path: at, key: kind === "key" });
     }
+    const binding = kind === "emitBinding" ? object(raw) : undefined;
+    if (includeDataBindings && binding && !Object.hasOwn(binding, "state")) {
+      if (typeof binding.data === "string") {
+        fields.push({ text: binding.data, path: at, key: false, dataPointer: true });
+      }
+      if (typeof binding.item === "string") {
+        fields.push({ text: "", path: at, key: false, itemBinding: true });
+      }
+    }
     return raw;
-  });
-  channelFields(spec, requests, fields);
+  };
+  for (const { value, path } of nodes) {
+    mapBindableFields(value, path, collect);
+  }
+  visitPrototypeHandlerFields(spec, collect);
+  channelFields(spec, requests, fields, collect);
   return { requests, fields };
 }
 
-function channelFields(spec: unknown, requests: string[], fields: LibraryField[]): void {
+function channelFields(
+  spec: unknown,
+  requests: string[],
+  fields: LibraryField[],
+  collect: FieldVisitor,
+): void {
   for (const [id, raw] of Object.entries(object(object(spec)?.channels) ?? {})) {
     const channel = object(raw)!;
     const at = prototypeContractPatterns.pathKey.test(id)
@@ -223,6 +383,8 @@ function channelFields(spec: unknown, requests: string[], fields: LibraryField[]
         fields.push({ text: value, path, key: false });
       } else if (typeof object(value)?.state === "string") {
         fields.push({ text: String(object(value)!.state), path: `${path}.state`, key: true });
+      } else {
+        collect(value, path, "emitBinding");
       }
     }
   }

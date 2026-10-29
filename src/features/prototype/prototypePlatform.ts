@@ -15,6 +15,10 @@ import {
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
 import {
+  prototypeNotificationsBlockError,
+  prototypeNotificationsCallError,
+} from "./prototypeNotifications";
+import {
   prototypeSecureStorageEmitError,
   prototypeSecureStorageError,
 } from "./prototypeSecureStorage";
@@ -614,6 +618,7 @@ function rootBlockError(root: Raw): PrototypePlatformError | undefined {
     prototypeAuthBlockError(root) ??
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
+    prototypeNotificationsBlockError(root) ??
     prototypeMediaError(root) ??
     prototypeVideoPlayerError(root) ??
     requiresError(root)
@@ -811,6 +816,7 @@ function channelUseError(
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
         prototypeAuthCallError(use.action, use.path, root) ??
+        prototypeNotificationsCallError(use.action, use.path, root) ??
         prototypeMediaCallError(use.action, use.path, players))
     : undefined;
 }

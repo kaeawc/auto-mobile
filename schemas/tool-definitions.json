@@ -37356,6 +37356,47 @@
               "additionalProperties": false,
               "description": "Foreground location updates for /platform/location/current (prototype_platform_location_v1); needs location in requires.platform and requires.permissions"
             },
+            "notifications": {
+              "type": "object",
+              "properties": {
+                "channels": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "\\S"
+                      },
+                      "importance": {
+                        "type": "string",
+                        "enum": ["min", "low", "default", "high"]
+                      },
+                      "description": {
+                        "type": "string",
+                        "maxLength": 256
+                      },
+                      "showBadge": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["id", "name", "importance"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 8
+                }
+              },
+              "required": ["channels"],
+              "additionalProperties": false,
+              "description": "Notification channels for notifications.post (prototype_platform_notifications_v1); unique ids"
+            },
             "media": {
               "type": "object",
               "properties": {

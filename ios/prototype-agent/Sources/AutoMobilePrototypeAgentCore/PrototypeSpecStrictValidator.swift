@@ -44,6 +44,7 @@ public enum PrototypeSpecStrictValidator {
                 auth: fields["auth"],
                 storage: fields["storage"],
                 location: fields["location"],
+                notifications: fields["notifications"],
                 media: fields["media"],
                 root: root,
                 state: state

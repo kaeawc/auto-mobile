@@ -39,8 +39,29 @@ Keep-booted resets run baseline cleaning unconditionally when journal checks all
 it. Fallback-prefixed opaque rows force baseline fallback. Unrevertible journal
 rows also force fallback unless baseline cleaning already restores their effects.
 On Android this covers packages, clipboard, rotation, screen reader, keep-awake,
-raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`), transient
-opened URLs, and screen state via the next wakeAndUnlock. Settings-backed adapter
+raw global/system/secure settings, verified display rows (`density`, `nightMode` and `display:*`),
+opened URLs and launched preinstalled apps (below), and screen state via the next wakeAndUnlock.
+
+Package cleaning lists only `pm list packages -3`, so a preinstalled app keeps its data
+across a plain clean. Android `launchApp` and `measureStartup` therefore journal a
+non-fallback `opaque` launch row (`["launched-app", appId]`). Before it mutates anything,
+cleaning collects the session's started apps: every launch row's app, the target of a
+`package:` URL, and, per user, every activity `cmd package query-activities --components`
+lists for an `android.intent.action.VIEW` of any other opened URL (the handler that opened
+it is not journaled, so all candidates count; a browser is the usual one). Candidates the
+baseline holds for that user without a third-party package identity are preinstalled.
+Each is force-stopped and `pm clear --user`ed after package cleaning; anything but a
+`Success` reply fails cleaning. A preinstalled candidate on the unclearable list
+(`ANDROID_UNCLEARABLE_PACKAGES`: framework, SystemUI, content providers, telephony,
+Bluetooth, NFC, Google Play services and framework, Play Store, installer and permission
+UI, launchers, input methods, AutoMobile's own packages), unreadable handler output or a
+malformed launch row fails cleaning, which escalates to the baseline fallback. `pm clear`
+returns the app to its factory state, not to data the baseline image may have held for it.
+Session-installed apps are uninstalled instead, and third-party apps the baseline held keep
+their data. Apps started without a journaled launch (tapping a launcher icon or a
+notification, an intent a started app sends) are not seen. Data writes into any
+baseline-held app (preferences, key-value stores, app-container files, SQL) keep forcing
+fallback as described below. Settings-backed adapter
 keys (`fontScale`, `timeFormat`, `textDirection` and accessibility display preferences)
 require a journal revert or fallback; the Android port reverts them by writing back (or
 deleting) their raw settings rows when the journaled prior is readable. The Android
@@ -59,6 +80,21 @@ differing key forces fallback. Critical settings restore failures force fallback
 Preferences are skipped by replay and require fallback unless their JSON key
 identifies an app absent from the readable baseline inventory, which cleaning
 uninstalls with its data.
+
+Android cleaning ends by comparing three baseline observations the session may change
+outside the journal. The time zone (`persist.sys.timezone`) is restored in place with the
+`clock:timezone` revert, `cmd alarm set-timezone` followed by a property read-back that
+must match; a baseline without a zone, or a failed read-back, fails cleaning. The same
+verified revert replays a journaled `clock:timezone` row (changeLocalization `timeZone`)
+whose prior was readable. The device locale (`persist.sys.locale`) has no in-place restore
+(cleaning a raw `system_locales` row does not apply it), so any difference fails cleaning.
+AccountManager accounts are observed per user as a SHA-256 of the sorted `Account {...}`
+rows `dumpsys account` lists (names never reach the journal); an unrooted shell can neither
+remove nor re-add accounts, so a user whose set differs, an account list that cannot be
+read at capture or reset, or a baseline without per-user account digests fails cleaning.
+The check runs after package cleaning, because uninstalling a session-installed
+authenticator removes its accounts; a user absent from the baseline compares against an
+empty set.
 
 Android volume rows hold live audio levels, which raw settings cleaning cannot
 reach (AudioService persists `volume_*` rows but never reloads them), so they
@@ -239,7 +275,8 @@ capture like other admission work.
   not unknown). For the standalone runner every `DEVICE_MUTATION_KINDS` entry must
   be complete or explicitly unobservable; omission, missing/changing inventories,
   duplicate keys and unobservable state prevent its certification even when values
-  match. None of this gates or forces fallback in keep-booted resets.
+  match. Apart from the Android time zone, locale and account checks above, none of
+  this gates or forces fallback in keep-booted resets.
 - Complete device settings cover all default-setting keys plus locale/appearance.
   Adapters must report blind spots (app data/containers, changes induced by UI, raw
   commands or the app under test) rather than call a partial scan complete; a cheap

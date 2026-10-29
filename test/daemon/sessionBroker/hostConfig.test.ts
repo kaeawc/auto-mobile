@@ -380,4 +380,48 @@ describe("session broker host configuration", () => {
       "Invalid session broker host configuration",
     );
   });
+
+  test.each(["snapshot", "keep-booted"])(
+    "accepts androidIdleTtlMs with reset mode %s and omits it by default",
+    (mode) => {
+      const android = {
+        defaults: { android: androidDefaults() },
+        reuseAndroidCleanDevices: true,
+        androidResetMode: mode,
+      };
+      expect(parseSessionBrokerHostConfig(config(android)).androidIdleTtlMs).toBeUndefined();
+      expect(
+        parseSessionBrokerHostConfig(config({ ...android, androidIdleTtlMs: 600_000 }))
+          .androidIdleTtlMs,
+      ).toBe(600_000);
+    },
+  );
+
+  test.each([0, -1, 1.5, "600000", Number.MAX_SAFE_INTEGER + 2])(
+    "rejects androidIdleTtlMs %p with a message naming the key",
+    (ttl) => {
+      expect(() =>
+        parseSessionBrokerHostConfig(
+          config({
+            defaults: { android: androidDefaults() },
+            reuseAndroidCleanDevices: true,
+            androidResetMode: "keep-booted",
+            androidIdleTtlMs: ttl,
+          }),
+        ),
+      ).toThrow("androidIdleTtlMs");
+    },
+  );
+
+  test("rejects androidIdleTtlMs when no Android reset mode pools devices", () => {
+    expect(() =>
+      parseSessionBrokerHostConfig(
+        config({
+          defaults: { android: androidDefaults() },
+          reuseAndroidCleanDevices: true,
+          androidIdleTtlMs: 600_000,
+        }),
+      ),
+    ).toThrow("androidIdleTtlMs requires androidResetMode");
+  });
 });

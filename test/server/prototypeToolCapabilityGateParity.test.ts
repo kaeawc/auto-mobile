@@ -820,6 +820,17 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: {
       ...base,
       requires: { platform: ["commerce"] },
+      commerce: {
+        backend: "fake",
+        products: [
+          {
+            id: "coins_100",
+            title: "100 coins",
+            kind: "consumable",
+            price: { amount: "0.99", currency: "USD" },
+          },
+        ],
+      },
       root: {
         ...base.root,
         children: [

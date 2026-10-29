@@ -16,6 +16,7 @@ import {
 } from "./prototypeMedia";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import { prototypeCommerceBlockError, prototypeCommerceCallError } from "./prototypeCommerce";
 import {
   prototypeNotificationsBlockError,
   prototypeNotificationsReadValid,
@@ -632,6 +633,7 @@ function rootBlockError(
   return (
     prototypeChannelsError(root) ??
     prototypeAuthBlockError(root) ??
+    prototypeCommerceBlockError(root) ??
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
     prototypeNotificationsBlockError(root) ??
@@ -856,6 +858,7 @@ function channelUseError(
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
         prototypeAuthCallError(use.action, use.path, root) ??
+        prototypeCommerceCallError(use.action, use.path, root) ??
         prototypeNotificationsCallError(use.action, use.path, root) ??
         prototypeMediaCallError(use.action, use.path, players))
     : undefined;

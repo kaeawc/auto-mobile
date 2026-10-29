@@ -65,6 +65,7 @@ internal object PrototypePlatformRules {
     listOf(
       { root, _ -> PrototypeChannels.error(root) },
       { root, _ -> PrototypeAuthRules.blockError(root) },
+      { root, _ -> PrototypeCommerceRules.blockError(root) },
       { root, _ -> PrototypeSecureStorageRules.blockError(root) },
       { root, _ -> PrototypeLocationRules.blockError(root) },
       { root, _ -> PrototypeNotificationRules.blockError(root) },
@@ -73,6 +74,16 @@ internal object PrototypePlatformRules {
       PrototypeMedia::videoPlayerError,
       PrototypeMediaCaptions::error,
       { root, _ -> requiresError(root) },
+    )
+
+  // Module rules for a call beyond its arguments, checked in order after the generic call checks.
+  private val callChecks: List<(JsonObject, String, JsonObject, Declared) -> PrototypeSpecError?> =
+    listOf(
+      { action, path, root, _ -> PrototypeChannels.callError(action, path, root) },
+      { action, path, root, _ -> PrototypeAuthRules.callError(action, path, root) },
+      { action, path, root, _ -> PrototypeCommerceRules.callError(action, path, root) },
+      { action, path, root, _ -> PrototypeNotificationRules.callError(action, path, root) },
+      { action, path, _, declared -> PrototypeMedia.callError(action, path, declared.players) },
     )
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
@@ -88,12 +99,9 @@ internal object PrototypePlatformRules {
       }
     for (use in uses(root, context)) {
       (useError(use, declared)
-          ?: (if (use is Use.Call)
-            PrototypeChannels.callError(use.action, use.path, root)
-              ?: PrototypeAuthRules.callError(use.action, use.path, root)
-              ?: PrototypeNotificationRules.callError(use.action, use.path, root)
-              ?: PrototypeMedia.callError(use.action, use.path, declared.players)
-          else null))
+          ?: (use as? Use.Call)?.let { call ->
+            callChecks.firstNotNullOfOrNull { it(call.action, call.path, root, declared) }
+          })
         ?.let {
           return it
         }

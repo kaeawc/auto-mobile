@@ -2208,9 +2208,15 @@ replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and r
 `{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`; a back-out is the
 typed error `cancelled`. `commerce.restore` takes no arguments. The `commerce.entitlementsChanged` event and the
 read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTransaction` complete the module.
-No argument carries an amount, merchant, key or card: prices come only from the catalog. The root `commerce`
-catalog block, the check that `productId` names a catalog product and `commerce.checkout` are not in the
-contract yet, and no production runtime advertises the module.
+No argument carries an amount, merchant, key or card: prices come only from the catalog.
+
+The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backend: "fake", products}` with 1 to
+32 products. Each product has a unique `id` (an identifier), a `title`, a `kind` (`consumable`, `nonConsumable`
+or `subscription`) and a `price` of a decimal-string `amount` (up to two decimal places) and an upper-case
+three-letter `currency`. Only a subscription may have a `period` or `trialPeriod`, an ISO 8601 duration of
+whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, gateway, key, card or URL field.
+Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
+`commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,

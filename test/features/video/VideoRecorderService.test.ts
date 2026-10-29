@@ -175,6 +175,23 @@ describe("VideoRecorderService", () => {
     });
   });
 
+  test("lists the files an active capture grows, and nothing once it stops", async () => {
+    backend.setLiveCapturePath((config) => `${config.outputPath}.raw.mov`);
+    backend.setInProgressSidecarPaths((config) => [`${config.outputPath}.audio.pcm`]);
+    const recording = await service.startRecording();
+    expect(service.getInProgressFiles(recording.recordingId)).toEqual([
+      `${recording.outputPath}.raw.mov`,
+      `${recording.outputPath}.audio.pcm`,
+    ]);
+    await service.stopRecording(recording.recordingId);
+    expect(service.getInProgressFiles(recording.recordingId)).toEqual([]);
+  });
+
+  test("an active capture with no live path or sidecar grows its output file", async () => {
+    const recording = await service.startRecording();
+    expect(service.getInProgressFiles(recording.recordingId)).toEqual([recording.outputPath]);
+  });
+
   for (const envKey of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {
     test(`resolves the default archive lazily from ${envKey} and preserves overrides`, async () => {
       const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;

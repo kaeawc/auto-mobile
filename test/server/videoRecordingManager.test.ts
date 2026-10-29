@@ -814,6 +814,27 @@ describe("videoRecordingManager", () => {
       expect(fakeTimer.getPendingIntervalCount()).toBe(0);
     });
 
+    test("size cap counts sidecar files such as an audio track's PCM", async () => {
+      const probed: string[] = [];
+      fakeBackend.setInProgressSidecarPaths((config) => [`${config.outputPath}.audio.pcm`]);
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        // Neither file alone reaches the cap; together they do.
+        statFileSize: async (filePath) => {
+          probed.push(filePath);
+          return Math.ceil(capBytes / 2);
+        },
+      });
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      const stopping = fakeBackend.waitForStopCall();
+      fakeTimer.advanceTime(15_000);
+      await stopping;
+      await stopVideoRecording(active.recordingId);
+
+      expect(probed).toEqual([active.outputPath, `${active.outputPath}.audio.pcm`]);
+      expect(fakeBackend.stopCalls).toHaveLength(1);
+    });
+
     test("size cap still measures the output path when the backend reports no live path", async () => {
       const probed: string[] = [];
       await setVideoRecordingManagerDependencies({

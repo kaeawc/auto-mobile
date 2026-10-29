@@ -1,5 +1,6 @@
 import type {
   AudioInjection,
+  AudioStream,
   CaptureResult,
   InjectAudioOptions,
   InjectionResult,
@@ -27,6 +28,8 @@ const CAPTURE_SAMPLE_RATE = 48_000;
 const CHUNK_MS = 100;
 /** Extra time past the requested capture before it counts as timed out. */
 const CAPTURE_GRACE_MS = 5_000;
+/** How long an open-ended capture may take to finish after stdin closes before it is killed. */
+const STREAM_STOP_GRACE_MS = 2_000;
 /** How long to wait, after the helper exits, for its stdout to deliver the last PCM. */
 export const CAPTURE_DRAIN_MS = 1_000;
 
@@ -188,6 +191,40 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     return {
       pcm: { sampleRate, channels: 1, samples },
       timedOut: timedOut || samples.length < expected,
+    };
+  }
+
+  async streamCapture(
+    sink: (pcm: Uint8Array) => void,
+    options: { sampleRate?: number } = {},
+  ): Promise<AudioStream> {
+    const sampleRate = helperRate(options.sampleRate ?? CAPTURE_SAMPLE_RATE);
+    const helper = await this.start(
+      "capture",
+      ["capture", "--until-stopped", "--sample-rate", String(sampleRate)],
+      sink,
+    );
+    // Closing stdin asks the helper to write its last buffer and exit; a kill is the fallback.
+    const stop = async (): Promise<void> => {
+      helper.process.stdin.end();
+      const kill = this.timer.setTimeout(
+        () => helper.process.kill("SIGTERM"),
+        STREAM_STOP_GRACE_MS,
+      );
+      const exitCode = await helper.exited;
+      this.timer.clearTimeout(kill);
+      await this.untilOutputEnded(helper);
+      if (exitCode !== 0 && exitCode !== null) {
+        throw helper.failure();
+      }
+    };
+    let stopping: Promise<void> | undefined;
+    return {
+      sampleRate,
+      stop: () => {
+        stopping ??= stop();
+        return stopping;
+      },
     };
   }
 

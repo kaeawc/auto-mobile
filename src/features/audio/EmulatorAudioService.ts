@@ -4,6 +4,7 @@ import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import type {
   AudioInjection,
+  AudioStream,
   CaptureResult,
   InjectAudioOptions,
   InjectionResult,
@@ -31,6 +32,11 @@ import { logger } from "../../utils/logger";
 export interface EmulatorAudioSession {
   injectAudio(source: PcmAudio, options?: InjectAudioOptions): Promise<AudioInjection>;
   captureAudio(options: { durationMs: number; sampleRate?: number }): Promise<CaptureResult>;
+  /** Streams output PCM to `sink` until stopped; for recordings of any length. */
+  streamCapture(
+    sink: (pcm: Uint8Array) => void,
+    options?: { sampleRate?: number },
+  ): Promise<AudioStream>;
   close(): Promise<void>;
 }
 
@@ -269,6 +275,41 @@ export class EmulatorAudioService {
     } finally {
       await session.close();
     }
+  }
+
+  /**
+   * Streams a device's audio output to `sink` until stopped, for the audio track of a recording.
+   * Stopping also closes the device session; it is idempotent.
+   */
+  async startStream(
+    deviceId: string,
+    sink: (pcm: Uint8Array) => void,
+    options: { sampleRate?: number } = {},
+  ): Promise<AudioStream> {
+    const route = await this.routeFor(deviceId, "audio_capture_unsupported");
+    const session = route.open();
+    let stream: AudioStream;
+    try {
+      stream = await session.streamCapture(sink, options);
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
+    let stopping: Promise<void> | undefined;
+    const stop = async (): Promise<void> => {
+      try {
+        await stream.stop();
+      } finally {
+        await session.close();
+      }
+    };
+    return {
+      sampleRate: stream.sampleRate,
+      stop: () => {
+        stopping ??= stop();
+        return stopping;
+      },
+    };
   }
 
   private async settle(

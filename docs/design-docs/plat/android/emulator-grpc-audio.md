@@ -67,6 +67,23 @@ is only worth building if some supported environment cannot reach the gRPC port.
   Assertions should be loose (non-silent, duration within a margin), not waveform matches,
   because loaded CI hosts glitch real-time audio.
 
+## Audio tracks in recordings
+
+A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCaptureBackend`:
+
+- Before the video capture starts it opens an open-ended capture on the device's route (gRPC
+  `streamAudio` with no deadline, or the loopback helper's `--until-stopped`) and appends the PCM to
+  `<recording>.audio.pcm`, so a long recording never sits in memory.
+- At stop, after the video is final, it ends the capture and muxes with ffmpeg: video copied, audio
+  AAC, the audio captured before the video started skipped (`-ss`), and the track padded with
+  silence to the video's length (`apad` + `-shortest`). A silent guest sends no packets, so an
+  empty capture becomes `anullsrc`. The muxed file replaces the original.
+- A failed capture or mux keeps the video, sets `hasAudioTrack: false` and adds a warning; a failed
+  start or a force stop discards the PCM file.
+- ffmpeg is probed at start, so a host without it is refused before anything is captured.
+- Segmented Android recordings (over 180 s) refuse `audio`: the track would need stitching across
+  segments.
+
 ## Discovery and auth
 
 - The emulator writes `pid_<pid>.ini` under `<dir>/avd/running`, where `<dir>` is

@@ -242,6 +242,44 @@ describe("EmulatorAudioClient.captureAudio", () => {
   });
 });
 
+describe("EmulatorAudioClient.streamCapture", () => {
+  function audioPacket(bytes: number[]): Uint8Array {
+    return encodeAudioPacket({ audio: Uint8Array.from(bytes) });
+  }
+
+  test("forwards PCM until stopped, then cancels the stream", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = undefined;
+      call.onWrite = () => {
+        call.respond(audioPacket([1, 0, 2, 0]));
+        call.respond(audioPacket([3, 0]));
+      };
+    };
+    const received: number[] = [];
+    const stream = await client.streamCapture((pcm) => received.push(...pcm), {
+      sampleRate: 16_000,
+    });
+    while (received.length < 6) {
+      await Promise.resolve();
+    }
+    await stream.stop();
+    await stream.stop();
+    expect(stream.sampleRate).toBe(16_000);
+    expect(received).toEqual([1, 0, 2, 0, 3, 0]);
+    expect(transport.calls[0].cancelled).toBe(true);
+  });
+
+  test("a stream the emulator refuses before any audio fails at stop", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = { code: GrpcStatus.UNIMPLEMENTED, message: "" };
+    };
+    const stream = await client.streamCapture(() => {});
+    await expect(stream.stop()).rejects.toMatchObject({ code: "audio_capture_unsupported" });
+  });
+});
+
 test("close releases the transport and the authorizer", async () => {
   const { client, transport, authorizer } = setup();
   await client.close();

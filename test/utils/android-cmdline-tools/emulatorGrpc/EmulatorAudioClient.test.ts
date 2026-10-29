@@ -52,7 +52,11 @@ describe("EmulatorAudioClient.injectAudio", () => {
   test("streams the clip in 20ms packets with the format on the first packet only", async () => {
     const { client, transport } = setup();
     const injection = await client.injectAudio(CLIP);
-    expect(await injection.done).toEqual({ framesSent: 1600, reason: "completed" });
+    expect(await injection.done).toEqual({
+      framesQueued: 1600,
+      framesPlayed: 0,
+      reason: "completed",
+    });
 
     const [call] = transport.calls;
     expect(call.method).toBe(INJECT_AUDIO_METHOD);
@@ -126,7 +130,7 @@ describe("EmulatorAudioClient.injectAudio", () => {
     }
     const first = await injection.stop();
     const second = await injection.stop();
-    expect(first).toEqual({ framesSent: 640, reason: "stopped" });
+    expect(first).toEqual({ framesQueued: 640, framesPlayed: 0, reason: "stopped" });
     expect(second).toBe(first);
     expect(transport.calls[0].cancelled).toBe(true);
   });
@@ -140,8 +144,9 @@ describe("EmulatorAudioClient.injectAudio", () => {
     const result = await injection.done;
     expect(result.reason).toBe("max_duration");
     // 250ms at 20ms per packet: 13 packets of 320 frames, more than two full passes.
-    expect(result.framesSent).toBe(13 * 320);
-    expect(sentFrames(transport.calls[0].written)).toBe(result.framesSent);
+    expect(result.framesQueued).toBe(13 * 320);
+    expect(result.framesPlayed).toBe(4_160);
+    expect(sentFrames(transport.calls[0].written)).toBe(result.framesQueued);
   });
 
   test("startDelayMs waits before the first packet", async () => {
@@ -150,13 +155,13 @@ describe("EmulatorAudioClient.injectAudio", () => {
     await Promise.resolve();
     expect(transport.calls[0].written).toHaveLength(0);
     timer.advanceTime(500);
-    expect((await injection.done).framesSent).toBe(1600);
+    expect((await injection.done).framesQueued).toBe(1600);
   });
 
   test("stop during the start delay settles at once without sending audio", async () => {
     const { client, transport, timer } = setup();
     const injection = await client.injectAudio(CLIP, { startDelayMs: 60_000 });
-    expect(await injection.stop()).toEqual({ framesSent: 0, reason: "stopped" });
+    expect(await injection.stop()).toEqual({ framesQueued: 0, framesPlayed: 0, reason: "stopped" });
     expect(transport.calls[0].written).toHaveLength(0);
     expect(transport.calls[0].cancelled).toBe(true);
     expect(timer.getMsUntilNextDueEvent()).toBeUndefined();
@@ -173,14 +178,64 @@ describe("EmulatorAudioClient.injectAudio", () => {
       await Promise.resolve();
     }
     timer.advanceTime(1_000);
-    expect(await injection.done).toEqual({ framesSent: 320, reason: "max_duration" });
+    expect(await injection.done).toEqual({
+      framesQueued: 320,
+      framesPlayed: 320,
+      reason: "max_duration",
+    });
     expect(transport.calls[0].cancelled).toBe(true);
+  });
+
+  test("framesPlayed follows the monotonic clock at real-time pace and never exceeds framesQueued", async () => {
+    const { client, transport, timer } = setup();
+    transport.onOpen = (call) => {
+      call.onWrite = (index) => {
+        timer.advanceTime(10);
+        return index === 2 ? new Promise<void>(() => {}) : undefined;
+      };
+    };
+    const injection = await client.injectAudio(CLIP);
+    while (transport.calls[0].written.length < 3) {
+      await Promise.resolve();
+    }
+    // Three 10ms steps elapsed: 480 frames at 16 kHz, of the 640 frames queued.
+    expect(await injection.stop()).toEqual({
+      framesQueued: 640,
+      framesPlayed: 480,
+      reason: "stopped",
+    });
+  });
+
+  test.each([60_000, -60_000])("framesPlayed ignores a %i ms wall-clock step", async (stepMs) => {
+    const { client, transport, timer } = setup();
+    // Start with distinct clock origins so mixing time sources also fails this test.
+    timer.stepWallClock(5_000);
+    transport.onOpen = (call) => {
+      call.onWrite = (index) => {
+        timer.advanceTime(10);
+        return index === 2 ? new Promise<void>(() => {}) : undefined;
+      };
+    };
+    const injection = await client.injectAudio(CLIP);
+    while (transport.calls[0].written.length < 3) {
+      await Promise.resolve();
+    }
+    timer.stepWallClock(stepMs);
+    expect(await injection.stop()).toEqual({
+      framesQueued: 640,
+      framesPlayed: 480,
+      reason: "stopped",
+    });
   });
 
   test("a clip that finishes before maxDurationMs clears its deadline", async () => {
     const { client, timer } = setup();
     const injection = await client.injectAudio(CLIP, { maxDurationMs: 5_000 });
-    expect(await injection.done).toEqual({ framesSent: 1600, reason: "completed" });
+    expect(await injection.done).toEqual({
+      framesQueued: 1600,
+      framesPlayed: 0,
+      reason: "completed",
+    });
     expect(timer.getMsUntilNextDueEvent()).toBeUndefined();
   });
 });

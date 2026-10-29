@@ -141,7 +141,7 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
   test("injectAudio streams every frame and completes with OK", async () => {
     const { emulator, client } = await connect();
     const injection = await client.injectAudio(sineTone({ durationMs: 100, sampleRate: 16_000 }));
-    expect(await injection.done).toEqual({ framesSent: 1_600, reason: "completed" });
+    expect(await injection.done).toMatchObject({ framesQueued: 1_600, reason: "completed" });
     expect(emulator.injectedFrames).toEqual([1_600]);
   });
 

@@ -42,7 +42,7 @@ async function turns(count: number): Promise<void> {
 
 describe("HostLoopbackAudioSession injection", () => {
   test("plays a clip as mono PCM, closes stdin and completes when the helper exits", async () => {
-    const { session, helpers } = setup();
+    const { session, helpers, timer } = setup();
     const mono = sineTone({ durationMs: 250, sampleRate: 16_000 });
     const stereo = {
       sampleRate: 16_000,
@@ -56,8 +56,29 @@ describe("HostLoopbackAudioSession injection", () => {
     await turns(5);
     expect(helpers[0].stdinEnded).toBe(true);
     expect(helpers[0].writtenFrames()).toBe(4_000);
+    timer.advanceTime(250);
     helpers[0].exit(0);
-    expect(await injection.done).toEqual({ framesSent: 4_000, reason: "completed" });
+    expect(await injection.done).toEqual({
+      framesQueued: 4_000,
+      framesPlayed: 4_000,
+      reason: "completed",
+    });
+  });
+
+  test("stop estimates played frames since the first write, excluding the start delay", async () => {
+    const { session, helpers, timer } = setup();
+    const injection = await session.injectAudio(sineTone({ durationMs: 250, sampleRate: 16_000 }), {
+      startDelayMs: 500,
+    });
+    timer.advanceTime(500);
+    await turns(5);
+    expect(helpers[0].writtenFrames()).toBe(4_000);
+    timer.advanceTime(62.6);
+    expect(await injection.stop()).toEqual({
+      framesQueued: 4_000,
+      framesPlayed: 1_001,
+      reason: "stopped",
+    });
   });
 
   test("a rate the helper cannot take is resampled to 48 kHz", async () => {

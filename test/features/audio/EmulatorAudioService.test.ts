@@ -119,7 +119,7 @@ describe("EmulatorAudioService injection", () => {
     });
     const first = await service.stopInjection(injectionId);
     const second = await service.stopInjection(injectionId);
-    expect(first).toEqual({ injectionId, framesSent: 7, reason: "stopped" });
+    expect(first).toEqual({ injectionId, framesQueued: 7, framesPlayed: 0, reason: "stopped" });
     expect(second).toEqual(first);
     expect(sessions[0].closed).toBe(1);
     expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
@@ -130,12 +130,17 @@ describe("EmulatorAudioService injection", () => {
     const { injectionId } = await service.startInjection("emulator-5554", {
       source: { kind: "tone" },
     });
-    sessions[0].settleInjection?.({ framesSent: 96_000, reason: "completed" });
+    sessions[0].settleInjection?.({
+      framesQueued: 96_000,
+      framesPlayed: 96_000,
+      reason: "completed",
+    });
     await Promise.resolve();
     await Promise.resolve();
     expect(await service.stopInjection(injectionId)).toEqual({
       injectionId,
-      framesSent: 96_000,
+      framesQueued: 96_000,
+      framesPlayed: 96_000,
       reason: "completed",
     });
   });
@@ -370,7 +375,7 @@ describe("verified guest capture guard", () => {
       const closed = new Promise<void>((resolve) => {
         guestCapture.onClose = resolve;
       });
-      sessions[0].settleInjection?.({ framesSent: 2, reason });
+      sessions[0].settleInjection?.({ framesQueued: 2, framesPlayed: 2, reason });
       await closed;
       expect(guestCapture.closed).toEqual(["emulator-5554"]);
       expect(await service.stopInjection(started.injectionId)).toMatchObject({ reason });
@@ -385,7 +390,8 @@ describe("verified guest capture guard", () => {
       session.injectAudio = async (pcm, options) => {
         const injection = await inject(pcm, options);
         timer.setTimeout(
-          () => session.settleInjection?.({ reason: "max_duration", framesSent: 1 }),
+          () =>
+            session.settleInjection?.({ framesQueued: 1, framesPlayed: 1, reason: "max_duration" }),
           options?.maxDurationMs ?? 0,
         );
         return injection;

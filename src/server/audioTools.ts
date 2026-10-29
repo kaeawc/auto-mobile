@@ -196,7 +196,7 @@ export const createStopAudioInputHandler =
     const stopped = await service.stopInjection(args.injectionId, device.deviceId);
     return createStructuredToolResponse({
       success: true,
-      message: `Audio injection ${stopped.injectionId} ended (${stopped.reason}) after ${stopped.framesSent} frames.`,
+      message: `Audio injection ${stopped.injectionId} ended (${stopped.reason}) after ${stopped.framesQueued} frames queued (about ${stopped.framesPlayed} played).`,
       ...stopped,
     });
   };

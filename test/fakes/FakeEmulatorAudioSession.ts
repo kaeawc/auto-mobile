@@ -32,7 +32,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
       sampleRate: source.sampleRate,
       done,
       stop: async () => {
-        this.settleInjection?.({ framesSent: 7, reason: "stopped" });
+        this.settleInjection?.({ framesQueued: 7, framesPlayed: 0, reason: "stopped" });
         return done;
       },
     };

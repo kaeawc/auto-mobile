@@ -75,7 +75,7 @@ takes the device. A relative `file` path is relative to the directory the server
 ## stopAudioInput
 
 Stops an injection by `injectionId`, on the device it was started on. Stopping one that already
-ended is not an error: you get its result again, with `framesSent` and `reason` (`completed`,
+ended is not an error: you get its result again, with `framesQueued`, `framesPlayed` and `reason` (`completed`,
 `stopped` or `max_duration`). The server keeps the last 64 ended injections; an older id, or any
 id after a server restart, is an error. If the emulator exited during injection, stopping reports
 `[audio_emulator_exited]` with the device name; restart the emulator before injecting again.

@@ -4,6 +4,7 @@ import {
   DAEMON_RELEASED_SESSION_PARAM,
 } from "./wire/constants";
 import type { DaemonRequest } from "./types";
+import { staticToolDeclaresHostInventory } from "./staticToolDefinitions";
 import type { Timer } from "../utils/SystemTimer";
 
 let socketRequestOrder = 0;
@@ -163,8 +164,6 @@ const SOCKET_ROUTING_MUTATING_TOOLS = new Set([
   "setToolEnabled",
 ]);
 
-const HOST_INVENTORY_TOOLS = new Set(["listDevices", "listDeviceImages"]);
-
 /**
  * Arguments that route to, restore, or rebind a device session. A call carrying any
  * of them can change the socket's bound route, so it stays a barrier.
@@ -204,7 +203,7 @@ export function resolveSocketAdmissionLane(request: DaemonRequest): string | und
 }
 
 export function isHostInventoryCall(name: unknown, args: unknown): boolean {
-  return typeof name === "string" && HOST_INVENTORY_TOOLS.has(name) && hasNoRoutingArgs(args);
+  return staticToolDeclaresHostInventory(name) && hasNoRoutingArgs(args);
 }
 
 function hasNoRoutingArgs(args: unknown): boolean {

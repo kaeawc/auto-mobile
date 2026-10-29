@@ -12,6 +12,7 @@ import {
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
+import { DestructionQueue, type SessionBrokerPoolDrainResult } from "./destructionQueue";
 import {
   normalizeSessionDeviceRequirement,
   resolveSessionDeviceProfile,
@@ -59,6 +60,8 @@ export { EXPORT_RETENTION_MS } from "./store";
 export { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./releaseReply";
 
 export { RECEIPT_RETENTION_MS } from "./retention";
+
+export type { SessionBrokerPoolDrainEntry, SessionBrokerPoolDrainResult } from "./destructionQueue";
 /** Rows deleted per retention call, so one pass never holds the write lock for long. */
 export const RECEIPT_PRUNE_BATCH = 500;
 
@@ -80,7 +83,7 @@ export class SessionBroker {
   private stopping = false;
 
   private readonly cleanup: RecoveryCleanup;
-  private readonly destroys = new Map<string, Promise<void>>();
+  private readonly destructions: DestructionQueue;
   /** A stop leaves them durable for the successor. */
   private readonly queuedRecoveryReleases = new Set<string>();
   private readonly timing: BrokerTimingRecorder;
@@ -88,6 +91,7 @@ export class SessionBroker {
   private readonly resetReadiness: ResetReadiness;
 
   constructor(private readonly options: SessionBrokerOptions) {
+    this.destructions = new DestructionQueue(options.store, options.devices);
     this.cleanup = new RecoveryCleanup(
       options.cleanupConcurrency,
       options.cleanupWaitMs,
@@ -115,6 +119,14 @@ export class SessionBroker {
 
   stats(windowMs = 24 * 60 * 60 * 1000, limit = 5000): Promise<SessionBrokerStats> {
     return readBrokerTimingStats(this.options.store, () => this.now(), windowMs, limit);
+  }
+
+  /** Operator drain of idle pooled devices through the durable destroy journal (#15653). */
+  async drainIdlePool(): Promise<SessionBrokerPoolDrainResult> {
+    if (this.stopping) {
+      throw new SessionBrokerStoppingError();
+    }
+    return this.destructions.drainIdlePool();
   }
 
   prepare(
@@ -372,14 +384,16 @@ export class SessionBroker {
     // Each eviction removes a distinct idle resource. No creation reservation is made until
     // the existing journal confirms that device's absence.
     while (admission.kind === "evict") {
-      const destroyed = await this.destroy(admission.resource).catch((error: unknown) => {
-        if (classifyCleanReleaseError(error) !== "retryable") {
-          throw error;
-        }
-        // The durable destroying row retains capacity until recovery confirms absence.
-        logger.warn(`Device eviction remains pending: ${errorMessage(error)}`, error);
-        return false;
-      });
+      const destroyed = await this.destructions
+        .destroy(admission.resource)
+        .catch((error: unknown) => {
+          if (classifyCleanReleaseError(error) !== "retryable") {
+            throw error;
+          }
+          // The durable destroying row retains capacity until recovery confirms absence.
+          logger.warn(`Device eviction remains pending: ${errorMessage(error)}`, error);
+          return false;
+        });
       if (!destroyed) {
         // A new request ID may evict the next idle device during this destroy, bounded by pool size.
         throw new SessionBrokerFailureError({
@@ -704,7 +718,7 @@ export class SessionBroker {
     );
     await this.joinReleases();
     await this.cleanup.join();
-    await Promise.allSettled([...this.destroys.values()]);
+    await this.destructions.joinAll();
   }
 
   /**
@@ -1017,38 +1031,7 @@ export class SessionBroker {
     return (this.preparations.get(requestId) ?? 0) > 0;
   }
 
-  private async destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<boolean> {
-    if ((await this.options.devices.destroy(resource, signal)) !== "absent") {
-      return false;
-    }
-    signal?.throwIfAborted();
-    return this.options.store.confirmDestroyed(destructionTicket(resource));
-  }
-
   private tryCleanup(ticket: DestructionTicket, signal?: AbortSignal): Promise<void> {
-    const previous = this.destroys.get(ticket.resourceId);
-    if (previous) {
-      return previous;
-    }
-    const pending = this.cleanupOnce(ticket, signal).finally(() => {
-      this.destroys.delete(ticket.resourceId);
-    });
-    this.destroys.set(ticket.resourceId, pending);
-    return pending;
-  }
-
-  private async cleanupOnce(ticket: DestructionTicket, signal?: AbortSignal): Promise<void> {
-    const resource = await this.options.store.getResource(ticket.resourceId);
-    if (resource?.state === "destroying" && resource.revision === ticket.revision) {
-      try {
-        signal?.throwIfAborted();
-        await this.destroy(resource, signal);
-      } catch (error) {
-        // The durable destroying row and native journal retain ownership for another pass.
-        logger.warn(
-          `Session resource ${resource.resourceId} cleanup remains pending: ${errorMessage(error)}`,
-        );
-      }
-    }
+    return this.destructions.tryCleanup(ticket, signal);
   }
 }

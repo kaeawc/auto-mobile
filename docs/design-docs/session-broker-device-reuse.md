@@ -254,7 +254,10 @@ for in-flight creation/cleanup (a target, not a promise: transitions and uncerta
 cleanup also consume the cap). Reducing `idlePoolCap` does not evict immediately:
 trimming runs when a device returns to idle. Separately, admission at the total cap
 can evict the oldest idle device, matching or not. Active or resetting devices are
-never evicted for an idle target.
+never evicted for an idle target. The `daemon/drainBrokerPool` operator method
+destroys every idle pooled device through the same durable destroy journal, without
+an acquisition; each device reports `destroyed` or `cleanup_pending`, and a replay
+drains only what is still idle.
 
 ### Worked sizing example
 

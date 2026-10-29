@@ -15,7 +15,8 @@ const SOURCE = join(
 
 function pageScript(): string {
   const match = /private static let script = #"""\n([\s\S]*?)\n\s*"""#/.exec(
-    readFileSync(SOURCE, "utf8"),
+    // A Windows checkout has CRLF line endings.
+    readFileSync(SOURCE, "utf8").replaceAll("\r\n", "\n"),
   );
   if (!match) {
     throw new Error("bridge page script not found");

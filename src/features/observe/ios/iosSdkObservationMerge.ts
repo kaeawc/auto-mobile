@@ -34,13 +34,14 @@ export function iosSdkBridgeTarget(attributes: Record<string, unknown>): IosSdkB
 }
 
 /**
- * The bridge target for `elementId` in `hierarchy`, read from the merged node's attributes, or
- * null when the hierarchy carries no bridge node with that id. Lets a caller holding an element id
- * from an earlier capture pick up the capture identity of the latest merge.
+ * The bridge target for `elementId` in `hierarchy` (any bridge node when `elementId` is omitted),
+ * read from the merged node's attributes, or null when the hierarchy carries no such bridge node.
+ * Lets a caller holding an element id from an earlier capture pick up the capture identity of the
+ * latest merge, or a screen-wide action name the merge it was resolved against.
  */
 export function findIosSdkBridgeTarget(
   hierarchy: ViewHierarchyResult | undefined,
-  elementId: string,
+  elementId?: string,
 ): IosSdkBridgeTarget | null {
   const root: unknown = hierarchy?.hierarchy?.node;
   const pending: ViewHierarchyNode[] = Array.isArray(root)
@@ -50,7 +51,7 @@ export function findIosSdkBridgeTarget(
       : [];
   for (let node = pending.pop(); node; node = pending.pop()) {
     const target = iosSdkBridgeTarget(nodeAttributes(node));
-    if (target?.elementId === elementId) {
+    if (target && (elementId === undefined || target.elementId === elementId)) {
       return target;
     }
     pending.push(...childrenOf(node));

@@ -20,11 +20,11 @@ const PACKAGE = "dev.jasonpearson.automobile.ctrlproxy";
 const PERMISSION = "android.permission.RECORD_AUDIO";
 const DUMP_COMMAND = `shell dumpsys package ${PACKAGE}`;
 const GRANT_COMMAND = `shell pm grant ${PACKAGE} ${PERMISSION}`;
-const permissionDump = (granted: boolean) =>
+const permissionDump = (granted: boolean, user = 0) =>
   createExecResult(
     `Packages:
   Package [${PACKAGE}] (123):
-    User 0: installed=true
+    User ${user}: installed=true
       runtime permissions:
         ${PERMISSION}: granted=${granted}, flags=[]
 `,
@@ -100,19 +100,23 @@ describe("AdbGuestAudioCapture", () => {
     await handle.close();
   });
 
-  test.each(["transport", "unknown permission", "still denied", "unreadable state"])(
+  test.each(["unknown permission", "still denied", "missing runtime row"])(
     "%s refuses injection with a typed RECORD_AUDIO error before any broadcast",
     async (failure) => {
       const { adb, capture } = setup();
       adb.setCommandResponse(DUMP_COMMAND, permissionDump(false));
-      if (failure === "transport") {
-        adb.setCommandError(GRANT_COMMAND, new Error("transport reset"));
-      } else if (failure === "unknown permission") {
+      if (failure === "unknown permission") {
         adb.setCommandResponse(GRANT_COMMAND, createExecResult("", "Unknown permission"));
         // A failed command must refuse even if a later read would report a grant.
         adb.setCommandResponseSequence(DUMP_COMMAND, [permissionDump(false), permissionDump(true)]);
-      } else if (failure === "unreadable state") {
-        adb.setCommandError(DUMP_COMMAND, new Error("cannot read package"));
+      } else if (failure === "missing runtime row") {
+        adb.setCommandResponse(
+          DUMP_COMMAND,
+          createExecResult(
+            `Packages:\n  Package [${PACKAGE}] (123):\n    User 0: installed=true`,
+            "",
+          ),
+        );
       }
       const opening = capture.open("emulator-5554", { leaseMs: 60_000 });
       await expect(opening).rejects.toBeInstanceOf(EmulatorAudioError);
@@ -123,6 +127,168 @@ describe("AdbGuestAudioCapture", () => {
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
     },
   );
+
+  test.each([
+    "read result",
+    "read throw",
+    "read timeout",
+    "grant result",
+    "grant throw",
+    "grant timeout",
+  ])("%s transport failure is unavailable before any broadcast", async (failure) => {
+    const { adb, capture } = setup();
+    adb.setCommandResponse(DUMP_COMMAND, permissionDump(false));
+    const command = failure.startsWith("read") ? DUMP_COMMAND : GRANT_COMMAND;
+    if (failure.endsWith("result")) {
+      adb.setCommandResponse(command, { ...createExecResult("", ""), error: "transport reset" });
+    } else {
+      adb.setCommandError(
+        command,
+        new Error(failure.endsWith("timeout") ? "Command timed out" : "transport reset"),
+      );
+    }
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+      message: expect.stringContaining(
+        `RECORD_AUDIO check could not ${failure.startsWith("read") ? "read" : "grant"}`,
+      ),
+    });
+    expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+  });
+
+  test("emulator pid lookup failure keeps the existing unavailable classification", async () => {
+    const { adb, capture, discovery } = setup();
+    discovery.findByConsolePort = async () => {
+      throw new Error("emulator gone");
+    };
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+    });
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test.each([
+    "audio_emulator_exited",
+    "audio_injection_busy",
+    "audio_guest_capture_unavailable",
+  ] as const)(
+    "inner %s is preserved unchanged during permission reads and grants",
+    async (code) => {
+      for (const command of [DUMP_COMMAND, GRANT_COMMAND]) {
+        const { adb, capture } = setup();
+        adb.setCommandResponse(DUMP_COMMAND, permissionDump(false));
+        const error = new EmulatorAudioError(code, "original detail");
+        adb.setCommandError(command, error);
+        await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toBe(error);
+        expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+      }
+    },
+  );
+
+  test("automotive permission reads select user 10 and the grant targets user 10", async () => {
+    const resolved: string[] = [];
+    const { adb, capture } = setup({
+      resolveSetupUser: async (deviceId) => {
+        resolved.push(deviceId);
+        return 10;
+      },
+    });
+    // dumpsys includes every user; match the existing per-user package-read convention.
+    adb.setCommandResponseSequence(DUMP_COMMAND, [
+      permissionDump(false, 10),
+      permissionDump(true, 10),
+    ]);
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    expect(resolved).toEqual(["emulator-5554"]);
+    expect(adb.getExecutedCommands().slice(0, 3)).toEqual([
+      DUMP_COMMAND,
+      `shell pm grant --user 10 ${PACKAGE} ${PERMISSION}`,
+      DUMP_COMMAND,
+    ]);
+    await handle.close();
+  });
+
+  test("undefined setup user preserves the default permission commands", async () => {
+    const resolved: string[] = [];
+    const { adb, capture } = setup({
+      resolveSetupUser: async (deviceId) => {
+        resolved.push(deviceId);
+        return undefined;
+      },
+    });
+    adb.setCommandResponseSequence(DUMP_COMMAND, [permissionDump(false), permissionDump(true)]);
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    expect(resolved).toEqual(["emulator-5554"]);
+    expect(adb.getExecutedCommands().slice(0, 3)).toEqual([
+      DUMP_COMMAND,
+      GRANT_COMMAND,
+      DUMP_COMMAND,
+    ]);
+    await handle.close();
+  });
+
+  test("setup user resolution failure is unavailable", async () => {
+    const { adb, capture } = setup({
+      resolveSetupUser: async () => {
+        throw new Error("cannot resolve user");
+      },
+    });
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+    });
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("permission retry cannot exceed the capture deadline", async () => {
+    const { adb, timer, capture } = setup();
+    adb.setCommandResponse(DUMP_COMMAND, permissionDump(false));
+    adb.setCommandResponse(GRANT_COMMAND, {
+      ...createExecResult("", ""),
+      error: "Command timed out",
+    });
+    const execute = adb.execute.bind(adb);
+    adb.execute = async (args, options) => {
+      const result = await execute(args, options);
+      if (args.includes("grant")) {
+        await timer.sleep(8_000);
+      }
+      return result;
+    };
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+      message: expect.stringContaining("capture verification deadline expired"),
+    });
+    expect(adb.getExecutedCommands().filter((command) => command === GRANT_COMMAND)).toHaveLength(
+      1,
+    );
+    expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+  });
+
+  test("permission retry uses the reduced remaining deadline budget", async () => {
+    const { adb, timer, capture } = setup({ timeoutMs: 2_000, settleMs: 0 });
+    adb.setCommandResponseSequence(DUMP_COMMAND, [permissionDump(false), permissionDump(true)]);
+    adb.setCommandResponseSequence(GRANT_COMMAND, [
+      { ...createExecResult("", ""), error: "Command timed out" },
+      createExecResult("", ""),
+    ]);
+    const execute = adb.execute.bind(adb);
+    let attempts = 0;
+    adb.execute = async (args, options) => {
+      const result = await execute(args, options);
+      if (args.includes("grant") && attempts++ === 0) {
+        await timer.sleep(1_500);
+      }
+      return result;
+    };
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    expect(
+      adb
+        .getCommandCalls()
+        .filter((call) => call.command === GRANT_COMMAND)
+        .map((call) => call.timeoutMs),
+    ).toEqual([2_000, 500]);
+    await handle.close();
+  });
 
   test("opens the explicit ordered broadcast and verifies the default settle window", async () => {
     const { adb, timer, capture } = setup();

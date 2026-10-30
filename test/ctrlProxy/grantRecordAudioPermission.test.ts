@@ -11,6 +11,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
+import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbCommandTimeoutError";
 
 function installer(adb: FakeAdbExecutor, userId?: number) {
   const host: AndroidCtrlProxyApkInstallerHost = {
@@ -46,6 +47,7 @@ describe("grantRecordAudioPermission", () => {
         `shell pm grant${user === undefined ? "" : " --user 10"} ${CTRL_PROXY_PACKAGE} android.permission.RECORD_AUDIO`,
       ]);
       expect(adb.getCommandCalls()[0].noRetry).toBe(true);
+      expect(adb.getCommandCalls()[0].timeoutMs).toBe(10_000);
       expect(adb.getApiLevelCalls()).toEqual([]);
     });
     test(`installer grants after install for user ${user ?? "default"}`, async () => {
@@ -58,6 +60,62 @@ describe("grantRecordAudioPermission", () => {
       ]);
     });
   }
+  test.each(["result", "throw"])("%s timeout then success retries exactly once", async (mode) => {
+    const adb = new FakeAdbExecutor();
+    if (mode === "result") {
+      adb.setCommandResponseSequence("pm grant", [
+        { ...createExecResult("", ""), error: "Command timed out after 10000ms" },
+        createExecResult("", ""),
+      ]);
+    } else {
+      const execute = adb.execute.bind(adb);
+      let attempts = 0;
+      adb.execute = async (args, options) => {
+        const result = await execute(args, options);
+        if (attempts++ === 0) {
+          throw new AdbCommandTimeoutError("grant budget expired");
+        }
+        return result;
+      };
+    }
+    expect(await grantRecordAudioPermission(adb)).toEqual({ granted: true });
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+    expect(adb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([10_000, 10_000]);
+  });
+
+  test.each(["result", "throw"])(
+    "%s timeout twice warns and stops after two commands",
+    async (mode) => {
+      const adb = new FakeAdbExecutor();
+      if (mode === "result") {
+        adb.setCommandResponse("pm grant", {
+          ...createExecResult("", ""),
+          error: "Command timeout",
+        });
+      } else {
+        adb.setCommandError("pm grant", new AdbCommandTimeoutError("grant budget expired"));
+      }
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await grantRecordAudioPermission(adb)).toMatchObject({ granted: false });
+        expect(adb.getExecutedCommands()).toHaveLength(2);
+        expect(adb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([10_000, 10_000]);
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("device refusal is not retried", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("pm grant", createExecResult("", "Unknown permission"));
+    expect(await grantRecordAudioPermission(adb)).toMatchObject({
+      granted: false,
+      reason: "Unknown permission",
+    });
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+  });
   test("a thrown error warns without rejecting", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDefaultError(new Error("transport reset"));

@@ -22,6 +22,7 @@ import { getFocusedTextField, type FocusedTextField } from "./ClearText";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { resolveSignalCall, type ActionCall } from "./ActionCall";
+import type { DispatchOptions } from "../observe/shared/types";
 
 type ClipboardCtrlProxy = {
   requestClipboard(
@@ -29,8 +30,7 @@ type ClipboardCtrlProxy = {
     text?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: DispatchOptions,
   ): Promise<{
     success: boolean;
     error?: string;
@@ -171,9 +171,12 @@ export class Clipboard {
     let result: Awaited<ReturnType<ClipboardCtrlProxy["requestClipboard"]>>;
     try {
       result = await awaitWhileRequestIsLive(
-        client.requestClipboard(action, text, undefined, undefined, signal, () => {
-          // copy sets supplied text and clear is idempotent; only paste risks duplication.
-          dispatched = action === "paste";
+        client.requestClipboard(action, text, undefined, undefined, {
+          signal,
+          onDispatch: () => {
+            // copy sets supplied text and clear is idempotent; only paste risks duplication.
+            dispatched = action === "paste";
+          },
         }),
         signal,
       );
@@ -254,7 +257,7 @@ export class Clipboard {
     let pasteboardUnreadable = false;
     try {
       const clipboard = await awaitWhileRequestIsLive(
-        client.requestClipboard("get", undefined, undefined, undefined, signal),
+        client.requestClipboard("get", undefined, undefined, undefined, { signal }),
         signal,
       );
       if (clipboard.success && !clipboard.text) {
@@ -373,9 +376,12 @@ export class Clipboard {
     let ctrlProxyReason: string | undefined;
     try {
       const a11yResult = await awaitWhileRequestIsLive(
-        a11yClient.requestClipboard(action, text, undefined, undefined, signal, () => {
-          // Only paste can duplicate an input action when replayed.
-          dispatched = action === "paste";
+        a11yClient.requestClipboard(action, text, undefined, undefined, {
+          signal,
+          onDispatch: () => {
+            // Only paste can duplicate an input action when replayed.
+            dispatched = action === "paste";
+          },
         }),
         signal,
       );

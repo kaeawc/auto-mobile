@@ -133,19 +133,13 @@ export class IosH264Source implements H264CaptureSource {
     this.simulatorWindowResolver =
       options.simulatorWindowResolver ??
       ((helperPath, device, audioEnabled, signal) =>
-        defaultResolveSimulatorWindowId(
-          helperPath,
-          device,
-          this.commandRunner,
-          audioEnabled,
+        defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner, audioEnabled, {
           signal,
-          {
-            timer: this.timer,
-            // The loop reserves one interval before each sleep, so the budget is the whole
-            // timeout; subtracting an interval here too wasted one (#13066).
-            pollBudgetMs: Math.max(0, IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS),
-          },
-        ));
+          timer: this.timer,
+          // The loop reserves one interval before each sleep, so the budget is the whole
+          // timeout; subtracting an interval here too wasted one (#13066).
+          pollBudgetMs: Math.max(0, IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS),
+        }));
     this.startup = new IosCaptureStartup(this.timer, this.firstFrameTimeoutMs, {
       generation: () => this.helperGeneration,
       lastReadinessPhase: () => this.lastReadinessPhase,

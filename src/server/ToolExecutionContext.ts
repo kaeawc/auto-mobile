@@ -523,8 +523,7 @@ async function runDeviceReadinessSetup(
             session.sessionId,
             session.platform,
             sessionManager.getTimer(),
-            { signal, noWaiters: flightHooks?.noWaiters },
-            sessionManager,
+            { signal, noWaiters: flightHooks?.noWaiters, sessionManager },
           ),
         );
       },
@@ -651,6 +650,11 @@ interface A11yReadinessCancellation {
   noWaiters?: AbortSignal;
 }
 
+/** Cancellation plus where setup timing is stored, for {@link ensureAccessibilityServiceReady}. */
+interface A11yReadinessOptions extends A11yReadinessCancellation {
+  sessionManager?: SessionManager;
+}
+
 /**
  * The retry delay between setup attempts (#7541). It ends early once the
  * shared flight has no waiters left, clearing its timer, so an abandoned
@@ -774,10 +778,8 @@ async function ensureAccessibilityServiceReady(
   sessionId: string,
   platform: Platform,
   timer: Timer = defaultTimer,
-  cancellation: A11yReadinessCancellation = {},
-  sessionManager?: SessionManager,
+  { signal, noWaiters, sessionManager }: A11yReadinessOptions = {},
 ): Promise<ReadinessSetupOutcome> {
-  const { signal, noWaiters } = cancellation;
   const device: BootedDevice = {
     name: deviceId,
     platform,

@@ -644,8 +644,7 @@ async function readFreshScreenshot(
   sessionUuid: string,
   activeSession: ActiveSessionDevice,
   context: ResourceReadContext,
-  path: string,
-  deps: ObservationResourceDependencies = {},
+  { path, deps = {} }: { path: string; deps?: ObservationResourceDependencies },
 ): Promise<ResourceContent> {
   try {
     await screenshotPathProtection.protect(path);
@@ -886,7 +885,10 @@ async function getFreshSessionScreenshot(
       );
     }
 
-    return readFreshScreenshot(uri, sessionUuid, activeSession, context, result.path, deps);
+    return readFreshScreenshot(uri, sessionUuid, activeSession, context, {
+      path: result.path,
+      deps,
+    });
   } catch (error) {
     const reason = errorMessage(error);
     logger.error(

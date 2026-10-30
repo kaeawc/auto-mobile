@@ -252,18 +252,20 @@ test("openLink chooser path passes the exact package to the handler and surfaces
     device,
     "com.example.app",
     { success: true, url: "example://item" },
-    "example://item",
     {
-      execute: async (...args) => {
-        calls.push(args);
-        return {
-          success: true,
-          detected: true,
-          action: "custom",
-          packageVerified: false,
-          tappedAt: 199,
-          observation: chosen,
-        };
+      url: "example://item",
+      chooser: {
+        execute: async (...args) => {
+          calls.push(args);
+          return {
+            success: true,
+            detected: true,
+            action: "custom",
+            packageVerified: false,
+            tappedAt: 199,
+            observation: chosen,
+          };
+        },
       },
     },
   );
@@ -341,8 +343,7 @@ test("openLink accepts a device-seconds chooser capture in the tap's coarse seco
     device,
     "com.example.app",
     { success: true, url: "example://item" },
-    "example://item",
-    { execute: async () => ({ ...selection, observation }) },
+    { url: "example://item", chooser: { execute: async () => ({ ...selection, observation }) } },
   );
   expect(selection.tappedAt).toBe(1000);
   expect(result.success).toBe(true);
@@ -355,8 +356,10 @@ test("openLink accepts an exact-package chooser tap without post-tap confirmatio
     device,
     "com.example.app",
     { success: true, url: "example://item" },
-    "example://item",
-    { execute: async () => ({ success: true, detected: true, packageVerified: true }) },
+    {
+      url: "example://item",
+      chooser: { execute: async () => ({ success: true, detected: true, packageVerified: true }) },
+    },
   );
   expect(result.success).toBe(true);
 });
@@ -371,15 +374,17 @@ test("openLink rejects a pre-tap cached label-only chooser observation", async (
     device,
     "com.example.app",
     { success: true, url: "example://item" },
-    "example://item",
     {
-      execute: async () => ({
-        success: true,
-        detected: true,
-        packageVerified: false,
-        tappedAt: 101,
-        observation: stale,
-      }),
+      url: "example://item",
+      chooser: {
+        execute: async () => ({
+          success: true,
+          detected: true,
+          packageVerified: false,
+          tappedAt: 101,
+          observation: stale,
+        }),
+      },
     },
   );
   expect(result.success).toBe(false);
@@ -396,8 +401,10 @@ test("openLink chooser path reports an expected chooser that never appeared", as
     device,
     "com.example.app",
     { success: true, url: "example://item" },
-    "example://item",
-    { execute: async () => ({ success: true, detected: false }) },
+    {
+      url: "example://item",
+      chooser: { execute: async () => ({ success: true, detected: false }) },
+    },
   );
   expect(result.success).toBe(false);
   expect(result.error).toContain("com.example.app");

@@ -221,10 +221,9 @@ export class ObservedAndroidDisplayCache {
     device: BootedDevice,
     adb: AdbCommandRunner,
     displayId: number | null | undefined,
-    signal?: AbortSignal,
-    identity?: AndroidPanelIdentity,
-    allowProbe = true,
+    options?: { signal?: AbortSignal; identity?: AndroidPanelIdentity; allowProbe?: boolean },
   ): Promise<DisplayPanel | undefined> {
+    const { signal, identity, allowProbe = true } = { ...options };
     const panels = device.displays?.panels ?? [];
     const direct = panelForAndroidIdentity(panels, identity);
     if (direct) {

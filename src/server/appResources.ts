@@ -30,7 +30,6 @@ import type {
   AppsQueryResourceContent,
   AppsQueryType,
   AppsResourceContent,
-  InstalledAppInfo,
 } from "./appResourcesTypes";
 import {
   buildAppsByPackage,
@@ -143,11 +142,16 @@ function getDeviceAppsUri(deviceId: string): string {
 
 function createAppsResourceContent(
   device: BootedDevice,
-  apps: InstalledAppInfo[],
-  foregroundApp: string | null,
-  lastUpdated: string,
-  observationComplete: boolean,
-  message?: string,
+  {
+    apps,
+    foregroundApp,
+    lastUpdated,
+    observationComplete,
+    message,
+  }: Pick<
+    AppsResourceContent,
+    "apps" | "foregroundApp" | "lastUpdated" | "observationComplete" | "message"
+  >,
 ): AppsResourceContent {
   return {
     deviceId: device.deviceId,
@@ -202,14 +206,13 @@ async function fetchAppsForDevice(
       cacheable: result.successful,
       entry: {
         expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-        content: createAppsResourceContent(
-          device,
-          userApps,
+        content: createAppsResourceContent(device, {
+          apps: userApps,
           foregroundApp,
           lastUpdated,
-          result.successful,
+          observationComplete: result.successful,
           message,
-        ),
+        }),
         appsByPackage: buildAppsByPackage(userApps),
         queryApps,
         launchabilityUnknown,
@@ -228,7 +231,12 @@ async function fetchAppsForDevice(
     cacheable: result.successful,
     entry: {
       expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-      content: createAppsResourceContent(device, apps, null, lastUpdated, result.successful),
+      content: createAppsResourceContent(device, {
+        apps,
+        foregroundApp: null,
+        lastUpdated,
+        observationComplete: result.successful,
+      }),
       appsByPackage: buildAppsByPackage(apps),
       queryApps,
       iosTypeClassificationUnreliable,

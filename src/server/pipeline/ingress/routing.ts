@@ -168,9 +168,12 @@ function routeViaBinding(scope: RoutingScope, rawArgs: Record<string, unknown>):
     sessionId,
     toolParams,
     admittedSessionDevice,
-    tool.selectsActiveDevice === true,
-    tool.selectsActiveDevice !== true && (readOnly || managedBinding !== undefined),
-    readOnly,
+    {
+      selectingActiveDevice: tool.selectsActiveDevice === true,
+      deferForeignDevice:
+        tool.selectsActiveDevice !== true && (readOnly || managedBinding !== undefined),
+      readOnly,
+    },
   );
   return { routingSessionUuid, resolvedImplicitAutolockSessionUuid: undefined };
 }

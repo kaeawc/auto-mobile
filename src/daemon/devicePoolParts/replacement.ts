@@ -5,7 +5,11 @@ import { BootedDevice, DeviceInfo } from "../../models";
 import { deviceLossCancellationReason } from "../emulatorLossIncident";
 import { type DeviceRetirementOptions } from "../deviceRuntimeIdentity";
 import type { PooledDevice } from "../devicePoolTypes";
-import { DiscoveryReconcileOptions, SystemUiAnrRecoveryHandoff } from "./contracts";
+import {
+  DiscoveryReconcileOptions,
+  SystemUiAnrRecoveryHandoff,
+  type SystemUiAnrReplacementOptions,
+} from "./contracts";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
@@ -26,8 +30,7 @@ export interface ReplacementOperations {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    options?: SystemUiAnrReplacementOptions,
   ): Promise<SystemUiAnrRecoveryHandoff>;
   settleSystemUiAnrOriginalClaim(originalDeviceId: string): void;
   validateSystemUiAnrRecoverySession(
@@ -175,16 +178,14 @@ export class DevicePoolReplacement {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    options?: SystemUiAnrReplacementOptions,
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return this.state.deviceReplacement.replaceDeviceForSystemUiAnrRecovery(
       expectedDevice,
       replacement,
       sourceImage,
       childProcess,
-      beforeReplacementPublishes,
-      excludeExecutionId,
+      options,
     );
   }
 

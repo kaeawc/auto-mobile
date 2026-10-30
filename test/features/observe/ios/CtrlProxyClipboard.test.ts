@@ -21,10 +21,12 @@ describe("CtrlProxyClipboard dispatch acknowledgement", () => {
         undefined,
         5000,
         undefined,
-        controller.signal,
-        () => {
-          expect(h.sentMessages).toHaveLength(1);
-          dispatches++;
+        {
+          signal: controller.signal,
+          onDispatch: () => {
+            expect(h.sentMessages).toHaveLength(1);
+            dispatches++;
+          },
         },
       );
       await flush();
@@ -56,16 +58,12 @@ describe("CtrlProxyClipboard dispatch acknowledgement", () => {
     controller.abort(reason);
     let dispatches = 0;
     await expect(
-      new CtrlProxyClipboard(h.context).requestClipboard(
-        "paste",
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-        () => {
+      new CtrlProxyClipboard(h.context).requestClipboard("paste", undefined, 5000, undefined, {
+        signal: controller.signal,
+        onDispatch: () => {
           dispatches++;
         },
-      ),
+      }),
     ).rejects.toBe(reason);
     expect(h.sentMessages).toEqual([]);
     expect(dispatches).toBe(0);
@@ -80,9 +78,10 @@ describe("CtrlProxyClipboard dispatch acknowledgement", () => {
       undefined,
       5000,
       undefined,
-      undefined,
-      () => {
-        dispatches++;
+      {
+        onDispatch: () => {
+          dispatches++;
+        },
       },
     );
     expect(result.success).toBe(false);

@@ -34,6 +34,12 @@ interface AndroidStartupLeaseNameContext {
   signal: AbortSignal | undefined;
 }
 
+/** The listing, deadline, clock and cancellation one Android startup-lease reservation runs under. */
+type AndroidStartupLeaseRequest = Pick<
+  AndroidStartupLeaseNameContext,
+  "deviceUtils" | "bootDeadlineMs" | "timer"
+> & { signal?: AbortSignal };
+
 async function resolveAndroidStartupLeaseAvdName({
   args,
   budgets,
@@ -116,10 +122,7 @@ async function resolveAndroidStartupLeaseImageName(
 export async function reserveAndroidStartupLease(
   args: StartDeviceArgs,
   budgets: { androidAvdName?: string },
-  bootDeadlineMs: number,
-  timer: Timer,
-  deviceUtils: PlatformDeviceManager,
-  signal?: AbortSignal,
+  { bootDeadlineMs, timer, deviceUtils, signal }: AndroidStartupLeaseRequest,
 ): Promise<(() => Promise<void>) | undefined> {
   if (args.platform !== "android") {
     return undefined;
@@ -160,14 +163,12 @@ export async function reserveAndroidStartupLease(
   signal?.addEventListener("abort", abortForCaller, { once: true });
   const timeout = timer.setTimeout(abortForTimeout, remainingMs);
   const reservation = (async () => {
-    const ownsOfflineRecovery = await ownsAndroidStartupOfflineRecovery(
-      exactAvdName,
-      devicePool,
+    const ownsOfflineRecovery = await ownsAndroidStartupOfflineRecovery(exactAvdName, devicePool, {
       deviceUtils,
-      bootDeadlineMs,
+      deadlineMs: bootDeadlineMs,
       timer,
-      timeoutController.signal,
-    );
+      signal: timeoutController.signal,
+    });
     // Classification can finish after cancellation; do not queue new work then.
     timeoutController.signal.throwIfAborted();
     return await devicePool.reserveAndroidStartupLease(
@@ -219,10 +220,12 @@ export async function reserveAndroidStartupLease(
 async function ownsAndroidStartupOfflineRecovery(
   avdName: string | undefined,
   devicePool: DevicePool,
-  deviceUtils: PlatformDeviceManager,
-  deadlineMs: number,
-  timer: Timer,
-  signal: AbortSignal,
+  {
+    deviceUtils,
+    deadlineMs,
+    timer,
+    signal,
+  }: { deviceUtils: PlatformDeviceManager; deadlineMs: number; timer: Timer; signal: AbortSignal },
 ): Promise<boolean> {
   // A criteria-only request may reuse a running AVD, so it cannot claim
   // ownership until an exact image has been resolved.

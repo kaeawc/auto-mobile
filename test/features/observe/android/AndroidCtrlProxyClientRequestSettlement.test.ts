@@ -154,7 +154,8 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestClipboard",
-    invoke: (h, s) => h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) =>
+      h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestSettingsGet",
@@ -280,7 +281,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "commitViaIme",
-    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestImeAction",
@@ -522,7 +523,13 @@ const methods: RequestMethod[] = [
   {
     name: "setPreference",
     abortable: false,
-    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "STRING", LONG_TIMEOUT_MS),
+    invoke: (h) =>
+      h.client.setPreference(
+        "pkg",
+        "file",
+        { key: "key", value: "1", type: "STRING" },
+        LONG_TIMEOUT_MS,
+      ),
   },
   {
     name: "removePreference",

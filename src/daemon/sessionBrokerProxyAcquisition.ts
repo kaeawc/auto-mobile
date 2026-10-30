@@ -538,8 +538,7 @@ async function prepareBudgetAfterRetry(
   ports: SessionBrokerProxyAcquisitionPorts,
   statusReserveMs: number,
   deadlineMs: number,
-  signal: AbortSignal | undefined,
-  retryAfterMs: number | undefined,
+  { signal, retryAfterMs }: { signal: AbortSignal | undefined; retryAfterMs: number | undefined },
 ): Promise<number | SessionBrokerResult> {
   let prepareCallBudgetMs = Math.floor(deadlineMs - ports.timer.now() - statusReserveMs);
   if (retryAfterMs !== undefined && prepareCallBudgetMs > 0) {
@@ -613,8 +612,7 @@ async function prepareThenRecover(
         ports,
         statusReserveMs,
         deadlineMs,
-        signal,
-        retryAfterMs,
+        { signal, retryAfterMs },
       );
       if (typeof prepareCallBudgetMs !== "number") {
         return prepareCallBudgetMs;

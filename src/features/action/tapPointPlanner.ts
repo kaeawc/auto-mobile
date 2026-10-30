@@ -273,12 +273,8 @@ export class TapPointPlanner {
         : ime
           ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
           : this.deps.geometry().getElementCenter({ bounds: visibleBounds });
-      const safe = applicationWindowSafeTapPoint(
-        hierarchy,
-        target,
-        visibleBounds,
-        proposed,
-        ime && {
+      const safe = applicationWindowSafeTapPoint(hierarchy, target, visibleBounds, proposed, {
+        imeBounds: ime && {
           left: ime.bounds[0],
           top: ime.bounds[1],
           right: ime.bounds[2],
@@ -286,8 +282,8 @@ export class TapPointPlanner {
         },
         // Default-layer selectors also resolve app rows kept under AutoMobile's own prototype
         // (#10691); layer "app" refuses those later with its own prototype-specific error.
-        tapOwnPrototypeCoverRule(context.options.layer),
-      );
+        ownWindows: tapOwnPrototypeCoverRule(context.options.layer),
+      });
       if (!safe.point) {
         throw new TapTargetUnavailableError(
           `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,

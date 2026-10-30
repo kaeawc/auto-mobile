@@ -903,7 +903,12 @@ describe("disconnect monitor miss counting", () => {
     daemon.getDevicePool().getDevice = () => replacementDevice;
     daemon.getSessionManager().getSessionForDevice = () => null;
 
-    expect(daemon.isCapturedTargetCurrent("emulator-5554", capturedDevice, 4)).toBe(false);
+    expect(
+      daemon.isCapturedTargetCurrent("emulator-5554", {
+        pooledDeviceAtDisconnect: capturedDevice,
+        assignmentCountAtDisconnect: 4,
+      }),
+    ).toBe(false);
   });
 
   test("retains disconnect state when cleanup verification is inconclusive", async () => {

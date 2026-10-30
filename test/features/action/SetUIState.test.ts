@@ -827,7 +827,7 @@ describe("SetUIState", () => {
         { fields: [{ selector: { elementId: "first" }, value: "a".repeat(1000) }] },
         undefined,
         undefined,
-        deadline,
+        { transportDeadlineMs: deadline },
       );
       expect(result.success).toBe(true);
       expect(deadlines).toEqual([deadline - 4000, deadline - 4000]);
@@ -3153,7 +3153,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     // A real, structured result -- never a bare discard.
@@ -3255,7 +3255,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     expect(result.success).toBe(true);
@@ -3307,7 +3307,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     expect(result.success).toBe(false);
@@ -3345,8 +3345,10 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       },
       undefined,
       undefined,
-      frozenTransportDeadlineMs,
-      () => liveTransportDeadlineMs,
+      {
+        transportDeadlineMs: frozenTransportDeadlineMs,
+        getLiveTransportDeadlineMs: () => liveTransportDeadlineMs,
+      },
     );
 
     // All three fields admitted and completed -- the frozen 50s snapshot
@@ -3410,7 +3412,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     // Flush microtasks until the field's own admission/tap path has run and
@@ -3494,7 +3496,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     for (let i = 0; i < 50 && tapCalls === 0; i++) {
@@ -3572,8 +3574,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     });
 
     const result = await setUIState.execute(
-      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
-      // Stands in for the daemon's onprogress handler: extends the shared
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] }, // Stands in for the daemon's onprogress handler: extends the shared
       // `ProgressExtendableDeadline` SYNCHRONOUSLY as part of handling this
       // call's own progress notification, exactly as `extendOnProgress`
       // (`src/daemon/socketServer.ts`) does before the notification's own
@@ -3582,8 +3583,10 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
         liveDeadlineMs = callStartMs + 120_000;
       },
       undefined,
-      frozenTransportDeadlineMs,
-      () => liveDeadlineMs,
+      {
+        transportDeadlineMs: frozenTransportDeadlineMs,
+        getLiveTransportDeadlineMs: () => liveDeadlineMs,
+      },
     );
 
     // The field ran for 50s total -- well past the ORIGINAL 30s deadline's
@@ -3648,14 +3651,15 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     );
 
     const resultPromise = setUIState.execute(
-      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
-      // Models `extra.sendNotification()` resolving WITHOUT the receiver
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] }, // Models `extra.sendNotification()` resolving WITHOUT the receiver
       // having extended the deadline yet.
       async () => {},
       undefined,
-      callStartMs + 30_000,
-      () => deadline.value,
-      (listener) => deadline.onExtended(listener),
+      {
+        transportDeadlineMs: callStartMs + 30_000,
+        getLiveTransportDeadlineMs: () => deadline.value,
+        subscribeLiveTransportDeadline: (listener) => deadline.onExtended(listener),
+      },
     );
 
     // Let the field reach its (fake-timer-driven) clear step before moving
@@ -3705,7 +3709,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     for (let i = 0; i < 50 && fakeTimer.getPendingTimeoutCount() === 0; i++) {
@@ -3795,7 +3799,7 @@ describe("SetUIState off-screen search device I/O is bounded by the result deadl
       { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     for (let i = 0; i < 50 && swipeCalls === 0; i++) {
@@ -3857,7 +3861,7 @@ describe("SetUIState off-screen search device I/O is bounded by the result deadl
       { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     for (let i = 0; i < 50 && observeCalls < 2; i++) {
@@ -3947,7 +3951,7 @@ describe("SetUIState post-success observation refresh is bounded by the result d
       { fields: [{ selector: { elementId: "checkbox" }, selected: true }] },
       undefined,
       undefined,
-      transportDeadlineMs,
+      { transportDeadlineMs },
     );
 
     for (let i = 0; i < 50 && observeCalls < 2; i++) {

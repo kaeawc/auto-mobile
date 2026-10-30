@@ -63,9 +63,11 @@ export class AdbAndroidFoldPostureRestore implements AndroidFoldPostureRestore {
         adb,
         "opened",
         { states },
-        this.timer,
-        () => {
-          throw new ActionableError("The device exposes no committed posture state to read back");
+        {
+          timer: this.timer,
+          observe: () => {
+            throw new ActionableError("The device exposes no committed posture state to read back");
+          },
         },
         operation,
       );

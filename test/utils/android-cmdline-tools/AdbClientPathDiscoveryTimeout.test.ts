@@ -50,7 +50,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
     client.testHooks.isTestMode = false;
     client.execAsync = async () => new Promise<ExecResult>(() => {});
-    client.testHooks.execWithSignal = async (_file, _args, _maxBuffer, timeoutMs) =>
+    client.testHooks.execWithSignal = async (_file, _args, { timeoutMs } = {}) =>
       new Promise<ExecResult>((_resolve, reject) => {
         if (timeoutMs === undefined) {
           throw new Error("Expected an explicit path-discovery timeout");
@@ -84,7 +84,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
     client.testHooks.isTestMode = false;
     const probes: Array<{ timeoutMs?: number; signal?: AbortSignal }> = [];
-    client.testHooks.execWithSignal = async (file, args, _maxBuffer, timeoutMs, signal) => {
+    client.testHooks.execWithSignal = async (file, args, { timeoutMs, signal } = {}) => {
       probes.push({ timeoutMs, signal });
       return file === "which" && args[0] === "adb" ? ok("/sdk/platform-tools/adb\n") : ok();
     };
@@ -111,7 +111,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     };
 
     const commandTimeouts: number[] = [];
-    client.testHooks.execWithSignal = async (file, args, _maxBuffer, timeoutMs) => {
+    client.testHooks.execWithSignal = async (file, args, { timeoutMs } = {}) => {
       if (file === "which" && args[0] === "adb") {
         timer.advanceTime(7);
         return ok("/sdk/platform-tools/adb\n");
@@ -134,7 +134,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     let recover = false;
     let adbPathProbeCalls = 0;
     const executedCommands: string[] = [];
-    client.testHooks.execWithSignal = async (file, args, _maxBuffer, timeoutMs) => {
+    client.testHooks.execWithSignal = async (file, args, { timeoutMs } = {}) => {
       const command = [file, ...args].join(" ");
       executedCommands.push(command);
       if (command === "which adb") {
@@ -181,7 +181,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     client.testHooks.isTestMode = false;
     let versionProbeCalls = 0;
     const commandFiles: string[] = [];
-    client.testHooks.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+    client.testHooks.execWithSignal = async (file, args, { signal } = {}) => {
       if (signal?.aborted) {
         throw new Error("probe aborted");
       }
@@ -223,7 +223,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     client.testHooks.isTestMode = false;
     let adbPathProbeCalls = 0;
     const commandFiles: string[] = [];
-    client.testHooks.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+    client.testHooks.execWithSignal = async (file, args, { signal } = {}) => {
       if (signal?.aborted) {
         throw new Error("probe aborted");
       }

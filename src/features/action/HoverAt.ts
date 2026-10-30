@@ -49,6 +49,12 @@ async function notAHoverRoute(): Promise<void> {
   throw new ActionableError("This route cannot inject a hover.");
 }
 
+/** `ActionCall` for one hover drive: also carries the target display and its fence check. */
+interface HoverDriveCall extends ActionCall {
+  displayId?: number;
+  assertCurrent?: () => void;
+}
+
 /**
  * Hover enter, move and exit over a path with a stylus or a mouse, no contact (Android). It is gated on
  * `hover_input_v1`: iOS and any runner that does not advertise it are refused before anything is sent,
@@ -113,7 +119,7 @@ export class HoverAt extends BaseVisualChange {
           },
         );
         return await this.observedInteraction(
-          () => this.drive(injector, options, observation, call, displayId, assertCurrent),
+          () => this.drive(injector, options, observation, { ...call, displayId, assertCurrent }),
           {
             changeExpected: false,
             display: observation.display.key,
@@ -126,14 +132,10 @@ export class HoverAt extends BaseVisualChange {
       }
       return await this.observedInteraction(
         (observation, fence) =>
-          this.drive(
-            injector,
-            options,
-            observation,
-            call,
-            undefined,
-            fence && (() => fence.assertCurrent()),
-          ),
+          this.drive(injector, options, observation, {
+            ...call,
+            assertCurrent: fence && (() => fence.assertCurrent()),
+          }),
         { changeExpected: false, progress, perf, signal },
       );
     } finally {
@@ -171,10 +173,9 @@ export class HoverAt extends BaseVisualChange {
     injector: PointerInjector,
     options: HoverAtOptions,
     observation: ObserveResult,
-    call: ActionCall,
-    displayId: number | undefined,
-    assertCurrent: (() => void) | undefined,
+    call: HoverDriveCall,
   ): Promise<HoverAtResult> {
+    const { displayId, assertCurrent } = call;
     const stale = options.snapshotId
       ? this.snapshotReferences.staleReason(options.snapshotId, this.device.deviceId, observation)
       : undefined;

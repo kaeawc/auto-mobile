@@ -1714,7 +1714,7 @@ describe("IOSCtrlProxyClient", function () {
         const updates: XCTestHierarchy[] = [];
         const unsubscribe = client.onPushUpdate((hierarchy) => updates.push(hierarchy));
         const options: NonNullable<
-          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[5]
+          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[4]
         > = {
           failureSink: {},
         };
@@ -1728,7 +1728,7 @@ describe("IOSCtrlProxyClient", function () {
           const pending = hasPendingRequest
             ? client.testHooks
                 .hierarchy()
-                .requestHierarchySync(undefined, false, undefined, 1000, false, options)
+                .requestHierarchySync(undefined, false, undefined, 1000, options)
             : undefined;
           if (hasPendingRequest) {
             const request = await waitForMessageType(socket, "request_hierarchy_if_stale");

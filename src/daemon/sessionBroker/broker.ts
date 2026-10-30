@@ -111,14 +111,12 @@ export class SessionBroker {
       setTimeout: (callback, ms) => (options.timer ?? defaultTimer).setTimeout(callback, ms),
       clearTimeout: (handle) => (options.timer ?? defaultTimer).clearTimeout(handle),
     });
-    this.resetRelease = new BrokerResetRelease(
-      options,
-      this.timing,
-      () => this.now(),
-      (ticket, signal) => this.tryCleanup(ticket, signal),
-      (resourceId) => this.resetReadiness.notify(resourceId),
-      (resourceId, active) => this.resetReadiness.setResetActive(resourceId, active),
-    );
+    this.resetRelease = new BrokerResetRelease(options, this.timing, () => this.now(), {
+      tryCleanup: (ticket, signal) => this.tryCleanup(ticket, signal),
+      notifyReady: (resourceId) => this.resetReadiness.notify(resourceId),
+      setResetActive: (resourceId, active) =>
+        this.resetReadiness.setResetActive(resourceId, active),
+    });
   }
 
   private now(): number {
@@ -215,14 +213,10 @@ export class SessionBroker {
         `Session request ${config.requestId} preparation failed: ${errorMessage(error)}`,
         error,
       );
-      return this.handlePreparationFailure(
-        config,
-        livenessOwnerToken,
-        fingerprint,
-        admitted,
-        preparationFailureError(error, signal),
+      return this.handlePreparationFailure(config, livenessOwnerToken, fingerprint, admitted, {
+        error: preparationFailureError(error, signal),
         exportIdentity,
-      );
+      });
     } finally {
       this.finishPreparation(config.requestId);
     }
@@ -233,8 +227,7 @@ export class SessionBroker {
     livenessOwnerToken: string,
     fingerprint: string,
     admitted: boolean,
-    error: unknown,
-    exportIdentity?: BrokerExportIdentity,
+    { error, exportIdentity }: { error: unknown; exportIdentity?: BrokerExportIdentity },
   ): Promise<SessionBrokerResult> {
     const failure = failureFor(error);
     if (admitted) {

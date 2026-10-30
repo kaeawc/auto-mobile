@@ -172,11 +172,11 @@ export class RotationOutcomes {
       restoreAutomaticRotation: boolean;
       beforeWrite: RotationCallSettings["beforeWrite"];
       cleanup: RotationSettingCleanup;
+      signal?: AbortSignal;
     },
-    signal?: AbortSignal,
   ): Promise<AlreadyAppliedOrientationDecision> {
+    const { preserveLock, restoreAutomaticRotation, beforeWrite, cleanup, signal } = plan;
     throwIfAborted(signal);
-    const { preserveLock, restoreAutomaticRotation, beforeWrite, cleanup } = plan;
     if (currentOrientation !== orientation) {
       return { kind: "requires-rotation", reason: "orientation-differs" };
     }

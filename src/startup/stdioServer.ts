@@ -60,8 +60,7 @@ export async function runStdioServer(
     modules,
     state,
     launch,
-    useProxyMode,
-    deviceReadiness,
+    { useProxyMode, deviceReadiness },
   );
   try {
     logger.info("Connecting MCP server to stdio transport");
@@ -140,8 +139,7 @@ async function createStdioMcpServer(
   modules: ServerModules,
   state: StdioRuntimeState,
   launch: StdioLaunchContext,
-  useProxyMode: boolean,
-  deviceReadiness?: DeviceReadiness,
+  { useProxyMode, deviceReadiness }: { useProxyMode: boolean; deviceReadiness?: DeviceReadiness },
 ): Promise<{
   server: ConnectableServer;
   proxyToClaimInitialSession: { claimInitialSession(): Promise<void> } | undefined;

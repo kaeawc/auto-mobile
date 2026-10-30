@@ -664,8 +664,8 @@ export class RealObserveScreen implements ObserveScreen {
         result.viewHierarchy,
         freshness,
         this.timer,
-        this.idGenerator,
         {
+          ids: this.idGenerator,
           captureId: result.observationId,
           iosMultiPanel: this.platformTraits.isIosMultiPanel(),
         },
@@ -742,8 +742,7 @@ export class RealObserveScreen implements ObserveScreen {
         perf,
         signal,
         screenshot === "settled",
-        displayId,
-        screenshotOptions,
+        { displayId, screenshotOptions },
       );
     } else {
       await this.screenshotRecorder.captureFresh(

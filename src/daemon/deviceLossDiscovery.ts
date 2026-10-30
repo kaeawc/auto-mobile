@@ -256,6 +256,13 @@ export interface ListedAndroidStates {
   listedNonDeviceIds?: Set<string>;
 }
 
+/** The disconnect candidates a listed-state probe asks about, and what discovery already booted. */
+export interface ListedAndroidCandidates {
+  candidateDeviceIds: Set<string>;
+  bootedDeviceIds: Set<string>;
+  candidatePlatforms: Map<string, Platform>;
+}
+
 /**
  * Online-ness is otherwise binary: an in-session Android emulator that
  * dropped to ADB `offline` looks identical to one that is fully gone, since
@@ -271,9 +278,7 @@ export async function probeListedAndroidStates(
   devicePool: Pick<DevicePool, "getAndroidTransportAliases">,
   deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
   planActive: boolean,
-  candidateDeviceIds: Set<string>,
-  bootedDeviceIds: Set<string>,
-  candidatePlatforms: Map<string, Platform>,
+  { candidateDeviceIds, bootedDeviceIds, candidatePlatforms }: ListedAndroidCandidates,
 ): Promise<ListedAndroidStates> {
   if (planActive) {
     return {};

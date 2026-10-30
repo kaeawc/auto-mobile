@@ -14,14 +14,6 @@ export interface ViewHierarchyReadRequest extends HierarchyReadOptions {
   signal?: AbortSignal;
 }
 
-/**
- * A performance tracker always has `track`/`serial`; the options objects never do, which is
- * how the options form is told apart from the deprecated positional `perf` argument.
- */
-function isRequestObject(value: unknown): boolean {
-  return typeof value === "object" && value !== null && !("track" in value) && !("serial" in value);
-}
-
 export interface ResolvedViewHierarchyRead {
   perf?: PerformanceTracker;
   skipWaitForFresh?: boolean;
@@ -30,24 +22,10 @@ export interface ResolvedViewHierarchyRead {
   readOptions?: number | HierarchyReadOptions;
 }
 
-/** Normalizes the options form and the deprecated positional form of `getViewHierarchy`. */
+/** Normalizes the `getViewHierarchy` request into the values the readers consume. */
 export function resolveViewHierarchyReadArgs(
-  perfOrRequest?: PerformanceTracker | ViewHierarchyReadRequest,
-  skipWaitForFresh?: boolean,
-  minTimestamp?: number,
-  signal?: AbortSignal,
-  readOptions?: number | HierarchyReadOptions,
+  request: ViewHierarchyReadRequest = {},
 ): ResolvedViewHierarchyRead {
-  if (!isRequestObject(perfOrRequest)) {
-    return {
-      perf: perfOrRequest as PerformanceTracker | undefined,
-      skipWaitForFresh,
-      minTimestamp,
-      signal,
-      readOptions,
-    };
-  }
-  const request = perfOrRequest as ViewHierarchyReadRequest;
   const { timeoutMs, requireFreshExtraction } = request;
   return {
     perf: request.perf,

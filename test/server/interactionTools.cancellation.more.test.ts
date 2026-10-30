@@ -655,9 +655,11 @@ describe("registered interaction handlers honor cancellation", () => {
     const launches: string[][] = [];
     interactionDeps.pressButtonFactory = () =>
       new PressButton(iosDevice, adb, timer, {
-        executeCommandArgs: async (args) => {
-          launches.push(args);
-          return createExecResult("", "");
+        simctl: {
+          executeCommandArgs: async (args) => {
+            launches.push(args);
+            return createExecResult("", "");
+          },
         },
       });
     const observed = bypassObservation();

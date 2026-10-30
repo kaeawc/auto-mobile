@@ -19,6 +19,7 @@ import {
   type ResolvedSessionAcquisition,
   type SessionAcquisitionOptions,
   type SessionLifecycleSlots,
+  type PersistedSessionRecovery,
   type SharedSessionAssignment,
   isDeviceRestartReleasedRow,
 } from "./internalContracts";
@@ -87,8 +88,7 @@ export interface SessionAcquisitionHost {
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
     listed: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery,
   ): Promise<Session>;
 }
 
@@ -449,13 +449,9 @@ export class SessionAcquisition {
     if (persisted && isDeviceRestartReleasedRow(persisted)) {
       this.host.recordRestartRecoveryActivity(sessionId);
     }
-    return await this.host.recoverPersistedSession(
-      sessionId,
-      devicePool,
-      platform,
-      persisted,
-      "owned",
+    return await this.host.recoverPersistedSession(sessionId, devicePool, platform, persisted, {
+      initialOwnership: "owned",
       shared,
-    );
+    });
   }
 }

@@ -198,9 +198,9 @@ export async function defaultResolveSimulatorWindowId(
   device: BootedDevice,
   commandRunner: CommandRunner,
   audioEnabled: boolean,
-  signal: AbortSignal,
-  poll: { timer: Timer; pollBudgetMs: number },
+  poll: { signal: AbortSignal; timer: Timer; pollBudgetMs: number },
 ): Promise<number> {
+  const { signal } = poll;
   const startedAt = poll.timer.now();
   let lookups = 0;
   for (;;) {

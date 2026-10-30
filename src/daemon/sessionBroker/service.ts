@@ -296,14 +296,10 @@ export async function openSessionBrokerService(
     const recoverMutationRecorder = (sessionUuid: string) =>
       recoverSessionMutationRecorder(options, store, scopeKey, bindMutationRecorder, sessionUuid);
     await recoverActiveMutationRecorders(store, recoverMutationRecorder, recordingGaps);
-    const service = new SessionBrokerService(
-      broker,
-      scopeKey,
-      lock,
-      options.timer,
+    const service = new SessionBrokerService(broker, scopeKey, lock, options.timer, {
       recordingGaps,
-      recoverMutationRecorder,
-    );
+      recorderFor: recoverMutationRecorder,
+    });
     if (!options.deferStart) {
       service.start();
     }
@@ -408,7 +404,7 @@ function iosReuseWiring(
 } {
   const { erase, journal, recordingGaps, store } = parts;
   if (reuse.mode === "keep-booted") {
-    return keepBootedIosWiring(options, reuse, erase, journal, recordingGaps, store);
+    return keepBootedIosWiring(options, reuse, erase, { journal, recordingGaps, store });
   }
   if (reuse.mode === "minimal") {
     return {
@@ -430,9 +426,15 @@ function keepBootedIosWiring(
   options: OpenSessionBrokerServiceOptions,
   reuse: { maxUses: number; fallback: "erase" | "destroy" },
   erase: IosBaselineReset,
-  journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
-  store: Pick<SqliteSessionBrokerStore, "getRequest">,
+  {
+    journal,
+    recordingGaps,
+    store,
+  }: {
+    journal: DeviceMutationJournal;
+    recordingGaps: MutationRecordingGaps;
+    store: Pick<SqliteSessionBrokerStore, "getRequest">;
+  },
 ): {
   resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"];
   captureIosBaseline: ManagedDevicePortDependencies["captureIosBaseline"];
@@ -467,8 +469,11 @@ function keepBootedIosWiring(
         profile,
         assertOwned,
         { ...context.scope, sessionUuid: request.sessionId },
-        context.resource.reuseCount ?? 0,
-        { signal, runResetBoot: context.runResetBoot },
+        {
+          reuseCount: context.resource.reuseCount ?? 0,
+          signal,
+          runResetBoot: context.runResetBoot,
+        },
       );
     },
   };
@@ -504,8 +509,7 @@ function minimalIosResetBaseline(
       profile,
       assertOwned,
       { ...context.scope, sessionUuid: request.sessionId },
-      context.resource.reuseCount ?? 0,
-      { signal },
+      { reuseCount: context.resource.reuseCount ?? 0, signal },
     );
   };
 }
@@ -824,6 +828,13 @@ async function assertBrokerInventoryOwned(
 /** Receipt retention runs at most this often; pruning is not urgent and takes the write lock. */
 export const RECEIPT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
+/** Mutation-recording seams the service exposes to device-tool calls. */
+export interface SessionBrokerServiceMutations {
+  recordingGaps: Pick<MutationRecordingGaps, "mark">;
+  /** Recovers a session's mutation recorder; absent resolves no recorder. */
+  recorderFor?: (sessionUuid: string) => Promise<MutationRecorder | undefined>;
+}
+
 export class SessionBrokerService {
   private stopped = false;
   private lastPruneAtMs: number | undefined;
@@ -836,14 +847,11 @@ export class SessionBrokerService {
     readonly scopeKey: string,
     private readonly lock: SessionBrokerHostLock,
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">,
-    private readonly recordingGaps: Pick<MutationRecordingGaps, "mark">,
-    private readonly recorderFor: (
-      sessionUuid: string,
-    ) => Promise<MutationRecorder | undefined> = async () => undefined,
+    private readonly mutations: SessionBrokerServiceMutations,
   ) {}
 
   markMutationUnrecorded(sessionUuid: string, reason: string): void {
-    this.recordingGaps.mark(sessionUuid, reason);
+    this.mutations.recordingGaps.mark(sessionUuid, reason);
   }
 
   async recoverMutationRecorder(sessionUuid: string): Promise<MutationRecorder | undefined> {
@@ -853,7 +861,7 @@ export class SessionBrokerService {
           "Cannot recover mutation recording from a stopped session broker",
         );
       }
-      return await this.recorderFor(sessionUuid);
+      return await this.mutations.recorderFor?.(sessionUuid);
     } catch (error) {
       this.markMutationUnrecorded(sessionUuid, `recorder recovery: ${errorMessage(error)}`);
       logger.warn(

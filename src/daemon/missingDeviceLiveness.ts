@@ -182,8 +182,10 @@ export class MissingDeviceLiveness {
     refreshGeneration: number,
     bootedDeviceIds: Set<string>,
     bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
+    {
+      succeededPlatforms,
+      succeededSources,
+    }: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources">,
   ): Promise<number | undefined> {
     const removeMissingDevices = async () => {
       if (refreshGeneration !== this.pool.getRefreshGeneration()) {

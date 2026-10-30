@@ -1,0 +1,103 @@
+{
+  "spec": {
+    "id": "ns",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "reminderStatus": ""
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Remind you about your order"
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "reminders",
+          "name": "Reminders",
+          "importance": "default"
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "notifications.scheduledFired": [
+          {
+            "type": "setState",
+            "key": "reminderStatus",
+            "value": "fired"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Remind me",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "notifications.schedule",
+          "statusKey": "reminderStatus",
+          "args": {
+            "id": {
+              "value": "order-eta"
+            },
+            "channel": {
+              "value": "reminders"
+            },
+            "title": {
+              "value": "Your order arrives soon"
+            },
+            "delaySeconds": {
+              "value": 1
+            }
+          }
+        },
+        {
+          "type": "platform",
+          "call": "notifications.schedule",
+          "statusKey": "reminderStatus",
+          "args": {
+            "id": {
+              "value": "order-eta"
+            },
+            "channel": {
+              "value": "reminders"
+            },
+            "title": {
+              "value": "Your order arrives soon"
+            },
+            "delaySeconds": {
+              "value": 604800
+            },
+            "body": {
+              "value": "Track it in the app"
+            }
+          }
+        },
+        {
+          "type": "platform",
+          "call": "notifications.cancel",
+          "args": {
+            "id": {
+              "value": "order-eta"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1", "prototype_platform_notifications_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_notifications_scheduled_v1"
+}

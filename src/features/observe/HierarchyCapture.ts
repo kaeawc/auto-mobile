@@ -58,20 +58,24 @@ export function getHierarchySnapshot(
   return hierarchy ? capturedHierarchies.get(hierarchy) : undefined;
 }
 
+/** How a newly identified capture is named; a fresh id comes from `ids` when `captureId` is unset. */
+export interface ObservedHierarchyIdentity {
+  ids?: IdGenerator;
+  captureId?: string;
+  iosMultiPanel?: boolean;
+}
+
 export function identifyObservedHierarchy(
   platform: "android" | "ios",
   source: ViewHierarchyResult,
   freshness: HierarchyCaptureRequest["freshness"],
   timer: Timer = defaultTimer,
-  ids: IdGenerator = defaultIdGenerator,
-  captureIdentity?: string | { captureId?: string; iosMultiPanel?: boolean },
+  { ids = defaultIdGenerator, captureId, iosMultiPanel = false }: ObservedHierarchyIdentity = {},
 ): HierarchySnapshot {
   const existing = getHierarchySnapshot(source);
   if (existing) {
     return existing;
   }
-  const { captureId, iosMultiPanel = false } =
-    (typeof captureIdentity === "string" ? { captureId: captureIdentity } : captureIdentity) ?? {};
   const hierarchy = projectActionableHierarchy(platform, source, iosMultiPanel);
   const snapshot: HierarchySnapshot = {
     captureId: captureId ?? ids.next(),

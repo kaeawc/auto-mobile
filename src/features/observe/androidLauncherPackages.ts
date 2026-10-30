@@ -200,9 +200,11 @@ export async function resolveConfiguredHomePackage(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  incarnationToken?: string,
-  signal?: AbortSignal,
-  timeoutMs?: number,
+  {
+    incarnationToken,
+    signal,
+    timeoutMs,
+  }: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string | null> {
   // Combine the caller's signal with the ambient request signal, then honor
   // cancellation BEFORE the warm-cache early return below: a hot cache would
@@ -308,14 +310,11 @@ export async function isForegroundLauncher(
     return false;
   }
   const { incarnationToken, signal, timeoutMs } = options;
-  const configuredHome = await resolveConfiguredHomePackage(
-    adb,
-    deviceId,
-    timer,
+  const configuredHome = await resolveConfiguredHomePackage(adb, deviceId, timer, {
     incarnationToken,
     signal,
     timeoutMs,
-  );
+  });
   // AAOS embeds this map host in Home while the configured HOME package owns the shell.
   if (options.formFactor === "automotive" && appId === "com.android.car.mapsplaceholder") {
     return true;

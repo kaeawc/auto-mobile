@@ -98,13 +98,19 @@ export function guardNamespaceNodes(
     : searchedNodes;
 }
 
+/** How an element-id query compares, and which captured nodes guard bare synthetic ids. */
+interface IdMatchOptions {
+  caseSensitive?: boolean;
+  /** Defaults to the searched nodes. */
+  captureNodes?: readonly SearchableEntry[];
+}
+
 export function matchId(
   nodes: SearchableEntry[],
   query: string,
   matchMode: MatchMode,
   intent: ResolutionIntent,
-  caseSensitive?: boolean,
-  captureNodes: readonly SearchableEntry[] = nodes,
+  { caseSensitive, captureNodes = nodes }: IdMatchOptions = {},
 ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
   if (matchMode === "regex") {
     return {

@@ -33,8 +33,9 @@ const spec = (extra: Record<string, unknown>, root: unknown = { type: "spacer" }
 describe("notifications module contract", () => {
   const notifications = PROTOTYPE_PLATFORM_MODULES.notifications;
 
-  test("post, cancel and setBadge; posting and badging need the notifications permission", () => {
-    expect(Object.keys(notifications.calls)).toEqual(["post", "cancel", "setBadge"]);
+  test("post, cancel, setBadge and schedule; all but cancel need the notifications permission", () => {
+    expect(Object.keys(notifications.calls)).toEqual(["post", "cancel", "setBadge", "schedule"]);
+    expect(notifications.calls.schedule.permissions).toEqual(["notifications"]);
     expect(notifications.calls.post.permissions).toEqual(["notifications"]);
     expect(notifications.calls.setBadge.permissions).toEqual(["notifications"]);
     expect(notifications.calls.cancel.permissions).toEqual([]);
@@ -46,12 +47,13 @@ describe("notifications module contract", () => {
     expect(Object.values(notifications.calls.cancel.args).every((arg) => arg.optional)).toBe(true);
   });
 
-  test("events are opened, action, reply and dismissed, and only reply is sensitive", () => {
+  test("events are opened, action, reply, dismissed and scheduledFired; only reply is sensitive", () => {
     expect(notifications.events).toEqual({
       opened: { sensitive: false },
       action: { sensitive: false },
       reply: { sensitive: true },
       dismissed: { sensitive: false },
+      scheduledFired: { sensitive: false },
     });
   });
 
@@ -74,6 +76,18 @@ describe("notifications module contract", () => {
       "restricted",
       "unavailable",
     ]);
+  });
+
+  test("schedule takes the post arguments plus a whole-second delay of 1 to 604800 behind its own capability", () => {
+    const { delaySeconds, ...postArgs } = notifications.calls.schedule.args;
+    expect(postArgs).toEqual(notifications.calls.post.args);
+    expect(delaySeconds).toEqual({
+      optional: false,
+      value: { kind: "number", integer: true, min: 1, max: 604800 },
+    });
+    expect(notifications.calls.schedule.capability).toBe(
+      "prototype_platform_notifications_scheduled_v1",
+    );
   });
 });
 

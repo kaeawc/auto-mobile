@@ -51,13 +51,9 @@ export function strokeAdmissionEndedError(method: string, admission: StrokeAdmis
         deviceId,
         lifted(`session ${holderSessionId} no longer holds the device`),
       )
-    : new InputDeviceOwnedError(
-        method,
-        deviceId,
-        undefined,
-        undefined,
-        lifted("a session acquired the device"),
-      );
+    : new InputDeviceOwnedError(method, deviceId, undefined, undefined, {
+        message: lifted("a session acquired the device"),
+      });
 }
 
 /** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */

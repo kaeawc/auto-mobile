@@ -26,6 +26,7 @@ import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import { TerminalReleaseGenerationRefusedError } from "../TerminalReleaseGenerationRefusedError";
 import { type SessionLifecycleSlots } from "./internalContracts";
 import { type TerminalIntentDurability } from "./releaseWrite";
+import type { RefusedRowWriteRelease } from "./supersededRows";
 
 export interface SessionReleasePersistenceHost {
   isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean;
@@ -42,12 +43,7 @@ export interface SessionReleasePersistenceHost {
     write: (
       guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
     ) => Promise<T>,
-    releaseReason?: string,
-    releaseOptions?: {
-      unlessDaemonShutdown?: boolean;
-      resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
-      incarnation?: Session;
-    },
+    release?: RefusedRowWriteRelease,
   ): Promise<T>;
   readonly sessionSlots: Pick<
     SessionLifecycleSlots,
@@ -151,8 +147,8 @@ export class SessionReleasePersistence {
           expectedRowGeneration: next.expectedRowGeneration,
           unlessTerminalOrOwnedByLivePeer: next,
         }),
-      snapshot.releaseReason,
       {
+        writingReleaseReason: snapshot.releaseReason,
         unlessDaemonShutdown: precondition.unlessDaemonShutdown,
         incarnation: this.releaseRowSessions.get(snapshot)?.deref(),
         resolveRowGeneration: (row) => {
@@ -209,8 +205,10 @@ export class SessionReleasePersistence {
           expectedRowGeneration: precondition.expectedRowGeneration,
         },
         (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
-        snapshot.releaseReason,
-        { unlessDaemonShutdown: precondition.unlessDaemonShutdown },
+        {
+          writingReleaseReason: snapshot.releaseReason,
+          unlessDaemonShutdown: precondition.unlessDaemonShutdown,
+        },
       ));
     };
   }

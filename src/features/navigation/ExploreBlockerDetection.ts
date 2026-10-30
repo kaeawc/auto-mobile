@@ -54,6 +54,11 @@ export interface BlockerHandlerDeps {
   timer?: Timer;
 }
 
+/** Per-call options for the blocker handlers: the injected seams plus the caller's progress. */
+export interface BlockerHandlerOptions extends BlockerHandlerDeps {
+  progress?: ProgressCallback;
+}
+
 const defaultTapActionFactory: DialogTapActionFactory = (device, adb) =>
   new TapOnElement(device, adb);
 
@@ -413,11 +418,11 @@ export async function handlePermissionDialog(
   viewHierarchy: ViewHierarchyResult,
   device: BootedDevice,
   adb: AdbExecutor | null,
-  progress?: ProgressCallback,
-  deps: BlockerHandlerDeps = {},
+  options: BlockerHandlerOptions = {},
 ): Promise<boolean> {
-  const tapActionFactory = deps.tapActionFactory ?? defaultTapActionFactory;
-  const timer = deps.timer ?? defaultTimer;
+  const { progress } = options;
+  const tapActionFactory = options.tapActionFactory ?? defaultTapActionFactory;
+  const timer = options.timer ?? defaultTimer;
   for (const element of elements) {
     if (!element.clickable || !isAffirmativeGrantElement(element)) {
       continue;
@@ -461,11 +466,11 @@ async function dismissDialog(
   viewHierarchy: ViewHierarchyResult,
   device: BootedDevice,
   adb: AdbExecutor | null,
-  progress?: ProgressCallback,
-  deps: BlockerHandlerDeps = {},
+  options: BlockerHandlerOptions = {},
 ): Promise<boolean> {
-  const tapActionFactory = deps.tapActionFactory ?? defaultTapActionFactory;
-  const timer = deps.timer ?? defaultTimer;
+  const { progress } = options;
+  const tapActionFactory = options.tapActionFactory ?? defaultTapActionFactory;
+  const timer = options.timer ?? defaultTimer;
   for (const element of elements) {
     if (!element.clickable || !matchesAnyKeywordInAnyField(DISMISS_KEYWORD_TOKENS, element)) {
       continue;
@@ -505,8 +510,7 @@ export async function detectAndHandleBlockers(
   device: BootedDevice,
   adb: AdbExecutor | null,
   elementParser: ElementParser,
-  progress?: ProgressCallback,
-  deps: BlockerHandlerDeps = {},
+  options: BlockerHandlerOptions = {},
 ): Promise<boolean> {
   const viewHierarchy = observation.viewHierarchy;
   if (!viewHierarchy || viewHierarchy.hierarchy.error) {
@@ -519,7 +523,7 @@ export async function detectAndHandleBlockers(
   // Check for permission dialogs
   if (isPermissionDialog(elements)) {
     logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-    return await handlePermissionDialog(elements, viewHierarchy, device, adb, progress, deps);
+    return await handlePermissionDialog(elements, viewHierarchy, device, adb, options);
   }
 
   // Check for login/signup screens
@@ -533,7 +537,7 @@ export async function detectAndHandleBlockers(
   // Check for app rating/review dialogs
   if (isRatingDialog(elements)) {
     logger.info("[Explore] Detected rating dialog, attempting to dismiss");
-    return await dismissDialog(elements, viewHierarchy, device, adb, progress, deps);
+    return await dismissDialog(elements, viewHierarchy, device, adb, options);
   }
 
   return false;

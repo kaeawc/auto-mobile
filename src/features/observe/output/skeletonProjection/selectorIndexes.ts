@@ -87,7 +87,7 @@ export function assignDuplicateIndexes(
     if (canSkipSelectorGroup(group, exactCounts.byId.get(elementId), nodes !== undefined)) {
       continue;
     }
-    indexSelectorGroup(group, { elementId }, selectionViewport, nodes, searchedNodes);
+    indexSelectorGroup(group, { elementId }, selectionViewport, { nodes, searchedNodes });
   }
   for (const [text, group] of byLabel) {
     if (
@@ -100,7 +100,11 @@ export function assignDuplicateIndexes(
     ) {
       continue;
     }
-    indexSelectorGroup(group, { text }, selectionViewport, nodes, searchedNodes, true);
+    indexSelectorGroup(group, { text }, selectionViewport, {
+      nodes,
+      searchedNodes,
+      labelOnly: true,
+    });
   }
 }
 
@@ -143,9 +147,15 @@ function indexSelectorGroup(
   group: SkeletonAccumulator[],
   selector: ResolverSelector,
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
-  nodes: readonly SearchableEntry[] | undefined,
-  searchedNodes: readonly SearchableEntry[] | undefined,
-  labelOnly = false,
+  {
+    nodes,
+    searchedNodes,
+    labelOnly = false,
+  }: {
+    nodes: readonly SearchableEntry[] | undefined;
+    searchedNodes: readonly SearchableEntry[] | undefined;
+    labelOnly?: boolean;
+  },
 ): void {
   const candidates = nodes
     ? new ElementResolver().resolve({ id: "skeleton", nodes, searchedNodes }, selector, {

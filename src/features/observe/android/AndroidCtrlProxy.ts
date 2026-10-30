@@ -34,7 +34,7 @@ import type {
   PrototypeResult,
 } from "./ctrlProxyProtocol";
 import type { PackageInfoOptions } from "./CtrlProxyPackages";
-import type { DragRequest, SwipeRequest } from "../shared/types";
+import type { DispatchOptions, DragRequest, SwipeRequest } from "../shared/types";
 import type {
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
@@ -62,6 +62,7 @@ import type {
   A11yLaunchIntentResult,
   AndroidPerfTiming,
   HierarchySyncRequestOptions,
+  ImeCommitOptions,
   LatestHierarchyOptions,
 } from "./types";
 import type { AndroidCtrlProxyClient } from "./AndroidCtrlProxyClient";
@@ -190,9 +191,7 @@ export interface AndroidCtrlProxy
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
-    trace?: boolean,
+    options?: ImeCommitOptions,
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -266,7 +265,7 @@ export interface AndroidCtrlProxy
     text?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: DispatchOptions,
   ): Promise<A11yClipboardResult>;
 
   requestSettingsGet(

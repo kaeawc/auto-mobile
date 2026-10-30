@@ -1,4 +1,5 @@
 import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch";
+import type { DispatchOptions } from "../shared/types";
 /**
  * CtrlProxyKeyboard - iOS keyboard delegate.
  */
@@ -72,8 +73,7 @@ export class CtrlProxyKeyboard {
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { signal, onDispatch }: DispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>> {
     return sendIOSPressCommand(this.context, {
       idPrefix: "pressKey",

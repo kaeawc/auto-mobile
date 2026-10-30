@@ -67,14 +67,7 @@ export function createRecording(
         ? { recorder: baseRecorder, ownerSessionUuid: base }
         : undefined;
     },
-    new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      observationReaders,
-    ),
+    new DefaultMutationPriorReader({ observationReaders }),
     undefined,
     undefined,
     (uuid, reason) => context.sessionBrokerService()?.markMutationUnrecorded(uuid, reason),

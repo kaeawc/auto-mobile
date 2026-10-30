@@ -57,16 +57,14 @@ function sharedKeys(
       at,
     );
   }
-  return repeatTemplateKeys(key, parent, node.path, at, data, glass);
+  return repeatTemplateKeys(key, parent, data, { path: node.path, at, glass });
 }
 
 function repeatTemplateKeys(
   key: string,
   parent: Located | undefined,
-  path: string,
-  at: string,
   data: PrototypeRepeatData,
-  glass: boolean,
+  { path, at, glass }: { path: string; at: string; glass: boolean },
 ): string[] | PrototypeValidationError {
   const repeat = record(parent?.value.repeat);
   if (!repeat || (!glass && parent?.path === path) || typeof repeat.key !== "string") {
@@ -136,7 +134,7 @@ export function prototypeSharedElementError(
   const pairs = new Map<string, SharedOccurrence[]>();
   const glassKeys = new Map<string, Set<string>>();
   for (const located of nodes) {
-    const error = addSharedNode(located, nodes, data, pairs, sources, glassKeys);
+    const error = addSharedNode(located, nodes, data, { pairs, sources, glassKeys });
     if (error) {
       return error;
     }
@@ -153,9 +151,15 @@ function addSharedNode(
   located: Located,
   nodes: Located[],
   data: PrototypeRepeatData,
-  pairs: Map<string, SharedOccurrence[]>,
-  sources: Set<string>,
-  glassKeys: Map<string, Set<string>>,
+  {
+    pairs,
+    sources,
+    glassKeys,
+  }: {
+    pairs: Map<string, SharedOccurrence[]>;
+    sources: Set<string>;
+    glassKeys: Map<string, Set<string>>;
+  },
 ): PrototypeValidationError | undefined {
   const { value: node, path } = located;
   const shared = record(node.shared);

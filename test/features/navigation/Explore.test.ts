@@ -1385,7 +1385,9 @@ describe("Explore", () => {
       // auto-advancing fakeTimer, so the run stays fast without stubbing a
       // module-level timer.
       const fakeTap = new FakeDialogTapAction();
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, {
+        tapActionFactory: fakeTap.factory,
+      });
 
       const denyOnlyDialog = createMockObservation([
         createMockViewHierarchyNode({
@@ -1429,7 +1431,9 @@ describe("Explore", () => {
     // A grantable permission dialog still taps "Allow" and exploration proceeds.
     test("grants a permission dialog and continues exploring", async () => {
       const fakeTap = new FakeDialogTapAction();
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, {
+        tapActionFactory: fakeTap.factory,
+      });
 
       const grantDialog = createMockObservation([
         createMockViewHierarchyNode({
@@ -1484,7 +1488,9 @@ describe("Explore", () => {
     // stop despite the intervening successful grant.
     test("resets the no-change streak after granting a permission", async () => {
       const fakeTap = new FakeDialogTapAction();
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, {
+        tapActionFactory: fakeTap.factory,
+      });
 
       const grantDialog = createMockObservation([
         createMockViewHierarchyNode({
@@ -1512,7 +1518,9 @@ describe("Explore", () => {
 
     test("does not fast-path an unconfirmed permission-like app screen", async () => {
       const fakeTap = new FakeDialogTapAction();
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, {
+        tapActionFactory: fakeTap.factory,
+      });
       const observation = createMockObservation([
         createMockViewHierarchyNode({ class: "android.widget.TextView", text: "App permissions" }),
         createMockViewHierarchyNode({ text: "OK", "resource-id": "com.example.app:id/ok_button" }),
@@ -1524,7 +1532,9 @@ describe("Explore", () => {
 
     test("caps taps on a repeatedly appearing confirmed permission dialog", async () => {
       const fakeTap = new FakeDialogTapAction();
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, {
+        tapActionFactory: fakeTap.factory,
+      });
       const observation = createMockObservation([
         createMockViewHierarchyNode({
           text: "Allow",
@@ -2348,7 +2358,9 @@ describe("Explore", () => {
     for (const kind of ["permission", "rating"] as const) {
       test(`a ${kind} dialog dismissal records no tool call, so no later edge can be attributed to it`, async () => {
         const fakeTap = new FakeDialogTapAction();
-        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, {
+          tapActionFactory: fakeTap.factory,
+        });
         const dialog = blockerDialogs[kind]();
         const normal = createMockObservation();
         let observeCount = 0;
@@ -2674,7 +2686,7 @@ describe("Explore", () => {
         },
       );
       const signal = new AbortController().signal;
-      explore = new Explore(iOSDevice, null, fakeTimer, fakeGraph, "session-1");
+      explore = new Explore(iOSDevice, null, fakeTimer, fakeGraph, { sessionUuid: "session-1" });
       explore.setStateForTesting({ targetPackageName: "com.test.app" });
 
       await explore.resetToHome(undefined, signal);

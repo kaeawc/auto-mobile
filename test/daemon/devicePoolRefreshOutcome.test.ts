@@ -359,8 +359,9 @@ describe("Android discovery failure refresh outcome", () => {
         },
       }),
       undefined,
-      undefined,
-      { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+      {
+        physicalIosDevices: { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+      },
     );
     const pool = makePool(sessions, "android-discovery-failure", {
       timer,

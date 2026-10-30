@@ -119,7 +119,9 @@ const methods: Method[] = [
     name: `clipboard ${action}`,
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestClipboard(action, action === "copy" ? "text" : undefined, 50, perf, signal),
+      h.client.requestClipboard(action, action === "copy" ? "text" : undefined, 50, perf, {
+        signal,
+      }),
   })),
   {
     name: "global action",
@@ -262,7 +264,9 @@ const methods: Method[] = [
           });
         }
       };
-      return h.client.testHooks.text().commitViaIme("text", undefined, 50, perf, signal);
+      return h.client.testHooks
+        .text()
+        .commitViaIme("text", undefined, 50, perf, { signal: signal });
     },
   },
   {
@@ -312,7 +316,9 @@ const methods: Method[] = [
   {
     name: "set preference",
     invoke: (h) =>
-      h.client.testHooks.storage().setPreference("pkg", "prefs", "key", null, "STRING", 50),
+      h.client.testHooks
+        .storage()
+        .setPreference("pkg", "prefs", { key: "key", value: null, type: "STRING" }, 50),
   },
   {
     name: "remove preference",

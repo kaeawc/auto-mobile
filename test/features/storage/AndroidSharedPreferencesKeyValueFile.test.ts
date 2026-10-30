@@ -325,7 +325,12 @@ describe("removeAndroidKeyValueDirect", () => {
       { appId: "com.example.app", fileName: "settings" },
       { key: "probeA", value: "1", type: "STRING" },
     );
-    await removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA");
+    await removeAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      { appId: "com.example.app", fileName: "settings" },
+      "probeA",
+    );
 
     const commands = adb.getExecutedCommands();
     const secondWrite = commands
@@ -344,7 +349,12 @@ describe("removeAndroidKeyValueDirect", () => {
     );
 
     await expect(
-      removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA"),
+      removeAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        { appId: "com.example.app", fileName: "settings" },
+        "probeA",
+      ),
     ).resolves.toBeUndefined();
     expect(adb.getExecutedCommands()).not.toContainEqual(
       expect.stringContaining("base64 -d > shared_prefs/settings.xml"),
@@ -483,7 +493,12 @@ describe("direct mutation serialization (#6292)", () => {
         { appId: "com.example.app", fileName: "settings" },
         { key: "added", value: "9", type: "STRING" },
       ),
-      removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "existing"),
+      removeAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        { appId: "com.example.app", fileName: "settings" },
+        "existing",
+      ),
     ]);
 
     const finalXml = adb.currentXml();
@@ -593,7 +608,12 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
     [
       "removeAndroidKeyValueDirect",
       (adb, userId) =>
-        removeAndroidKeyValueDirect(adb, "device-1", APP, "settings", "probeA", userId),
+        removeAndroidKeyValueDirect(
+          adb,
+          "device-1",
+          { appId: APP, fileName: "settings", userId: userId },
+          "probeA",
+        ),
     ],
     [
       "clearAndroidKeyValueFileDirect",

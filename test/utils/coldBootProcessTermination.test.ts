@@ -114,11 +114,12 @@ function watch(
   const timer = new RecordingTimer();
   const exit = Promise.withResolvers<void>();
   let gone = false;
-  void watchSurvivingProcess(handle, exit.promise, "Pixel_9", timer, isRunning, generation).then(
-    () => {
-      gone = true;
-    },
-  );
+  void watchSurvivingProcess(handle, exit.promise, "Pixel_9", timer, {
+    isProcessRunning: isRunning,
+    processGeneration: generation,
+  }).then(() => {
+    gone = true;
+  });
   return { timer, exit, gone: () => gone };
 }
 

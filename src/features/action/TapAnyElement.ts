@@ -386,14 +386,10 @@ export class TapAnyElement extends BaseVisualChange {
         timeoutMs,
         signal,
       });
-      identifyObservedHierarchy(
-        this.tapPlatform,
-        snapshot.hierarchy,
-        "fresh",
-        this.timer,
-        undefined,
-        { captureId: snapshot.captureId, iosMultiPanel: this.iosMultiPanel },
-      );
+      identifyObservedHierarchy(this.tapPlatform, snapshot.hierarchy, "fresh", this.timer, {
+        captureId: snapshot.captureId,
+        iosMultiPanel: this.iosMultiPanel,
+      });
       return snapshot.hierarchy;
     } catch (error) {
       throwIfAborted(signal);
@@ -471,7 +467,6 @@ export class TapAnyElement extends BaseVisualChange {
           refreshed,
           "fresh",
           this.timer,
-          undefined,
           { iosMultiPanel: this.iosMultiPanel },
         );
         const found = this.findClickableElement(options, selectedCapture.hierarchy, {
@@ -549,7 +544,6 @@ export class TapAnyElement extends BaseVisualChange {
       viewHierarchy,
       "cached-ok",
       this.timer,
-      undefined,
       { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
     );
     const searchDurationMs = this.getSearchUntilDuration(options);

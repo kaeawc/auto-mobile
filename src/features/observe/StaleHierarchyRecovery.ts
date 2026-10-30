@@ -272,11 +272,14 @@ export class StaleHierarchyRecovery {
         () =>
           this.viewHierarchy.getViewHierarchy(
             {},
-            new NoOpPerformanceTracker(),
-            true,
-            Math.max(1, updatedAt ?? 1),
-            retrySignal,
-            { timeoutMs: remainingMs, requireFreshExtraction: true },
+            {
+              perf: new NoOpPerformanceTracker(),
+              skipWaitForFresh: true,
+              minTimestamp: Math.max(1, updatedAt ?? 1),
+              signal: retrySignal,
+              timeoutMs: remainingMs,
+              requireFreshExtraction: true,
+            },
           ),
         {
           timer: this.timer,

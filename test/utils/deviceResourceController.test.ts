@@ -46,7 +46,6 @@ describe("device resource control", () => {
       plist,
       timer,
       (path) => plist.readDirectory(path),
-      undefined,
       { hazards },
     );
     request.resources = { calendarServices: "disabled", reminderServices: "disabled" };

@@ -80,7 +80,7 @@ const ids = { next: () => "capture-1" };
 describe("SDK bridge merge keeps selectors and change detection right (#5159)", () => {
   test("a snapshot bound before the merge indexes the merged bridge nodes", async () => {
     const hierarchy = xctestHierarchy();
-    identifyObservedHierarchy("ios", hierarchy, "fresh", new FakeTimer(), ids);
+    identifyObservedHierarchy("ios", hierarchy, "fresh", new FakeTimer(), { ids });
     const indexed = () =>
       JSON.stringify(getHierarchySnapshot(hierarchy)?.nodes ?? []).includes('"save"');
     expect(indexed()).toBe(false);

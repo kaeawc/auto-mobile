@@ -48,13 +48,9 @@ describe("announceSessionRelease", () => {
     const announcer = new FakeAnnouncer();
     announcer.captured.set("a", ["rec-1"]);
     const announced = new Set<string>();
-    announceSessionRelease(
-      announcer,
-      { fallbacks: new Set(), announced },
-      "a",
-      "daemon-shutdown",
-      snapshot("a"),
-    );
+    announceSessionRelease(announcer, { fallbacks: new Set(), announced }, "a", "daemon-shutdown", {
+      snapshot: snapshot("a"),
+    });
     expect(announcer.emitted).toEqual([
       { sessionId: "a", reason: "daemon-shutdown", recordingIds: ["rec-1"] },
     ]);
@@ -69,7 +65,7 @@ describe("announceSessionRelease", () => {
       { fallbacks: new Set(["a"]), announced: new Set() },
       "a",
       "daemon-shutdown",
-      snapshot("a"),
+      { snapshot: snapshot("a") },
     );
     expect(announcer.emitted).toEqual([]);
 
@@ -79,7 +75,7 @@ describe("announceSessionRelease", () => {
       { fallbacks: null, announced: null },
       "a",
       "heartbeat-timeout",
-      snapshot("a"),
+      { snapshot: snapshot("a") },
     );
     expect(announcer.emitted).toEqual([
       { sessionId: "a", reason: "heartbeat-timeout", recordingIds: undefined },
@@ -93,8 +89,7 @@ describe("announceSessionRelease", () => {
       { fallbacks: null, announced: null },
       "a",
       "explicit-release",
-      snapshot("a"),
-      { upgradeOnly: true },
+      { snapshot: snapshot("a"), upgradeOnly: true },
     );
     expect(announcer.emitted).toEqual([
       { sessionId: "a", reason: "explicit-release", recordingIds: undefined, upgradeOnly: true },

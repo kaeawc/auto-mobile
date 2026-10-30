@@ -57,6 +57,12 @@ interface AndroidAppFileUser {
   pinInResourceUri: boolean;
 }
 
+/** The caller's requested user (if any) and cancellation for one user resolution. */
+interface AndroidAppFileUserRequest {
+  userId?: number;
+  signal?: AbortSignal;
+}
+
 // Explicit IDs (including 0) always round-trip. Auto-resolved 0 is pinned only
 // when several users have the app installed; a sole user-0 installation keeps
 // its existing query-free URI. Nonzero resolved users are always pinned.
@@ -65,8 +71,7 @@ async function resolveAndroidAppFileUser(
   foregroundAppLookup: ForegroundAppLookup,
   device: BootedDevice,
   appId: string,
-  userId?: number,
-  signal?: AbortSignal,
+  { userId, signal }: AndroidAppFileUserRequest,
 ): Promise<AndroidAppFileUser> {
   const resolver = new AndroidUserTargetResolver(adb);
   if (userId !== undefined) {
@@ -110,14 +115,10 @@ async function resolveAndroidAppFileUser(
         `Android app ${appId} is not installed for any user on ${device.deviceId}. Install the app for the intended user.`,
       );
     }
-    return await resolveAmbiguousAndroidAppFileUser(
-      adb,
-      foregroundAppLookup,
-      device,
-      appId,
+    return await resolveAmbiguousAndroidAppFileUser(adb, foregroundAppLookup, device, appId, {
       candidates,
       signal,
-    );
+    });
   } catch (error) {
     signal?.throwIfAborted();
     throw toActionableError(
@@ -132,8 +133,7 @@ async function resolveAmbiguousAndroidAppFileUser(
   foregroundAppLookup: ForegroundAppLookup,
   device: BootedDevice,
   appId: string,
-  candidates: number[],
-  signal?: AbortSignal,
+  { candidates, signal }: { candidates: number[]; signal?: AbortSignal },
 ): Promise<AndroidAppFileUser> {
   try {
     const foreground = await foregroundAppLookup.getForegroundApp(signal);
@@ -152,6 +152,13 @@ async function resolveAmbiguousAndroidAppFileUser(
   throw new ActionableError(
     `Android app ${appId} on ${device.deviceId} is installed for candidate users ${candidates.join(", ")}, but no installed foreground user could be selected. Pass userId explicitly (resource query ?userId=N).`,
   );
+}
+
+/** How one file write of a batch reports back to the batch's rollback bookkeeping. */
+interface AndroidAppFileWriteTracking {
+  onWritten: (backup: string | undefined) => void;
+  cleanupFailures: string[];
+  keepPrevious: boolean;
 }
 
 function androidRunAsPrefix(appId: string, userId: number): string {
@@ -213,8 +220,7 @@ export class AndroidAppFileProvider
       this.foregroundAppLookup ?? adb,
       request.device,
       appTarget.appId,
-      request.userId,
-      request.signal,
+      { userId: request.userId, signal: request.signal },
     );
     const results: AppFileProviderWriteResult[] = [];
     const writtenPaths: string[] = [];
@@ -225,11 +231,8 @@ export class AndroidAppFileProvider
     try {
       for (const file of requests) {
         failedPath = file.destinationPath;
-        await this.writeFile(
-          file,
-          adb,
-          userId,
-          (backup) => {
+        await this.writeFile(file, adb, userId, {
+          onWritten: (backup) => {
             writtenPaths.push(file.destinationPath);
             if (backup !== undefined) {
               backups.set(file.destinationPath, backup);
@@ -237,8 +240,8 @@ export class AndroidAppFileProvider
           },
           cleanupFailures,
           // A single-file write has no earlier file to roll back, so it needs no backup.
-          requests.length > 1,
-        );
+          keepPrevious: requests.length > 1,
+        });
         if (cleanupFailures.length > 0) {
           throw new ActionableError("Android app-file staging cleanup failed.");
         }
@@ -368,9 +371,7 @@ export class AndroidAppFileProvider
     request: PutAppFileProviderRequest,
     adb: AdbExecutor,
     userId: number,
-    onWritten: (backup: string | undefined) => void,
-    cleanupFailures: string[],
-    keepPrevious: boolean,
+    { onWritten, cleanupFailures, keepPrevious }: AndroidAppFileWriteTracking,
   ): Promise<void> {
     const appTarget = requireAppContainersTarget(request.target);
     const target = resolveAndroidTarget(
@@ -521,7 +522,7 @@ export class AndroidAppFileProvider
       this.foregroundAppLookup ?? adb,
       request.device,
       request.appId,
-      request.userId,
+      { userId: request.userId },
     );
     if (base.kind === "external" && userId !== 0) {
       const resolved = resolveAndroidTarget(
@@ -626,7 +627,7 @@ export class AndroidAppFileProvider
       this.foregroundAppLookup ?? adb,
       request.device,
       request.appId,
-      request.userId,
+      { userId: request.userId },
     );
     if (target.kind === "external" && userId !== 0) {
       const resolved = resolveAndroidTarget(request.appId, request.container, request.path, userId);

@@ -97,8 +97,7 @@ export class TargetFocus {
           this.deps.device,
           this.deps.adb(),
           focusedWindow.displayId,
-          signal,
-          focusedWindow.panelUniqueId,
+          { signal, identity: focusedWindow.panelUniqueId },
         )
       : undefined;
     if (focusedPanel?.key === observation.display.key) {
@@ -126,7 +125,7 @@ export class TargetFocus {
         this.deps.device,
         adb,
         displayId,
-        signal,
+        { signal },
       );
     } catch (error) {
       signal?.throwIfAborted();

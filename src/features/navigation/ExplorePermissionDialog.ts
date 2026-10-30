@@ -85,14 +85,10 @@ export class ExplorePermissionDialog {
     this.permissionDialogTapAttempts++;
 
     logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-    const granted = await handlePermissionDialog(
-      elements,
-      viewHierarchy,
-      deps.device,
-      deps.adb,
+    const granted = await handlePermissionDialog(elements, viewHierarchy, deps.device, deps.adb, {
+      ...deps.blockerHandlerDeps,
       progress,
-      deps.blockerHandlerDeps,
-    );
+    });
     if (granted) {
       deps.resetNoChange();
       return "continue";

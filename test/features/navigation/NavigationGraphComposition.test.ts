@@ -297,8 +297,10 @@ describe("navigation graph composition", () => {
             state,
             { getCurrentScreen: () => actual },
             timer,
-            resolution.status === "back" ? 1 : resolution.confidence,
-            () => {},
+            {
+              elementConfidence: resolution.status === "back" ? 1 : resolution.confidence,
+              setStopReason: () => {},
+            },
           );
           outcome.set(label, `${resolution.status}:${ok ? "ok" : "diverged"}`);
         }

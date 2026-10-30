@@ -373,7 +373,12 @@ function argumentsError(
       }
       continue;
     }
-    const error = argumentValueError(action, name, args[name], at, declared.value, check);
+    const error = argumentValueError(
+      action,
+      { name, value: args[name], at },
+      declared.value,
+      check,
+    );
     if (error) {
       return error;
     }
@@ -867,9 +872,7 @@ export const PROTOTYPE_PLATFORM_MODULE_GATES = [
 
 function argumentValueError(
   action: Raw,
-  name: string,
-  value: unknown,
-  at: string,
+  { name, value, at }: { name: string; value: unknown; at: string },
   rule: Rule,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {

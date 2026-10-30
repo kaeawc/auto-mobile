@@ -25,6 +25,12 @@ export interface SettledScreenshotCaptureDeps {
   pathProtection: () => ScreenshotPathProtection;
 }
 
+/** Which display a settled screenshot captures, and how it is encoded. */
+export interface SettledScreenshotTarget {
+  displayId?: number;
+  screenshotOptions?: ObserveScreenshotOptions;
+}
+
 /** Settled screenshot capture and the raster evidence attached to its observation. */
 export class SettledScreenshotCapture {
   constructor(private readonly deps: SettledScreenshotCaptureDeps) {}
@@ -50,8 +56,7 @@ export class SettledScreenshotCapture {
     perf: PerformanceTracker,
     signal: AbortSignal | undefined,
     strict: boolean,
-    displayId?: number,
-    screenshotOptions?: ObserveScreenshotOptions,
+    { displayId, screenshotOptions }: SettledScreenshotTarget = {},
   ): Promise<void> {
     try {
       if (!this.screenshotRecorder.captureSettled) {

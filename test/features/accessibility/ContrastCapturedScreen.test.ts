@@ -63,8 +63,7 @@ describe("real dark-theme Playground capture", () => {
     const result = await audit.audit(
       appElements,
       { node: [] },
-      screenshot,
-      "playground",
+      { screenshotPath: screenshot, packageName: "playground" },
       config,
       480,
     );
@@ -92,8 +91,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      screenshot,
-      "playground",
+      { screenshotPath: screenshot, packageName: "playground" },
       config,
       {
         density: 480,
@@ -108,8 +106,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      undefined,
-      "playground",
+      { packageName: "playground" },
       config,
       {
         density: 480,
@@ -127,8 +124,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      screenshot,
-      "playground",
+      { screenshotPath: screenshot, packageName: "playground" },
       config,
       {
         density: 480,
@@ -142,8 +138,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      undefined,
-      "playground",
+      { packageName: "playground" },
       config,
       480,
     );

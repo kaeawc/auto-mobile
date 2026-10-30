@@ -463,14 +463,21 @@ async function resolveShowDisplay(
   }
 }
 
+interface MutationPreflightShow {
+  inPlace: boolean;
+  shownDisplayId?: number;
+  signal: AbortSignal | undefined;
+}
+
 /**
  * Chrome resolution/refusal, then display resolution, the iOS reset refusal, the theme-modes
  * refusal, the appearance-override refusal, window-option support, then anchor
  * resolution: any refusal ends the call unsent and leaves the device untouched (the app-layer grant
  * is a device side effect that runs later, in [sendPrototype]). An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
+ * [show.signal] cancels every device read the preflight makes.
  */
 export async function preflightMutation(
-  show: { inPlace: boolean; shownDisplayId?: number },
+  show: MutationPreflightShow,
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
@@ -478,8 +485,8 @@ export async function preflightMutation(
     PrototypeToolDependencies,
     "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "env"
   >,
-  signal: AbortSignal | undefined,
 ): Promise<PreflightStage> {
+  const { signal } = show;
   const multiSurface = await multiSurfaceRefusal(target, args, signal);
   if (multiSurface) {
     return { failure: multiSurface };
@@ -488,14 +495,7 @@ export async function preflightMutation(
   if (chrome.failure) {
     return { failure: chrome.failure };
   }
-  const resolved = await resolveMutationDisplay(
-    show.inPlace,
-    target,
-    device,
-    args,
-    dependencies,
-    signal,
-  );
+  const resolved = await resolveMutationDisplay(show, target, device, args, dependencies);
   if (resolved.failure) {
     return resolved;
   }
@@ -525,12 +525,11 @@ export async function preflightMutation(
  * the requested or pinned display is irrelevant: resolving it could only fail the call.
  */
 async function resolveMutationDisplay(
-  inPlace: boolean,
+  { inPlace, signal }: Pick<MutationPreflightShow, "inPlace" | "signal">,
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
-  signal: AbortSignal | undefined,
 ): Promise<{ displayId?: number; failure?: PrototypeResult }> {
   return inPlace ? {} : resolveShowDisplay(target, device, args, dependencies, signal);
 }

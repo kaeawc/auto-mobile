@@ -174,7 +174,10 @@ async function setupTapPipeline(withClientNotifications = false) {
   } else {
     a11y = new FakeA11y();
   }
-  const recorder = new DualTrackRecorder(device, reader, a11y, timer, tracker, source);
+  const recorder = new DualTrackRecorder(device, reader, a11y, timer, {
+    geometry: tracker,
+    displaySource: source,
+  });
   await recorder.start();
   await Promise.resolve();
   const feed = (text: string): void => {

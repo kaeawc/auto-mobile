@@ -198,6 +198,16 @@ export interface DarwinProcessStartReader {
   readStartSeconds(pid: number): number | undefined;
 }
 
+/** The native sysctl(3) argument list, in C order. */
+type DarwinSysctlArgs = [
+  mib: number,
+  count: number,
+  buffer: number,
+  length: number,
+  newValue: null,
+  newLength: number,
+];
+
 /** Only the bun:ffi surface needed for sysctl; resolved lazily like bun:sqlite. */
 interface DarwinSysctlFfi {
   FFIType: { ptr: number; u32: number; u64: number; i32: number };
@@ -209,14 +219,7 @@ interface DarwinSysctlFfi {
     },
   ): {
     symbols: {
-      sysctl: (
-        mib: number,
-        count: number,
-        buffer: number,
-        length: number,
-        newValue: null,
-        newLength: number,
-      ) => number;
+      sysctl: (...args: DarwinSysctlArgs) => number;
     };
   };
 }

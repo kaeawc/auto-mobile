@@ -104,8 +104,7 @@ export class SingleDisplayEnrichStage {
         perf,
         signal,
         options?.screenshot === "settled",
-        screenshotDisplayId,
-        options?.screenshotOptions,
+        { displayId: screenshotDisplayId, screenshotOptions: options?.screenshotOptions },
       );
     } else if (serverConfig.getAccessibilityAuditConfig()) {
       await this.d

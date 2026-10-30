@@ -648,7 +648,6 @@ describe("CtrlProxyVoiceOver", function () {
           "com.test.app:id/submit_button",
           undefined,
           5000,
-          undefined,
           { duration: 1750 },
         );
         const socket = await waitForSocket(getSocket);
@@ -690,7 +689,6 @@ describe("CtrlProxyVoiceOver", function () {
           undefined,
           undefined,
           5000,
-          undefined,
           { abortSignal: controller.signal },
         );
         const sentTypes = (getSocket()?.sentMessages ?? []).map(
@@ -716,14 +714,9 @@ describe("CtrlProxyVoiceOver", function () {
       const cancellation = new Error("openLink deadline exceeded");
 
       try {
-        const result = client.requestAction(
-          "system_alert_accept",
-          undefined,
-          undefined,
-          5000,
-          undefined,
-          { abortSignal: controller.signal },
-        );
+        const result = client.requestAction("system_alert_accept", undefined, undefined, 5000, {
+          abortSignal: controller.signal,
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);

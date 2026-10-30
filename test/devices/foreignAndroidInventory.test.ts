@@ -62,7 +62,7 @@ function harness() {
     getBootedDevicesChecked: async (only, options, signal) =>
       (await scanner.getBootedDevicesWithDiagnostics(only, options, signal)).devices,
   });
-  const manager = new MultiPlatformDeviceManager(adb, null, emulator, undefined, timer);
+  const manager = new MultiPlatformDeviceManager(adb, null, emulator, undefined, { timer });
   return { scanner, factory, names, manager, adb, timer, nameBudgets };
 }
 

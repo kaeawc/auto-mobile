@@ -703,17 +703,11 @@ export async function bindBootedDeviceSession(
       recoveryTarget,
     });
   if (resumeSessionId) {
-    return await resumePreparedDeviceSession(
-      device,
-      args,
-      resumeSessionId,
-      bind,
-      {
-        autolockEnabled: useAutolock,
-        achievedReadiness,
-      },
+    return await resumePreparedDeviceSession(device, args, resumeSessionId, bind, {
+      autolockEnabled: useAutolock,
+      achievedReadiness,
       daemonState,
-    );
+    });
   }
   const boundSessionId = await bind();
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
@@ -729,11 +723,12 @@ async function resumePreparedDeviceSession(
   {
     autolockEnabled,
     achievedReadiness,
+    daemonState,
   }: {
     autolockEnabled: boolean;
     achievedReadiness: DeviceReadinessLevel;
+    daemonState: Pick<DaemonStateLike, "getDevicePool" | "getSessionManager">;
   },
-  daemonState: Pick<DaemonStateLike, "getDevicePool" | "getSessionManager">,
 ): Promise<string> {
   const pool = daemonState.getDevicePool();
   // The resume bind and adoption share a close fence, including provisionDevice callers.

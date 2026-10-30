@@ -200,8 +200,7 @@ export const registerDeviceLabelMap = async (
   labels: string[],
   primaryLabel?: string,
   sessionOptions: SessionOptions = {},
-  execution?: SessionExecutionMetadata,
-  signal?: AbortSignal,
+  { execution, signal }: { execution?: SessionExecutionMetadata; signal?: AbortSignal } = {},
 ): Promise<DeviceLabelMap> => {
   const devicePool = defaultDaemonContext.fullDevicePool();
   const sessionManager = defaultDaemonContext.sessionManager();

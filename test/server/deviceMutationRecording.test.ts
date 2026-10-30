@@ -1120,21 +1120,21 @@ describe("review regression coverage", () => {
 
   test("readable state, rotation and screen reader priors use legacy device keys and the call signal", async () => {
     const signal = new AbortController().signal;
-    const reader = new DefaultMutationPriorReader(
-      {
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: {
         read: async (_device, _keys, actualSignal) => {
           expect(actualSignal).toBe(signal);
           return { fontScale: 1 };
         },
       },
-      () => ({ execute: async () => ({ success: false, action: "get" }) }),
-      () => ({
+      clipboardFor: () => ({ execute: async () => ({ success: false, action: "get" }) }),
+      biometricsFor: () => ({
         getBiometricEnrollmentState: async (actualSignal) => {
           expect(actualSignal).toBe(signal);
           return { supported: true, verified: true, enrollment: "enrolled" };
         },
       }),
-      () => ({
+      stateFor: () => ({
         getState: async (fields, actualSignal) => {
           expect(actualSignal).toBe(signal);
           expect(fields).toEqual([
@@ -1161,14 +1161,14 @@ describe("review regression coverage", () => {
           };
         },
       }),
-      () => ({
+      rotationFor: () => ({
         getRestoreState: async (actualSignal) => {
           expect(actualSignal).toBe(signal);
           return { accelerometerRotation: 1, userRotation: 0 };
         },
       }),
-      { screenReaderFor: () => ({ getEnabled: async () => false }) },
-    );
+      observationReaders: { screenReaderFor: () => ({ getEnabled: async () => false }) },
+    });
     const mutations = [
       ...deviceToolMutations("setDeviceState", {
         doNotDisturb: {},
@@ -1195,18 +1195,14 @@ describe("review regression coverage", () => {
 describe("existing cheap mutation prior readers", () => {
   test("iOS rotation records an unobservable prior without invoking Android orientation reads", async () => {
     let rotationReads = 0;
-    const reader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => ({
+    const reader = new DefaultMutationPriorReader({
+      rotationFor: () => ({
         getRestoreState: async () => {
           rotationReads++;
           return { orientation: "portrait" };
         },
       }),
-    );
+    });
     const journal = new FakeDeviceMutationJournal(new FakeTimer());
     const recorder = new SessionMutationRecorder(journal, SCOPE);
     const recording = new SessionDeviceMutationRecording(() => recorder, reader);
@@ -1234,13 +1230,8 @@ describe("existing cheap mutation prior readers", () => {
     "keyboard setProfile captures active profile %s or records unobservable and still dispatches",
     async (activeProfileId) => {
       let profileReads = 0;
-      const reader = new DefaultMutationPriorReader(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        {
+      const reader = new DefaultMutationPriorReader({
+        observationReaders: {
           keyboardProfilesFor: () => ({
             listKeyboardProfiles: async () => {
               profileReads++;
@@ -1248,7 +1239,7 @@ describe("existing cheap mutation prior readers", () => {
             },
           }),
         },
-      );
+      });
       const journal = new FakeDeviceMutationJournal(new FakeTimer());
       const recording = new SessionDeviceMutationRecording(
         () => new SessionMutationRecorder(journal, SCOPE),
@@ -1290,20 +1281,15 @@ describe("existing cheap mutation prior readers", () => {
   );
 
   test("failed keyboard profile reads record unobservable without preventing the action", async () => {
-    const reader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    const reader = new DefaultMutationPriorReader({
+      observationReaders: {
         keyboardProfilesFor: () => ({
           listKeyboardProfiles: async () => {
             throw new Error("profile unreadable");
           },
         }),
       },
-    );
+    });
     const journal = new FakeDeviceMutationJournal(new FakeTimer());
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, SCOPE),
@@ -1331,16 +1317,16 @@ describe("existing cheap mutation prior readers", () => {
 
   test("verified biometric enrollment is read before mutation without recording transient auth state as enrollment", async () => {
     let reads = 0;
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({}) },
-      () => ({ execute: async () => ({ success: false, action: "get" }) }),
-      () => ({
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({}) },
+      clipboardFor: () => ({ execute: async () => ({ success: false, action: "get" }) }),
+      biometricsFor: () => ({
         getBiometricEnrollmentState: async () => {
           reads++;
           return { supported: true, verified: true, enrollment: "not_enrolled" };
         },
       }),
-    );
+    });
     expect(await reader.read(DEVICE, [{ kind: "biometric-enrollment", key: "device" }])).toEqual([
       { state: "present", value: "not_enrolled" },
     ]);
@@ -1351,23 +1337,23 @@ describe("existing cheap mutation prior readers", () => {
   });
 
   test("unverified biometric enrollment remains non-revertible", async () => {
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({}) },
-      () => ({ execute: async () => ({ success: false, action: "get" }) }),
-      () => ({
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({}) },
+      clipboardFor: () => ({ execute: async () => ({ success: false, action: "get" }) }),
+      biometricsFor: () => ({
         getBiometricEnrollmentState: async () => ({ supported: true, enrollment: "enrolled" }),
       }),
-    );
+    });
     expect(await reader.read(DEVICE, [{ kind: "biometric-enrollment", key: "device" }])).toEqual([
       { state: "unobservable" },
     ]);
   });
 
   test("restorable settings distinguish missing prior state from an absent setting", async () => {
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({ fontScale: 1.25, timeFormat: null }) },
-      () => ({ execute: async () => ({ success: true, action: "get", text: "" }) }),
-    );
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({ fontScale: 1.25, timeFormat: null }) },
+      clipboardFor: () => ({ execute: async () => ({ success: true, action: "get", text: "" }) }),
+    });
     expect(
       await reader.read(DEVICE, [
         { kind: "device-setting", key: "fontScale" },
@@ -1384,9 +1370,12 @@ describe("existing cheap mutation prior readers", () => {
   });
 
   test("failed clipboard reads are unobservable, never absent", async () => {
-    const reader = new DefaultMutationPriorReader({ read: async () => ({}) }, () => ({
-      execute: async () => ({ success: false, action: "get" }),
-    }));
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({}) },
+      clipboardFor: () => ({
+        execute: async () => ({ success: false, action: "get" }),
+      }),
+    });
     expect(await reader.read(DEVICE, [{ kind: "clipboard", key: "device" }])).toEqual([
       { state: "unobservable" },
     ]);

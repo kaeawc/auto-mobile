@@ -206,7 +206,6 @@ async function reserveStartStableDeviceLifecycle(
   stableTarget: StableDeviceTarget | undefined,
   budgets: DevicePreparationBudgets,
   timer: Timer,
-  deadlineMs: number,
   signal: AbortSignal | undefined,
   coordinator: VirtualDeviceLifecycleCoordinator,
 ): Promise<VirtualDeviceLifecycleLease | undefined> {
@@ -221,7 +220,7 @@ async function reserveStartStableDeviceLifecycle(
       deviceId: stableTarget.stableId,
     },
     timer,
-    deadlineMs,
+    budgets.automationDeadlineMs,
     {
       requestAbortSignal: signal,
       timeoutError: (detail) =>
@@ -259,11 +258,16 @@ async function matchIosSimulatorSkippingManaged(
   );
 }
 
+/** The device listing and matcher a stable-target lookup resolves a selector through. */
+interface StableTargetDiscovery {
+  deviceUtils: PlatformDeviceManager;
+  deviceMatcher: DeviceMatcher;
+}
+
 async function resolveStartStableDeviceLifecycleTarget(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
-  deviceUtils: PlatformDeviceManager,
-  deviceMatcher: DeviceMatcher,
+  { deviceUtils, deviceMatcher }: StableTargetDiscovery,
   timer: Timer,
   signal: AbortSignal | undefined,
 ): Promise<StableDeviceTarget | undefined> {
@@ -394,20 +398,18 @@ async function reserveStartDeviceLifecycleReservations(
 }> {
   let releaseAndroidStartupLease: (() => Promise<void>) | undefined;
   let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
+  const stableTargetDiscovery = { deviceUtils, deviceMatcher };
   try {
-    releaseAndroidStartupLease = await reserveAndroidStartupLease(
-      args,
-      budgets,
+    releaseAndroidStartupLease = await reserveAndroidStartupLease(args, budgets, {
       bootDeadlineMs,
-      deps.timer,
+      timer: deps.timer,
       deviceUtils,
       signal,
-    );
+    });
     const stableTarget = await resolveStartStableDeviceLifecycleTarget(
       args,
       budgets,
-      deviceUtils,
-      deviceMatcher,
+      stableTargetDiscovery,
       deps.timer,
       signal,
     );
@@ -417,7 +419,6 @@ async function reserveStartDeviceLifecycleReservations(
         stableTarget,
         budgets,
         deps.timer,
-        budgets.automationDeadlineMs,
         signal,
         deps.lifecycleCoordinator,
       )) ?? (await reserveStartSelectorDeviceLifecycle(args, budgets, deps, signal));
@@ -425,8 +426,7 @@ async function reserveStartDeviceLifecycleReservations(
       const revalidatedTarget = await resolveStartStableDeviceLifecycleTarget(
         args,
         budgets,
-        deviceUtils,
-        deviceMatcher,
+        stableTargetDiscovery,
         deps.timer,
         signal,
       );

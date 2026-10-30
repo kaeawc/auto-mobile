@@ -250,7 +250,10 @@ class DefaultSharedStorageService implements SharedStorageService {
     });
     onPushed?.();
     const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
-      ? await indexMediaFile(adb, destination, destinationPath, userId, this.timer, request.signal)
+      ? await indexMediaFile(adb, destination, destinationPath, userId, {
+          timer: this.timer,
+          signal: request.signal,
+        })
       : {
           status: "notRequested" as const,
           reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true),
@@ -790,8 +793,7 @@ async function indexMediaFile(
   destination: string,
   destinationPath: string,
   userId: number,
-  timer: Timer,
-  signal?: AbortSignal,
+  { timer, signal }: { timer: Timer; signal?: AbortSignal },
 ): Promise<{ status: "completed" }> {
   await execute(adb, `shell ${mediaScanCommand(userId, destination)}`, signal);
   const collection = mediaCollectionFor(destinationPath);

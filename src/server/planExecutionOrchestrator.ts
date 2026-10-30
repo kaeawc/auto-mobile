@@ -489,8 +489,7 @@ export class PlanExecutionOrchestrator {
       effectiveLabels,
       this.request.device,
       { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
-      getToolSelectionContext()?.execution,
-      this.signal,
+      { execution: getToolSelectionContext()?.execution, signal: this.signal },
     );
 
     return deviceMapping;

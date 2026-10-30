@@ -217,9 +217,11 @@ export async function selectAndroidOpenLinkChooser(
   device: BootedDevice,
   packageName: string,
   opened: OpenURLResult,
-  url?: string,
-  chooser: Pick<HandleIntentChooser, "execute"> = new HandleIntentChooser(device),
-  signal?: AbortSignal,
+  {
+    url,
+    chooser = new HandleIntentChooser(device),
+    signal,
+  }: { url?: string; chooser?: Pick<HandleIntentChooser, "execute">; signal?: AbortSignal },
 ): Promise<OpenURLResult> {
   if (device.platform !== "android") {
     throw new ActionableError("chooserAppPackage is supported only on Android.");
@@ -818,14 +820,11 @@ export const createOpenLinkHandler =
     const opened = await openUrl.execute(args.url, { signal });
     throwIfAborted(signal);
     const result = args.chooserAppPackage
-      ? await selectAndroidOpenLinkChooser(
-          device,
-          args.chooserAppPackage,
-          opened,
-          opened.url,
-          (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
+      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened, {
+          url: opened.url,
+          chooser: (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
           signal,
-        )
+        })
       : opened;
     throwIfAborted(signal);
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;

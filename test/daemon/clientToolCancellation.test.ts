@@ -149,10 +149,12 @@ describe("DaemonClient tool cancellation", () => {
     const { client, socket, timer, respond } = setup();
     const controller = new AbortController();
     const remove = spyOn(controller.signal, "removeEventListener");
-    const cancelled = client.callTool("tapOn", {}, undefined, undefined, controller.signal).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const cancelled = client
+      .callTool("tapOn", {}, undefined, undefined, { signal: controller.signal })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     const sibling = client.callTool("tapOn", {});
     const [first, second] = socket.getWrittenMessages(daemonRequestFrameSchema);
     controller.abort(new Error("client cancelled"));
@@ -180,7 +182,9 @@ describe("DaemonClient tool cancellation", () => {
   test("an abort after the response, even before promise cleanup, sends no cancel", async () => {
     const { client, socket, respond } = setup();
     const controller = new AbortController();
-    const result = client.callTool("tapOn", {}, undefined, undefined, controller.signal);
+    const result = client.callTool("tapOn", {}, undefined, undefined, {
+      signal: controller.signal,
+    });
     respond(socket.getWrittenMessages(daemonRequestFrameSchema)[0].id);
     controller.abort();
     expect(await result).toEqual({ ok: true });
@@ -193,7 +197,7 @@ describe("DaemonClient tool cancellation", () => {
     const controller = new AbortController();
     controller.abort(new Error("already cancelled"));
     await expect(
-      client.callTool("tapOn", {}, undefined, undefined, controller.signal),
+      client.callTool("tapOn", {}, undefined, undefined, { signal: controller.signal }),
     ).rejects.toThrow("already cancelled");
     expect(socket.getWrittenMessages()).toHaveLength(0);
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -212,10 +216,12 @@ describe("DaemonClient tool cancellation", () => {
       client.testHooks.attachSocket(nextSocket);
     };
     const controller = new AbortController();
-    const result = client.callTool("tapOn", {}, undefined, undefined, controller.signal).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const result = client
+      .callTool("tapOn", {}, undefined, undefined, { signal: controller.signal })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     await started.promise;
     controller.abort(new Error("cancel during connect"));
     expect(await result).toEqual(controller.signal.reason);

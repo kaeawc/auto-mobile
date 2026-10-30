@@ -40,6 +40,24 @@ export interface ConnectionRecoveryPort {
   releaseKeepsBinding(sessionUuid: string, releaseReason: string | undefined): boolean;
 }
 
+/** What a recoverable reconnect may replay, and the caller's cancellation. */
+export interface RecoverableReconnectOptions {
+  /** A tool that may have run must not be replayed on a fresh connection. */
+  nonIdempotentToolName?: string;
+  signal?: AbortSignal;
+}
+
+/** A reconnect without a caller signal still gets one, so every await below can check it. */
+function resolveReconnectOptions(options: RecoverableReconnectOptions | undefined): {
+  nonIdempotentToolName: string | undefined;
+  signal: AbortSignal;
+} {
+  return {
+    nonIdempotentToolName: options?.nonIdempotentToolName,
+    signal: options?.signal ?? new AbortController().signal,
+  };
+}
+
 /**
  * Reconnect-and-retry-once policy for a request that failed recoverably (stale session, daemon
  * handoff, dead transport), with the fences that keep a replay from repeating a device action
@@ -56,9 +74,9 @@ export class ConnectionRecovery {
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
     fenceSessionNotFoundOnRetry = true,
-    nonIdempotentToolName?: string,
-    signal: AbortSignal = new AbortController().signal,
+    options?: RecoverableReconnectOptions,
   ): Promise<T> {
+    const { nonIdempotentToolName, signal } = resolveReconnectOptions(options);
     signal.throwIfAborted();
     if (this.port.isClosing()) {
       throw new DaemonUnavailableError("MCP proxy is closing");

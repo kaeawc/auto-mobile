@@ -361,14 +361,11 @@ export class ExplicitDeviceBind {
               sessionId,
               options,
             );
-            return this.reuseExistingDeviceSession(
-              deviceId,
-              existingSession,
-              sessionId,
+            return this.reuseExistingDeviceSession(deviceId, existingSession, sessionId, {
               sourceImage,
               confirmedSameOwner,
-              options.signal,
-            );
+              signal: options.signal,
+            });
           }
 
           if (existingSession) {
@@ -524,29 +521,23 @@ export class ExplicitDeviceBind {
     const session = await this.port.createSessionOrRestore(
       device,
       assignmentSnapshot,
-      this.createSessionForBinding(
-        previousSession,
-        sessionId,
-        deviceId,
-        platform,
+      this.createSessionForBinding(previousSession, sessionId, deviceId, platform, {
         allowSessionRebind,
-        {
-          stableDeviceId: this.port.stableDeviceIdFor(device),
-          deferCleanup: options.deferRebindCleanup
-            ? (cleanup) => {
-                options.receipt.deferredRebindCleanup = cleanup;
-              }
-            : undefined,
-          persistenceSource: creatorPersistenceSource(
-            caller,
-            allowSessionRebind,
-            expectedExistingSessionDeviceId,
-          ),
-          recoveryTarget: options.recoveryTarget,
-          recovery: recoveryRebindFlag(expectedExistingSessionDeviceId),
-          signal: options.signal,
-        },
-      ),
+        stableDeviceId: this.port.stableDeviceIdFor(device),
+        deferCleanup: options.deferRebindCleanup
+          ? (cleanup) => {
+              options.receipt.deferredRebindCleanup = cleanup;
+            }
+          : undefined,
+        persistenceSource: creatorPersistenceSource(
+          caller,
+          allowSessionRebind,
+          expectedExistingSessionDeviceId,
+        ),
+        recoveryTarget: options.recoveryTarget,
+        recovery: recoveryRebindFlag(expectedExistingSessionDeviceId),
+        signal: options.signal,
+      }),
     );
     // A restored session predates this call. A session minted under the id its client chose is
     // recorded as such here, at the commit, so a failure of anything after it (the claim publish
@@ -792,8 +783,8 @@ export class ExplicitDeviceBind {
     sessionId: string,
     deviceId: string,
     platform: Platform,
-    allowSessionRebind: boolean,
     creation: {
+      allowSessionRebind: boolean;
       stableDeviceId: string | undefined;
       persistenceSource: string | undefined;
       deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
@@ -803,7 +794,7 @@ export class ExplicitDeviceBind {
       signal?: AbortSignal;
     },
   ): () => Promise<Session> {
-    const { stableDeviceId, persistenceSource, signal } = creation;
+    const { allowSessionRebind, stableDeviceId, persistenceSource, signal } = creation;
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
       return async () => {
@@ -909,9 +900,11 @@ export class ExplicitDeviceBind {
     deviceId: string,
     existingSession: Session,
     requestedSessionId: string,
-    sourceImage?: DeviceInfo,
-    confirmedSameOwner = false,
-    signal?: AbortSignal,
+    {
+      sourceImage,
+      confirmedSameOwner = false,
+      signal,
+    }: { sourceImage?: DeviceInfo; confirmedSameOwner?: boolean; signal?: AbortSignal } = {},
   ): Promise<string> {
     const existingSessionId = existingSession.sessionId;
     if (sourceImage && !confirmedSameOwner) {

@@ -683,14 +683,13 @@ test("disconnect recovery retries through the daemon after its deferred shutdown
   internals.replaceSessionManager(sessions);
   pool.isCurrentDisconnectedDevice = async () => "current";
   try {
-    const firstPass = internals.recordAndTryRecoverCapturedDisconnect(
-      original.deviceId,
-      captured,
-      captured.assignmentCount,
-      "session",
-      sessions.getSession("session"),
-      undefined,
-    );
+    const firstPass = internals.recordAndTryRecoverCapturedDisconnect(original.deviceId, {
+      pooledDeviceAtDisconnect: captured,
+      assignmentCountAtDisconnect: captured.assignmentCount,
+      sessionIdAtDisconnect: "session",
+      sessionAtDisconnect: sessions.getSession("session"),
+      forceGenerationAtDisconnect: undefined,
+    });
     await manager.killAccepted.promise;
     await flush();
     timer.advanceTime(30_000);
@@ -700,14 +699,13 @@ test("disconnect recovery retries through the daemon after its deferred shutdown
     manager.bootedDevices = [];
     timer.advanceTime(30_000);
     expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
-    const secondPass = await internals.recordAndTryRecoverCapturedDisconnect(
-      original.deviceId,
-      captured,
-      captured.assignmentCount,
-      "session",
-      sessions.getSession("session"),
-      undefined,
-    );
+    const secondPass = await internals.recordAndTryRecoverCapturedDisconnect(original.deviceId, {
+      pooledDeviceAtDisconnect: captured,
+      assignmentCountAtDisconnect: captured.assignmentCount,
+      sessionIdAtDisconnect: "session",
+      sessionAtDisconnect: sessions.getSession("session"),
+      forceGenerationAtDisconnect: undefined,
+    });
 
     expect(secondPass).toMatchObject({ handled: true });
     expect(manager.startedDevices).toHaveLength(1);

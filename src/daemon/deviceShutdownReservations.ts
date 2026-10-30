@@ -55,6 +55,13 @@ export interface DeviceShutdownReservationsPoolPort {
   getOwnedAutolockSession(device: PooledDevice, client: AutolockClient | undefined): unknown;
 }
 
+/** One shutdown reservation attempt: its recovery-route lease and the caller's holder fences. */
+interface ShutdownReservationAttempt {
+  recoveryRouteLease: symbol | undefined;
+  assertHolder?: () => void;
+  fenceUnpooled?: boolean;
+}
+
 /** Owns readiness and shutdown reservations while the pool retains ownership decisions. */
 export class DeviceShutdownReservations {
   /** Per device, the owner symbols of every live readiness reservation. */
@@ -245,8 +252,7 @@ export class DeviceShutdownReservations {
       identity,
       abortSignal,
       autolockClient,
-      recoveryRouteLease,
-      { assertHolder, ...options },
+      { recoveryRouteLease, assertHolder, ...options },
     );
     if (!expectedDevice) {
       identity.releaseSession?.();
@@ -282,9 +288,9 @@ export class DeviceShutdownReservations {
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
     autolockClient: AutolockClient | undefined,
-    recoveryRouteLease: symbol | undefined,
-    options: { assertHolder?: () => void; fenceUnpooled?: boolean },
+    options: ShutdownReservationAttempt,
   ): Promise<PooledDevice | undefined> {
+    const { recoveryRouteLease } = options;
     const releaseSessionOnAbort = () => identity.releaseSession?.();
     abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
     try {
@@ -293,7 +299,6 @@ export class DeviceShutdownReservations {
         identity,
         abortSignal,
         autolockClient,
-        recoveryRouteLease,
         options,
       );
       if (abortSignal?.aborted) {
@@ -319,9 +324,9 @@ export class DeviceShutdownReservations {
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
     autolockClient: AutolockClient | undefined,
-    recoveryRouteLease: symbol | undefined,
-    options: { assertHolder?: () => void; fenceUnpooled?: boolean },
+    options: ShutdownReservationAttempt,
   ): Promise<{ expectedDevice?: PooledDevice; unpooledFenceToken?: symbol }> {
+    const { recoveryRouteLease } = options;
     return await this.pool.withAssignmentLock(() => {
       if (abortSignal?.aborted) {
         throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");

@@ -166,7 +166,10 @@ export class VideoStreamCapturePipeline {
           }
           const packet = encodeDroppedFrames(droppedFrames);
           for (const subscriber of capture.subscribers) {
-            this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
+            this.writePacketToSubscriber(deviceId, capture, subscriber, packet, {
+              isConfig: false,
+              isKeyFrame: false,
+            });
           }
         },
         onError: (error) => {
@@ -249,7 +252,7 @@ export class VideoStreamCapturePipeline {
     );
 
     for (const subscriber of capture.subscribers) {
-      this.writePacketToSubscriber(deviceId, capture, subscriber, packet, isConfig, isKeyFrame);
+      this.writePacketToSubscriber(deviceId, capture, subscriber, packet, { isConfig, isKeyFrame });
     }
   }
 
@@ -315,8 +318,7 @@ export class VideoStreamCapturePipeline {
         encodePtsAndFlags(this.deps.nowUs(), { isKeyFrame: true }),
         capture.latestKeyFrameAu,
       ),
-      false,
-      true,
+      { isConfig: false, isKeyFrame: true },
     );
     for (const au of capture.latestInterFrameAus) {
       this.writePacketToSubscriber(
@@ -324,8 +326,7 @@ export class VideoStreamCapturePipeline {
         capture,
         socket,
         encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
-        false,
-        false,
+        { isConfig: false, isKeyFrame: false },
       );
     }
   }
@@ -356,8 +357,7 @@ export class VideoStreamCapturePipeline {
     capture: DeviceCapture,
     subscriber: Socket,
     packet: Buffer,
-    isConfig: boolean,
-    isKeyFrame: boolean,
+    { isConfig, isKeyFrame }: { isConfig: boolean; isKeyFrame: boolean },
   ): void {
     if (subscriber.destroyed) {
       this.host.detach(subscriber);

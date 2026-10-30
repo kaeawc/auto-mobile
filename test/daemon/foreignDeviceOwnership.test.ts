@@ -123,12 +123,15 @@ function harness(
     files,
     probe,
     () => SELF_SOCKET,
-    timer,
-    forwardVerdict === undefined
-      ? undefined
-      : "read" in forwardVerdict
-        ? forwardVerdict
-        : ({ read: async () => forwardVerdict } satisfies ForeignCtrlProxyForwardEvidence),
+    {
+      timer,
+      forwardEvidence:
+        forwardVerdict === undefined
+          ? undefined
+          : "read" in forwardVerdict
+            ? forwardVerdict
+            : ({ read: async () => forwardVerdict } satisfies ForeignCtrlProxyForwardEvidence),
+    },
   );
   const ownerOf = async (deviceId: string) => {
     await ownership.refresh([deviceId]);
@@ -709,14 +712,14 @@ describe("daemons in different coordination directories on one adb server (#1070
       daemon(home, join(root, "coord-a"), alive),
       probe,
       () => "/sockets/first.sock",
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     const second = new ForwardLeaseForeignDeviceOwnership(
       SELF_PID,
       daemon(home, join(root, "coord-b"), alive),
       probe,
       () => SELF_SOCKET,
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
 
     expect(await first.claim("emulator-5554")).toBe(true);
@@ -742,7 +745,7 @@ describe("daemons in different coordination directories on one adb server (#1070
       daemon(home, coordinationDir, new Set([SELF_PID])),
       new FakeOwnerProbe(),
       () => SELF_SOCKET,
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     const claimPath = deviceAllocationClaimPath(
       "emulator-5554",
@@ -796,7 +799,7 @@ describe("the host-wide claims mirror (#11811 b)", () => {
       files,
       new FakeOwnerProbe(),
       () => undefined,
-      timer,
+      { timer },
     );
     const mirror = new StoreDeviceClaimMirror({
       platform: "android",
@@ -958,7 +961,7 @@ describe("reading the host-wide claims table (#11811 c)", () => {
       files,
       probe,
       () => undefined,
-      timer,
+      { timer },
     );
     const mirror = new StoreDeviceClaimMirror({
       platform: "android",

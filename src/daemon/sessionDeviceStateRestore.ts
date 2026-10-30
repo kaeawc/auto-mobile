@@ -17,7 +17,7 @@ import {
 } from "./deviceStateRestoreQueue";
 import type { IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
 import { KeepAwakeRestoreError } from "./KeepAwakeRestoreError";
-import { QueuedDeviceStateRestore } from "./queuedDeviceStateRestore";
+import { type PendingRestorationSteps, QueuedDeviceStateRestore } from "./queuedDeviceStateRestore";
 import {
   type BiometricRestoreTarget,
   type KeepScreenAwakeRestoreTarget,
@@ -159,16 +159,9 @@ export class SessionDeviceStateRestore {
     slot: K,
     session: Session,
     pendingSetups: Promise<void> | null,
-    start: (
-      deviceId: string,
-      target: PendingRestore<NonNullable<Session["cacheData"][K]> & object>,
-    ) => Promise<{ pending: Promise<void> | null }>,
-    again: (
-      session: Session,
-      pendingSetups: Promise<void> | null,
-    ) => Promise<{ pending: Promise<void> | null }>,
+    steps: PendingRestorationSteps<K>,
   ): { pending: Promise<void> | null } | Promise<{ pending: Promise<void> | null }> {
-    return this.queued.getPendingRestoration(queue, slot, session, pendingSetups, start, again);
+    return this.queued.getPendingRestoration(queue, slot, session, pendingSetups, steps);
   }
 
   startRestoration<S extends object>(

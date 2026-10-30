@@ -285,8 +285,7 @@ export function wireSessionLifecycle(
       },
       sessionId,
       releaseReason,
-      snapshot,
-      { upgradeOnly: opts?.upgradeOnly },
+      { snapshot, upgradeOnly: opts?.upgradeOnly },
     );
     if (host.shutdownFallbackReleaseNotifications()?.has(sessionId)) {
       return;

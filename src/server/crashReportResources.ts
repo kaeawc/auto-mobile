@@ -185,10 +185,13 @@ export function registerCrashReportResources(
   ResourceRegistry.registerTemplateWithReadContext(
     CRASH_REPORT_RESOURCE_TEMPLATE,
     "Native Crash Report",
-    "The full OS crash report (an `.ips` on iOS Simulator, a dropbox entry on Android) named by " +
-      "`crashApp`'s `crashReport.reportId`, for the device owned by the caller's session. " +
-      "`maxBytes` bounds the returned text.",
-    "application/json",
-    createCrashReportHandler(deps),
+    {
+      description:
+        "The full OS crash report (an `.ips` on iOS Simulator, a dropbox entry on Android) named by " +
+        "`crashApp`'s `crashReport.reportId`, for the device owned by the caller's session. " +
+        "`maxBytes` bounds the returned text.",
+      mimeType: "application/json",
+      handler: createCrashReportHandler(deps),
+    },
   );
 }

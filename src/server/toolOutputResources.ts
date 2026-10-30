@@ -137,15 +137,14 @@ async function getToolOutputArtifact(
 }
 
 export function registerToolOutputResources(deps: ToolOutputResourceDependencies = {}): void {
-  ResourceRegistry.registerTemplate(
-    TOOL_OUTPUT_RESOURCE_URI_TEMPLATE,
-    "Tool Output Artifact",
-    "In-band fetch for a tool-output artifact that spilled to a host file. The " +
+  ResourceRegistry.registerTemplate(TOOL_OUTPUT_RESOURCE_URI_TEMPLATE, "Tool Output Artifact", {
+    description:
+      "In-band fetch for a tool-output artifact that spilled to a host file. The " +
       "`resourceUri` in an artifact's metadata points here so a client can read the " +
       'full raw JSON (e.g. an `observe {"raw": true}` hierarchy) over the protocol.',
-    "application/json",
-    (params: Record<string, string>) => getToolOutputArtifact(params, deps),
-  );
+    mimeType: "application/json",
+    handler: (params: Record<string, string>) => getToolOutputArtifact(params, deps),
+  });
 
   logger.info("[ToolOutputResources] Registered tool-output artifact resource");
 }

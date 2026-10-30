@@ -4,6 +4,7 @@ import {
   addDeviceTargetingToSchema,
   responseShapeControlFields,
   withAppIdAliases,
+  watchAwarePlatformSchema,
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
 import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
@@ -26,18 +27,6 @@ export const packageNameSchema = withAppIdAliases(
       .strict(),
   ),
 );
-
-/**
- * installApp, uninstallApp, listApps, launchApp and terminateApp accept an Apple Watch simulator
- * (#14908), so their `platform` names "watchos" too. Every other tool keeps the Android/iOS enum.
- */
-const watchAwarePlatformSchema = () =>
-  z
-    .enum(["android", "ios", "watchos"])
-    .optional()
-    .describe(
-      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session',
-    );
 
 // terminateApp embeds a post-action observation, so it carries the same
 // response-shape control as the other action tools (issue #5886): the embedded

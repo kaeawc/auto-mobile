@@ -81,20 +81,19 @@ describe("the registry backstop blames the client only for its own URI (#10135)"
 
   beforeEach(() => {
     ResourceRegistry.clearResources();
-    ResourceRegistry.registerTemplate(
-      "automobile:test/encode/{name}",
-      "Encodes",
-      "Builds a URI from a device-reported name with the raw encoder",
-      "application/json",
-      async () => ({ uri: "automobile:test", text: encodeURIComponent(LONE_SURROGATE) }),
-    );
-    ResourceRegistry.registerTemplate(
-      "automobile:test/decode/{name}",
-      "Decodes",
-      "Decodes its capture without a guard",
-      "application/json",
-      async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test/encode/{name}", "Encodes", {
+      description: "Builds a URI from a device-reported name with the raw encoder",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "automobile:test", text: encodeURIComponent(LONE_SURROGATE) }),
+    });
+    ResourceRegistry.registerTemplate("automobile:test/decode/{name}", "Decodes", {
+      description: "Decodes its capture without a guard",
+      mimeType: "application/json",
+      handler: async (params) => ({
+        uri: "automobile:test",
+        text: decodeURIComponent(params.name),
+      }),
+    });
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server, () => ({}));
     const handler = server.server.handlersBySchema.get("resources/read");

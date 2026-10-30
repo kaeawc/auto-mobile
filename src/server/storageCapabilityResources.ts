@@ -312,13 +312,12 @@ export async function getStorageCapabilitiesResource(
 export function registerStorageCapabilityResources(
   dependencies: StorageCapabilityDependencies = {},
 ): void {
-  ResourceRegistry.registerTemplate(
-    STORAGE_CAPABILITIES_TEMPLATE,
-    "Storage Capabilities",
-    "Versioned descriptor of which storage operations (list, read, write, namespace reset, media indexing, observation) are available per logical domain (app containers, user-visible files, media library, key-value state, databases, secure state) for a device and optional app context. Clients negotiate capabilities instead of inferring them from platform names.",
-    "application/json",
-    (params) => getStorageCapabilitiesResource(params, dependencies),
-  );
+  ResourceRegistry.registerTemplate(STORAGE_CAPABILITIES_TEMPLATE, "Storage Capabilities", {
+    description:
+      "Versioned descriptor of which storage operations (list, read, write, namespace reset, media indexing, observation) are available per logical domain (app containers, user-visible files, media library, key-value state, databases, secure state) for a device and optional app context. Clients negotiate capabilities instead of inferring them from platform names.",
+    mimeType: "application/json",
+    handler: (params) => getStorageCapabilitiesResource(params, dependencies),
+  });
 
   logger.info("[StorageCapabilityResources] Registered storage capability resources");
 }

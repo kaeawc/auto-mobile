@@ -27,13 +27,14 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
     ResourceRegistry.clearResources();
     registerFailuresResources(repository, timer);
     // The #10117 backstop target: a handler that decodes its capture unguarded.
-    ResourceRegistry.registerTemplate(
-      "automobile:test/unguarded/{name}",
-      "Unguarded",
-      "Decodes its capture without a guard",
-      "application/json",
-      async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test/unguarded/{name}", "Unguarded", {
+      description: "Decodes its capture without a guard",
+      mimeType: "application/json",
+      handler: async (params) => ({
+        uri: "automobile:test",
+        text: decodeURIComponent(params.name),
+      }),
+    });
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server, () => ({}));
     const handler = server.server.handlersBySchema.get("resources/read");

@@ -11,6 +11,7 @@ export const WATCHOS_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<string>([
   "listApps",
   "launchApp",
   "terminateApp",
+  "observe",
 ]);
 
 export function watchOsUnsupportedToolMessage(toolName: string): string {

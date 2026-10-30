@@ -129,7 +129,8 @@ function setup(pages: ObserveResult[], markScrollBoundary = true) {
   });
   return { adb, observer, timer };
 }
-const list = () => listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000);
+const list = () =>
+  listSystemTrayNotifications(device, "com.example.messages", "Messages", { awaitTimeoutMs: 5000 });
 class FakeTrayApps {
   labels = new Map<string, string | null>([["com.example.messages", "Messages"]]);
   calls: string[] = [];
@@ -319,7 +320,10 @@ describe("systemTray list", () => {
     const { adb } = setup([page(row("first"))]);
     const signal = AbortSignal.abort(new Error("cancelled"));
     await expect(
-      listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000, { signal }),
+      listSystemTrayNotifications(device, "com.example.messages", "Messages", {
+        awaitTimeoutMs: 5000,
+        signal,
+      }),
     ).rejects.toThrow("cancelled");
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -331,7 +335,8 @@ describe("systemTray list", () => {
       return page(row("first"));
     });
     await expect(
-      listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000, {
+      listSystemTrayNotifications(device, "com.example.messages", "Messages", {
+        awaitTimeoutMs: 5000,
         signal: controller.signal,
       }),
     ).rejects.toThrow("cancelled");
@@ -358,7 +363,7 @@ describe("systemTray list", () => {
         device,
         "com.example.messages",
         Array.from({ length: 20 }, (_, i) => `com.other.${i}`),
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("cancelled");
     expect(apps.calls).toHaveLength(9);
@@ -674,7 +679,9 @@ describe("systemTray list", () => {
   test("lists both real headerless children and retains the neighboring row as unattributed", async () => {
     const fixture = headerlessTwoNotificationGroups.expanded!;
     setup([{ ...page(), viewHierarchy: fixture }], false);
-    const result = await listSystemTrayNotifications(device, "com.android.shell", "Shell", 5000);
+    const result = await listSystemTrayNotifications(device, "com.android.shell", "Shell", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications).toMatchObject([
       { title: "Delta", inGroup: true },
       { title: "Gamma", inGroup: true },
@@ -747,7 +754,9 @@ describe("systemTray list", () => {
   test("rejects unsupported platforms before interaction", async () => {
     const { adb } = setup([page()]);
     await expect(
-      listSystemTrayNotifications({ ...device, platform: "ios" }, "app", "App", 5000),
+      listSystemTrayNotifications({ ...device, platform: "ios" }, "app", "App", {
+        awaitTimeoutMs: 5000,
+      }),
     ).rejects.toThrow("Android");
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -792,7 +801,9 @@ describe("systemTray list silent-section ownership", () => {
       "dumpsys notification",
       execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
     );
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications).toMatchObject([
       { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
     ]);
@@ -805,7 +816,9 @@ describe("systemTray list silent-section ownership", () => {
     const snapshot = execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY)));
     adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
 
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
 
     expect(result.notifications).toMatchObject([{ appId: WELLBEING, ownership: "dumpsys" }]);
     expect(adb.getExecutedCommands().filter((command) => command.includes("dumpsys"))).toHaveLength(
@@ -819,7 +832,9 @@ describe("systemTray list silent-section ownership", () => {
       "dumpsys notification",
       execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
     );
-    const result = await listSystemTrayNotifications(device, MESSAGING, "Messages", 5000);
+    const result = await listSystemTrayNotifications(device, MESSAGING, "Messages", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications).toMatchObject([
       { appId: MESSAGING, title: "(555) 123-4567", ownership: "header" },
     ]);
@@ -828,7 +843,9 @@ describe("systemTray list silent-section ownership", () => {
 
   test("reports unattributed rows instead of a confident empty list", async () => {
     setup([shade()]);
-    const result = await listSystemTrayNotifications(device, "com.other.app", "Other", 5000);
+    const result = await listSystemTrayNotifications(device, "com.other.app", "Other", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications).toEqual([]);
     expect(result.unattributedRows).toBe(1);
   });
@@ -846,7 +863,7 @@ describe("systemTray list silent-section ownership", () => {
     );
     // #6875: records for this package exist, so an ambiguous shade row is not a confident empty list.
     await expect(
-      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", { awaitTimeoutMs: 5000 }),
     ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*could not be correlated/i);
   });
 
@@ -863,7 +880,7 @@ describe("systemTray list silent-section ownership", () => {
     ]);
 
     await expect(
-      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", { awaitTimeoutMs: 5000 }),
     ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*could not be correlated/i);
   });
 
@@ -882,7 +899,9 @@ describe("systemTray list silent-section ownership", () => {
       return executeCommand(...args);
     };
 
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
 
     expect(result.notifications).toMatchObject([{ appId: WELLBEING, ownership: "dumpsys" }]);
     expect(result.unattributedRows).toBe(0);
@@ -917,7 +936,9 @@ describe("systemTray list silent-section ownership", () => {
       return executeCommand(...args);
     };
 
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
 
     expect(result.swipes).toBe(1);
     expect(result.notifications).toEqual([]);
@@ -934,7 +955,7 @@ describe("systemTray list silent-section ownership", () => {
     ]);
 
     await expect(
-      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", { awaitTimeoutMs: 5000 }),
     ).rejects.toThrow(/notification records.*could not be correlated/i);
   });
 
@@ -948,7 +969,7 @@ describe("systemTray list silent-section ownership", () => {
     ]);
 
     await expect(
-      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", { awaitTimeoutMs: 5000 }),
     ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*could not be correlated/i);
   });
 
@@ -1012,7 +1033,9 @@ describe("systemTray list content-less custom layouts", () => {
     const snapshot = execResult(dumpsys(customRecord()));
     adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
 
-    const result = await listSystemTrayNotifications(device, CLOCK, clockLabel, 5000);
+    const result = await listSystemTrayNotifications(device, CLOCK, clockLabel, {
+      awaitTimeoutMs: 5000,
+    });
 
     expect(result.notifications).toMatchObject([{ appId: CLOCK, ownership: "header" }]);
     expect(result.unattributedRows).toBe(0);
@@ -1023,7 +1046,9 @@ describe("systemTray list content-less custom layouts", () => {
     const snapshot = execResult(dumpsys(customRecord(), customRecord("Ordinary")));
     adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
 
-    const result = await listSystemTrayNotifications(device, CLOCK, clockLabel, 5000);
+    const result = await listSystemTrayNotifications(device, CLOCK, clockLabel, {
+      awaitTimeoutMs: 5000,
+    });
 
     expect(result.notifications).toHaveLength(2);
     expect(result.notifications.map((notification) => notification.ownership)).toEqual([
@@ -1038,7 +1063,9 @@ describe("systemTray list content-less custom layouts", () => {
     const snapshot = execResult(dumpsys(customRecord()));
     adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
 
-    await expect(listSystemTrayNotifications(device, CLOCK, clockLabel, 5000)).rejects.toThrow(
+    await expect(
+      listSystemTrayNotifications(device, CLOCK, clockLabel, { awaitTimeoutMs: 5000 }),
+    ).rejects.toThrow(
       `Notification records for ${CLOCK} have no title/text extras to correlate with shade rows (custom layout).`,
     );
   });
@@ -1054,7 +1081,9 @@ describe("systemTray list content-less custom layouts", () => {
     const snapshot = execResult(dumpsys(customRecord()));
     adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
 
-    await expect(listSystemTrayNotifications(device, CLOCK, clockLabel, 5000)).rejects.toThrow(
+    await expect(
+      listSystemTrayNotifications(device, CLOCK, clockLabel, { awaitTimeoutMs: 5000 }),
+    ).rejects.toThrow(
       `Notification records for ${CLOCK} have no title/text extras to correlate with shade rows (custom layout).`,
     );
   });
@@ -1064,9 +1093,9 @@ describe("systemTray list content-less custom layouts", () => {
     const snapshot = execResult(dumpsys(customRecord("Hidden default")));
     adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
 
-    await expect(listSystemTrayNotifications(device, CLOCK, clockLabel, 5000)).rejects.toThrow(
-      `Notification records for ${CLOCK} could not be correlated with shade rows.`,
-    );
+    await expect(
+      listSystemTrayNotifications(device, CLOCK, clockLabel, { awaitTimeoutMs: 5000 }),
+    ).rejects.toThrow(`Notification records for ${CLOCK} could not be correlated with shade rows.`);
   });
 });
 
@@ -2538,7 +2567,9 @@ describe("systemTray list silent-section correlation content", () => {
         ),
       ),
     );
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications).toMatchObject([
       { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
     ]);
@@ -2551,7 +2582,9 @@ describe("systemTray list silent-section correlation content", () => {
       "dumpsys notification",
       execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
     );
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications[0].actions).toEqual(["Reply"]);
     expect(result.notifications[0].texts).toContain("Reply");
   });
@@ -2567,7 +2600,9 @@ describe("systemTray list silent-section correlation content", () => {
         ),
       ),
     );
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications).toMatchObject([{ appId: WELLBEING, ownership: "dumpsys" }]);
   });
 });
@@ -2616,7 +2651,9 @@ describe("systemTray list silent-section chronometer chrome", () => {
         ),
       ),
     );
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications).toMatchObject([
       { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
     ]);
@@ -2629,7 +2666,9 @@ describe("systemTray list silent-section chronometer chrome", () => {
       "dumpsys notification",
       execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
     );
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
     expect(result.notifications[0].texts).toContain("00:01");
   });
 
@@ -2639,7 +2678,9 @@ describe("systemTray list silent-section chronometer chrome", () => {
       "dumpsys notification",
       execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
     );
-    await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", {
+      awaitTimeoutMs: 5000,
+    });
     const call = adb
       .getCommandCalls()
       .find((entry) => entry.command.includes("dumpsys notification"))!;
@@ -2668,6 +2709,8 @@ test("matching identical notification titles prefers the topmost window before s
     { windowLayer: 10, hierarchy: page(upper).viewHierarchy.hierarchy.node },
   ];
   setup([observation]);
-  const result = await waitForNotificationMatch(device, { title: "Same" }, [], 1000);
+  const result = await waitForNotificationMatch(device, { title: "Same" }, [], {
+    awaitTimeoutMs: 1000,
+  });
   expect(result.match?.candidate.element?.bounds.top).toBe(900);
 });

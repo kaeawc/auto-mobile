@@ -472,9 +472,11 @@ async function bindPreparedDevice(
                   state.boot!.sourceImage && !readinessResult.preservedSessionId
                     ? preparation.sourceImage
                     : undefined,
-                  // Recovery already registered this process and its output tail.
-                  readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
                   {
+                    // Recovery already registered this process and its output tail.
+                    childProcess: readinessResult.preservedSessionId
+                      ? undefined
+                      : state.boot!.processHandle,
                     readinessReservationOwners: new Set(
                       releaseReadinessReservations.map((reservation) => reservation.owner),
                     ),
@@ -609,8 +611,8 @@ export async function bindBootedDeviceSession(
   device: BootedDevice,
   args: StartDeviceSessionArgs,
   sourceImage: DeviceInfo | undefined,
-  childProcess: ChildProcess | null | undefined,
   {
+    childProcess,
     autolockEnabled = captureAutolockPolicy(getDeviceToolsDependencies().env),
     readinessReservationOwners,
     verifiedAndroidAvdIdentity,
@@ -619,6 +621,7 @@ export async function bindBootedDeviceSession(
     receipt,
     signal,
   }: {
+    childProcess?: ChildProcess | null;
     autolockEnabled?: boolean;
     readinessReservationOwners?: ReadonlySet<symbol>;
     verifiedAndroidAvdIdentity?: DeviceInfo;

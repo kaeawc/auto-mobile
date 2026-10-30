@@ -156,11 +156,10 @@ const resolveClearAllAttributionLabel = async (
   device: BootedDevice,
   appId: string,
   installedApps: string[],
-  resolvedLabel: string | null,
-  signal?: AbortSignal,
+  { resolvedLabel, signal }: { resolvedLabel: string | null; signal?: AbortSignal },
 ): Promise<string | null> => {
   try {
-    return await resolveUniqueTrayAppLabel(device, appId, installedApps, signal, resolvedLabel);
+    return await resolveUniqueTrayAppLabel(device, appId, installedApps, { signal, resolvedLabel });
   } catch (error) {
     if (!(error instanceof ActionableError)) {
       throw error;
@@ -397,8 +396,9 @@ export class SystemTray {
     if (!appIds.includes(appId)) {
       throw new ActionableError(`App ${appId} is not installed.`);
     }
-    const label = await resolveUniqueTrayAppLabel(device, appId, appIds, signal);
-    const result = await listSystemTrayNotifications(device, appId, label, awaitTimeoutMs, {
+    const label = await resolveUniqueTrayAppLabel(device, appId, appIds, { signal });
+    const result = await listSystemTrayNotifications(device, appId, label, {
+      awaitTimeoutMs,
       signal,
     });
     await captureSystemTrayTerminalEvidence(device, result.observation, signal);
@@ -443,8 +443,7 @@ export class SystemTray {
       device,
       notification,
       appMatchTexts,
-      awaitTimeoutMs,
-      { progress, signal },
+      { awaitTimeoutMs, progress, signal },
     );
 
     if (!match) {
@@ -464,13 +463,11 @@ export class SystemTray {
     const { device, progress, signal } = this;
     const { notification, appMatchTexts } = scope;
     const actionStartMs = getSystemTrayDependencies().timer.now();
-    const initialMatch = await waitForNotificationMatch(
-      device,
-      notification,
-      appMatchTexts,
+    const initialMatch = await waitForNotificationMatch(device, notification, appMatchTexts, {
       awaitTimeoutMs,
-      { progress, signal },
-    );
+      progress,
+      signal,
+    });
 
     if (!initialMatch.match) {
       throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
@@ -480,8 +477,15 @@ export class SystemTray {
       device,
       notification,
       appMatchTexts,
-      actionStartMs + awaitTimeoutMs,
-      { observation: initialMatch.observation, match: initialMatch.match, signal, progress },
+      {
+        deadlineMs: actionStartMs + awaitTimeoutMs,
+        result: {
+          observation: initialMatch.observation,
+          match: initialMatch.match,
+          signal,
+          progress,
+        },
+      },
     );
 
     const tapMatch = resolveNotificationTapElement(match, notification);
@@ -524,13 +528,11 @@ export class SystemTray {
     const { device, progress, signal } = this;
     const { notification, appMatchTexts } = scope;
     const actionStartMs = getSystemTrayDependencies().timer.now();
-    const initialMatch = await waitForNotificationMatch(
-      device,
-      notification,
-      appMatchTexts,
+    const initialMatch = await waitForNotificationMatch(device, notification, appMatchTexts, {
       awaitTimeoutMs,
-      { progress, signal },
-    );
+      progress,
+      signal,
+    });
 
     if (!initialMatch.match) {
       throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
@@ -540,8 +542,15 @@ export class SystemTray {
       device,
       notification,
       appMatchTexts,
-      actionStartMs + awaitTimeoutMs,
-      { observation: initialMatch.observation, match: initialMatch.match, signal, progress },
+      {
+        deadlineMs: actionStartMs + awaitTimeoutMs,
+        result: {
+          observation: initialMatch.observation,
+          match: initialMatch.match,
+          signal,
+          progress,
+        },
+      },
     );
     const swipeTarget = resolveDismissSwipeTarget(match, notification, appMatchTexts);
 
@@ -571,8 +580,7 @@ export class SystemTray {
               appMatchTexts,
             ),
             notification,
-            appMatchTexts,
-            { observation: nextObservation, signal },
+            { appMatchTexts, observation: nextObservation, signal },
           )
         : undefined;
     const finalObservation = verification?.observation ?? nextObservation;
@@ -666,23 +674,17 @@ export class SystemTray {
     let shadeCollapsed = false;
     if (device.platform === "android" && notification.appId) {
       const appId = notification.appId;
-      const attributionLabel = await resolveClearAllAttributionLabel(
-        device,
-        appId,
-        installedApps,
-        appLabel,
+      const attributionLabel = await resolveClearAllAttributionLabel(device, appId, installedApps, {
+        resolvedLabel: appLabel,
         signal,
-      );
+      });
       const listed = await retryTransientPreSwipe(
         "clearAll notification listing",
         () =>
-          listSystemTrayNotificationsForClear(
-            device,
-            appId,
-            attributionLabel,
+          listSystemTrayNotificationsForClear(device, appId, attributionLabel, {
             awaitTimeoutMs,
             signal,
-          ),
+          }),
         signal,
       );
       shadeCollapsed = true;
@@ -717,18 +719,13 @@ export class SystemTray {
     );
     const drained =
       device.platform === "android"
-        ? await clearMatchingSystemTrayNotifications(
-            device,
-            notification,
-            clearMatchTexts,
+        ? await clearMatchingSystemTrayNotifications(device, notification, clearMatchTexts, {
             awaitTimeoutMs,
-            {
-              maxSwipes: expectedKeys?.length,
-              progress,
-              signal,
-              shadeKnownClosed: shadeCollapsed,
-            },
-          )
+            maxSwipes: expectedKeys?.length,
+            progress,
+            signal,
+            shadeKnownClosed: shadeCollapsed,
+          })
         : await clearIosSystemTrayNotifications(device, notification, clearMatchTexts, {
             progress,
             signal,

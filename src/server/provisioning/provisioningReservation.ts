@@ -27,8 +27,7 @@ export async function reserveExistingIosProvisionDeviceLifecycle(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
+  { totalDeadlineMs, signal }: { totalDeadlineMs: number; signal?: AbortSignal },
 ): Promise<VirtualDeviceLifecycleLease | undefined> {
   const discovery = await runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
     operation: async (deadlineSignal) =>
@@ -54,14 +53,16 @@ export async function reserveExistingIosProvisionDeviceLifecycle(
         args,
         deps,
         { deviceId: args.device.deviceId },
-        totalDeadlineMs,
-        signal,
+        { totalDeadlineMs, signal },
       );
     }
     return undefined;
   }
   admitRestartReservedProvision(args, existing.deviceId);
-  return await reserveIosProvisionDeviceLifecycle(args, deps, existing, totalDeadlineMs, signal);
+  return await reserveIosProvisionDeviceLifecycle(args, deps, existing, {
+    totalDeadlineMs,
+    signal,
+  });
 }
 
 /**
@@ -97,8 +98,7 @@ async function reserveIosProvisionDeviceLifecycle(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   device: Pick<DeviceInfo, "deviceId">,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
+  { totalDeadlineMs, signal }: { totalDeadlineMs: number; signal?: AbortSignal },
 ): Promise<VirtualDeviceLifecycleLease> {
   if (!device.deviceId) {
     throw new ProvisionDeviceError(

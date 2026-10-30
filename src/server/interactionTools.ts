@@ -280,11 +280,11 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   // Register with the tool registry
   selectAllTextTool.register(ToolRegistry, (device, args, progress, signal) =>
-    selectAllTextHandler(device, args, progress, signal, deps),
+    selectAllTextHandler(device, args, { progress, signal, deps }),
   );
 
   pressButtonTool.register(ToolRegistry, (device, args, progress, signal) =>
-    pressButtonHandler(device, args, progress, signal, deps),
+    pressButtonHandler(device, args, { progress, signal, deps }),
   );
 
   ToolRegistry.registerDeviceAware(
@@ -327,7 +327,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "tapOn",
     "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     tapOnSchema,
-    (device, args, progress, signal) => tapOnHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) => tapOnHandler(device, args, { progress, signal, deps }),
     {
       defaultEnabled: true,
       supportsProgress: true,
@@ -340,7 +340,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "tapAt",
     "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
-    (device, args, progress, signal) => tapAtHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) => tapAtHandler(device, args, { progress, signal, deps }),
     { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
@@ -364,7 +364,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "hitTest",
     "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     hitTestSchema,
-    (device, args, progress, signal) => hitTestHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) => hitTestHandler(device, args, { progress, signal, deps }),
     // Dispatches no input: a read (#10965). On a held device it reads through the observer
     // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
     { defaultEnabled: false, deviceReadOnly: true },
@@ -374,7 +374,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "tapAny",
     "Tap any clickable element; scope with container or scrollableContainer.",
     tapAnySchema,
-    (device, args, progress, signal) => tapAnyHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) => tapAnyHandler(device, args, { progress, signal, deps }),
     { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
@@ -382,7 +382,8 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "dragAndDrop",
     "Drag and drop element",
     dragAndDropSchema,
-    (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) =>
+      dragAndDropHandler(device, args, { progress, signal, deps }),
     {
       defaultEnabled: false,
       supportsProgress: true,
@@ -395,7 +396,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "swipeOn",
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
-    (device, args, progress, signal) => swipeOnHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) => swipeOnHandler(device, args, { progress, signal, deps }),
     { defaultEnabled: true, supportsProgress: true, ...NAV_PLAN_SKELETON },
   );
 
@@ -403,7 +404,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "pinchOn",
     "Pinch to zoom",
     pinchOnSchema,
-    (device, args, progress, signal) => pinchOnHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) => pinchOnHandler(device, args, { progress, signal, deps }),
     {
       defaultEnabled: false,
       supportsProgress: true,
@@ -422,14 +423,14 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   // Register the new rotate tool
   rotateTool.register(ToolRegistry, (device, args, progress, signal) =>
-    rotateHandler(device, args, progress, signal, deps),
+    rotateHandler(device, args, { progress, signal, deps }),
   );
 
   ToolRegistry.registerDeviceAware(
     "setPosture",
     "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console support is detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android strictly parses emu sensor get hinge-angle0 output as hinge-angle0 = <n>; iOS uses the runner angle. Both report observedHingeAngle when available and warn without failing when the resulting angle is unavailable or differs by more than 1 degree.",
     setPostureSchema,
-    (device, args, progress, signal) => setPostureHandler(device, args, progress, signal, deps),
+    (device, args, progress, signal) => setPostureHandler(device, args, { progress, signal, deps }),
     { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setPostureResultSchema },
   );
 

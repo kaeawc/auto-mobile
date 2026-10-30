@@ -210,8 +210,7 @@ export const waitForSystemTrayOpen = async (
   detector: NotificationUIDetector,
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
-  awaitTimeoutMs: number,
-  signal?: AbortSignal,
+  { awaitTimeoutMs, signal }: { awaitTimeoutMs: number; signal?: AbortSignal },
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
@@ -238,8 +237,7 @@ const waitForSystemTrayClosed = async (
   detector: NotificationUIDetector,
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
-  awaitTimeoutMs: number,
-  signal?: AbortSignal,
+  { awaitTimeoutMs, signal }: { awaitTimeoutMs: number; signal?: AbortSignal },
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
@@ -291,13 +289,10 @@ export const ensureSystemTrayOpen = async (
   await expandSystemTray(detector, observation, signal);
   minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
 
-  const awaitedObservation = await waitForSystemTrayOpen(
-    detector,
-    observeScreen,
-    minTimestamp,
+  const awaitedObservation = await waitForSystemTrayOpen(detector, observeScreen, minTimestamp, {
     awaitTimeoutMs,
     signal,
-  );
+  });
 
   return {
     observation: awaitedObservation ?? observation,
@@ -331,13 +326,10 @@ export const ensureSystemTrayClosed = async (
   await collapseSystemTray(detector, observation, signal);
   minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
 
-  const awaitedObservation = await waitForSystemTrayClosed(
-    detector,
-    observeScreen,
-    minTimestamp,
+  const awaitedObservation = await waitForSystemTrayClosed(detector, observeScreen, minTimestamp, {
     awaitTimeoutMs,
     signal,
-  );
+  });
 
   return {
     observation: awaitedObservation ?? observation,
@@ -416,8 +408,7 @@ export const waitForNotificationMatch = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-  awaitTimeoutMs: number,
-  { progress, signal }: SystemTrayCall = {},
+  { awaitTimeoutMs, progress, signal }: SystemTrayCall & { awaitTimeoutMs: number },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
   const resolvedAwaitTimeoutMs = resolveSystemTrayAwaitTimeout(awaitTimeoutMs);

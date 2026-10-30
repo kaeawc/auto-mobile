@@ -850,8 +850,12 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     args: TeardownDeviceArgs,
     deps: DeviceToolsDependencies,
     callerSignal: AbortSignal | undefined,
-    teardownService: DeviceTeardownService,
-    { lifecycleLease, requester, internal }: DeleteDeviceOptions = {},
+    {
+      teardownService,
+      lifecycleLease,
+      requester,
+      internal,
+    }: DeleteDeviceOptions & { teardownService: DeviceTeardownService },
   ): Promise<TeardownToolResponse> {
     // Queue before the deadline starts, so waiting for a turn never spends the delete's own budget.
     let permit: Awaited<ReturnType<BootConcurrencyPool["acquire"]>> | undefined;
@@ -893,13 +897,10 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
       );
     }
     const deps = getDeviceToolsDependencies();
-    return await executeDeleteDevice(
-      args,
-      deps,
-      abortSignal ?? getAbortSignal(),
-      getDeviceTeardownService(deps),
-      { requester: lifecycleRequester(args) },
-    );
+    return await executeDeleteDevice(args, deps, abortSignal ?? getAbortSignal(), {
+      teardownService: getDeviceTeardownService(deps),
+      requester: lifecycleRequester(args),
+    });
   };
 
   return { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler };

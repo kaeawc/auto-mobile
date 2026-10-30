@@ -1610,18 +1610,15 @@ describe("provisionDevice handler", () => {
         prebootDisabledResources: ["widgets" as const],
       };
       for (const created of [true, false]) {
-        const result = buildProvisionDeviceResult(
-          args,
-          provisioned,
-          created,
-          createPerformanceTracker(false),
-          boot
+        const result = buildProvisionDeviceResult(args, provisioned, created, {
+          perf: createPerformanceTracker(false),
+          booted: boot
             ? {
                 device: { name: "phone", platform: "ios", deviceId: "UDID" },
                 sessionId: "session",
               }
             : undefined,
-        );
+        });
         if (created) {
           expect(result.disabledResources).toEqual([
             expect.objectContaining({

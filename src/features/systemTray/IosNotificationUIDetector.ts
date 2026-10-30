@@ -1,4 +1,5 @@
 import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
+import type { SwipeRequest } from "../../utils/interfaces/SwipeRequest";
 import {
   ActionableError,
   BootedDevice,
@@ -31,11 +32,7 @@ export interface IosGestureResult {
 export interface IosNotificationUIDetectorDeps {
   pressHome?(): Promise<IosGestureResult>;
   requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
+    request: Pick<SwipeRequest, "x1" | "y1" | "x2" | "y2" | "duration">,
   ): Promise<IosGestureResult>;
   requestTapCoordinates(request: TapCoordinatesRequest): Promise<IosGestureResult>;
   /** Host-side monotonic clock used as the iOS observation timestamp. */
@@ -78,13 +75,13 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
 
   async expandTray(observation?: ObserveResult): Promise<void> {
     const { width, height } = this.requireScreenSize(observation, "open");
-    const result = await this.deps.requestSwipe(
-      Math.floor(width * 0.5),
-      5,
-      Math.floor(width * 0.5),
-      Math.floor(height * 0.7),
-      IOS_OPEN_SWIPE_DURATION_MS,
-    );
+    const result = await this.deps.requestSwipe({
+      x1: Math.floor(width * 0.5),
+      y1: 5,
+      x2: Math.floor(width * 0.5),
+      y2: Math.floor(height * 0.7),
+      duration: IOS_OPEN_SWIPE_DURATION_MS,
+    });
     this.requireGestureSuccess(result, "open Notification Center");
   }
 
@@ -101,13 +98,13 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
       return;
     }
     const { width, height } = this.requireScreenSize(observation, "close");
-    const result = await this.deps.requestSwipe(
-      Math.floor(width * 0.5),
-      Math.floor(height * 0.65),
-      Math.floor(width * 0.5),
-      Math.floor(height * 0.08),
-      IOS_CLOSE_SWIPE_DURATION_MS,
-    );
+    const result = await this.deps.requestSwipe({
+      x1: Math.floor(width * 0.5),
+      y1: Math.floor(height * 0.65),
+      x2: Math.floor(width * 0.5),
+      y2: Math.floor(height * 0.08),
+      duration: IOS_CLOSE_SWIPE_DURATION_MS,
+    });
     this.requireGestureSuccess(result, "close Notification Center");
   }
 
@@ -125,13 +122,13 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
   async swipeElement(element: Element): Promise<void> {
     const geometry = new DefaultElementGeometry();
     const { startX, startY, endX, endY } = geometry.getSwipeWithinBounds("left", element.bounds);
-    const result = await this.deps.requestSwipe(
-      Math.floor(startX),
-      Math.floor(startY),
-      Math.floor(endX),
-      Math.floor(endY),
-      SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
-    );
+    const result = await this.deps.requestSwipe({
+      x1: Math.floor(startX),
+      y1: Math.floor(startY),
+      x2: Math.floor(endX),
+      y2: Math.floor(endY),
+      duration: SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
+    });
     this.requireGestureSuccess(result, "dismiss notification");
   }
 

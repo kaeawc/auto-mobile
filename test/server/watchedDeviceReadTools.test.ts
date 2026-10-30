@@ -48,13 +48,7 @@ describe("hitTest on the read-only device path (#10965)", () => {
     });
 
     const response = await watching(() =>
-      hitTestHandler(
-        device,
-        { x: 1, y: 2, display: "active" },
-        undefined,
-        undefined,
-        interactionDeps,
-      ),
+      hitTestHandler(device, { x: 1, y: 2, display: "active" }, { deps: interactionDeps }),
     );
 
     expect(deviceReads).toEqual([{ display: "active", screenshot: "none" }]);
@@ -77,7 +71,7 @@ describe("hitTest on the read-only device path (#10965)", () => {
       },
     });
 
-    await hitTestHandler(device, { x: 1, y: 2 }, undefined, undefined, interactionDeps);
+    await hitTestHandler(device, { x: 1, y: 2 }, { deps: interactionDeps });
 
     expect(sessionReads).toBe(1);
   });

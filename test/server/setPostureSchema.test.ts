@@ -71,7 +71,7 @@ describe("setPosture hinge angle contract", () => {
     });
     const angleArgs = Object.freeze({ hingeAngle: 90, ...metadata });
     const args = selector === "posture" ? postureArgs : angleArgs;
-    await setPostureHandler(device, args, undefined, signal, interactionDeps);
+    await setPostureHandler(device, args, { signal, deps: interactionDeps });
     expect(calls).toEqual(
       selector === "posture"
         ? [["opened", "tablet", signal]]
@@ -90,9 +90,7 @@ describe("setPosture hinge angle contract", () => {
       const promise = setPostureHandler(
         device,
         { ...args, ...serverMetadata },
-        undefined,
-        undefined,
-        interactionDeps,
+        { deps: interactionDeps },
       );
       await expect(promise).rejects.toBeInstanceOf(ActionableError);
       await expect(promise).rejects.toMatchObject({
@@ -112,9 +110,7 @@ describe("setPosture hinge angle contract", () => {
         displayPreset: "phone",
         ...serverMetadata,
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     await expect(promise).rejects.toBeInstanceOf(ActionableError);
     await expect(promise).rejects.toMatchObject({
@@ -135,9 +131,7 @@ describe("setPosture hinge angle contract", () => {
       setPostureHandler(
         device,
         { posture: "opened", ...serverMetadata },
-        undefined,
-        undefined,
-        interactionDeps,
+        { deps: interactionDeps },
       ),
     ).rejects.toBe(error);
   });
@@ -226,9 +220,7 @@ describe("setPosture hinge angle contract", () => {
     const response = await setPostureHandler(
       device,
       { hingeAngle: 90 },
-      undefined,
-      signal,
-      interactionDeps,
+      { signal, deps: interactionDeps },
     );
     expect(calls).toEqual([[90, { displayPreset: undefined, signal }]]);
     expect(response.structuredContent).toMatchObject({
@@ -260,9 +252,7 @@ describe("setPosture hinge angle contract", () => {
       const response = await setPostureHandler(
         device,
         { hingeAngle: 120 },
-        undefined,
-        undefined,
-        interactionDeps,
+        { deps: interactionDeps },
       );
       expect(response.structuredContent).toMatchObject({
         message:

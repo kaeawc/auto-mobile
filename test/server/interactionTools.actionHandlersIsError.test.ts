@@ -154,7 +154,7 @@ describe("tapAnyHandler (registered handler wiring)", () => {
         },
       });
       const internalArgs = { ...args, __mcpRequestDeadlineMs: deadline };
-      await tapAnyHandler(fakeDevice, internalArgs, undefined, undefined, interactionDeps);
+      await tapAnyHandler(fakeDevice, internalArgs, { deps: interactionDeps });
       expect(received).toBe(deadline);
     },
   );
@@ -172,13 +172,7 @@ describe("tapAnyHandler (registered handler wiring)", () => {
       duration: 20000,
       __mcpRequestDeadlineMs: timer.now() + 5000,
     };
-    const response = await tapAnyHandler(
-      device,
-      internalArgs,
-      undefined,
-      undefined,
-      interactionDeps,
-    );
+    const response = await tapAnyHandler(device, internalArgs, { deps: interactionDeps });
     const error =
       "Failed to tap clickable element: longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started. Increase the request timeout or use a shorter duration.";
     expect(toolIsError(response)).toBe(true);
@@ -193,13 +187,9 @@ describe("tapAnyHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ error: "No clickable element found" }),
     });
 
-    const response = (await tapAnyHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await tapAnyHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to tap clickable element: No clickable element found",
@@ -212,13 +202,9 @@ describe("tapAnyHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: true }),
     });
 
-    const response = (await tapAnyHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await tapAnyHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Tapped clickable element");
   });
@@ -244,13 +230,9 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
         fakeResult({ error: "Unable to get view hierarchy, cannot drag and drop" }),
     });
 
-    const response = (await dragAndDropHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await dragAndDropHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to drag element to target: Unable to get view hierarchy, cannot drag and drop",
@@ -269,13 +251,7 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
     interactionDeps.dragAndDropFactory = () => ({
       execute: async () => fakeResult({ error, containerFailure }),
     });
-    const response = await dragAndDropHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    );
+    const response = await dragAndDropHandler(fakeDevice, args, { deps: interactionDeps });
     expect(toolIsError(response)).toBe(true);
     expect(parsePayload(response)).toMatchObject({ error, containerFailure });
     expect(parsePayload(response).message).toBe(`Failed to drag element to target: ${error}`);
@@ -286,13 +262,9 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: true }),
     });
 
-    const response = (await dragAndDropHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await dragAndDropHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Dragged element to target");
   });
@@ -315,13 +287,9 @@ describe("selectAllTextHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ error: "No focused input field" }),
     });
 
-    const response = (await selectAllTextHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await selectAllTextHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to select all text: No focused input field",
@@ -334,13 +302,9 @@ describe("selectAllTextHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: true }),
     });
 
-    const response = (await selectAllTextHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await selectAllTextHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Selected all text in focused input field");
   });
@@ -366,13 +330,9 @@ describe("pressButtonHandler (registered handler wiring)", () => {
         }),
     });
 
-    const response = (await pressButtonHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await pressButtonHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to press button back: iOS has no menu hardware button",
@@ -386,13 +346,9 @@ describe("pressButtonHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: true }),
     });
 
-    const response = (await pressButtonHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await pressButtonHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Pressed button back");
   });
@@ -424,7 +380,7 @@ describe("rotateHandler (registered handler wiring)", () => {
     };
     const internalArgs = { ...args, __mcpRequestDeadlineMs: 12345 };
 
-    await rotateHandler(fakeDevice, internalArgs, undefined, undefined, interactionDeps);
+    await rotateHandler(fakeDevice, internalArgs, { deps: interactionDeps });
 
     expect(receivedOptions?.deadlineMs).toBe(12345);
   });
@@ -436,7 +392,7 @@ describe("rotateHandler (registered handler wiring)", () => {
       return { execute: async () => fakeResult({ success: true }) };
     };
 
-    await rotateHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    await rotateHandler(fakeDevice, args, { deps: interactionDeps });
 
     expect(receivedOptions).toBeDefined();
     expect("deadlineMs" in receivedOptions!).toBe(false);
@@ -451,13 +407,9 @@ describe("rotateHandler (registered handler wiring)", () => {
         }),
     });
 
-    const response = (await rotateHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await rotateHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
 
     expect(response.isError).toBe(true);
     expect(parsePayload(response).success).toBe(false);
@@ -490,9 +442,7 @@ describe("rotateHandler (registered handler wiring)", () => {
     const response = await rotateHandler(
       fakeDevice,
       { orientation: "portrait" },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
 
     expect(readToolResponse(response).isError).toBeUndefined();
@@ -509,13 +459,9 @@ describe("rotateHandler (registered handler wiring)", () => {
       },
     });
 
-    const response = (await rotateHandler(
-      fakeDevice,
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    )) as ToolResponse;
+    const response = (await rotateHandler(fakeDevice, args, {
+      deps: interactionDeps,
+    })) as ToolResponse;
 
     expect(response.isError).toBeUndefined();
     expect(receivedLockOrientation).toBe(true);
@@ -539,9 +485,7 @@ describe("setPostureHandler structured result", () => {
     const response = await setPostureHandler(
       fakeDevice,
       { posture: "opened" },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     const message = "status" in result ? result.message : "Set device posture to opened";
     expect(toolStructured(response)).toEqual({ message, ...result });
@@ -559,7 +503,7 @@ describe("setPostureHandler structured result", () => {
       },
     });
     await expect(
-      setPostureHandler(fakeDevice, { posture: "opened" }, undefined, undefined, interactionDeps),
+      setPostureHandler(fakeDevice, { posture: "opened" }, { deps: interactionDeps }),
     ).rejects.toThrow("Failed to set device posture: posture failed");
   });
 });

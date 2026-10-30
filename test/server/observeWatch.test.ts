@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -108,7 +109,7 @@ describe("observe on an Apple Watch simulator (#14910)", () => {
       screenshotSource: "fresh",
       screenshotExpiresAt: NOW + SCREENSHOT_PATH_MIN_LIFETIME_MS,
     });
-    expect(result.screenshotPath).toStartWith(`${CACHE_DIR}/screenshot_${NOW}_`);
+    expect(result.screenshotPath).toStartWith(path.join(CACHE_DIR, `screenshot_${NOW}_`));
     expect(result.screenshotPath).toEndWith("_watch-2.png");
     expect(observeToolResultSchema.safeParse(result).success).toBe(true);
   });

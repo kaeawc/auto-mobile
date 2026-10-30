@@ -15406,8 +15406,13 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "clearAppData": {
-          "description": "Clear app data before launch (default false)",
+          "description": "Clear app data before launch (default false); on watchOS wipes the app's data container",
           "type": "boolean"
         },
         "coldBoot": {
@@ -15415,7 +15420,7 @@
           "type": "boolean"
         },
         "launchArguments": {
-          "description": "Arguments passed to the launched iOS app. On Android use intent instead.",
+          "description": "Arguments passed to the launched iOS or watchOS app. On Android use intent instead.",
           "type": "array",
           "items": {
             "type": "string"
@@ -15583,10 +15588,6 @@
           "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -63482,6 +63483,11 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
           "type": "boolean"
@@ -63494,10 +63500,6 @@
           "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",

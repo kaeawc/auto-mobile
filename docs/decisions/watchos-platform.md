@@ -25,11 +25,16 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   `["android", "ios"]` until a tool supports watchOS, so agents are not offered a value the tool
   rejects. A tool that opts in gets its own platform enum (the shared `platformSchema` stays
   Android/iOS).
-- **Allowlisted app tools.** `installApp`, `uninstallApp` and `listApps` route a watch to
-  `WatchAppManager` (`simctl install|uninstall|listapps` on the watch UDID) through their executor
-  factories; Android and iOS keep their executors. `installApp` takes only a `.app` (bundle id from
-  Info.plist; `upgrade` from a prior listing) and refuses Android-only options by name;
-  `uninstallApp` refuses `keepData: true`.
+- **Allowlisted app tools.** `installApp`, `uninstallApp`, `listApps`, `launchApp` and
+  `terminateApp` route a watch to `WatchAppManager` (`simctl install|uninstall|listapps|launch|
+  terminate` on the watch UDID) through their executor factories; Android and iOS keep their
+  executors. `installApp` takes only a `.app` (bundle id from Info.plist; `upgrade` from a prior
+  listing). Android-only options are refused by name; `uninstallApp` refuses `keepData: true`.
+  `launchApp` reports a not-installed app without launching; `coldBoot` stops a running process
+  first; `clearAppData` reuses the iOS simulator wipe (terminate, resolve the data container
+  confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
+  wipe launches nothing. `prototype: true` is refused before any agent preparation. A
+  `terminateApp` whose process is already gone is a success with `wasRunning: false`.
 - **Explicit resolution.** A watch session resolves through the pooled-session path (readiness
   setup and keep-awake are Android-only). A sessionless call reaches a watch only with
   `platform: "watchos"`: readiness then resolves a watch a fresh watchOS listing shows booted (by

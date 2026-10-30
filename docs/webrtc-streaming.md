@@ -110,7 +110,7 @@ display bounds to exclude its toolbar and bezel when positioning circles. Box, p
 
 While a highlight is visible, ScreenCaptureKit captures only the selected Simulator
 and the helper's overlay windows, cropped to the Simulator window. The same capture
-path feeds raw frames and H.264 streams. Separate device screenshots do not include
+path feeds the H.264 streams. Separate device screenshots do not include
 the host overlay. Outside highlights, capture uses its independent-window filter.
 The overlay host stays alive until its parent daemon exits because ScreenCaptureKit
 retains connections to applications whose windows have appeared in a stream.

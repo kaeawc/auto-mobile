@@ -46,19 +46,6 @@ nonisolated(unsafe) private let blockBufferBytes: UnsafeMutableRawBufferPointer 
     return buffer
 }()
 
-// A 1080p BGRA frame (1920x1080x4 ≈ 8.3 MB) standing in for the RAW path's per-frame
-// payload — the largest per-frame slab in the system and where the copy cost is real
-// (hundreds of µs, unlike the compressed path). The device capture (CVPixelBuffer lock /
-// ScreenCaptureKit delivery) is not headless-testable, but the copy itself takes a raw
-// pointer, so the pooled-vs-unpooled allocation cost around the same memcpy is.
-private let rawFrameByteCount = 1920 * 1080 * 4
-nonisolated(unsafe) private let rawFrame: UnsafeMutableRawBufferPointer = {
-    let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: rawFrameByteCount, alignment: 16)
-    buffer.initializeMemory(as: UInt8.self, repeating: 0xCD)
-    return buffer
-}()
-nonisolated(unsafe) private let rawFramePool = FrameBufferPool()
-
 let benchmarks: @Sendable () -> Void = {
     Benchmark.defaultConfiguration = .init(
         metrics: [.mallocCountTotal, .cpuTotal, .wallClock, .throughput],
@@ -136,27 +123,6 @@ let benchmarks: @Sendable () -> Void = {
     Benchmark("AudioPcm16Encoder.encodeFloat32LE") { benchmark in
         for _ in benchmark.scaledIterations {
             blackHole(AudioPcm16Encoder.encodeFloat32LE(float32Audio))
-        }
-    }
-
-    // Raw path: same ~8.3 MB memcpy either way — the delta is malloc + first-touch page
-    // faulting of a fresh slab (unpooled) vs recycling one (pooled). CPU/wall is the
-    // story here, not allocation count.
-    Benchmark("raw frame copy — 1080p BGRA via FrameBufferPool (pooled)") { benchmark in
-        guard let baseAddress = rawFrame.baseAddress else {
-            preconditionFailure("Raw benchmark fixture must be non-empty")
-        }
-        for _ in benchmark.scaledIterations {
-            blackHole(rawFramePool.makeData(copyingFrom: baseAddress, count: rawFrame.count))
-        }
-    }
-
-    Benchmark("raw frame copy — 1080p BGRA via Data(bytes:) (unpooled)") { benchmark in
-        guard let baseAddress = rawFrame.baseAddress else {
-            preconditionFailure("Raw benchmark fixture must be non-empty")
-        }
-        for _ in benchmark.scaledIterations {
-            blackHole(Data(bytes: baseAddress, count: rawFrame.count))
         }
     }
 }

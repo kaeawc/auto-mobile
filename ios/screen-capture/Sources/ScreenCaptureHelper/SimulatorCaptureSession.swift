@@ -38,7 +38,7 @@ extension SCStream: CaptureStream {}
 /// package does not own.
 extension SCWindow: @retroactive @unchecked Sendable {}
 
-/// Streams BGRA frames from a single iOS Simulator window via ScreenCaptureKit.
+/// Streams H.264-encoded frames from a single iOS Simulator window via ScreenCaptureKit.
 /// The frame rate is configurable (5–60); 5 is the default for typical MCP
 /// automation workloads. Size changes (e.g. device rotation) trigger a stream
 /// reconfiguration so frames don't get cropped.
@@ -57,11 +57,10 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     private let writer: FrameWriter
     private let onFatalError: (Error) -> Void
     private let makeStream: StreamFactory
-    /// In-helper H.264 encode settings (issue #4788). `nil` keeps the default
-    /// raw-BGRA path byte-for-byte unchanged.
-    private let encodeSettings: CommandLineOptions.EncodeSettings?
+    /// In-helper H.264 encode settings (issue #4788).
+    private let encodeSettings: CommandLineOptions.EncodeSettings
     /// Force-keyframe latch shared with the STDIN control channel; consumed by
-    /// the encoder on the next frame. Present even in raw mode (harmless there).
+    /// the encoder on the next frame.
     let forceKeyFrameLatch = ForceKeyFrameLatch()
     /// Guards the mutable frame-path state shared across the ScreenCaptureKit frame
     /// queue (`didOutputSampleBuffer`), the MainActor `start()`/`stop()`, and the
@@ -69,8 +68,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// dimensions. Snapshot-under-lock-then-act;
     /// the lock is never held across an `await` or a blocking call.
     private let stateLock = NSLock()
-    /// Shared in-helper encode wiring in `--encode h264` mode (issues #4788 /
-    /// #4790). `nil` in the raw-BGRA path. The same `EncodePipeline` type backs the
+    /// Shared in-helper encode wiring (issues #4788 /
+    /// #4790). The same `EncodePipeline` type backs the
     /// physical-device capture session, so the VideoToolbox glue lives in exactly
     /// one place. Guarded by `stateLock`.
     private var _pipeline: EncodePipeline?
@@ -84,10 +83,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     private var lastIdleMarkerUptime: TimeInterval?
     private var overlayTask: Task<Void, Never>?
 
-    /// Pixel format requested from ScreenCaptureKit — 32BGRA for the raw path,
-    /// 420v (NV12) for the lowest-CPU encode path. Set once in `start()` before
-    /// frames flow, then read-only.
-    var configuredPixelFormat: OSType = kCVPixelFormatType_32BGRA
+    /// Pixel format requested from ScreenCaptureKit — 420v (NV12), the lowest-CPU
+    /// encode input. Set once in `start()` before frames flow, then read-only.
+    var configuredPixelFormat: OSType = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
     /// Diagnostic lines (first-frame marker, reconfigure warnings) go here so
     /// tests can observe them; the default preserves the stderr behavior.
     private let diagnosticSink: (String) -> Void
@@ -142,7 +140,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             DescriptorWrite.writeDiagnostic(line)
         },
         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        encode: CommandLineOptions.EncodeSettings? = nil,
+        encode: CommandLineOptions.EncodeSettings,
         onFatalError: @escaping (Error) -> Void
     ) {
         self.writer = writer
@@ -153,33 +151,25 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         self.onFatalError = onFatalError
     }
 
-    /// Whether this session encodes H.264 in-process instead of streaming raw
-    /// BGRA.
-    var isEncoding: Bool {
-        encodeSettings != nil
-    }
-
     func start(window: SCWindow, fps: Int, audio: Bool) async throws {
         self.fps = fps
         audioEnabled = audio
         windowID = window.windowID
         // 420v (NV12) is the lowest-CPU encode input: the delivered
         // IOSurface-backed CVPixelBuffer feeds VTCompressionSession directly with
-        // no color conversion. The raw path keeps 32BGRA untouched.
-        if let encodeSettings = encodeSettings {
-            configuredPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-            // Set before frames flow (before `beginCapture` starts the stream), so a
-            // direct field write is safe here.
-            _pipeline = EncodePipeline(
-                writer: writer,
-                fps: fps,
-                source: .simulator,
-                bitrate: encodeSettings.bitrate,
-                forceKeyFrameLatch: forceKeyFrameLatch,
-                diagnosticSink: diagnosticSink,
-                onFatalError: onFatalError
-            )
-        }
+        // no color conversion.
+        configuredPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        // Set before frames flow (before `beginCapture` starts the stream), so a
+        // direct field write is safe here.
+        _pipeline = EncodePipeline(
+            writer: writer,
+            fps: fps,
+            source: .simulator,
+            bitrate: encodeSettings.bitrate,
+            forceKeyFrameLatch: forceKeyFrameLatch,
+            diagnosticSink: diagnosticSink,
+            onFatalError: onFatalError
+        )
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SimulatorCaptureSession.makeConfiguration(
             window: window, fps: fps, audio: audio, pixelFormat: configuredPixelFormat
@@ -315,25 +305,13 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         let actualWidth = CVPixelBufferGetWidth(pixelBuffer)
         let actualHeight = CVPixelBufferGetHeight(pixelBuffer)
 
-        if isEncoding {
-            encodeScreenFrame(
-                pixelBuffer: pixelBuffer, sampleBuffer: sampleBuffer,
-                width: actualWidth, height: actualHeight
-            )
-            return
-        }
-
-        let (configuredWidth, configuredHeight) = currentConfiguredSize()
-        if actualWidth != configuredWidth || actualHeight != configuredHeight {
-            reconfigure(width: actualWidth, height: actualHeight)
-        }
-
-        if writer.write(sampleBuffer: sampleBuffer) {
-            noteFrameWritten(width: actualWidth, height: actualHeight)
-        }
+        encodeScreenFrame(
+            pixelBuffer: pixelBuffer, sampleBuffer: sampleBuffer,
+            width: actualWidth, height: actualHeight
+        )
     }
 
-    /// Encode-mode screen path (issue #4788). Converges the ScreenCaptureKit
+    /// Screen frame path (issue #4788). Converges the ScreenCaptureKit
     /// output size to the Level 4.2 and quality-capped encode resolution — so
     /// SCK does the downscale, not a separate stage — then feeds the delivered
     /// 420v buffer straight to VideoToolbox. On a size change the encoder is torn
@@ -348,7 +326,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         guard let pipeline = currentPipeline() else { return }
         let target = H264EncodeMath.resolveEncoderScale(
             H264EncodeMath.EncoderSize(width: width, height: height),
-            maxLongSide: encodeSettings?.maxLongSide
+            maxLongSide: encodeSettings.maxLongSide
         ) ?? H264EncodeMath.EncoderSize(width: width, height: height)
 
         // Ask SCK to deliver the encode resolution. Until it does, skip encoding
@@ -587,7 +565,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         window: SCWindow,
         fps: Int,
         audio: Bool,
-        pixelFormat: OSType = kCVPixelFormatType_32BGRA
+        pixelFormat: OSType
     )
         -> SCStreamConfiguration
     {

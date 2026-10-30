@@ -4,11 +4,11 @@
  * Header (24 bytes, little-endian UInt32):
  *   magic(4) | headerChecksum(4) | width(4) | height(4) | bytesPerRow(4) | timestampMs(4)
  *
- * Followed by `height * bytesPerRow` bytes of BGRA pixel data. Audio records
- * reserve width=0: height=8000, bytesPerRow=1, timestampMs=payload length,
- * followed by 8 kHz mono PCM16LE bytes. Encoded-video records (issue #4787) also
- * reserve width=0, with a distinct `height` sentinel — see
- * `ENCODED_VIDEO_HEIGHT_BASE` below.
+ * Every record reserves width=0 and is told apart by its `height` sentinel. Audio
+ * records are height=8000, bytesPerRow=1, timestampMs=payload length, followed by
+ * 8 kHz mono PCM16LE bytes. Encoded-video records (issue #4787) use a distinct
+ * `height` sentinel — see `ENCODED_VIDEO_HEIGHT_BASE` below. A header that is
+ * neither is rejected: the helper no longer streams raw BGRA frames.
  *
  * `magic` is a fixed sync marker ("AMF1" on the wire) and `headerChecksum` is a
  * CRC-32 (IEEE) over the 16 field bytes that follow it. Together they make frame
@@ -35,40 +35,22 @@ export const FRAME_HEADER_SIZE = 24;
 /** The checksum covers the field bytes from here to the end of the header. */
 const HEADER_FIELDS_OFFSET = 8;
 
-/**
- * Structural bounds used to sanity-check an already-checksum-validated header.
- * A valid checksum means the encoder really wrote these values, so these bounds
- * only guard against an encoder bug (or an astronomically unlikely CRC
- * collision) producing an absurd allocation.
- */
-/** Largest plausible display dimension, in pixels. */
-const MAX_FRAME_DIMENSION = 16_384;
-/**
- * Largest row padding accepted beyond the visible `width * 4` BGRA bytes.
- * `CVPixelBufferGetBytesPerRow` aligns rows to a small boundary (real captures
- * observed at exactly `width * 4`), so a full page of slack is generous.
- */
-const MAX_ROW_PADDING_BYTES = 4096;
-/**
- * Largest raw frame retained by the Node handoff. 32 MiB covers current iPhone
- * and iPad BGRA captures while keeping one incomplete frame bounded.
- */
-export const MAX_RAW_FRAME_BYTES = 32 * 1024 * 1024;
 /** Largest plausible audio record (16 MiB ≈ 17 minutes of 8 kHz PCM16LE). */
 const MAX_AUDIO_PAYLOAD_BYTES = 16 * 1024 * 1024;
 /**
  * Largest plausible encoded-video record. A single H.264 access unit (even a
- * high-resolution keyframe) is far smaller than a raw BGRA frame; 16 MiB is
+ * high-resolution keyframe) is far smaller than a raw frame would be; 16 MiB is
  * generous headroom while keeping one buffered record bounded.
  */
 const MAX_ENCODED_VIDEO_PAYLOAD_BYTES = 16 * 1024 * 1024;
+/** The decoder never buffers more than one record of the larger kind. */
+const MAX_RECORD_PAYLOAD_BYTES = Math.max(MAX_AUDIO_PAYLOAD_BYTES, MAX_ENCODED_VIDEO_PAYLOAD_BYTES);
 
 /**
  * Encoded-video discriminator (issue #4787). The header carries no type field;
- * raw frames and audio are told apart by reserved sentinels in the geometry
- * fields (audio = `width=0, height=8000, bytesPerRow=1`). An encoded-video record
- * reuses `width=0` (a real raw frame always has `width>=1`, so the raw decoder
- * already rejects `width=0`) and puts a reserved constant in `height` whose top
+ * records are told apart by reserved sentinels in the geometry fields (audio =
+ * `width=0, height=8000, bytesPerRow=1`). An encoded-video record also uses
+ * `width=0` and puts a reserved constant in `height` whose top
  * 31 bits are fixed and whose low bit carries the keyframe flag:
  *
  *     width       = 0                                  (never a raw frame)
@@ -95,18 +77,13 @@ export interface FrameHeader {
   timestampMs: number;
 }
 
-export interface DecodedFrame {
-  header: FrameHeader;
-  pixels: Buffer;
-}
-
 export interface DecodedAudio {
   pcm16le: Buffer;
 }
 
 /**
  * An in-helper-encoded H.264 access unit (issue #4787). Surfaced distinctly from
- * raw BGRA frames and audio. `presentationTimestampMs` is the CMSampleBuffer PTS
+ * audio. `presentationTimestampMs` is the CMSampleBuffer PTS
  * (not helper wall-clock) so downstream RTP timing is driven by capture time.
  */
 export interface DecodedEncodedVideo {
@@ -118,12 +95,7 @@ export interface DecodedEncodedVideo {
 type MalformedFrameReason =
   | "header_magic_mismatch"
   | "header_checksum_mismatch"
-  | "header_width_zero"
-  | "header_height_zero"
-  | "header_bytes_per_row_too_small"
-  | "header_bytes_per_row_too_large"
-  | "header_dimensions_out_of_range"
-  | "header_payload_too_large"
+  | "header_unsupported_record"
   | "audio_payload_too_large"
   | "encoded_video_payload_too_large";
 
@@ -144,34 +116,30 @@ export class FrameDecoder {
   private resynchronizing: boolean = false;
 
   /**
-   * Append bytes from the helper's stdout stream and return any frames that have
-   * completed. A malformed header is surfaced via `onMalformed` exactly once per
-   * corruption episode; the decoder then discards bytes until it finds the next
-   * marker whose checksum validates and resumes decoding there.
+   * Append bytes from the helper's stdout stream and deliver each completed
+   * record to its callback. A malformed header is surfaced via `onMalformed`
+   * exactly once per corruption episode; the decoder then discards bytes until
+   * it finds the next marker whose checksum validates and resumes decoding there.
    */
   push(
     chunk: Buffer,
     onMalformed?: (error: MalformedFrameError) => void,
     onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void,
     onEncodedVideo?: (video: DecodedEncodedVideo) => void,
-  ): DecodedFrame[] {
-    const frames: DecodedFrame[] = [];
+  ): void {
     let offset = 0;
     while (offset < chunk.length) {
-      // Do not retain more than one valid raw frame plus its header, even when
-      // a synthetic or unusually coalesced stdout chunk carries many frames.
-      const available = FRAME_HEADER_SIZE + MAX_RAW_FRAME_BYTES - this.buffer.length;
+      // Do not retain more than one valid record plus its header, even when a
+      // synthetic or unusually coalesced stdout chunk carries many records.
+      const available = FRAME_HEADER_SIZE + MAX_RECORD_PAYLOAD_BYTES - this.buffer.length;
       if (available === 0) {
-        // Backstop against an unbounded buffer. A corrupt or oversized frame does
+        // Backstop against an unbounded buffer. A corrupt or oversized record does
         // NOT reach here: `fieldBoundsError` caps a validated payload at
-        // MAX_RAW_FRAME_BYTES, and `resynchronize` compacts garbage that carries
-        // no validating marker — so every full-buffer state drains, leaving this
-        // throw an infinite-loop guard rather than a real teardown path (#4772).
-        if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame, onEncodedVideo)) {
-          throw new Error(
-            "FrameDecoder reached its raw-frame buffer limit without a complete frame",
-          );
+        // MAX_RECORD_PAYLOAD_BYTES, and `resynchronize` compacts garbage that
+        // carries no validating marker — so every full-buffer state drains, leaving
+        // this throw an infinite-loop guard rather than a real teardown path (#4772).
+        if (!this.decodeAvailable(onMalformed, onAudio, onEncodedVideo)) {
+          throw new Error("FrameDecoder reached its buffer limit without a complete record");
         }
         continue;
       }
@@ -179,24 +147,21 @@ export class FrameDecoder {
       this.buffer.append(chunk.subarray(offset, end));
       this.highWaterMarkBytes = Math.max(this.highWaterMarkBytes, this.buffer.length);
       offset = end;
-      this.decodeAvailable(frames, onMalformed, onAudio, onFrame, onEncodedVideo);
+      this.decodeAvailable(onMalformed, onAudio, onEncodedVideo);
     }
-    return frames;
   }
 
   getMetrics(): FrameDecoderMetrics {
     return {
       bufferedBytes: this.buffer.length,
       highWaterMarkBytes: this.highWaterMarkBytes,
-      maxBufferedBytes: FRAME_HEADER_SIZE + MAX_RAW_FRAME_BYTES,
+      maxBufferedBytes: FRAME_HEADER_SIZE + MAX_RECORD_PAYLOAD_BYTES,
     };
   }
 
   private decodeAvailable(
-    frames: DecodedFrame[],
     onMalformed?: (error: MalformedFrameError) => void,
     onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void,
     onEncodedVideo?: (video: DecodedEncodedVideo) => void,
   ): boolean {
     let madeProgress = false;
@@ -228,7 +193,7 @@ export class FrameDecoder {
       // avoids the former concatenate-on-every-chunk behavior while retaining
       // no more than this one completed payload.
       const payload = this.buffer.takeDetached(expected);
-      this.emitRecord(pending, payload, frames, onAudio, onFrame, onEncodedVideo);
+      this.emitRecord(pending, payload, onAudio, onEncodedVideo);
       this.pendingHeader = null;
       madeProgress = true;
     }
@@ -238,29 +203,18 @@ export class FrameDecoder {
   private emitRecord(
     header: FrameHeader,
     payload: Buffer,
-    frames: DecodedFrame[],
     onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void,
     onEncodedVideo?: (video: DecodedEncodedVideo) => void,
   ): void {
     if (isAudioHeader(header)) {
       onAudio?.({ pcm16le: payload });
       return;
     }
-    if (isEncodedVideoHeader(header)) {
-      onEncodedVideo?.({
-        keyframe: (header.height & ENCODED_VIDEO_KEYFRAME_BIT) !== 0,
-        presentationTimestampMs: header.timestampMs,
-        payload,
-      });
-      return;
-    }
-    const frame = { header, pixels: payload };
-    if (onFrame) {
-      onFrame(frame);
-    } else {
-      frames.push(frame);
-    }
+    onEncodedVideo?.({
+      keyframe: (header.height & ENCODED_VIDEO_KEYFRAME_BIT) !== 0,
+      presentationTimestampMs: header.timestampMs,
+      payload,
+    });
   }
 
   /**
@@ -364,10 +318,7 @@ function payloadSize(header: FrameHeader): number {
   if (isAudioHeader(header)) {
     return header.timestampMs;
   }
-  if (isEncodedVideoHeader(header)) {
-    return header.bytesPerRow;
-  }
-  return header.height * header.bytesPerRow;
+  return header.bytesPerRow;
 }
 
 function parseFields(buffer: Buffer, offset: number): FrameHeader {
@@ -403,34 +354,12 @@ function fieldBoundsError(header: FrameHeader): MalformedFrameReason | null {
   if (isAudioHeader(header)) {
     return header.timestampMs > MAX_AUDIO_PAYLOAD_BYTES ? "audio_payload_too_large" : null;
   }
-  // Encoded video is checked before the `width===0` raw rejection: it too
-  // reserves `width===0`, so it must be classified before that guard fires.
   if (isEncodedVideoHeader(header)) {
     return header.bytesPerRow > MAX_ENCODED_VIDEO_PAYLOAD_BYTES
       ? "encoded_video_payload_too_large"
       : null;
   }
-  if (header.width === 0) {
-    return "header_width_zero";
-  }
-  if (header.height === 0) {
-    return "header_height_zero";
-  }
-  // BGRA is 4 bytes per pixel; bytesPerRow may include padding but must fit
-  // at least the visible pixels.
-  if (header.bytesPerRow < header.width * 4) {
-    return "header_bytes_per_row_too_small";
-  }
-  if (header.width > MAX_FRAME_DIMENSION || header.height > MAX_FRAME_DIMENSION) {
-    return "header_dimensions_out_of_range";
-  }
-  if (header.bytesPerRow > header.width * 4 + MAX_ROW_PADDING_BYTES) {
-    return "header_bytes_per_row_too_large";
-  }
-  if (header.height * header.bytesPerRow > MAX_RAW_FRAME_BYTES) {
-    return "header_payload_too_large";
-  }
-  return null;
+  return "header_unsupported_record";
 }
 
 /**

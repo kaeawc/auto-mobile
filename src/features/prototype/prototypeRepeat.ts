@@ -120,12 +120,14 @@ function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError |
 
 /** Count each placeholder once, then evaluate field multiplicities per item. */
 function repeatTextError(
-  text: string,
-  segments: Segment[],
+  {
+    text,
+    segments,
+    dataRecognized,
+  }: { text: string; segments: Segment[]; dataRecognized: boolean },
   path: string,
   scope: Scope,
   state: RepeatState,
-  dataRecognized: boolean,
 ): RepeatError | undefined {
   const fields = new Map<string, number>();
   let indices = 0;
@@ -179,12 +181,14 @@ function dataTextError(path: string, state: RepeatState): RepeatError | undefine
 }
 
 function fieldError(
-  value: unknown,
-  path: string,
-  kind: FieldKind,
+  {
+    value,
+    path,
+    kind,
+    dataCondition = false,
+  }: { value: unknown; path: string; kind: FieldKind; dataCondition?: boolean },
   scope: Scope,
   state: RepeatState,
-  dataCondition = false,
 ): RepeatError | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -209,7 +213,12 @@ function fieldError(
     return dataTextError(path, state);
   }
   const segments = resolved === value ? authored : templateSegments(resolved, scope.binding);
-  const repeated = repeatTextError(resolved, segments, path, scope, state, dataRecognized);
+  const repeated = repeatTextError(
+    { text: resolved, segments, dataRecognized },
+    path,
+    scope,
+    state,
+  );
   if (repeated) {
     return repeated;
   }
@@ -259,7 +268,7 @@ function checkOwnFields(
       first ??= emitBindingError(value, fieldPath, scope);
     }
     first ??= dataPathPlaceholderError(kind, value, fieldPath, scope);
-    first ??= fieldError(value, fieldPath, kind, scope, state, dataCondition);
+    first ??= fieldError({ value, path: fieldPath, kind, dataCondition }, scope, state);
     return value;
   });
   return first;

@@ -95,7 +95,7 @@ export class IosProtoViewer implements ProtoViewerDevice {
     const temporary = `${inbox}.tmp`;
     const resultPath = join(resultsDir, `${request}.json`);
     try {
-      await this.prepare(inboxDir, resultsDir, temporary, inbox, work, signal);
+      await this.prepare({ inboxDir, resultsDir, temporary, inbox }, work, signal);
       signal?.throwIfAborted();
       const url =
         "bytes" in work
@@ -134,10 +134,12 @@ export class IosProtoViewer implements ProtoViewerDevice {
   }
 
   private async prepare(
-    inboxDir: string,
-    resultsDir: string,
-    temporary: string,
-    inbox: string,
+    {
+      inboxDir,
+      resultsDir,
+      temporary,
+      inbox,
+    }: { inboxDir: string; resultsDir: string; temporary: string; inbox: string },
     work: { bytes: Uint8Array } | { libraryId: string },
     signal?: AbortSignal,
   ): Promise<void> {

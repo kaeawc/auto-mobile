@@ -25,11 +25,11 @@ test("selected-display owner null reports no answer rather than service reachabi
     {
       timer: new FakeTimer(),
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, timeout, diagnostics, displayId) => {
+        requestHierarchySync: async (_perf, _raw, _signal, timeout, options) => {
           ownerReads++;
           expect(timeout).toBe(15000);
-          expect(displayId).toBe(2);
-          observedDiagnostics = diagnostics;
+          expect(options?.displayId).toBe(2);
+          observedDiagnostics = options?.diagnostics;
           return null;
         },
         requestHierarchySyncForObserver: async () => {
@@ -58,10 +58,10 @@ test.each([
     {
       timer: new FakeTimer(),
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, timeout, diagnostics) => {
+        requestHierarchySync: async (_perf, _raw, _signal, timeout, options) => {
           expect(timeout).toBe(250);
-          if (diagnostics) {
-            Object.assign(diagnostics, failure);
+          if (options?.diagnostics) {
+            Object.assign(options.diagnostics, failure);
           }
           return null;
         },
@@ -118,14 +118,9 @@ function fixture(elapsed: number, incomplete = true, updatedAt?: number, autoAdv
   const syncClient: HierarchySyncClient = {
     requestHierarchySync: read,
     requestHierarchySyncForObserver: (perf, filtering, signal, timeout, display) =>
-      read(
-        perf,
-        filtering,
-        signal,
-        timeout,
-        undefined,
-        typeof display === "number" ? display : display?.displayId,
-      ),
+      read(perf, filtering, signal, timeout, {
+        displayId: typeof display === "number" ? display : display?.displayId,
+      }),
     convertToViewHierarchyResult: () => ({ ...converted, updatedAt: undefined }),
   };
   const capture = createDeviceHierarchyCapture(
@@ -173,7 +168,7 @@ test("incomplete hierarchy retry returns the complete accessibility reply withou
     signal,
   });
   expect(reads).toHaveLength(2);
-  expect(reads.map((args) => [args[1], args[2], args[3], args[5]])).toEqual([
+  expect(reads.map((args) => [args[1], args[2], args[3], args[4]?.displayId])).toEqual([
     [true, signal, 1000, 2],
     [true, signal, 900, 2],
   ]);

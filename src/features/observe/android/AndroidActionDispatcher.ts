@@ -31,6 +31,12 @@ export interface AndroidActivateAccessibilityLinkRequest {
   onDispatch?: () => void;
 }
 
+/** Node targeting and cancellation for {@link AndroidActionDispatcher.requestAction}. */
+export interface AndroidActionRequestOptions {
+  selector?: AccessibilityNodeSelector;
+  signal?: AbortSignal;
+}
+
 /** A semantic or custom accessibility action on the node with `resourceId` (#14077). */
 export interface AndroidAccessibilityActionRequest {
   action: string;
@@ -71,9 +77,9 @@ export class AndroidActionDispatcher {
     resourceId?: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    selector?: AccessibilityNodeSelector,
-    signal?: AbortSignal,
+    options: AndroidActionRequestOptions = {},
   ): Promise<A11yActionResult> {
+    const { selector, signal } = options;
     return this.dispatchActionRequest(
       action,
       (requestId) =>
@@ -312,7 +318,7 @@ export class AndroidActionDispatcher {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector, signal);
+    return this.requestAction(action, selector.resourceId, timeoutMs, perf, { selector, signal });
   }
 
   async supportsNodeActionSelectors(

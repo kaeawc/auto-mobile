@@ -36,6 +36,30 @@ describe("parseAndroidSystemImageRuntime", () => {
         systemImagePackage: "system-images;android-35;custom_tag;riscv64",
       },
     ],
+    [
+      "system-images;android-34-ext9;android-automotive;arm64-v8a",
+      {
+        apiLevel: 34,
+        apiIdentifier: "34",
+        extensionLevel: 9,
+        tag: "android-automotive",
+        abi: "arm64-v8a",
+        architecture: "arm64",
+        systemImagePackage: "system-images;android-34-ext9;android-automotive;arm64-v8a",
+      },
+    ],
+    [
+      "system-images;android-36.1-ext17;google_apis;x86_64",
+      {
+        apiLevel: 36,
+        apiIdentifier: "36.1",
+        extensionLevel: 17,
+        tag: "google_apis",
+        abi: "x86_64",
+        architecture: "x86_64",
+        systemImagePackage: "system-images;android-36.1-ext17;google_apis;x86_64",
+      },
+    ],
   ] as const)("parses exact package identity %s", (runtime, expected) => {
     expect(parseAndroidSystemImageRuntime(runtime)).toEqual(expected);
   });
@@ -48,6 +72,11 @@ describe("parseAndroidSystemImageRuntime", () => {
     "system-images;android-36;google_apis;",
     "system-images;android-36-preview;google_apis;x86_64",
     "system-images;android-36.;google_apis;x86_64",
+    "system-images;android-34-ext;android-automotive;arm64-v8a",
+    "system-images;android-34-ext0;android-automotive;arm64-v8a",
+    "system-images;android-34-ext9-x;android-automotive;arm64-v8a",
+    "system-images;android-34-extension9;android-automotive;arm64-v8a",
+    "system-images;android-34-ext99999999999999999999;android-automotive;arm64-v8a",
     "system-images;android-0;google_apis;x86_64",
     "system-images;android-999999999999999999999;google_apis;x86_64",
     "system-images;android-36.999999999999999999999;google_apis;x86_64",

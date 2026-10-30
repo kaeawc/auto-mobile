@@ -101,9 +101,7 @@ describe("session mock location clear", () => {
         { latitude: 0, longitude: 0 },
         { latitude: 1, longitude: 1 },
       ],
-      1000,
-      500,
-      true,
+      { durationMs: 1000, updateIntervalMs: 500, loop: true },
       async (_point, options) => {
         signal = options.signal;
         calls.push("emit");

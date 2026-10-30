@@ -465,7 +465,12 @@ export class LocationOperations {
     this.assertLocationWriteAdmitted();
     this.dependencies
       .routeRegistry()
-      .start(this.dependencies.device().deviceId, input.waypoints, duration, interval, loop, emit);
+      .start(
+        this.dependencies.device().deviceId,
+        input.waypoints,
+        { durationMs: duration, updateIntervalMs: interval, loop },
+        emit,
+      );
     // Mark at start: a release can precede the first scheduled simulator fix.
     // Android's console has no unset command, so Android never acquires a marker.
     onStarted?.();

@@ -75,7 +75,8 @@ const selector = { resourceId: "res/id", text: "label", occurrence: 2 };
 const methods: Method[] = [
   {
     name: "requestAction",
-    invoke: (h, signal) => h.client.requestAction("click", "res/id", 50, perf, selector, signal),
+    invoke: (h, signal) =>
+      h.client.requestAction("click", "res/id", 50, perf, { selector, signal }),
     frame: (requestId) =>
       ctrlProxyRequests.requestAction({
         requestId,
@@ -105,7 +106,7 @@ const methods: Method[] = [
   },
   {
     name: "requestAction omits undefined resource and selector",
-    invoke: (h, signal) => h.client.requestAction("focus", undefined, 50, perf, undefined, signal),
+    invoke: (h, signal) => h.client.requestAction("focus", undefined, 50, perf, { signal }),
     frame: (requestId) => ctrlProxyRequests.requestAction({ requestId, action: "focus" }),
     literal: '{"type":"request_action","requestId":"action_wire-1","action":"focus"}',
     timeout: "Action timeout after 50ms",
@@ -166,7 +167,7 @@ const methods: Method[] = [
   {
     name: "requestGlobalAction",
     invoke: (h, signal, onDispatch) =>
-      h.client.requestGlobalAction("back", 50, perf, "frame", signal, onDispatch),
+      h.client.requestGlobalAction("back", 50, perf, { frameContext: "frame", signal, onDispatch }),
     frame: (requestId) =>
       ctrlProxyRequests.requestGlobalAction({ requestId, action: "back", frameContext: "frame" }),
     literal:

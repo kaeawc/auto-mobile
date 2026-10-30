@@ -38,6 +38,20 @@ export interface AndroidClientRequestsContext {
   awaitActionWork<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T>;
 }
 
+/** Transport controls for {@link AndroidClientRequests.requestSettingsPut}. */
+export interface AndroidSettingsPutOptions {
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+}
+
+/** Frame validation, cancellation and dispatch hook for a global action. */
+export interface AndroidGlobalActionOptions {
+  frameContext?: string;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export class AndroidClientRequests {
   constructor(private readonly context: AndroidClientRequestsContext) {}
 
@@ -181,12 +195,9 @@ export class AndroidClientRequests {
     key: string,
     value: string | null,
     valueType: SettingsValueType = "string",
-    timeoutMs: number = 5000,
-    ...[perf = new NoOpPerformanceTracker(), signal]: [
-      perf?: PerformanceTracker,
-      signal?: AbortSignal,
-    ]
+    options: AndroidSettingsPutOptions = {},
   ): Promise<A11ySettingsPutResult> {
+    const { timeoutMs = 5000, perf = new NoOpPerformanceTracker(), signal } = options;
     return this.sendSettingsCommand(
       "put",
       { namespace, key, value, valueType },
@@ -271,9 +282,7 @@ export class AndroidClientRequests {
     action: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options: AndroidGlobalActionOptions = {},
   ): Promise<{
     success: boolean;
     action: string;
@@ -281,6 +290,7 @@ export class AndroidClientRequests {
     error?: string;
     acknowledged?: boolean;
   }> {
+    const { frameContext, signal, onDispatch } = options;
     const startTime = this.context.timer.now();
     // Combine with the ambient request signal so a cancelled request (e.g.
     // session teardown mid-home-press) can free this keyed device operation

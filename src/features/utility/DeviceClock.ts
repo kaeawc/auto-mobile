@@ -358,34 +358,50 @@ export function cancellableDeviceClockAdapter(
   };
 }
 
+/** Where a clock write records ownership, what it runs against, and any preflight it reuses. */
+interface DeviceClockWriteOptions {
+  slot?: DeviceClockRestoreSlot;
+  /** Defaults to the host timer with no cache invalidation. */
+  dependencies?: DeviceClockDependencies;
+  prepared?: PreparedDeviceClock;
+}
+/** Re-enters writeDeviceClock inside the device's registry critical section. */
+function writeDeviceClockExclusively(
+  device: BootedDevice,
+  adapter: DeviceClockAdapter,
+  input: SetDeviceClockInput,
+  {
+    slot,
+    dependencies,
+    prepared,
+  }: DeviceClockWriteOptions & { dependencies: DeviceClockDependencies },
+): Promise<DeviceClockState> {
+  const registry = dependencies.restoreRegistry ?? defaultDeviceClockRestoreRegistry;
+  return registry.runExclusive(
+    device.deviceId,
+    (ownership, signal) =>
+      writeDeviceClock(device, cancellableDeviceClockAdapter(adapter, signal), input, {
+        slot: ownership,
+        dependencies: { ...dependencies, mutationSignal: signal },
+        prepared,
+      }),
+    slot,
+  );
+}
 export async function writeDeviceClock(
   device: BootedDevice,
   adapter: DeviceClockAdapter,
   input: SetDeviceClockInput,
-  slot?: DeviceClockRestoreSlot,
-  dependencies: DeviceClockDependencies = defaultDependencies,
-  prepared?: PreparedDeviceClock,
+  options: DeviceClockWriteOptions = {},
 ): Promise<DeviceClockState> {
+  const { slot, dependencies = defaultDependencies, prepared } = options;
   validateDeviceClockInput(input);
   const limitation = clockWriteLimitation(device);
   if (limitation) {
     return limitation;
   }
   if (!dependencies.mutationSignal) {
-    const registry = dependencies.restoreRegistry ?? defaultDeviceClockRestoreRegistry;
-    return registry.runExclusive(
-      device.deviceId,
-      (ownership, signal) =>
-        writeDeviceClock(
-          device,
-          cancellableDeviceClockAdapter(adapter, signal),
-          input,
-          ownership,
-          { ...dependencies, mutationSignal: signal },
-          prepared,
-        ),
-      slot,
-    );
+    return writeDeviceClockExclusively(device, adapter, input, { slot, dependencies, prepared });
   }
   dependencies.mutationSignal.throwIfAborted();
   // Presence comes before rooting: ownership makes refused root a pending restore failure.

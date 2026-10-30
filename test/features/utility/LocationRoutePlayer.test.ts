@@ -68,9 +68,14 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     const fixes: LocationWaypoint[] = [];
-    registry.start("short", points, 100, 500, false, async (point) => {
-      fixes.push(point);
-    });
+    registry.start(
+      "short",
+      points,
+      { durationMs: 100, updateIntervalMs: 500, loop: false },
+      async (point) => {
+        fixes.push(point);
+      },
+    );
     timer.advanceTime(0);
     await flush();
     timer.advanceTime(100);
@@ -87,10 +92,15 @@ describe("location route player", () => {
     const request = new AbortController();
     const fixes: number[] = [];
     await runWithAbortSignal(request.signal, async () => {
-      registry.start("detached", points, 1000, 500, false, async (point, options) => {
-        options.signal.throwIfAborted();
-        fixes.push(point.longitude);
-      });
+      registry.start(
+        "detached",
+        points,
+        { durationMs: 1000, updateIntervalMs: 500, loop: false },
+        async (point, options) => {
+          options.signal.throwIfAborted();
+          fixes.push(point.longitude);
+        },
+      );
     });
     request.abort();
     timer.advanceTime(0);
@@ -105,10 +115,15 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     let attempts = 0;
-    registry.start("hung", points, 10000, 500, false, () => {
-      attempts++;
-      return new Promise<void>(() => {});
-    });
+    registry.start(
+      "hung",
+      points,
+      { durationMs: 10000, updateIntervalMs: 500, loop: false },
+      () => {
+        attempts++;
+        return new Promise<void>(() => {});
+      },
+    );
     for (const delta of [0, 1000, 500, 1000, 500, 1000]) {
       timer.advanceTime(delta);
       await flush();
@@ -124,10 +139,15 @@ describe("location route player", () => {
     const registry = new LocationRouteRegistry(timer);
     const pending = deferred();
     const fixes: number[] = [];
-    registry.start("slow", points, 3000, 500, false, (point) => {
-      fixes.push(point.longitude);
-      return fixes.length === 1 ? pending.promise : Promise.resolve();
-    });
+    registry.start(
+      "slow",
+      points,
+      { durationMs: 3000, updateIntervalMs: 500, loop: false },
+      (point) => {
+        fixes.push(point.longitude);
+        return fixes.length === 1 ? pending.promise : Promise.resolve();
+      },
+    );
     timer.advanceTime(0);
     timer.advanceTime(800);
     expect(fixes).toHaveLength(1);
@@ -144,7 +164,12 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     const pending = deferred();
-    registry.start("settle", points, 2000, 500, false, () => pending.promise);
+    registry.start(
+      "settle",
+      points,
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      () => pending.promise,
+    );
     timer.advanceTime(0);
     const stopping = registry.stopAndSettle("settle");
     let settled = false;
@@ -164,7 +189,12 @@ describe("location route player", () => {
   test("stopAndSettle has a fake-timer bound when an emit ignores cancellation", async () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
-    registry.start("uncooperative", points, 2000, 500, false, () => new Promise<void>(() => {}));
+    registry.start(
+      "uncooperative",
+      points,
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      () => new Promise<void>(() => {}),
+    );
     timer.advanceTime(0);
     const stopping = registry.stopAndSettle("uncooperative");
     timer.advanceTime(1000);
@@ -179,7 +209,12 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     for (const id of ["a", "b"]) {
-      registry.start(id, points, 1000, 500, false, async () => {});
+      registry.start(
+        id,
+        points,
+        { durationMs: 1000, updateIntervalMs: 500, loop: false },
+        async () => {},
+      );
     }
     registry.stopAll();
     expect(registry.isActive("a")).toBe(false);
@@ -195,9 +230,11 @@ describe("location route player", () => {
     registry.start(
       "d",
       points,
-      (routeDistanceMeters(points) / speed) * 1000,
-      1000,
-      false,
+      {
+        durationMs: (routeDistanceMeters(points) / speed) * 1000,
+        updateIntervalMs: 1000,
+        loop: false,
+      },
       async (point) => {
         fixes.push(point);
       },
@@ -222,9 +259,14 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     const fixes: number[] = [];
-    registry.start("duration", points, 3000, 1000, false, async (point) => {
-      fixes.push(point.longitude);
-    });
+    registry.start(
+      "duration",
+      points,
+      { durationMs: 3000, updateIntervalMs: 1000, loop: false },
+      async (point) => {
+        fixes.push(point.longitude);
+      },
+    );
     for (const delta of [0, 1000, 1000, 1000]) {
       timer.advanceTime(delta);
       await flush();
@@ -238,9 +280,14 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     const fixes: number[] = [];
-    registry.start("d", points, 1000, 500, true, async (point) => {
-      fixes.push(point.longitude);
-    });
+    registry.start(
+      "d",
+      points,
+      { durationMs: 1000, updateIntervalMs: 500, loop: true },
+      async (point) => {
+        fixes.push(point.longitude);
+      },
+    );
     for (const delta of [0, 500, 500, 500]) {
       timer.advanceTime(delta);
       await flush();
@@ -260,14 +307,24 @@ describe("location route player", () => {
     const registry = new LocationRouteRegistry(timer);
     const first: number[] = [];
     const second: number[] = [];
-    registry.start("d", points, 2000, 500, false, async (point) => {
-      first.push(point.longitude);
-    });
+    registry.start(
+      "d",
+      points,
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      async (point) => {
+        first.push(point.longitude);
+      },
+    );
     timer.advanceTime(0);
     await flush();
-    registry.start("d", points.slice().reverse(), 2000, 500, false, async (point) => {
-      second.push(point.longitude);
-    });
+    registry.start(
+      "d",
+      points.slice().reverse(),
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      async (point) => {
+        second.push(point.longitude);
+      },
+    );
     expect(timer.getPendingTimeoutCount()).toBe(1);
     timer.advanceTime(0);
     await flush();
@@ -285,10 +342,15 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     let attempts = 0;
-    registry.start("d", points, 4000, 500, false, async () => {
-      attempts++;
-      throw new Error("offline");
-    });
+    registry.start(
+      "d",
+      points,
+      { durationMs: 4000, updateIntervalMs: 500, loop: false },
+      async () => {
+        attempts++;
+        throw new Error("offline");
+      },
+    );
     for (const delta of [0, 500, 500, 500]) {
       timer.advanceTime(delta);
       await flush();
@@ -305,7 +367,7 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     const pending: ReturnType<typeof deferred>[] = [];
-    registry.start("d", points, 5000, 500, false, () => {
+    registry.start("d", points, { durationMs: 5000, updateIntervalMs: 500, loop: false }, () => {
       const request = deferred();
       pending.push(request);
       return request.promise;
@@ -319,9 +381,14 @@ describe("location route player", () => {
       }
     }
     const replacementFixes: number[] = [];
-    registry.start("d", points, 2000, 500, false, async (point) => {
-      replacementFixes.push(point.longitude);
-    });
+    registry.start(
+      "d",
+      points,
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      async (point) => {
+        replacementFixes.push(point.longitude);
+      },
+    );
     expect(registry.consumeLastEnded("d")).toBeUndefined();
     pending[2].reject(new Error("stale third failure"));
     await flush();
@@ -343,10 +410,15 @@ describe("location route player", () => {
     const registry = new LocationRouteRegistry(timer);
     const pending = deferred();
     const fixes: number[] = [];
-    registry.start("d", points, 1000, 500, false, (point) => {
-      fixes.push(point.longitude);
-      return pending.promise;
-    });
+    registry.start(
+      "d",
+      points,
+      { durationMs: 1000, updateIntervalMs: 500, loop: false },
+      (point) => {
+        fixes.push(point.longitude);
+        return pending.promise;
+      },
+    );
     timer.advanceTime(0);
     expect(fixes).toEqual([0]);
     expect(registry.stop("d")).toBe(true);
@@ -375,10 +447,15 @@ describe("location route player", () => {
     );
     const pending = deferred();
     const fixes: number[] = [];
-    registry.start("d", points, 1000, 500, false, (point) => {
-      fixes.push(point.longitude);
-      return pending.promise;
-    });
+    registry.start(
+      "d",
+      points,
+      { durationMs: 1000, updateIntervalMs: 500, loop: false },
+      (point) => {
+        fixes.push(point.longitude);
+        return pending.promise;
+      },
+    );
     timer.advanceTime(0);
     unbound!("session", "d");
     pending.resolve();
@@ -397,9 +474,14 @@ describe("location route player", () => {
     registerLocationRouteSessionCleanup(manager, { registry });
     await manager.createSession("route-owner", "emulator-5554", "android");
     const fixes: number[] = [];
-    registry.start("emulator-5554", points, 2000, 500, false, async (point) => {
-      fixes.push(point.longitude);
-    });
+    registry.start(
+      "emulator-5554",
+      points,
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      async (point) => {
+        fixes.push(point.longitude);
+      },
+    );
     timer.advanceTime(0);
     await flush();
     await manager.releaseSession("route-owner", "explicit-release");
@@ -445,9 +527,14 @@ for (const replaced of [true, false]) {
         },
       },
     );
-    registry.start("serial", points, 2000, 500, false, async () => {
-      commands.push("location fix");
-    });
+    registry.start(
+      "serial",
+      points,
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      async () => {
+        commands.push("location fix");
+      },
+    );
     release(
       "owner",
       "serial",

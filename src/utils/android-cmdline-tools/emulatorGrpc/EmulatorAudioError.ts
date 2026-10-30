@@ -7,6 +7,7 @@ export type EmulatorAudioErrorCode =
   | "audio_guest_capture_unavailable"
   | "audio_host_microphone_unavailable"
   | "audio_repeat_injection_unsafe"
+  | "audio_record_permission_not_granted"
   | "audio_injection_busy"
   | "audio_injection_unsupported"
   | "audio_capture_unsupported"

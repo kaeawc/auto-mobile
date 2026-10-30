@@ -9,6 +9,7 @@ export const WATCHOS_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<string>([
   "installApp",
   "uninstallApp",
   "listApps",
+  "observe",
 ]);
 
 export function watchOsUnsupportedToolMessage(toolName: string): string {

@@ -30,6 +30,16 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   factories; Android and iOS keep their executors. `installApp` takes only a `.app` (bundle id from
   Info.plist; `upgrade` from a prior listing) and refuses Android-only options by name;
   `uninstallApp` refuses `keepData: true`.
+- **Screenshot-only observe.** `observe` on a watch (`src/server/observeWatch.ts`) captures with
+  `simctl io <udid> screenshot` through `SimCtlClient.screenshot`, writes the PNG into the shared
+  retained screenshot cache, and returns the screenshot with the PNG header's `screenSize` and a
+  `hierarchyUnavailable` note. No CtrlProxy, hierarchy, element matching, snapshot reference or
+  observation resource runs. Hierarchy fields are absent, not empty, so "no elements" is never
+  read as an empty screen; for the same reason the response finalizer neither projects a watch
+  observation to a skeleton nor makes it a session diff baseline. Options that need a hierarchy
+  or an Android/iOS pipeline (`waitFor`, `settled`, `raw`, `includeExtras`, `project`, `scope`,
+  `layer`, `skipBackStack`, `crop`, `screenshotOptions`, `screenshot: "none"`, another display)
+  are refused by name before any capture.
 - **Explicit resolution.** A watch session resolves through the pooled-session path (readiness
   setup and keep-awake are Android-only). A sessionless call reaches a watch only with
   `platform: "watchos"`: readiness then resolves a watch a fresh watchOS listing shows booted (by

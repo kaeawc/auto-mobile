@@ -4,6 +4,7 @@ import {
   addDeviceTargetingToSchema,
   responseShapeControlFields,
   withAppIdAliases,
+  watchAwarePlatformSchema,
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
 import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
@@ -181,18 +182,6 @@ const installBundleSchema = z
       .describe(".aab: build with bundletool --local-testing for on-demand modules"),
   })
   .strict();
-
-/**
- * installApp, uninstallApp and listApps accept an Apple Watch simulator (#14908), so their
- * `platform` names "watchos" too. Every other tool keeps the shared Android/iOS enum.
- */
-const watchAwarePlatformSchema = () =>
-  z
-    .enum(["android", "ios", "watchos"])
-    .optional()
-    .describe(
-      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session',
-    );
 
 const installAppInput = z.object({
   platform: watchAwarePlatformSchema(),

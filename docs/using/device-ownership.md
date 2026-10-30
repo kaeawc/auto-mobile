@@ -315,6 +315,13 @@ watch, even after one was selected.
   takes a `.app` bundle built for the watchOS simulator; `.ipa`, `.apk` and the
   Android-only options are refused by name. `uninstallApp` refuses
   `keepData: true`, because uninstalling always removes the app's data.
+- `observe` on a watch returns only a fresh screenshot (`screenshotPath`,
+  `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note:
+  the view hierarchy is not available on watchOS yet. `viewHierarchy`,
+  `skeleton`, `elements` and the other element fields are absent, not empty, so
+  read the screenshot rather than treating the screen as empty. Options that
+  need a hierarchy (`waitFor`, `raw`, `project`, `scope`, `layer`, `crop` and
+  the like), `screenshot: "none"` and `screenshotOptions` are refused by name.
 - Every other device tool refuses a watch with `<tool> does not support watchOS
   yet`. `startDevice` and `killDevice` start and stop a watch named with
   `platform: "watchos"`.

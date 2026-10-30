@@ -76,7 +76,10 @@ test("input/typeText submit reports a returned IME failure after successful typi
     abortSignal: undefined,
     onDispatch: expect.any(Function),
   });
-  expect(ime).toHaveBeenCalledWith("done", 1000, undefined, undefined, expect.any(Function));
+  expect(ime).toHaveBeenCalledWith("done", 1000, undefined, {
+    abortSignal: undefined,
+    onDispatch: expect.any(Function),
+  });
   expect(warn).toHaveBeenCalled();
 });
 
@@ -96,13 +99,10 @@ test("input/typeText submit preserves a rejected IME error's class and metadata"
   expect(error.code).toBe("runner_failed");
   expect(error.failureSource).toBe("transport");
   expect(controller.signal.aborted).toBe(false);
-  expect(ime).toHaveBeenCalledWith(
-    "done",
-    1000,
-    undefined,
-    expect.any(AbortSignal),
-    expect.any(Function),
-  );
+  expect(ime).toHaveBeenCalledWith("done", 1000, undefined, {
+    abortSignal: expect.any(AbortSignal),
+    onDispatch: expect.any(Function),
+  });
 });
 
 function prototypeOnlyIosClient(): IOSCtrlProxyClient {
@@ -139,13 +139,13 @@ test.each([
       spyOnIosClientInstance(iosClient);
       spyOn(iosClient, "requestSetText").mockResolvedValue({ success: true, totalTimeMs: 0 });
       ime = spyOn(iosClient, "requestImeAction").mockImplementation(
-        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
+        (_action, _timeoutMs, _perf, options) => abortingIme(options?.abortSignal),
       );
     } else {
       const androidClient = prototypeOnlyAndroidClient();
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(androidClient);
       ime = spyOn(androidClient, "requestImeAction").mockImplementation(
-        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
+        (_action, _timeoutMs, _perf, options) => abortingIme(options?.abortSignal),
       );
     }
     const warn = spyOn(logger, "warn").mockImplementation(() => {});

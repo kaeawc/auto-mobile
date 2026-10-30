@@ -243,7 +243,7 @@ export class RecentApps extends BaseVisualChange {
   private async executeIosRecentApps(signal?: AbortSignal): Promise<RecentAppsResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     throwIfAborted(signal);
-    const result = await client.requestRecentApps(undefined, undefined, undefined, signal);
+    const result = await client.requestRecentApps(undefined, undefined, { signal });
     if (!result.success && result.dispatched && result.acknowledged === false) {
       // Preserve the uncertain dispatch before post-action reads can replace it with cancellation.
       throw new ActionableError(

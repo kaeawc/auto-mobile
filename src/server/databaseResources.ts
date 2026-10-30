@@ -158,7 +158,7 @@ function createDatabaseClient(
         iosStorageRequest(() => client.listTablesForIos(appId, databasePath)),
       getTableData: async (_appId, databasePath, table, limit, offset) =>
         iosStorageRequest(() =>
-          client.getTableDataForIos(_appId, databasePath, table, { limit, offset }),
+          client.getTableDataForIos(_appId, databasePath, table, { page: { limit, offset } }),
         ),
       getTableStructure: async (appId, databasePath, table) =>
         iosStorageRequest(() => client.getTableStructureForIos(appId, databasePath, table)),

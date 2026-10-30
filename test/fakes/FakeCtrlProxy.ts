@@ -859,7 +859,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
+    { timeoutMs }: { timeoutMs?: number } = {},
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     this.hierarchyRequestCount++;
     this.lastRequestHierarchySyncArgs = { disableAllFiltering, timeoutMs };
@@ -1073,8 +1073,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: "done" | "next" | "search" | "send" | "go" | "previous",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    _abortSignal?: AbortSignal,
-    _onDispatch?: () => void,
+    {
+      abortSignal: _abortSignal,
+      onDispatch: _onDispatch,
+    }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<A11yImeActionResult> {
     await this.applyDelay("imeAction");
 

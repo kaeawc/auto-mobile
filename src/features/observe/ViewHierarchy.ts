@@ -419,8 +419,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
           !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh
           timeoutMs ?? 15000, // timeout: caller budget when supplied
           perf,
-          skipWaitForFresh,
-          { minTimestamp, signal },
+          { skipWaitForFresh, minTimestamp, signal },
         );
       } catch (error) {
         if (!(error instanceof IosRunnerStalledError)) {

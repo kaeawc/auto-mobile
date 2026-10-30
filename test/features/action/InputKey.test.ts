@@ -612,7 +612,7 @@ describe("InputKey", () => {
       key: "enter",
       keyCode: "enter",
     });
-    expect(requestPressKey).toHaveBeenCalledWith("enter", ["meta"], 500, undefined, {
+    expect(requestPressKey).toHaveBeenCalledWith("enter", ["meta"], 500, {
       signal: undefined,
       onDispatch: undefined,
     });

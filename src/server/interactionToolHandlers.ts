@@ -693,24 +693,18 @@ function buildIosOpenAlertOptions(
     tapOnElementFactory,
     refreshHierarchy: iosClient
       ? async () => {
-          const refreshed = await iosClient.requestHierarchySync(
-            undefined,
-            true,
-            signal,
-            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-          );
+          const refreshed = await iosClient.requestHierarchySync(undefined, true, signal, {
+            timeoutMs: IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+          });
           return refreshed ? iosClient.convertToViewHierarchyResult(refreshed.hierarchy) : null;
         }
       : undefined,
     tapSystemAlert: iosClient
       ? () =>
-          iosClient.requestAction(
-            "system_alert_accept",
-            undefined,
-            undefined,
-            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-            { abortSignal: signal },
-          )
+          iosClient.requestAction("system_alert_accept", undefined, undefined, {
+            timeoutMs: IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+            abortSignal: signal,
+          })
       : undefined,
   };
 }

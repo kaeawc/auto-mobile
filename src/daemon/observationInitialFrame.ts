@@ -84,8 +84,7 @@ export interface ObservationStreamIosClient {
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    options?: LatestHierarchyOptions,
+    options?: LatestHierarchyOptions & { skipWaitForFresh?: boolean },
   ): Promise<CtrlProxyHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
@@ -536,7 +535,7 @@ async function getIosInitialHierarchy(
     false,
     INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
     undefined,
-    true,
+    { skipWaitForFresh: true },
   );
   if (hierarchyResponse.hierarchy && hierarchyResponse.fresh) {
     return {

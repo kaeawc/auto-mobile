@@ -94,7 +94,9 @@ export async function readFreshPlatformHierarchy(
             signal,
             effectiveTimeoutMs,
           )
-        : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
+        : await client.requestHierarchySync(undefined, false, signal, {
+            timeoutMs: effectiveTimeoutMs,
+          });
       if (!synced?.hierarchy) {
         return null;
       }

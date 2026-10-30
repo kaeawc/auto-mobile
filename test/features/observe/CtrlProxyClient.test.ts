@@ -3208,11 +3208,11 @@ describe("AndroidCtrlProxyClient", function () {
           const h = await createSuppressionHarness();
           try {
             const first = ordinaryFirst
-              ? h.client.requestHierarchySync(undefined, false, undefined, 1000)
+              ? h.client.requestHierarchySync(undefined, false, undefined, { timeoutMs: 1000 })
               : h.request();
             const second = ordinaryFirst
               ? h.request()
-              : h.client.requestHierarchySync(undefined, false, undefined, 1000);
+              : h.client.requestHierarchySync(undefined, false, undefined, { timeoutMs: 1000 });
             await flushMicrotasks();
             const ids = h.requestIds();
             expect(ids).toHaveLength(2);
@@ -3313,12 +3313,9 @@ describe("AndroidCtrlProxyClient", function () {
         try {
           const pending = h.request();
           await flushMicrotasks();
-          const observer = h.client.requestHierarchySyncForObserver(
-            undefined,
-            false,
-            undefined,
-            1000,
-          );
+          const observer = h.client.requestHierarchySyncForObserver(undefined, false, undefined, {
+            timeoutMs: 1000,
+          });
           await flushMicrotasks();
           const ids = h.requestIds();
           expect(ids).toHaveLength(2);
@@ -5280,7 +5277,9 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         testClient.invalidateCache();
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -5317,7 +5316,8 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
           diagnostics,
         });
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
@@ -5399,7 +5399,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -5443,7 +5445,9 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         testClient.invalidateCache();
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -5496,7 +5500,9 @@ describe("AndroidCtrlProxyClient", function () {
         timer,
       });
       try {
-        const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
+        const pending = client.requestHierarchySync(undefined, true, undefined, {
+          timeoutMs: 10000,
+        });
         let settled = false;
         void pending.then(() => {
           settled = true;
@@ -5537,7 +5543,9 @@ describe("AndroidCtrlProxyClient", function () {
         timer,
       });
       try {
-        const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
+        const pending = client.requestHierarchySync(undefined, true, undefined, {
+          timeoutMs: 10000,
+        });
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket);
@@ -5571,7 +5579,9 @@ describe("AndroidCtrlProxyClient", function () {
         timer,
       });
       try {
-        const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
+        const pending = client.requestHierarchySync(undefined, true, undefined, {
+          timeoutMs: 10000,
+        });
         let settled = false;
         void pending.then(() => {
           settled = true;
@@ -5619,7 +5629,9 @@ describe("AndroidCtrlProxyClient", function () {
       });
 
       try {
-        const syncPromise = client.requestHierarchySync(undefined, true, undefined, 10000);
+        const syncPromise = client.requestHierarchySync(undefined, true, undefined, {
+          timeoutMs: 10000,
+        });
         let settled = false;
         void syncPromise.then(() => {
           settled = true;
@@ -5683,7 +5695,9 @@ describe("AndroidCtrlProxyClient", function () {
       });
 
       try {
-        const syncPromise = client.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = client.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket);
@@ -5758,7 +5772,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -5808,7 +5824,9 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         testClient.invalidateCache();
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -5869,7 +5887,9 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         // Prime the connection + cache via a sync that a push resolves quickly.
-        const primePromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const primePromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -5969,7 +5989,8 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
           diagnostics,
         });
 
@@ -6019,7 +6040,8 @@ describe("AndroidCtrlProxyClient", function () {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
         // Short timeout; never deliver a push or an error frame -> genuine timeout.
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 3000, {
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 3000,
           diagnostics,
         });
 
@@ -6049,7 +6071,8 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
           diagnostics,
         });
 
@@ -6101,7 +6124,8 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
           diagnostics,
         });
 
@@ -6551,7 +6575,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
 
         const socket = (await waitForSocket(getSocket)) as HierarchySendFailingWebSocket;
         expect(socket).not.toBeNull();
@@ -6599,7 +6625,8 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
           diagnostics,
         });
 
@@ -6645,7 +6672,9 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         testClient.invalidateCache();
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
 
         const socket = (await waitForSocket(getSocket)) as HierarchySendFailingWebSocket;
         expect(socket).not.toBeNull();
@@ -6704,7 +6733,9 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         // Prime the connection + cache via a sync that a push resolves quickly.
-        const primePromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const primePromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 10000,
+        });
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);

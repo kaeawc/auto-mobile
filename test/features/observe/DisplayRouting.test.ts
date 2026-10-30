@@ -185,7 +185,7 @@ describe("display read routing", () => {
     });
     const capture = createDeviceHierarchyCapture(device, {
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, _timeout, options) => {
+        requestHierarchySync: async (_perf, _raw, _signal, { timeoutMs: _timeout, ...options }) => {
           requestedDisplayId = options?.displayId;
           return { hierarchy };
         },
@@ -217,7 +217,12 @@ describe("display read routing", () => {
         },
       },
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, actualSignal, timeout, options) => {
+        requestHierarchySync: async (
+          _perf,
+          _raw,
+          actualSignal,
+          { timeoutMs: timeout, ...options },
+        ) => {
           syncReads++;
           expect(actualSignal).toBe(signal);
           expect(timeout).toBe(750);

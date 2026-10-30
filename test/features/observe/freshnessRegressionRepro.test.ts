@@ -269,7 +269,10 @@ describe("freshness regression repro (receivedAt-vs-updatedAt clock, CtrlProxyHi
     context.setCachedHierarchy({ ...primed, receivedAt: timer.now() });
 
     // `observe`'s default glance path: skipWaitForFresh=true, no invalidation.
-    await hierarchy.getLatestHierarchy(false, 15000, undefined, true, { minTimestamp: 0 });
+    await hierarchy.getLatestHierarchy(false, 15000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     // A cache-age computed from the DELIVERY clock (receivedAt, just refreshed)
     // looks brand new and would skip the fetch — fetches would stay at 1 while

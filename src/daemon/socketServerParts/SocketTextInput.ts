@@ -371,7 +371,8 @@ export class SocketTextInput {
         deadline - this.state.timer.now(),
         (fenced, dispatched) =>
           iosAppendClient
-            ? iosAppendClient.requestAppendText(text, timeoutMs, undefined, frameContext, {
+            ? iosAppendClient.requestAppendText(text, timeoutMs, undefined, {
+                frameContext,
                 abortSignal: fenced,
                 onDispatch: dispatched,
               })
@@ -587,7 +588,10 @@ export class SocketTextInput {
         signal,
         remainingTimeoutMs,
         (fenced, dispatched) =>
-          client.requestImeAction(imeAction, remainingTimeoutMs, undefined, fenced, dispatched),
+          client.requestImeAction(imeAction, remainingTimeoutMs, undefined, {
+            abortSignal: fenced,
+            onDispatch: dispatched,
+          }),
         { onDispatch },
       );
       assertSocketInputNotAborted(signal);

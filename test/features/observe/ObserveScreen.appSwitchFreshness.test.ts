@@ -45,7 +45,12 @@ async function harness(
         viewHierarchy: h.viewHierarchy,
         timer: h.timer,
         syncClientFactory: () => ({
-          requestHierarchySync: async (perf, disableAllFiltering, signal, timeoutMs, options) => {
+          requestHierarchySync: async (
+            perf,
+            disableAllFiltering,
+            signal,
+            { timeoutMs, ...options },
+          ) => {
             const synced = await h.hierarchy.requestHierarchySync(
               perf,
               disableAllFiltering,

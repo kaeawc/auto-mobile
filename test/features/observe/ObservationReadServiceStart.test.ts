@@ -469,7 +469,12 @@ test("setup and extraction share the original deadline", async () => {
   h.setSetup(async () => {
     h.timer.advanceTime(70);
   });
-  h.client.requestHierarchySyncForObserver = async (_perf, _raw, _signal, timeout) => {
+  h.client.requestHierarchySyncForObserver = async (
+    _perf,
+    _raw,
+    _signal,
+    { timeoutMs: timeout },
+  ) => {
     readBudget = timeout;
     return new Promise(() => {});
   };

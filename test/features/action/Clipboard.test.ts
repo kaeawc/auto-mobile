@@ -640,7 +640,6 @@ describe("Clipboard Android", () => {
           _action,
           _text,
           _timeout,
-          _perf,
           { onDispatch }: { onDispatch?: () => void } = {},
         ) => {
           if (!undelivered) {
@@ -688,7 +687,7 @@ describe("Clipboard Android", () => {
       const clipboard = new Clipboard(androidDevice, {
         adbFactory: new FakeAdbClientFactory(adb),
         ctrlProxyFactory: () => ({
-          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
+          requestClipboard: async (_action, _text, _timeout, { onDispatch } = {}) => {
             onDispatch?.();
             return { success: false, acknowledged: true, error, totalTimeMs: 1 };
           },
@@ -765,7 +764,7 @@ describe("Clipboard Android", () => {
         const clipboard = new Clipboard(androidDevice, {
           adbFactory: new FakeAdbClientFactory(adb),
           ctrlProxyFactory: () => ({
-            requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
+            requestClipboard: async (_action, _text, _timeout, { onDispatch } = {}) => {
               if (proxyFailure === "pre-send throw") {
                 throw new Error(reason);
               }
@@ -882,7 +881,7 @@ describe("Clipboard Android", () => {
       const clipboard = new Clipboard(androidDevice, {
         adbFactory: new FakeAdbClientFactory(adb),
         ctrlProxyFactory: () => ({
-          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
+          requestClipboard: async (_action, _text, _timeout, { onDispatch } = {}) => {
             onDispatch?.();
             if (failure === "throw") {
               throw new Error(reason);
@@ -914,7 +913,7 @@ describe("Clipboard Android", () => {
       const clipboard = new Clipboard(androidDevice, {
         adbFactory: new FakeAdbClientFactory(adb),
         ctrlProxyFactory: () => ({
-          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
+          requestClipboard: async (_action, _text, _timeout, { onDispatch } = {}) => {
             onDispatch?.();
             return { success: true, acknowledged: true, text: "hello", totalTimeMs: 1 };
           },
@@ -1037,7 +1036,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
       const clipboard = new Clipboard(device, {
         adbFactory: new FakeAdbClientFactory(),
         ctrlProxyFactory: () => ({
-          requestClipboard: async (action, _text, _timeout, _perf, { signal, onDispatch } = {}) => {
+          requestClipboard: async (action, _text, _timeout, { signal, onDispatch } = {}) => {
             if (action === "get") {
               return { success: true, text: "", totalTimeMs: 0 };
             }
@@ -1087,7 +1086,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
       const clipboard = new Clipboard(device, {
         adbFactory: new FakeAdbClientFactory(),
         ctrlProxyFactory: () => ({
-          requestClipboard: async (action, _text, _timeout, _perf, { onDispatch } = {}) => {
+          requestClipboard: async (action, _text, _timeout, { onDispatch } = {}) => {
             if (action === "get") {
               return { success: true, text: "", totalTimeMs: 0 };
             }
@@ -1129,7 +1128,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
       const clipboard = new Clipboard(device, {
         adbFactory: new FakeAdbClientFactory(),
         ctrlProxyFactory: () => ({
-          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
+          requestClipboard: async (_action, _text, _timeout, { onDispatch } = {}) => {
             onDispatch?.();
             return { success: false, acknowledged: false, error: "timeout", totalTimeMs: 0 };
           },

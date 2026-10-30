@@ -72,8 +72,7 @@ export class CtrlProxyKeyboard {
     key: InputKeyName,
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    { signal, onDispatch }: DispatchOptions = {},
+    { perf, signal, onDispatch }: DispatchOptions & { perf?: PerformanceTracker } = {},
   ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>> {
     return sendIOSPressCommand(this.context, {
       idPrefix: "pressKey",

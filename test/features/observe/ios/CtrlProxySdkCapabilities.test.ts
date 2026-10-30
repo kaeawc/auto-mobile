@@ -664,7 +664,8 @@ describe("SDK capability caller budgets", () => {
     [
       {
         name: "SQL",
-        run: (client) => client.executeSQLForIos("com.example.sdk", "app.db", "select 1", 250),
+        run: (client) =>
+          client.executeSQLForIos("com.example.sdk", "app.db", "select 1", { timeoutMs: 250 }),
       },
       { name: "databases", run: (client) => client.listDatabasesForIos("com.example.sdk", 250) },
       {
@@ -678,13 +679,10 @@ describe("SDK capability caller budgets", () => {
       {
         name: "table data",
         run: (client) =>
-          client.getTableDataForIos(
-            "com.example.sdk",
-            "app.db",
-            "items",
-            { limit: 50, offset: 0 },
-            250,
-          ),
+          client.getTableDataForIos("com.example.sdk", "app.db", "items", {
+            page: { limit: 50, offset: 0 },
+            timeoutMs: 250,
+          }),
       },
       {
         name: "table structure",
@@ -763,8 +761,7 @@ describe("SDK capability caller budgets", () => {
           "com.example.sdk",
           boundary === "deadline" ? 200 : undefined,
           undefined,
-          false,
-          controller.signal,
+          { coldBoot: false, signal: controller.signal },
         ),
       );
       void pending.then(() => {

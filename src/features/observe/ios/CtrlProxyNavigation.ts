@@ -44,9 +44,7 @@ export class CtrlProxyNavigation {
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { frameContext, signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyPressHomeResult>> {
     return sendIOSPressCommand(
       this.context,
@@ -73,9 +71,7 @@ export class CtrlProxyNavigation {
   async requestPressBack(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { frameContext, signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyPressBackResult>> {
     return sendIOSPressCommand(this.context, {
       idPrefix: "pressBack",
@@ -313,8 +309,7 @@ export class CtrlProxyNavigation {
     bundleId: string,
     timeoutMs: number = 10000,
     perf?: PerformanceTracker,
-    coldBoot: boolean = false,
-    signal?: AbortSignal,
+    { coldBoot = false, signal }: { coldBoot?: boolean; signal?: AbortSignal } = {},
   ): Promise<CtrlProxyLaunchAppResult> {
     return sendCommand<CtrlProxyLaunchAppResult>(this.context, {
       idPrefix: "launchApp",
@@ -336,9 +331,7 @@ export class CtrlProxyNavigation {
   async requestRecentApps(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { frameContext, signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>> {
     return sendIOSPressCommand(this.context, {
       idPrefix: "recentApps",

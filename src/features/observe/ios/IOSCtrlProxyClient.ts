@@ -164,7 +164,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
       connectWebSocket: (perf, interest) => this.connectWebSocket(perf, interest),
       ensureConnected: () => this.ensureConnected(),
       requestHierarchySync: (perf, filter, signal, timeoutMs) =>
-        this.requestHierarchySync(perf, filter, signal, timeoutMs),
+        this.requestHierarchySync(perf, filter, signal, { timeoutMs }),
     }));
   }
   public async verifyServiceReady(

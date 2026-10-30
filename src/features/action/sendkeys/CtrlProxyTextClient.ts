@@ -35,7 +35,10 @@ export function createSendKeysTextClient(
       clear: async () => client.requestClearText(),
       ime: async (action, signal, onDispatch) =>
         withImeActionApproximationWarning(
-          await client.requestImeAction(action, 5000, undefined, signal, onDispatch),
+          await client.requestImeAction(action, 5000, undefined, {
+            abortSignal: signal,
+            onDispatch,
+          }),
         ),
       supportsImeCommit: async () =>
         (await client.supportsCommand("request_commit_text")) &&
@@ -79,7 +82,6 @@ export function createSendKeysTextClient(
         text,
         options?.timeoutMs ?? resolveTextCtrlProxyTimeoutMs(text),
         undefined,
-        undefined,
         {
           abortSignal: options?.abortSignal,
           ...(options?.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
@@ -93,7 +95,7 @@ export function createSendKeysTextClient(
       });
     },
     ime: async (action, signal, onDispatch) =>
-      client.requestImeAction(action, 5000, undefined, signal, onDispatch),
+      client.requestImeAction(action, 5000, undefined, { abortSignal: signal, onDispatch }),
     supportsImeCommit: async () => false,
     supportsImeKeyEvents: async () => false,
     supportsImeClearField: async () => false,

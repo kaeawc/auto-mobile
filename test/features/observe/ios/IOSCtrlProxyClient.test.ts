@@ -1336,7 +1336,9 @@ describe("IOSCtrlProxyClient", function () {
           }),
         );
 
-        const hierarchyPromise = testClient.requestHierarchySync(undefined, false, undefined, 1000);
+        const hierarchyPromise = testClient.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 1000,
+        });
         const hierarchyRequest = await waitForMessageType(socket, "request_hierarchy_if_stale");
         socket.simulateMessage(
           JSON.stringify({
@@ -1714,7 +1716,7 @@ describe("IOSCtrlProxyClient", function () {
         const updates: XCTestHierarchy[] = [];
         const unsubscribe = client.onPushUpdate((hierarchy) => updates.push(hierarchy));
         const options: NonNullable<
-          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[4]
+          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[3]
         > = {
           failureSink: {},
         };
@@ -1728,7 +1730,7 @@ describe("IOSCtrlProxyClient", function () {
           const pending = hasPendingRequest
             ? client.testHooks
                 .hierarchy()
-                .requestHierarchySync(undefined, false, undefined, 1000, options)
+                .requestHierarchySync(undefined, false, undefined, { timeoutMs: 1000, ...options })
             : undefined;
           if (hasPendingRequest) {
             const request = await waitForMessageType(socket, "request_hierarchy_if_stale");
@@ -2023,7 +2025,9 @@ describe("IOSCtrlProxyClient", function () {
         await testClient.ensureConnected();
         await testClient.ensureConnected();
 
-        const result = await testClient.getLatestHierarchy(false, 100, undefined, true);
+        const result = await testClient.getLatestHierarchy(false, 100, undefined, {
+          skipWaitForFresh: true,
+        });
 
         expect(result.hierarchy).toBeNull();
         expect(result.fresh).toBe(false);
@@ -3215,8 +3219,7 @@ describe("IOSCtrlProxyClient", function () {
           "com.apple.Preferences",
           5000,
           undefined,
-          false,
-          controller.signal,
+          { coldBoot: false, signal: controller.signal },
         );
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
@@ -4462,7 +4465,9 @@ describe("IOSCtrlProxyClient", function () {
           // A navigation invalidates the cache; its solicited response refreshes it.
           client.invalidateCache();
           const sentBefore = socket.sentMessages.length;
-          const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
+          const pending = client.requestHierarchySync(undefined, false, undefined, {
+            timeoutMs: 1000,
+          });
           const request = await waitForSentRequest(
             socket,
             "request_hierarchy_if_stale",
@@ -4648,7 +4653,9 @@ describe("IOSCtrlProxyClient", function () {
         }
         client.invalidateCache();
         const sentBefore = socket.sentMessages.length;
-        const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
+        const pending = client.requestHierarchySync(undefined, false, undefined, {
+          timeoutMs: 1000,
+        });
         const request = await waitForSentRequest(socket, "request_hierarchy_if_stale", sentBefore);
         socket.simulateMessage(
           JSON.stringify({

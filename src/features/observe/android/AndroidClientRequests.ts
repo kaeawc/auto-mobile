@@ -59,8 +59,11 @@ export class AndroidClientRequests {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    { signal, onDispatch }: DispatchOptions = {},
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      onDispatch,
+    }: DispatchOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yClipboardResult & { acknowledged?: boolean }> {
     const startTime = this.context.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);

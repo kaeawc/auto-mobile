@@ -515,8 +515,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     action: ImeAction,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
+    { abortSignal, onDispatch }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<ActionTimingResult> {
     let dispatched = false;
     const startMs = this.context.timer.now();

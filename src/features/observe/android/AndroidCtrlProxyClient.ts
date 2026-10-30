@@ -776,8 +776,10 @@ export class AndroidCtrlProxyClient
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     disableAllFiltering = false,
     signal?: AbortSignal,
-    timeoutMs = 10000,
-    display?: number | ObserverHierarchyRequestOptions,
+    {
+      timeoutMs = 10000,
+      display,
+    }: { timeoutMs?: number; display?: number | ObserverHierarchyRequestOptions } = {},
   ): Promise<{ hierarchy: AccessibilityHierarchy; frameContext?: string } | null> {
     const deadline = this.timer.now() + timeoutMs;
     await this.waitForPendingRequests(timeoutMs, signal);

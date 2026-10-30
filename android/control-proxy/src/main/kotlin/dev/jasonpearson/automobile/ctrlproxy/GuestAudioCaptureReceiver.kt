@@ -57,6 +57,14 @@ private class AndroidGuestAudioCapturePort(private val context: Context) : Guest
         AudioFormat.ENCODING_PCM_16BIT,
       )
     check(bufferSize > 0) { "invalid AudioRecord minimum buffer size: $bufferSize" }
+    if (
+      context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+        PackageManager.PERMISSION_GRANTED
+    ) {
+      throw IllegalStateException(
+        "RECORD_AUDIO is not granted to CtrlProxy; reinstall the CtrlProxy APK"
+      )
+    }
     val record =
       AudioRecord(
         MediaRecorder.AudioSource.MIC,

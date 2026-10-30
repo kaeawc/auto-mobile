@@ -379,19 +379,41 @@ export class BrokerDeviceAcquisition {
     request: BrokerDeviceRequest,
     options: BindingPreparationOptions,
   ): Promise<BindingResultEntry> {
-    const result = await this.deps.reconcile(registry, {
-      key,
-      role: request.role,
-      platform: request.platform,
-      requestedSpec: request.requestedSpec as BindingRequestedSpec,
-      ...(request.priorDeviceHint ? { priorDeviceHint: request.priorDeviceHint } : {}),
-      deadlineMs: options.deadlineMs,
-      ...(options.createDeadlineMs === undefined
-        ? {}
-        : { createDeadlineMs: options.createDeadlineMs }),
-      signal: options.signal,
-      owner: this.deps.owner(),
-    });
+    let result: BindingReconcileResult;
+    try {
+      result = await this.deps.reconcile(registry, {
+        key,
+        role: request.role,
+        platform: request.platform,
+        requestedSpec: request.requestedSpec as BindingRequestedSpec,
+        ...(request.priorDeviceHint ? { priorDeviceHint: request.priorDeviceHint } : {}),
+        deadlineMs: options.deadlineMs,
+        ...(options.createDeadlineMs === undefined
+          ? {}
+          : { createDeadlineMs: options.createDeadlineMs }),
+        signal: options.signal,
+        owner: this.deps.owner(),
+      });
+    } catch (error) {
+      if (!(error instanceof BindingRegistrySchemaUnsupportedError)) {
+        throw error;
+      }
+      return {
+        bindingIndex: request.bindingIndex,
+        role: request.role,
+        platform: request.platform,
+        assignmentGeneration: null,
+        device: null,
+        sessionUuid: null,
+        requestedSpec: request.requestedSpec,
+        resolvedSpec: null,
+        specFingerprint: null,
+        disposition: null,
+        readiness: null,
+        lifecycle: null,
+        failure: acquisitionFailure(error.code, errorMessage(error), error.retryable),
+      };
+    }
     if (result.outcome === "failed") {
       return {
         bindingIndex: request.bindingIndex,

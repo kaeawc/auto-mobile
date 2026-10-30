@@ -504,7 +504,7 @@ test("ide/setKeyValue needs no input hold: separate tracked execution, atomic wr
   const pending = Promise.withResolvers<void>();
   let sent = false;
   const write = spyOn(f.client, "setPreference").mockImplementation(
-    (_app, _file, _key, _value, _type, options) => {
+    (_app, _file, _entry, options) => {
       if (typeof options === "object") {
         options.onDispatch?.();
       }

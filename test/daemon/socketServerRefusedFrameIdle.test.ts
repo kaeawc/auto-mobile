@@ -275,7 +275,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
         requestGestureEnd: record("gestureEnd"),
         requestSetText: record("setText", 1),
         requestImeAction: recordIme(4),
-        setPreference: recordWrite("setPreference", 5),
+        setPreference: recordWrite("setPreference", 3),
         removePreference: recordWrite("removePreference", 3),
         clearPreferenceStore: recordWrite("clearPreferenceStore", 2),
       });
@@ -288,7 +288,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
         requestSetText: record("setText", 1),
         requestAppendText: record("appendText", 4),
         requestImeAction: recordIme(4),
-        setPreference: recordWrite("setPreference", 5),
+        setPreference: recordWrite("setPreference", 3),
         removePreference: recordWrite("removePreference", 3),
         clearPreferenceStore: recordWrite("clearPreferenceStore", 2),
       }),

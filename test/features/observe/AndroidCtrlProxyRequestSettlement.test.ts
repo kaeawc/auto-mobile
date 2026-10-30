@@ -316,7 +316,9 @@ const methods: Method[] = [
   {
     name: "set preference",
     invoke: (h) =>
-      h.client.testHooks.storage().setPreference("pkg", "prefs", "key", null, "STRING", 50),
+      h.client.testHooks
+        .storage()
+        .setPreference("pkg", "prefs", { key: "key", value: null, type: "STRING" }, 50),
   },
   {
     name: "remove preference",

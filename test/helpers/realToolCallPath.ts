@@ -122,8 +122,8 @@ export class RealToolCallPath {
       return { success: true, totalTimeMs: 0 };
     };
     proxy.setPreference = async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-      if (typeof args[5] === "object") {
-        args[5].onDispatch?.();
+      if (typeof args[3] === "object") {
+        args[3].onDispatch?.();
       }
       this.ctrlProxyWrites.push("setPreference");
     };

@@ -523,7 +523,13 @@ const methods: RequestMethod[] = [
   {
     name: "setPreference",
     abortable: false,
-    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "STRING", LONG_TIMEOUT_MS),
+    invoke: (h) =>
+      h.client.setPreference(
+        "pkg",
+        "file",
+        { key: "key", value: "1", type: "STRING" },
+        LONG_TIMEOUT_MS,
+      ),
   },
   {
     name: "removePreference",

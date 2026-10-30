@@ -100,6 +100,15 @@ export class IosSdkTextRouting {
   }
 
   /**
+   * Forgets the focused field after a key that can move focus or leave the page (Tab, or any IME
+   * action), so later text actions follow keyboard focus through XCTest instead of acting on the
+   * field the command started on.
+   */
+  focusMayHaveMoved(): void {
+    this.setTarget(undefined);
+  }
+
+  /**
    * IME `done` on a web field submits its form through the web view. Every other IME action, and
    * every IME action on a native bridge field, has no bridge form and reports the XCTest fallback.
    */

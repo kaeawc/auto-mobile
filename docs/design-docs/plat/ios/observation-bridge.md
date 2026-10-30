@@ -215,7 +215,9 @@ reports `fallbackReason: unsupported`, as do the other IME actions. The field ke
 and element id (stable across the document's snapshots) and takes the snapshot id of every
 observation that shows it; when the fresh read before its first action no longer shows it (the
 element left, or no snapshot merged), XCTest stands in and the result reports
-`fallbackReason: unavailable`. A rejected web action fails closed.
+`fallbackReason: unavailable`. A rejected web action fails closed. After Tab or any IME action,
+which can move focus or leave the page, the command forgets the field (native or web), and later
+text actions follow keyboard focus through XCTest.
 
 Any capture moves the bridge's current observation, and the bridge rejects an action naming an older
 one. So sendKeys keeps the field's element id, takes the capture identity of every observation it

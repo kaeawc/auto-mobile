@@ -141,3 +141,17 @@ describe("the focused field's bridge identity (#5162)", () => {
     expect(sdkTargetField(ios, undefined)).toEqual({});
   });
 });
+
+describe("keys that move focus away from the web field (#5162)", () => {
+  test.each(["next", "tab"] as const)(
+    "after %s, a clear follows focus through XCTest instead of the first field",
+    async (key) => {
+      const { h, web } = harness();
+      await h.executor.key({ action: "key", key });
+      const result = await h.executor.clear();
+      expect(web.requests).toEqual([]);
+      expect(h.clientCalls).toContain("clear");
+      expect(result.iosBackend).toBeUndefined();
+    },
+  );
+});

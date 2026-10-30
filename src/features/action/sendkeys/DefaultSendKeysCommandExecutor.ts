@@ -620,6 +620,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
               ),
             )
           : await this.textClient.ime(key, signal, onDispatch);
+      this.iosSdkText.focusMayHaveMoved();
       return {
         index: -1,
         action: "key",
@@ -634,6 +635,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     const result = await this.inputKey.press(command.key, undefined, undefined, modifiers);
+    if (command.key === "tab") {
+      this.iosSdkText.focusMayHaveMoved();
+    }
     return {
       index: -1,
       action: "key",

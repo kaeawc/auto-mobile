@@ -175,7 +175,9 @@ describe("SessionManager", () => {
       };
 
       await expect(
-        sessionManager.getOrCreateSession("kumquat-D", devicePool, "android", undefined, true),
+        sessionManager.getOrCreateSession("kumquat-D", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(/not an active daemon session/);
       expect(assignedSessionIds).toEqual([]);
       expect(sessionManager.getSession("kumquat-D")).toBeNull();
@@ -221,7 +223,9 @@ describe("SessionManager", () => {
       };
 
       await expect(
-        restarted.getOrCreateSession("restarted-session", devicePool, "android", undefined, true),
+        restarted.getOrCreateSession("restarted-session", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
       expect(recoveryTarget).toMatchObject({
         platform: "android",
@@ -243,7 +247,9 @@ describe("SessionManager", () => {
 
       // Typed terminal refusal carrying the expired reason, not an untyped not-found (#11361).
       const error = await manager
-        .getOrCreateSession("persisted-session", devicePool, "android", undefined, true)
+        .getOrCreateSession("persisted-session", devicePool, "android", {
+          requireIssuedSession: true,
+        })
         .catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(TerminalSessionError);
       expect((error as TerminalSessionError).release).toMatchObject({
@@ -282,7 +288,9 @@ describe("SessionManager", () => {
 
         for (const attempt of [
           () =>
-            manager.getOrCreateSession("persisted-session", devicePool, "android", undefined, true),
+            manager.getOrCreateSession("persisted-session", devicePool, "android", {
+              requireIssuedSession: true,
+            }),
           () => manager.admitIssuedSessionForAutomation("persisted-session"),
         ]) {
           const error = await attempt().then(
@@ -314,7 +322,9 @@ describe("SessionManager", () => {
       const devicePool = countingAssigner("emulator-5556");
 
       await expect(
-        manager.getOrCreateSession("persisted-session", devicePool, "android", undefined, true),
+        manager.getOrCreateSession("persisted-session", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow("not found");
       expect(devicePool.assignments).toBe(0);
       expect(persisted.release_reason).toBe("daemon-restart");
@@ -429,8 +439,7 @@ describe("SessionManager", () => {
               },
             },
             "android",
-            undefined,
-            true,
+            { requireIssuedSession: true },
           ),
         ).rejects.toThrow("persisted device identity is unavailable");
         expect(releases).toEqual(["identity-recovery-identity-continuity-lost"]);
@@ -508,7 +517,9 @@ describe("SessionManager", () => {
         restarted.admitIssuedSessionForAutomation(persisted.session_uuid),
       ).resolves.toBeUndefined();
       const error = await restarted
-        .getOrCreateSession(persisted.session_uuid, devicePool, "android", undefined, true)
+        .getOrCreateSession(persisted.session_uuid, devicePool, "android", {
+          requireIssuedSession: true,
+        })
         .catch((error: unknown) => error);
       expect(error).toBeInstanceOf(SessionRecoveryAssignmentError);
       expect(error).toMatchObject({
@@ -556,13 +567,9 @@ describe("SessionManager", () => {
         };
 
         await expect(
-          restarted.getOrCreateSession(
-            persisted.session_uuid,
-            devicePool,
-            platform,
-            undefined,
-            true,
-          ),
+          restarted.getOrCreateSession(persisted.session_uuid, devicePool, platform, {
+            requireIssuedSession: true,
+          }),
         ).rejects.toThrow(`Cannot safely recover session ${persisted.session_uuid}`);
         expect(assignments).toBe(1);
         expect(releases).toEqual([`identity-recovery-${reason}`]);
@@ -652,7 +659,9 @@ describe("SessionManager", () => {
       };
 
       await expect(
-        restarted.getOrCreateSession("lost-session", devicePool, "android", undefined, true),
+        restarted.getOrCreateSession("lost-session", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow("terminal");
       expect(assignedSessionIds).toEqual([]);
     });
@@ -810,8 +819,10 @@ describe("SessionManager", () => {
       // The timely control call keeps this session in use; acquisition restarts its idle window.
       await expect(
         sessionManager.getOrCreateSession("session-1", undefined, undefined, {
-          executionId: "late",
-          startTime: fakeTimer.now(),
+          execution: {
+            executionId: "late",
+            startTime: fakeTimer.now(),
+          },
         }),
       ).resolves.toMatchObject({ sessionId: "session-1", expiresAt: 2001 });
 
@@ -940,8 +951,10 @@ describe("SessionManager", () => {
       fakeTimer.advanceTime(1001);
 
       const resolved = await sessionManager.getOrCreateSession("session-1", undefined, undefined, {
-        executionId: "pre-deadline",
-        startTime: 1000,
+        execution: {
+          executionId: "pre-deadline",
+          startTime: 1000,
+        },
       });
 
       expect(resolved).toBe(session);
@@ -963,8 +976,10 @@ describe("SessionManager", () => {
 
       await expect(
         sessionManager.getOrCreateSession("session-1", undefined, undefined, {
-          executionId: "late",
-          startTime: 1001,
+          execution: {
+            executionId: "late",
+            startTime: 1001,
+          },
         }),
       ).resolves.toMatchObject({ sessionId: "session-1", expiresAt: 2001 });
 

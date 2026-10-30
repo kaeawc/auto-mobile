@@ -15,6 +15,7 @@ import {
 } from "../sessionManager";
 import { SessionSlotShadowProbe } from "../sessionSlotShadowProbe";
 import {
+  type GetOrCreateSessionOptions,
   type RecoveryAssignmentWait,
   type ResolvedSessionAcquisition,
   type SessionAcquisitionOptions,
@@ -45,14 +46,7 @@ export interface SessionAcquisitionHost {
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
     platform?: Platform,
-    execution?: SessionExecutionMetadata, // #6069: when true, a NEW session (no live in-memory session) may only be
-    // minted for an id this daemon already issued — i.e. a persisted, non-terminal
-    // row (live-during-restart recovery). This is set on the device-tool path so a
-    // fabricated/never-issued sessionUuid can never be auto-assigned a pooled
-    // device just because a device pool is in scope. Internal fresh mints
-    // (device-label derived sessions) leave it false and keep minting.
-    requireIssuedSession?: boolean,
-    accessOptions?: SessionAccess | SessionAcquisitionOptions,
+    options?: GetOrCreateSessionOptions,
   ): Promise<Session>;
   readonly slotShadowProbe: SessionSlotShadowProbe<Session>;
   readonly timer: Timer;
@@ -162,14 +156,12 @@ export class SessionAcquisition {
       const shared = this.host.sessionSlots.getShared(sessionId);
       if (shared?.controller.signal.aborted) {
         await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs, signal);
-        return await this.host.getOrCreateSession(
-          sessionId,
-          devicePool,
-          platform,
-          undefined,
+        return await this.host.getOrCreateSession(sessionId, devicePool, platform, {
           requireIssuedSession,
-          { access, requestDeadlineMs, signal },
-        );
+          access,
+          requestDeadlineMs,
+          signal,
+        });
       }
       const joined = await this.waitForSharedAssignment(
         sessionId,
@@ -333,14 +325,10 @@ export class SessionAcquisition {
           return undefined;
         }
       }
-      return await this.host.getOrCreateSession(
-        sessionId,
-        undefined,
-        undefined,
+      return await this.host.getOrCreateSession(sessionId, undefined, undefined, {
+        ...options,
         execution,
-        false,
-        options,
-      );
+      });
     } catch (error) {
       if (!(error instanceof UnissuedSessionError)) {
         throw error;

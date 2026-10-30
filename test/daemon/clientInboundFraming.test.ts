@@ -25,18 +25,12 @@ class RecordingDaemonClient extends DaemonClient {
 function setup(limit = 256) {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new RecordingDaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    {
-      idGenerator: new FakeIdGenerator(["p"]),
-      platformOverride: "darwin",
-      maxInboundFrameBytes: limit,
-    },
-  );
+  const client = new RecordingDaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+    clientIdentity: null,
+    idGenerator: new FakeIdGenerator(["p"]),
+    platformOverride: "darwin",
+    maxInboundFrameBytes: limit,
+  });
   client.testHooks.attachSocket(socket);
   const feed = (frame: unknown) =>
     client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(frame) + "\n"));
@@ -226,7 +220,8 @@ async function withSocketConnection(
     callbacks.push(connectionListenerOf(args)!);
     return socket;
   });
-  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+    clientIdentity: null,
     idGenerator: new FakeIdGenerator(["p", "q"]),
     platformOverride: "win32",
     maxInboundFrameBytes: 128,
@@ -319,13 +314,9 @@ test("overflow destroys the socket and rejects requests even when a connection-c
 
 test("test socket attachment adds no listeners", async () => {
   const socket = new FakeSocket();
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    new FakeTimer(),
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-  );
+  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, {
+    clientIdentity: null,
+  });
   const listeners = socket.eventNames().map((event) => [event, socket.listeners(event)]);
   try {
     client.testHooks.attachSocket(socket);

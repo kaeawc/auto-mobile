@@ -175,7 +175,7 @@ describe("rows released before their latest incarnation was handed out", () => {
       await seedRow(reason);
       timer.setCurrentTime(DEADLINE + 1);
       await expect(
-        manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+        manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(UnissuedSessionError);
       expect(await repo.getSession!(SESSION)).toMatchObject({
         status: "released",
@@ -222,7 +222,7 @@ describe("rows released before their latest incarnation was handed out", () => {
         release_reason: reason,
       });
       await expect(
-        manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+        manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(TerminalSessionError);
       expect(await repo.getSession!(SESSION)).toMatchObject({
         status: "expired",

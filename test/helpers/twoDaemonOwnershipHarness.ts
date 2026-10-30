@@ -572,7 +572,9 @@ export class TwoDaemonWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, reason);
+        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+          reason,
+        });
       },
       timer,
     );
@@ -1197,13 +1199,9 @@ export class TwoDaemonWorld {
         const pooled = process.pool.getDevice(device.deviceId);
         const sessionId = pooled?.sessionId ?? null;
         if (sessionId && process.manager.getSession(sessionId)) {
-          await releaseSessionAndDevice(
-            process.manager,
-            process.pool,
-            device.deviceId,
-            sessionId,
-            deviceLossCancellationReason(device.deviceId),
-          );
+          await releaseSessionAndDevice(process.manager, process.pool, device.deviceId, sessionId, {
+            reason: deviceLossCancellationReason(device.deviceId),
+          });
         }
         await process.pool.removeDisconnectedDevice(
           device.deviceId,
@@ -1334,13 +1332,9 @@ export class TwoDaemonWorld {
             const deviceId =
               process.pool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
               null;
-            await releaseSessionAndDevice(
-              process.manager,
-              process.pool,
-              deviceId,
-              sessionId,
-              "daemon-shutdown",
-            );
+            await releaseSessionAndDevice(process.manager, process.pool, deviceId, sessionId, {
+              reason: "daemon-shutdown",
+            });
           }),
         );
         process.pool.releaseDeviceClaimsForShutdown();

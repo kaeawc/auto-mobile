@@ -89,6 +89,16 @@ export interface DaemonClientRecoveryOptions {
   isProcessRunning?: (pid: number) => boolean;
 }
 
+/** Everything the {@link DaemonClient} constructor takes after its recovery options. */
+export interface DaemonClientOptions {
+  /** `null` = no handshake, so doctor reaches a wrong-build daemon ungated; omitted = live identity. */
+  clientIdentity?: { version: string; build: BuildIdentity } | null;
+  idGenerator?: IdGenerator;
+  platformOverride?: NodeJS.Platform;
+  maxInboundFrameBytes?: number;
+  env?: NodeJS.ProcessEnv;
+}
+
 /**
  * Per-RPC transport budget. Lifecycle callers use this to share one absolute
  * deadline across connect and every control request instead of silently
@@ -159,19 +169,13 @@ export class DaemonClient {
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
     timer: Timer = defaultTimer,
     recoveryOptions: DaemonClientRecoveryOptions = {},
-    // `null` = no handshake, so doctor reaches a wrong-build daemon ungated; omitted = live identity.
-    clientIdentity?: { version: string; build: BuildIdentity } | null,
     {
+      clientIdentity,
       idGenerator = defaultIdGenerator,
       platformOverride = platform(),
       maxInboundFrameBytes = DAEMON_CLIENT_MAX_FRAME_BYTES,
       env = process.env,
-    }: {
-      idGenerator?: IdGenerator;
-      platformOverride?: NodeJS.Platform;
-      maxInboundFrameBytes?: number;
-      env?: NodeJS.ProcessEnv;
-    } = {},
+    }: DaemonClientOptions = {},
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
@@ -693,7 +697,7 @@ export class DaemonClient {
       this.connectionTimeout,
       this.timer,
       {},
-      null,
+      { clientIdentity: null },
     );
     try {
       const rawStatus = await diagnostic.callDaemonMethod("ide/status", {}, { timeoutMs });

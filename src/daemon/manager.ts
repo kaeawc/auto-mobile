@@ -267,7 +267,13 @@ export class DaemonManager implements DaemonManagerLike {
     this.clientFactory =
       resolved.clientFactory ??
       ((options) =>
-        new DaemonClient(this.socketPath, undefined, resolved.timer, {}, options?.clientIdentity));
+        new DaemonClient(
+          this.socketPath,
+          undefined,
+          resolved.timer,
+          {},
+          { clientIdentity: options?.clientIdentity },
+        ));
     this.daemonProtocolHealthProbe =
       resolved.daemonProtocolHealthProbe ??
       (async () => {

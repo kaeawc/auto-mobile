@@ -149,7 +149,7 @@ function isCallToolResult(value: unknown): value is CallToolResult {
 }
 
 function connect(h: Harness): DaemonClient {
-  const client = new DaemonClient(h.socketPath, 5_000, undefined, {}, null);
+  const client = new DaemonClient(h.socketPath, 5_000, undefined, {}, { clientIdentity: null });
   h.clients.push(client);
   return client;
 }

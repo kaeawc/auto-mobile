@@ -270,21 +270,15 @@ export function createSystemUiAnrRebooter(
           return;
         }
         if (session) {
-          await releaseSessionAndDevice(
-            manager,
-            devicePool,
-            replacement.id,
-            sessionId,
-            utilDeviceLossCancellationReason(replacement.id),
-            {
-              release: async () =>
-                await manager.releaseSession(
-                  sessionId,
-                  utilDeviceLossCancellationReason(replacement.id),
-                  { expectedOwner: { session: session, deviceId: replacement.id } },
-                ),
-            },
-          );
+          await releaseSessionAndDevice(manager, devicePool, replacement.id, sessionId, {
+            reason: utilDeviceLossCancellationReason(replacement.id),
+            release: async () =>
+              await manager.releaseSession(
+                sessionId,
+                utilDeviceLossCancellationReason(replacement.id),
+                { expectedOwner: { session: session, deviceId: replacement.id } },
+              ),
+          });
         } else {
           await releasePoolDevice(devicePool, replacement.id, sessionId);
         }

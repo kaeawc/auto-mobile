@@ -90,8 +90,7 @@ describe("DevicePool", () => {
           "restarted-session",
           devicePool,
           "android",
-          undefined,
-          true,
+          { requireIssuedSession: true },
         );
 
         expect(recovered).toMatchObject({
@@ -153,8 +152,7 @@ describe("DevicePool", () => {
         persisted.session_uuid,
         devicePool,
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       );
 
       expect(recovered).toMatchObject({
@@ -206,8 +204,7 @@ describe("DevicePool", () => {
         persisted.session_uuid,
         devicePool,
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       );
       await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
         description: "identity recovery retry sleep",
@@ -272,8 +269,7 @@ describe("DevicePool", () => {
           persisted.session_uuid,
           devicePool,
           platform,
-          undefined,
-          true,
+          { requireIssuedSession: true },
         );
         await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
           description: "absent target recovery retry sleep",
@@ -299,13 +295,9 @@ describe("DevicePool", () => {
       await initializeLiveDevices([createBootedDevice("Original_AVD", "android", "Pixel 9")]);
 
       await expect(
-        sessionManager.getOrCreateSession(
-          "restarted-session",
-          devicePool,
-          "android",
-          undefined,
-          true,
-        ),
+        sessionManager.getOrCreateSession("restarted-session", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(/cannot safely recover/i);
       expect(devicePool.getDevice("Original_AVD")).toMatchObject({
         sessionId: null,
@@ -324,13 +316,9 @@ describe("DevicePool", () => {
       ]);
 
       await expect(
-        sessionManager.getOrCreateSession(
-          "restarted-session",
-          devicePool,
-          "android",
-          undefined,
-          true,
-        ),
+        sessionManager.getOrCreateSession("restarted-session", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(/cannot safely recover/i);
       expect(devicePool.getDevice("emulator-5554")).toMatchObject({
         sessionId: null,
@@ -351,7 +339,9 @@ describe("DevicePool", () => {
       ]);
 
       await expect(
-        sessionManager.getOrCreateSession("restarted-session", devicePool, "ios", undefined, true),
+        sessionManager.getOrCreateSession("restarted-session", devicePool, "ios", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(/cannot safely recover/i);
       expect(devicePool.getDevice("replacement-simulator-uuid")).toMatchObject({
         sessionId: null,

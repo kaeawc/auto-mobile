@@ -141,7 +141,9 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     await setUp([ios(SIM_A)]);
     await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
 
-    const recovered = await sessions.getOrCreateSession("row-a", pool, "ios", undefined, true);
+    const recovered = await sessions.getOrCreateSession("row-a", pool, "ios", {
+      requireIssuedSession: true,
+    });
 
     expect(recovered).toMatchObject({ sessionId: "row-a", assignedDevice: SIM_A });
     expect(sessions.getTerminalReleaseSnapshot("row-a")).toBeUndefined();
@@ -157,12 +159,12 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     ]);
 
     await expect(
-      sessions.getOrCreateSession("row-duplicate", pool, "ios", undefined, true),
+      sessions.getOrCreateSession("row-duplicate", pool, "ios", { requireIssuedSession: true }),
     ).rejects.toThrow("target-busy");
 
     expect(pool.getDevice(SIM_A)?.sessionId).toBeNull();
     await expect(
-      sessions.getOrCreateSession("row-a", pool, "ios", undefined, true),
+      sessions.getOrCreateSession("row-a", pool, "ios", { requireIssuedSession: true }),
     ).resolves.toMatchObject({ assignedDevice: SIM_A });
   });
 
@@ -257,7 +259,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     expect(pool.getDevice(SIM_A)?.sessionId).toBe("slot-exec");
 
     await expect(
-      sessions.getOrCreateSession("row-a", pool, "ios", undefined, true),
+      sessions.getOrCreateSession("row-a", pool, "ios", { requireIssuedSession: true }),
     ).rejects.toThrow("target-busy");
     expect(sessions.getTerminalReleaseSnapshot("row-a")).toMatchObject({
       releaseReason: "identity-recovery-target-busy",

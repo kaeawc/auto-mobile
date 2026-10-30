@@ -349,7 +349,7 @@ function tagRank(tag: string): number {
 
 /** Which installed images a requested form factor may create an AVD from. */
 export interface AndroidImageFamily {
-  kind: "handheld" | "tv";
+  kind: "handheld" | "tv" | "automotive";
   accepts(tag: string): boolean;
   /** Lower is better; only compared between images of equal API level and ABI. */
   rank(tag: string): number;
@@ -383,19 +383,38 @@ const TV_IMAGE_FAMILY: AndroidImageFamily = {
 };
 
 /**
+ * Car images, best first: the Play variant, whose tag the default `automotive_1024p_landscape`
+ * profile carries in `avdmanager list device`, then plain `android-automotive` (#15879). These are
+ * exactly the tags inventory classifies as automotive, so a created car AVD is found again by a
+ * repeated request.
+ */
+const AUTOMOTIVE_ANDROID_TAGS = androidSystemImageTagsFor("automotive");
+
+const AUTOMOTIVE_IMAGE_FAMILY: AndroidImageFamily = {
+  kind: "automotive",
+  accepts: (tag) => AUTOMOTIVE_ANDROID_TAGS.includes(tag),
+  rank: (tag) => AUTOMOTIVE_ANDROID_TAGS.indexOf(tag),
+  deviceProfile: defaultAndroidProfileIdFor("automotive"),
+  namePrefix: "android-automotive",
+};
+
+/**
  * The image family a request may be created from. Phone, tablet, foldable and an omitted form
- * factor stay handheld-only (#14900); `tv` selects TV images only. Watch and automotive are
- * refused: picking a handheld image would silently satisfy them with a phone.
+ * factor stay handheld-only (#14900); `tv` and `automotive` select only their own images. Watch is
+ * refused: picking a handheld image would silently satisfy it with a phone.
  */
 export function androidImageFamilyFor(formFactor: FormFactor | undefined): AndroidImageFamily {
   if (formFactor === "tv") {
     return TV_IMAGE_FAMILY;
   }
-  if (formFactor === "watch" || formFactor === "automotive") {
+  if (formFactor === "automotive") {
+    return AUTOMOTIVE_IMAGE_FAMILY;
+  }
+  if (formFactor === "watch") {
     throw new ActionableError(
       `Creating a '${formFactor}' AVD is not supported yet; AutoMobile only creates ` +
-        "phone, tablet, foldable and TV AVDs. Create the AVD with avdmanager and the matching " +
-        "system image, or use provisionDevice with an explicit runtime and deviceType.",
+        "phone, tablet, foldable, TV and automotive AVDs. Create the AVD with avdmanager and the " +
+        "matching system image, or use provisionDevice with an explicit runtime and deviceType.",
     );
   }
   return HANDHELD_IMAGE_FAMILY;
@@ -407,6 +426,9 @@ export function androidImageFamilyFor(formFactor: FormFactor | undefined): Andro
  * has no x86_64 TV image.
  */
 const SUGGESTED_TV_API_LEVEL = 36;
+
+/** API level suggested in the missing-car-image hint when the request names no bound (AAOS baseline). */
+const SUGGESTED_AUTOMOTIVE_API_LEVEL = 34;
 
 /** ABIs that can run on the host, best first. */
 export function preferredAbis(architecture: string): string[] {
@@ -564,11 +586,38 @@ function tvImagesOrThrow(
   );
 }
 
+/** Car images in range, or an error naming the exact sdkmanager command that installs one. */
+function automotiveImagesOrThrow(
+  images: SystemImage[],
+  inRange: SystemImage[],
+  bounds: ApiBounds,
+  architecture: string,
+): SystemImage[] {
+  const car = inRange.filter((image) => AUTOMOTIVE_IMAGE_FAMILY.accepts(image.tag));
+  if (car.length > 0) {
+    return car;
+  }
+  const api = Math.min(
+    Math.max(bounds.min, SUGGESTED_AUTOMOTIVE_API_LEVEL),
+    bounds.max ?? Number.POSITIVE_INFINITY,
+  );
+  const abis = preferredAbis(architecture);
+  throw new ActionableError(
+    `No installed Android Automotive system image (${AUTOMOTIVE_ANDROID_TAGS.join(", ")}) matches ` +
+      `the requested API range ${describeRange(bounds)}. Installed images: ${describeInstalled(images)}. ` +
+      "AutoMobile does not download system images. Install one with " +
+      `'sdkmanager "system-images;android-${api};android-automotive;${abis[0]}"', then retry. ` +
+      `This host runs ${abis.join(" or ")} images; 'sdkmanager --list' shows the ABIs published ` +
+      "for each API level.",
+  );
+}
+
 /**
  * Choose an installed system image: newest exact API identifier within the
  * requested major-API range, preferring a host-runnable ABI and the family's best tag.
  * The form factor picks the family ({@link androidImageFamilyFor}): handheld requests never
- * select Wear OS, TV or Automotive images (#14900), and a TV request selects only TV images.
+ * select Wear OS, TV or Automotive images (#14900), and a TV or automotive request selects only
+ * its own images.
  */
 export function pickAndroidSystemImage(
   images: SystemImage[],
@@ -610,7 +659,9 @@ export function pickAndroidSystemImage(
   const familyImages =
     family.kind === "tv"
       ? tvImagesOrThrow(images, inRange, bounds, architecture)
-      : handheldImagesOrThrow(images, inRange, bounds);
+      : family.kind === "automotive"
+        ? automotiveImagesOrThrow(images, inRange, bounds, architecture)
+        : handheldImagesOrThrow(images, inRange, bounds);
 
   const preferences = preferredAbis(architecture);
   const runnable = familyImages.filter((image) => preferences.includes(image.abi));
@@ -778,7 +829,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     signal?: AbortSignal,
     identityHooks?: DeviceProvisioningIdentityHooks,
   ): Promise<ProvisionedDevice> {
-    // Refuses watch and automotive before listing images.
+    // Refuses watch before listing images.
     const family = androidImageFamilyFor(criteria.formFactor);
     const avdManager = this.dependencies.androidCreator();
 

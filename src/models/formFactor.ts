@@ -27,7 +27,8 @@ const NON_GEOMETRIC_FORM_FACTORS: Readonly<
     defaultProfileId: "wearos_small_round",
   },
   automotive: {
-    systemImageTags: ["android-automotive", "android-automotive-playstore"],
+    // Play first: it is the tag of the default `automotive_1024p_landscape` profile (#15879).
+    systemImageTags: ["android-automotive-playstore", "android-automotive"],
     profileIdPattern: /^automotive_/i,
     defaultProfileId: "automotive_1024p_landscape",
   },

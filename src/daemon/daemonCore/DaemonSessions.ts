@@ -168,8 +168,7 @@ export class DaemonSessions {
         sessionId,
         _deviceId,
         releaseReason,
-        shouldCommit,
-        releaseOptions,
+        { shouldCommit, releaseOptions } = {},
       ) =>
         this.host.cancelAndReleaseSession(sessionId, releaseReason, {
           shouldCommit,

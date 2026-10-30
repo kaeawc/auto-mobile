@@ -280,13 +280,10 @@ export class DaemonDisconnect {
               schedule.selectPlatform(platforms, this.host.services.timer().now(), planOnTracked),
           };
           try {
-            await this.checkDisconnects(
-              deviceManager,
-              listRecordings,
-              transportRestarts,
+            await this.checkDisconnects(deviceManager, listRecordings, transportRestarts, {
               checkPlanDeviceLoss,
               sweep,
-            );
+            });
             schedule.recordSuccess(sweep.idleSignature);
           } catch (error) {
             schedule.recordFailure();
@@ -842,8 +839,13 @@ export class DaemonDisconnect {
     >,
     listRecordings: DaemonDisconnectHost["listActiveVideoRecordings"],
     transportRestarts: AdbTransportRestartLookup,
-    checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>,
-    sweep: DisconnectSweep,
+    {
+      checkPlanDeviceLoss,
+      sweep,
+    }: {
+      checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>;
+      sweep: DisconnectSweep;
+    },
   ): Promise<void> {
     this.startDeferredSessionRecoverySweep();
     const activeRecordings = await listRecordings();
@@ -968,21 +970,23 @@ export class DaemonDisconnect {
         .getAllDevices()
         .map((device) => device.id),
     );
-    await this.cleanupDisconnects(
-      bootedDeviceIds,
-      succeededPlatforms,
-      missingByDevice,
+    await this.cleanupDisconnects(bootedDeviceIds, succeededPlatforms, missingByDevice, {
       activeRecordings,
       sweep,
-    );
+    });
   }
 
   private async cleanupDisconnects(
     bootedDeviceIds: Set<string>,
     succeededPlatforms: Set<Platform>,
     missingByDevice: Map<string, string[]>,
-    activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>,
-    sweep: { adbServerResetCohort: readonly PooledDevice[] },
+    {
+      activeRecordings,
+      sweep,
+    }: {
+      activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>;
+      sweep: { adbServerResetCohort: readonly PooledDevice[] };
+    },
   ): Promise<void> {
     const resetCohort = getProcessWideAdbServerResetCohort(
       bootedDeviceIds,

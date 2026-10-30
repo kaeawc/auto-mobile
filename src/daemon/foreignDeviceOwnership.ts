@@ -734,7 +734,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     const startingUp =
       kind === "claim" &&
       this.timer.now() - metadata.acquiredAt < DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS;
-    if (!ownerStillHolds(report, pid, kind, deviceId, startingUp)) {
+    if (!ownerStillHolds(report, pid, kind, { deviceId, startingUp })) {
       return undefined;
     }
     return ownerReportsNoUse(report) ? { pid, idleSocketPath: metadata.socketPath } : { pid };
@@ -842,8 +842,7 @@ function ownerStillHolds(
   report: ForwardLeaseOwnerReport,
   pid: number,
   kind: "lease" | "claim",
-  deviceId: string,
-  startingUp: boolean,
+  { deviceId, startingUp }: { deviceId: string; startingUp: boolean },
 ): boolean {
   switch (report.kind) {
     case "unreachable":

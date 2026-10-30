@@ -238,8 +238,7 @@ export class DeviceShutdownReservations {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
-    assertHolder?: () => void,
-    options?: { fenceUnpooled?: boolean },
+    { assertHolder, ...options }: { assertHolder?: () => void; fenceUnpooled?: boolean } = {},
   ): Promise<ShutdownDeviceReservation | undefined> {
     if (abortSignal?.aborted) {
       throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
@@ -251,8 +250,7 @@ export class DeviceShutdownReservations {
       deviceId,
       identity,
       abortSignal,
-      autolockClient,
-      { recoveryRouteLease, assertHolder, ...options },
+      { autolockClient, recoveryRouteLease, assertHolder, ...options },
     );
     if (!expectedDevice) {
       identity.releaseSession?.();
@@ -287,8 +285,10 @@ export class DeviceShutdownReservations {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
-    autolockClient: AutolockClient | undefined,
-    options: ShutdownReservationAttempt,
+    {
+      autolockClient,
+      ...options
+    }: ShutdownReservationAttempt & { autolockClient?: AutolockClient },
   ): Promise<PooledDevice | undefined> {
     const { recoveryRouteLease } = options;
     const releaseSessionOnAbort = () => identity.releaseSession?.();
@@ -298,8 +298,7 @@ export class DeviceShutdownReservations {
         deviceId,
         identity,
         abortSignal,
-        autolockClient,
-        options,
+        { autolockClient, ...options },
       );
       if (abortSignal?.aborted) {
         if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
@@ -323,8 +322,10 @@ export class DeviceShutdownReservations {
     deviceId: string,
     identity: ShutdownIdentityReservation,
     abortSignal: AbortSignal | undefined,
-    autolockClient: AutolockClient | undefined,
-    options: ShutdownReservationAttempt,
+    {
+      autolockClient,
+      ...options
+    }: ShutdownReservationAttempt & { autolockClient?: AutolockClient },
   ): Promise<{ expectedDevice?: PooledDevice; unpooledFenceToken?: symbol }> {
     const { recoveryRouteLease } = options;
     return await this.pool.withAssignmentLock(() => {

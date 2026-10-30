@@ -129,13 +129,10 @@ export class InputStrokes {
         // Frame-identity-free: no frameContext is required or checked.
         checksFrame: false,
         around: (device, run) =>
-          this.ports.liftingStrokeOnSessionRefusal(
-            kind,
-            socketSessionId,
-            device,
-            args.gestureId,
+          this.ports.liftingStrokeOnSessionRefusal(kind, socketSessionId, device, {
+            gestureId: args.gestureId,
             run,
-          ),
+          }),
         dispatch: async ({ targetDevice, signal, dispatching, remainingTimeoutMs }) => {
           // Before the start's admission is captured: it reads the session this frame uses.
           dispatching?.();
@@ -154,13 +151,10 @@ export class InputStrokes {
     }
 
     if (socketSessionId) {
-      await this.ports.trackAckedGestureFrame(
-        kind,
-        socketSessionId,
-        targetDevice,
-        args.gestureId,
+      await this.ports.trackAckedGestureFrame(kind, socketSessionId, targetDevice, {
+        gestureId: args.gestureId,
         startAdmission,
-      );
+      });
     }
 
     return {
@@ -183,8 +177,7 @@ export class InputStrokes {
     kind: "start" | "move" | "end",
     socketSessionId: string,
     targetDevice: BootedDevice,
-    gestureId: string,
-    startAdmission: StrokeAdmission | undefined,
+    { gestureId, startAdmission }: { gestureId: string; startAdmission?: StrokeAdmission },
   ): Promise<void> {
     if (kind === "end") {
       this.ports.ownedGestures().onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
@@ -228,8 +221,7 @@ export class InputStrokes {
     kind: "start" | "move" | "end",
     socketSessionId: string | undefined,
     targetDevice: BootedDevice,
-    gestureId: string,
-    run: () => Promise<T>,
+    { gestureId, run }: { gestureId: string; run: () => Promise<T> },
   ): Promise<T> {
     try {
       return await run();

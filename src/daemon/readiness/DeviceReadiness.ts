@@ -262,8 +262,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
     simctl: Pick<DeviceClientSimctl, "bootSimulator">,
     device: { runtimeId?: string },
     udid: string,
-    signal: AbortSignal,
-    reason: "create" | "restart" = "restart",
+    { signal, reason = "restart" }: { signal: AbortSignal; reason?: "create" | "restart" },
   ): Promise<BootedDevice> {
     return await this.iosBootInstrumentation.run(
       {
@@ -858,8 +857,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
               this.simctl!,
               provisioned,
               provisioned.deviceId!,
-              signal,
-              "create",
+              { signal, reason: "create" },
             );
             perf.endOperation("bootSimulator");
             if (createdDevice.deviceId === provisioned.deviceId) {
@@ -952,12 +950,9 @@ export class DeviceReadiness implements DeviceReadinessContract {
       options,
       async (signal) => {
         perf.startOperation("bootSimulator");
-        const bootedDevice = await this.bootIosSimulatorAdmitted(
-          this.simctl!,
-          device,
-          deviceId,
+        const bootedDevice = await this.bootIosSimulatorAdmitted(this.simctl!, device, deviceId, {
           signal,
-        );
+        });
         perf.endOperation("bootSimulator");
         if (bootedDevice.deviceId === deviceId) {
           await this.simctl!.presentSimulatorAfterStart(deviceId, this.idGenerator.next(), signal);

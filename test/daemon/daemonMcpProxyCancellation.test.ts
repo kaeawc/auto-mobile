@@ -97,7 +97,7 @@ describe("MCP proxy cancellation", () => {
         method: DAEMON_CANCEL_REQUEST_METHOD,
         params: { requestId: requests[0].id },
       });
-      const signal = call.mock.calls[0][4]?.signal;
+      const signal = call.mock.calls[0][3]?.signal;
       expect(signal).toBeInstanceOf(AbortSignal);
       expect(signal?.aborted).toBe(true);
       respond(requests[0].id);
@@ -185,12 +185,10 @@ describe("MCP proxy cancellation", () => {
     const proxy = new DaemonMcpProxy(config(() => clients.shift()!));
     const controller = new AbortController();
     try {
-      const result = proxy
-        .callTool("tapOn", {}, undefined, undefined, { signal: controller.signal })
-        .then(
-          () => undefined,
-          (error: unknown) => error,
-        );
+      const result = proxy.callTool("tapOn", {}, undefined, { signal: controller.signal }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
       await started.promise;
       controller.abort(new Error("cancel reconnect"));
       expect(await result).toEqual(controller.signal.reason);

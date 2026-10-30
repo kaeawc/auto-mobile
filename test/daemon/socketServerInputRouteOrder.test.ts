@@ -67,7 +67,12 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     typeTextOptions.dispatching?.();
     return { success: true };
   };
-  server.liftingStrokeOnSessionRefusal = async (kind, _session, _device, _id, run) => {
+  server.liftingStrokeOnSessionRefusal = async (
+    kind,
+    _session,
+    _device,
+    { gestureId: _id, run },
+  ) => {
     events.push(`lift:${kind}`);
     return await run();
   };

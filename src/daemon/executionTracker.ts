@@ -556,7 +556,9 @@ export class ExecutionTracker {
     sessionId: string,
     reason: ExecutionCancellationReason = "unspecified",
   ): Promise<number> {
-    return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
+    return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", {
+      cancelReason: reason,
+    });
   }
 
   async cancelToolExecutions(
@@ -566,7 +568,7 @@ export class ExecutionTracker {
     const executionIds = Array.from(this.executions.values())
       .filter((execution) => execution.toolName === toolName)
       .map((execution) => execution.id);
-    return this.cancelExecutionIds(executionIds, "toolName", toolName, reason);
+    return this.cancelExecutionIds(executionIds, "toolName", toolName, { cancelReason: reason });
   }
 
   async waitForToolExecutionsToEnd(toolName: string, timeoutMs: number): Promise<boolean> {
@@ -621,13 +623,10 @@ export class ExecutionTracker {
     reason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
-    return this.cancelExecutionsForKey(
-      sessionUuid,
-      this.sessionUuidExecutions,
-      "sessionUuid",
-      reason,
-      options,
-    );
+    return this.cancelExecutionsForKey(sessionUuid, this.sessionUuidExecutions, "sessionUuid", {
+      cancelReason: reason,
+      ...options,
+    });
   }
 
   /**
@@ -682,13 +681,10 @@ export class ExecutionTracker {
     if (options.onlySessionUuid !== undefined) {
       this.revokeSessionDeviceBindings(deviceId, reason, options);
     }
-    return this.cancelExecutionIds(
-      this.deviceExecutions.get(deviceId),
-      "deviceId",
-      deviceId,
-      reason,
-      options,
-    );
+    return this.cancelExecutionIds(this.deviceExecutions.get(deviceId), "deviceId", deviceId, {
+      cancelReason: reason,
+      ...options,
+    });
   }
 
   /**
@@ -748,7 +744,10 @@ export class ExecutionTracker {
       ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
       ...this.unresolvedAutolockExecutionIds(sessionUuid),
     ]);
-    return this.cancelExecutionIds(executionIds, "deviceSessionUuid", sessionUuid, reason, options);
+    return this.cancelExecutionIds(executionIds, "deviceSessionUuid", sessionUuid, {
+      cancelReason: reason,
+      ...options,
+    });
   }
 
   /**
@@ -1003,18 +1002,22 @@ export class ExecutionTracker {
     key: string,
     executionMap: Map<string, Set<string>>,
     label: "sessionId" | "sessionUuid",
-    cancelReason: ExecutionCancellationReason = "unspecified",
-    options: ExecutionCancellationOptions = {},
+    {
+      cancelReason = "unspecified",
+      ...options
+    }: ExecutionCancellationOptions & { cancelReason?: ExecutionCancellationReason } = {},
   ): Promise<number> {
-    return this.cancelExecutionIds(executionMap.get(key), label, key, cancelReason, options);
+    return this.cancelExecutionIds(executionMap.get(key), label, key, { cancelReason, ...options });
   }
 
   private async cancelExecutionIds(
     executionIds: Iterable<string> | undefined,
     label: "sessionId" | "sessionUuid" | "deviceSessionUuid" | "deviceId" | "toolName",
     key: string,
-    cancelReason: ExecutionCancellationReason = "unspecified",
-    options: ExecutionCancellationOptions = {},
+    {
+      cancelReason = "unspecified",
+      ...options
+    }: ExecutionCancellationOptions & { cancelReason?: ExecutionCancellationReason } = {},
   ): Promise<number> {
     if (!executionIds) {
       return 0;

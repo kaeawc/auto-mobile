@@ -69,8 +69,7 @@ export interface AndroidRebootCoordinatorPoolPort {
     avdName: string,
     recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
-    replacementHandoffOwner: symbol,
-    lateShutdownSettled?: Promise<unknown>,
+    options: { replacementHandoffOwner: symbol; lateShutdownSettled?: Promise<unknown> },
   ): void;
   stopAndroidEmulatorForRecovery(
     device: PooledDevice,
@@ -158,8 +157,10 @@ export class AndroidRebootCoordinator {
     device: PooledDevice,
     incidentId: string | undefined,
     options: AndroidEmulatorRecoveryOptions,
-    signal: AbortSignal,
-    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+    {
+      signal,
+      retainLeaseUntil,
+    }: { signal: AbortSignal; retainLeaseUntil: (settlement: Promise<unknown>) => void },
   ): Promise<boolean> {
     const avdName = device.avdName;
     if (!avdName) {
@@ -272,13 +273,10 @@ export class AndroidRebootCoordinator {
       );
       return recovered;
     } finally {
-      this.pool.finishAndroidRecoveryAttempt(
-        avdName,
-        recoveryDeviceIds,
-        retainRecoveryImage,
+      this.pool.finishAndroidRecoveryAttempt(avdName, recoveryDeviceIds, retainRecoveryImage, {
         replacementHandoffOwner,
-        lateShutdowns.settledWhen(retainRecoveryImage),
-      );
+        lateShutdownSettled: lateShutdowns.settledWhen(retainRecoveryImage),
+      });
     }
   }
 

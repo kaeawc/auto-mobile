@@ -204,8 +204,12 @@ export class ToolCallForwarder {
     name: string,
     callerArgs: Record<string, unknown>,
     progressToken: string | number | undefined,
-    onProgress: DaemonProxyProgressCallback | undefined,
-    { allowSuspectRetry, tasks, signal }: ToolCallForwardMode,
+    {
+      onProgress,
+      allowSuspectRetry,
+      tasks,
+      signal,
+    }: ToolCallForwardMode & { onProgress?: DaemonProxyProgressCallback },
   ): Promise<ForwardedToolCall> {
     if (this.port.hasLivenessLifecycleFence()) {
       await this.port.waitForLivenessRecovery(signal);

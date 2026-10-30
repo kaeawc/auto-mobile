@@ -87,13 +87,10 @@ export class DaemonDeviceLeaseOwnerProbe
   ) {}
 
   async query(socketPath: string, deviceId: string): Promise<ForwardLeaseOwnerReport> {
-    const answer = await this.request(
-      socketPath,
-      DAEMON_DEVICE_LEASE_STATUS_METHOD,
-      deviceId,
-      this.timeoutMs,
-      statusSchema,
-    );
+    const answer = await this.request(socketPath, DAEMON_DEVICE_LEASE_STATUS_METHOD, deviceId, {
+      timeoutMs: this.timeoutMs,
+      resultSchema: statusSchema,
+    });
     return answer.kind === "answer" ? { kind: "status", status: answer.result } : answer;
   }
 
@@ -102,13 +99,10 @@ export class DaemonDeviceLeaseOwnerProbe
     socketPath: string,
     deviceId: string,
   ): Promise<ForwardLeaseRelinquishReport> {
-    const answer = await this.request(
-      socketPath,
-      DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
-      deviceId,
-      this.relinquishTimeoutMs,
-      relinquishSchema,
-    );
+    const answer = await this.request(socketPath, DAEMON_RELINQUISH_DEVICE_LEASE_METHOD, deviceId, {
+      timeoutMs: this.relinquishTimeoutMs,
+      resultSchema: relinquishSchema,
+    });
     return answer.kind === "answer" ? { kind: "relinquish", result: answer.result } : answer;
   }
 
@@ -116,8 +110,7 @@ export class DaemonDeviceLeaseOwnerProbe
     socketPath: string,
     method: string,
     deviceId: string,
-    timeoutMs: number,
-    resultSchema: z.ZodType<T>,
+    { timeoutMs, resultSchema }: { timeoutMs: number; resultSchema: z.ZodType<T> },
   ): Promise<OwnerAnswer<T>> {
     const frame =
       JSON.stringify({

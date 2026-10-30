@@ -240,8 +240,7 @@ export interface DeviceDisconnectSessionReleaser {
     sessionId: string,
     deviceId: string,
     releaseReason: SessionReleaseReason,
-    shouldCommit?: () => boolean,
-    options?: SessionReleaseOptions,
+    options?: { shouldCommit?: () => boolean; releaseOptions?: SessionReleaseOptions },
   ): Promise<boolean | void>;
 }
 

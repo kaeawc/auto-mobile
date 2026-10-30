@@ -273,8 +273,7 @@ async function statusUntilSettled(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   deadlineMs: number,
-  signal: AbortSignal | undefined,
-  initial: SessionBrokerResult | undefined,
+  { signal, initial }: { signal?: AbortSignal; initial?: SessionBrokerResult } = {},
 ): Promise<SessionBrokerResult> {
   const state: StatusRecoveryState = { last: initial, unreachableSinceMs: undefined };
   while (!signal?.aborted && ports.timer.now() < deadlineMs) {
@@ -379,8 +378,7 @@ async function abandonHeldReadyResult(
   result: SessionBrokerResult,
   late: Promise<void> | undefined,
   ports: SessionBrokerProxyAcquisitionPorts,
-  end: AcquisitionEnd,
-  deadlineMs: number,
+  { end, deadlineMs }: { end: AcquisitionEnd; deadlineMs: number },
 ): Promise<SessionBrokerResult> {
   const sessionUuid = result.sessionUuid!;
   if (late) {
@@ -443,7 +441,7 @@ async function holdReadyResult(
   const endedBeforeHold = acquisitionEnded(ports, deadlineMs, signal);
   if (endedBeforeHold) {
     // Never start ownership for a grant whose acquisition already ended; release it instead.
-    return abandonHeldReadyResult(result, undefined, ports, endedBeforeHold, deadlineMs);
+    return abandonHeldReadyResult(result, undefined, ports, { end: endedBeforeHold, deadlineMs });
   }
   const holdTimeoutMs = deadlineMs - ports.timer.now();
   const hold = ports.holdSession(result.requestId, sessionUuid);
@@ -468,12 +466,12 @@ async function holdReadyResult(
       `[SessionBroker] Holding session ${sessionUuid} did not finish before acquisition ended: ${errorMessage(error)}`,
       error,
     );
-    return abandonHeldReadyResult(result, hold, ports, ended, deadlineMs);
+    return abandonHeldReadyResult(result, hold, ports, { end: ended, deadlineMs });
   }
   // Fence publication after the awaited hold: cancellation may land in the same turn it resolves.
   const endedDuringHold = acquisitionEnded(ports, deadlineMs, signal);
   return endedDuringHold
-    ? abandonHeldReadyResult(result, undefined, ports, endedDuringHold, deadlineMs)
+    ? abandonHeldReadyResult(result, undefined, ports, { end: endedDuringHold, deadlineMs })
     : result;
 }
 
@@ -537,8 +535,11 @@ async function prepareBudgetAfterRetry(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   statusReserveMs: number,
-  deadlineMs: number,
-  { signal, retryAfterMs }: { signal: AbortSignal | undefined; retryAfterMs: number | undefined },
+  {
+    deadlineMs,
+    signal,
+    retryAfterMs,
+  }: { deadlineMs: number; signal: AbortSignal | undefined; retryAfterMs: number | undefined },
 ): Promise<number | SessionBrokerResult> {
   let prepareCallBudgetMs = Math.floor(deadlineMs - ports.timer.now() - statusReserveMs);
   if (retryAfterMs !== undefined && prepareCallBudgetMs > 0) {
@@ -596,8 +597,7 @@ async function prepareThenRecover(
   config: SessionConfig,
   ports: SessionBrokerProxyAcquisitionPorts,
   statusReserveMs: number,
-  deadlineMs: number,
-  signal: AbortSignal | undefined,
+  { deadlineMs, signal }: { deadlineMs: number; signal?: AbortSignal },
 ): Promise<SessionBrokerResult> {
   // The runner's start identity is proxy-only; older daemons reject unknown config keys.
   const { executionOwnerStartIdentity: _executionOwnerStartIdentity, ...daemonConfig } = config;
@@ -607,13 +607,11 @@ async function prepareThenRecover(
   while (true) {
     let reply: unknown;
     try {
-      const prepareCallBudgetMs = await prepareBudgetAfterRetry(
-        config,
-        ports,
-        statusReserveMs,
+      const prepareCallBudgetMs = await prepareBudgetAfterRetry(config, ports, statusReserveMs, {
         deadlineMs,
-        { signal, retryAfterMs },
-      );
+        signal,
+        retryAfterMs,
+      });
       if (typeof prepareCallBudgetMs !== "number") {
         return prepareCallBudgetMs;
       }
@@ -650,12 +648,12 @@ async function prepareThenRecover(
         `[SessionBroker] Prepare reply was not received; checking request ${config.requestId}: ${errorMessage(error)}`,
         error,
       );
-      return statusUntilSettled(config, ports, deadlineMs, signal, undefined);
+      return statusUntilSettled(config, ports, deadlineMs, { signal });
     }
     const initial = isSessionBrokerResult(reply, config.requestId) ? reply : undefined;
     return initial !== undefined && initial.outcome !== "pending"
       ? initial
-      : await statusUntilSettled(config, ports, deadlineMs, signal, initial);
+      : await statusUntilSettled(config, ports, deadlineMs, { signal, initial });
   }
 }
 
@@ -718,7 +716,7 @@ export async function acquireSessionThroughDaemon(
       STATUS_RECOVERY_RESERVE_MS,
       Math.max(1, Math.floor(budgetMs / 4)),
     );
-    const result = await prepareThenRecover(config, ports, statusReserveMs, deadlineMs, signal);
+    const result = await prepareThenRecover(config, ports, statusReserveMs, { deadlineMs, signal });
     return await holdReadyResult(result, ports, deadlineMs, signal);
   } catch (error) {
     const result = acquisitionFailure(config, error, signal);

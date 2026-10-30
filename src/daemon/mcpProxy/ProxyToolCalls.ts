@@ -110,16 +110,21 @@ export class ProxyToolCalls {
     name: string,
     args: Record<string, unknown>,
     progressToken?: string | number,
-    onProgress?: DaemonProxyProgressCallback,
-    options: DaemonProxyToolCallOptions = {},
+    {
+      onProgress,
+      ...options
+    }: DaemonProxyToolCallOptions & { onProgress?: DaemonProxyProgressCallback } = {},
   ): Promise<any> {
     this.refuseBrokerGenericAcquisition(name);
     const signal = this.port.untilClosed(options.signal);
     const tasks = this.taskRelayForToolCall(name, options.declaresTasks === true);
-    let first = await this.forwardToolCall(name, args, progressToken, onProgress, {
-      allowSuspectRetry: true,
-      tasks,
-      signal,
+    let first = await this.forwardToolCall(name, args, progressToken, {
+      onProgress,
+      mode: {
+        allowSuspectRetry: true,
+        tasks,
+        signal,
+      },
     });
     if (isDeviceBindingTool(name)) {
       first = await new DeviceCleanupWait({
@@ -133,9 +138,12 @@ export class ProxyToolCalls {
           readCleanupRefusal: readDeviceCleanupInProgressRefusal,
           isClosing: () => this.runtime.closing,
           reforward: () =>
-            this.forwardToolCall(name, args, progressToken, onProgress, {
-              allowSuspectRetry: false,
-              signal,
+            this.forwardToolCall(name, args, progressToken, {
+              onProgress,
+              mode: {
+                allowSuspectRetry: false,
+                signal,
+              },
             }),
         },
         signal,
@@ -148,10 +156,13 @@ export class ProxyToolCalls {
     // Exactly one retry: the refused call never reached its handler (isSuspectRefusalRetryable).
     // The retry's own pre-forward checks surface a handover or loss recovery recorded.
     logger.info(`[DaemonMcpProxy] Session ${refusal.sessionUuid} restored; retrying ${name} once`);
-    const retried = await this.forwardToolCall(name, args, progressToken, onProgress, {
-      allowSuspectRetry: false,
-      tasks,
-      signal,
+    const retried = await this.forwardToolCall(name, args, progressToken, {
+      onProgress,
+      mode: {
+        allowSuspectRetry: false,
+        tasks,
+        signal,
+      },
     });
     return this.withPendingResumedNotice(retried.forwardedSessionUuid, retried.result);
   }
@@ -276,8 +287,7 @@ export class ProxyToolCalls {
     name: string,
     args: Record<string, unknown>,
     progressToken: string | number | undefined,
-    onProgress: DaemonProxyProgressCallback | undefined,
-    mode: ToolCallForwardMode,
+    { onProgress, mode }: { onProgress?: DaemonProxyProgressCallback; mode: ToolCallForwardMode },
   ): Promise<ForwardedToolCall> {
     const { signal } = mode;
     signal?.throwIfAborted();
@@ -301,21 +311,15 @@ export class ProxyToolCalls {
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
     const retrievalOwner = this.runtime.finalizedRecordingOwners.retrievalOwner(name, callerArgs);
     if (retrievalOwner !== undefined) {
-      return this.forwardFinalizedRecordingRetrieval(
-        name,
-        callerArgs,
-        retrievalOwner,
+      return this.forwardFinalizedRecordingRetrieval(name, callerArgs, retrievalOwner, {
         progressToken,
         signal,
-      );
+      });
     }
-    return this.runtime.toolCallForwarder.forward(
-      name,
-      callerArgs,
-      progressToken,
+    return this.runtime.toolCallForwarder.forward(name, callerArgs, progressToken, {
       onProgress,
-      mode,
-    );
+      ...mode,
+    });
   }
 
   /**
@@ -326,8 +330,7 @@ export class ProxyToolCalls {
     name: string,
     callerArgs: Record<string, unknown>,
     ownerSessionUuid: string,
-    progressToken: string | number | undefined,
-    signal: AbortSignal | undefined,
+    { progressToken, signal }: { progressToken?: string | number; signal?: AbortSignal } = {},
   ): Promise<ForwardedToolCall> {
     // Artifact lookup only reaches a resumed session when its owner is still held.
     const forwardedSessionUuid = this.runtime.latestBindingKeeper.isHeldSession(ownerSessionUuid)

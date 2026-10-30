@@ -354,13 +354,10 @@ function deliverInitialObservationFrame(
   // Fresh waiters reuse the broadcast hierarchy, but may still need to send
   // its screenshot if the first target disappeared between the two pushes.
   if (subscriber && !subscriber.replay && frame.hierarchyDelivered) {
-    pushInitialObservationScreenshot(
-      deviceId,
-      frame,
-      frame.captureSequence ?? null,
-      dependencies.streamServer,
+    pushInitialObservationScreenshot(deviceId, frame, frame.captureSequence ?? null, {
+      streamServer: dependencies.streamServer,
       subscriber,
-    );
+    });
     return;
   }
   const sequence = dependencies.streamServer.pushHierarchyUpdate(
@@ -386,13 +383,10 @@ function deliverInitialObservationFrame(
     frame.frameContextGeneration =
       dependencies.streamServer.getCurrentFrameContextGeneration?.(deviceId);
   }
-  pushInitialObservationScreenshot(
-    deviceId,
-    frame,
-    sequence,
-    dependencies.streamServer,
+  pushInitialObservationScreenshot(deviceId, frame, sequence, {
+    streamServer: dependencies.streamServer,
     subscriber,
-  );
+  });
 }
 
 function isInitialObservationFrameCurrent(
@@ -424,8 +418,13 @@ function pushInitialObservationScreenshot(
   deviceId: string,
   frame: InitialObservationFrame,
   sequence: number | null,
-  streamServer: ObservationInitialFrameDependencies["streamServer"],
-  subscriber?: InitialFrameSubscriber,
+  {
+    streamServer,
+    subscriber,
+  }: {
+    streamServer: ObservationInitialFrameDependencies["streamServer"];
+    subscriber?: InitialFrameSubscriber;
+  },
 ): void {
   const screenshot = frame.screenshot;
   if (

@@ -269,10 +269,12 @@ describe("DaemonMcpProxy", () => {
     });
     const firstProgress: number[] = [];
     const secondProgress: number[] = [];
-    const first = proxy.callTool("tapOn", {}, "reused", (progress) => firstProgress.push(progress));
-    const second = proxy.callTool("swipeOn", {}, "reused", (progress) =>
-      secondProgress.push(progress),
-    );
+    const first = proxy.callTool("tapOn", {}, "reused", {
+      onProgress: (progress) => firstProgress.push(progress),
+    });
+    const second = proxy.callTool("swipeOn", {}, "reused", {
+      onProgress: (progress) => secondProgress.push(progress),
+    });
 
     try {
       await bothStarted.promise;
@@ -938,8 +940,10 @@ describe("DaemonMcpProxy", () => {
 
         override async waitForReady(
           timeout: number,
-          _signal?: AbortSignal,
-          shouldContinueWaiting?: () => boolean,
+          {
+            signal: _signal,
+            shouldContinueWaiting,
+          }: { signal?: AbortSignal; shouldContinueWaiting?: () => boolean } = {},
         ): Promise<boolean> {
           this.waitForReadyCalls++;
           this.lastWaitForReadyTimeout = timeout;

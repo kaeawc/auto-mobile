@@ -287,6 +287,76 @@ class GuestAudioCaptureControllerTest {
   }
 
   @Test
+  fun `62 minute lease survives 31 minutes and expires at its deadline`() {
+    val port = FakePort()
+    val controller = GuestAudioCaptureController(port)
+    assertEquals("running", controller.handle("start", "one", 3_720_000L))
+    port.advance(31 * 60 * 1000L)
+    assertEquals("running", controller.handle("status", "one"))
+    assertEquals(0, port.record.released)
+    port.advance(31 * 60 * 1000L - 1)
+    assertEquals(0, port.record.released)
+    port.advance(1)
+    assertEquals(1, port.record.released)
+    assertEquals("absent", controller.handle("status", "one"))
+  }
+
+  @Test
+  fun `absent timeout expires after 30 minutes`() {
+    val port = FakePort()
+    val controller = GuestAudioCaptureController(port)
+    controller.handle("start", "one")
+    port.advance(30 * 60 * 1000L - 1)
+    assertEquals("running", controller.handle("status", "one"))
+    port.advance(1)
+    assertEquals(1, port.record.released)
+    assertEquals("absent", controller.handle("status", "one"))
+  }
+
+  @Test
+  fun `invalid lease timeout is refused before creating a record`() {
+    for (timeout in listOf(0L, -1L, 3_720_001L)) {
+      val port = FakePort()
+      val controller = GuestAudioCaptureController(port)
+      assertEquals("failed invalid lease timeout", controller.handle("start", "one", timeout))
+      assertEquals(0, port.creates)
+      assertTrue(port.deadlines.isEmpty())
+    }
+  }
+
+  @Test
+  fun `clock expiry uses the held lease timeout before the callback runs`() {
+    for (timeout in listOf(100L, 3_720_000L)) {
+      val port = FakePort()
+      val controller = GuestAudioCaptureController(port)
+      controller.handle("start", "one", timeout)
+      port.now = timeout - 1
+      assertEquals("running", controller.handle("status", "one"))
+      assertEquals(0, port.record.released)
+      port.now = timeout
+      assertEquals("absent", controller.handle("status", "one"))
+      assertEquals(1, port.record.released)
+      assertTrue(port.deadlines.isEmpty())
+    }
+  }
+
+  @Test
+  fun `repeated start ignores replacement timeout and keeps the original deadline`() {
+    val port = FakePort()
+    val controller = GuestAudioCaptureController(port)
+    controller.handle("start", "one", 3_720_000L)
+    port.advance(31 * 60 * 1000L)
+    val deadline = port.deadlines.single().first
+    for (replacement in listOf(100L, 0L, -1L, 3_720_001L)) {
+      assertEquals("running", controller.handle("start", "one", replacement))
+      assertEquals(deadline, port.deadlines.single().first)
+    }
+    assertEquals(1, port.creates)
+    port.advance(31 * 60 * 1000L)
+    assertEquals(1, port.record.released)
+  }
+
+  @Test
   fun `timeout releases even without a status call`() {
     val port = FakePort()
     val controller = GuestAudioCaptureController(port)

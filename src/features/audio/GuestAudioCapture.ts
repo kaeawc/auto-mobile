@@ -15,9 +15,16 @@ export interface GuestAudioCaptureHandle {
   close(): Promise<void>;
 }
 
+export const GUEST_CAPTURE_LEASE_MARGIN_MS = 60_000;
+export const GUEST_CAPTURE_MAX_LEASE_MS = 3_720_000;
+
+export interface GuestAudioCaptureOpenOptions {
+  leaseMs: number;
+}
+
 /** Resolves only after an owned guest capture has been observed alive and settled. */
 export interface GuestAudioCapture {
-  open(deviceId: string): Promise<GuestAudioCaptureHandle>;
+  open(deviceId: string, options: GuestAudioCaptureOpenOptions): Promise<GuestAudioCaptureHandle>;
 }
 
 export interface GuestAudioCaptureOptions {
@@ -73,7 +80,10 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     }
   }
 
-  async open(deviceId: string): Promise<GuestAudioCaptureHandle> {
+  async open(
+    deviceId: string,
+    { leaseMs }: GuestAudioCaptureOpenOptions,
+  ): Promise<GuestAudioCaptureHandle> {
     const deadline = this.now() + this.timeoutMs;
     let emulatorPid: number | undefined;
     let lease: string | undefined;
@@ -108,6 +118,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
           "--es",
           "lease",
           shellQuoteUnlessSafe(lease ?? ""),
+          ...(op === "start" ? ["--el", "leaseTimeoutMs", String(leaseMs)] : []),
         ],
         {
           timeoutMs: Math.min(BROADCAST_TIMEOUT_MS, remaining),

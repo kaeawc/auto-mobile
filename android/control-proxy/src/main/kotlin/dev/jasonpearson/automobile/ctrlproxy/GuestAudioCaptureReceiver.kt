@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.BadParcelableException
 import android.os.SystemClock
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ScheduledThreadPoolExecutor
@@ -18,10 +19,26 @@ import kotlin.concurrent.thread
 class GuestAudioCaptureReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     if (intent.action != ACTION) return
+    val op = intent.getStringExtra("op")
     val reply =
-      controller(context).handle(intent.getStringExtra("op"), intent.getStringExtra("lease"))
+      controller(context).handle(op, intent.getStringExtra("lease"), leaseTimeout(intent, op))
     resultCode = 0
     resultData = reply
+  }
+
+  private fun leaseTimeout(intent: Intent, op: String?): Long? {
+    if (op != "start") return null
+    return try {
+      if (!intent.hasExtra("leaseTimeoutMs")) return null
+      // A wrong-typed extra can return the fallback instead of throwing; zero is invalid.
+      intent.getLongExtra("leaseTimeoutMs", 0L)
+    } catch (error: BadParcelableException) {
+      android.util.Log.w("GuestAudioCapture", "Unreadable lease timeout", error)
+      0L
+    } catch (error: ClassCastException) {
+      android.util.Log.w("GuestAudioCapture", "Unreadable lease timeout", error)
+      0L
+    }
   }
 
   private companion object {

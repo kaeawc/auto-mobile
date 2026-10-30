@@ -86,8 +86,10 @@ export async function reserveRecoveredDeviceForReadiness(
   devicePool: Pick<DevicePool, "reserveDeviceForReadiness"> | undefined,
   boot: DeviceBootResult,
   args: StartDeviceArgs,
-  requestedIdentity: string,
-  releaseReadinessReservations: DeviceReadinessReservation[],
+  {
+    requestedIdentity,
+    releaseReadinessReservations,
+  }: { requestedIdentity: string; releaseReadinessReservations: DeviceReadinessReservation[] },
 ): Promise<void> {
   validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
   await validatePooledDeviceMapping(boot.device, requestedIdentity);
@@ -116,8 +118,7 @@ export async function reserveInitialDeviceForReadiness(
   daemonState: DaemonStateLike,
   boot: DeviceBootResult,
   releaseReadinessReservations: DeviceReadinessReservation[],
-  mcpSessionId: string | undefined,
-  oneShotCli = false,
+  { mcpSessionId, oneShotCli = false }: { mcpSessionId?: string; oneShotCli?: boolean } = {},
 ): Promise<void> {
   const devicePool = getStartDevicePool(daemonState);
   if (!devicePool) {
@@ -303,13 +304,10 @@ export async function prepareRecoveredDeviceForRunnerReadiness(
   if (recovery.releaseReadinessReservation) {
     input.releaseReadinessReservations.push(recovery.releaseReadinessReservation);
   }
-  await reserveRecoveredDeviceForReadiness(
-    devicePool,
-    recovery.boot,
-    input.args,
-    input.requestedIdentity,
-    input.releaseReadinessReservations,
-  );
+  await reserveRecoveredDeviceForReadiness(devicePool, recovery.boot, input.args, {
+    requestedIdentity: input.requestedIdentity,
+    releaseReadinessReservations: input.releaseReadinessReservations,
+  });
 }
 
 export async function prepareStartDeviceRunnerReadiness(

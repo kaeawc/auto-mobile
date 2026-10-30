@@ -185,8 +185,7 @@ export class WcagAudit {
   async audit(
     elements: Element[],
     viewHierarchy: Hierarchy | ViewHierarchyNode,
-    { screenshotPath, packageName }: WcagAuditTarget,
-    config: AccessibilityAuditConfig,
+    { screenshotPath, packageName, config }: WcagAuditTarget & { config: AccessibilityAuditConfig },
     densityOrOptions?: number | AuditHierarchyOptions,
   ): Promise<AccessibilityAuditResult> {
     const { density, windows, descendantLabelled, elementWindowIds } =
@@ -205,9 +204,12 @@ export class WcagAudit {
     // Check for insufficient contrast ratios (if screenshot available)
     let contrast: ContrastCheckOutcome | undefined;
     if (screenshotPath) {
-      contrast = await this.checkContrastRatios(elements, screenshotPath, config, density, {
-        windows: windows ?? [],
-        elementWindowIds,
+      contrast = await this.checkContrastRatios(elements, screenshotPath, config, {
+        density,
+        coverage: {
+          windows: windows ?? [],
+          elementWindowIds,
+        },
       });
       violations.push(...contrast.violations);
     }
@@ -318,10 +320,15 @@ export class WcagAudit {
     elements: Element[],
     screenshotPath: string,
     { level: wcagLevel, contrast: contrastConfig }: AccessibilityAuditConfig,
-    density: number | undefined,
-    coverage: {
-      windows: readonly ViewHierarchyWindowInfo[];
-      elementWindowIds?: ReadonlyMap<Element, number>;
+    {
+      density,
+      coverage,
+    }: {
+      density?: number;
+      coverage: {
+        windows: readonly ViewHierarchyWindowInfo[];
+        elementWindowIds?: ReadonlyMap<Element, number>;
+      };
     },
   ): Promise<ContrastCheckOutcome> {
     const violations: WcagViolation[] = [];

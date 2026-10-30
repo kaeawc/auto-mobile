@@ -62,7 +62,8 @@ describe("TalkBackToggle", () => {
     adb.setCommandError("enabled_accessibility_services", new Error("device offline"));
     const detector = new DefaultAccessibilityDetector(new FakeTimer());
     detector.clearAllCache();
-    const result = await new TalkBackToggle(ANDROID_DEVICE, adb, detector, new FakeTimer(), {
+    const result = await new TalkBackToggle(ANDROID_DEVICE, adb, detector, {
+      timer: new FakeTimer(),
       secureSettings: new FakeSecureSettingsRpc(),
       dialogProbe: fakeProbe,
     }).toggle(false);
@@ -89,7 +90,8 @@ describe("TalkBackToggle", () => {
       makeExecResult(service),
       makeExecResult("null"),
     ]);
-    const result = await new TalkBackToggle(ANDROID_DEVICE, adb, detector, timer, {
+    const result = await new TalkBackToggle(ANDROID_DEVICE, adb, detector, {
+      timer,
       secureSettings: secure,
       dialogProbe: fakeProbe,
     }).toggle(false);
@@ -110,7 +112,8 @@ describe("TalkBackToggle", () => {
     const state = spyOn(fakeDetector, "resolveState").mockResolvedValue(null);
     state.mockResolvedValueOnce({ enabled: true, service: "talkback", ctrlProxyEnabled: false });
     try {
-      const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       }).toggle(false);
@@ -159,7 +162,8 @@ describe("TalkBackToggle", () => {
       const foreground = spyOn(fakeAdb, "getForegroundApp");
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(true);
@@ -195,7 +199,8 @@ describe("TalkBackToggle", () => {
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
       const debug = spyOn(logger, "debug").mockImplementation(() => {});
       try {
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(true);
@@ -216,7 +221,8 @@ describe("TalkBackToggle", () => {
       fakeDetector.enqueueDetectMethodResults("unknown", "unknown", "talkback");
       const foreground = spyOn(fakeAdb, "getForegroundApp");
       try {
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(true);
@@ -238,7 +244,8 @@ describe("TalkBackToggle", () => {
         activityName: "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
       });
       fakeDetector.enqueueDetectMethodResults("unknown", "unknown", "talkback");
-      const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       }).toggle(true);
@@ -262,7 +269,8 @@ describe("TalkBackToggle", () => {
       );
       const foreground = spyOn(fakeAdb, "getForegroundApp");
       try {
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(true);
@@ -288,7 +296,8 @@ describe("TalkBackToggle", () => {
       fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
       const foreground = spyOn(fakeAdb, "getForegroundApp");
       try {
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(false);
@@ -306,7 +315,8 @@ describe("TalkBackToggle", () => {
       );
       const debug = spyOn(logger, "debug").mockImplementation(() => {});
       try {
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(true);
@@ -335,13 +345,11 @@ describe("TalkBackToggle", () => {
         fakeDetector.enqueueDetectMethodResults(initialService);
         const warn = spyOn(logger, "warn").mockImplementation(() => {});
         try {
-          const result = await new TalkBackToggle(
-            ANDROID_DEVICE,
-            fakeAdb,
-            fakeDetector,
-            fakeTimer,
-            { secureSettings: fakeSecureSettings, dialogProbe: fakeProbe },
-          ).toggle(enabled);
+          const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+            timer: fakeTimer,
+            secureSettings: fakeSecureSettings,
+            dialogProbe: fakeProbe,
+          }).toggle(enabled);
 
           const reason = enabled
             ? "TalkBack requested enabled but observed disabled after 1500ms of confirmation waits"
@@ -382,7 +390,8 @@ describe("TalkBackToggle", () => {
           initialService,
           requestedService,
         );
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(enabled);
@@ -411,7 +420,8 @@ describe("TalkBackToggle", () => {
           initialService,
           requestedService,
         );
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(enabled);
@@ -434,7 +444,8 @@ describe("TalkBackToggle", () => {
             ? (["unknown", "talkback", "talkback"] as const)
             : (["talkback", "unknown"] as const)),
         );
-        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         }).toggle(enabled);
@@ -454,7 +465,8 @@ describe("TalkBackToggle", () => {
         activityName:
           "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
       });
-      const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const result = await new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       }).toggle(true);
@@ -483,7 +495,8 @@ describe("TalkBackToggle", () => {
       // confirmation detect: talkback -> applied:true (#3921).
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -500,7 +513,8 @@ describe("TalkBackToggle", () => {
       // not talkback -> the toggle must not claim success optimistically (#3921).
       fakeDetector.enqueueDetectMethodResults("unknown", "unknown");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -514,7 +528,8 @@ describe("TalkBackToggle", () => {
     test("runs the correct enable ADB commands", async () => {
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -533,7 +548,8 @@ describe("TalkBackToggle", () => {
     test("invalidates the detector cache after enabling", async () => {
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -545,7 +561,8 @@ describe("TalkBackToggle", () => {
     test("invalidates cache before idempotency check to avoid stale state", async () => {
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -561,7 +578,8 @@ describe("TalkBackToggle", () => {
       const taps = () =>
         fakeAdb.getCommandCalls().filter((call) => call.command.startsWith("shell input tap"));
       const newToggle = () =>
-        new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         });
@@ -736,7 +754,8 @@ describe("TalkBackToggle", () => {
       // Idempotency: not talkback -> proceed. Confirmation: talkback -> applied:true.
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -760,7 +779,8 @@ describe("TalkBackToggle", () => {
       // Idempotency: not talkback -> proceed. Confirmation: talkback -> applied:true.
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -773,7 +793,8 @@ describe("TalkBackToggle", () => {
     test("is idempotent when TalkBack is already enabled", async () => {
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -797,7 +818,8 @@ describe("TalkBackToggle", () => {
       // Confirmation: talkback -> applied:true (#3921).
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -814,7 +836,8 @@ describe("TalkBackToggle", () => {
       );
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -844,7 +867,8 @@ describe("TalkBackToggle", () => {
       );
       fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -864,7 +888,8 @@ describe("TalkBackToggle", () => {
       // not talkback -> applied:true, currentState:false (#3921).
       fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -878,7 +903,8 @@ describe("TalkBackToggle", () => {
     test("runs the correct disable ADB commands", async () => {
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -895,7 +921,8 @@ describe("TalkBackToggle", () => {
     test("does not attempt dialog dismissal when disabling", async () => {
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -909,7 +936,8 @@ describe("TalkBackToggle", () => {
     test("invalidates the detector cache after disabling", async () => {
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -927,7 +955,8 @@ describe("TalkBackToggle", () => {
       );
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -950,7 +979,8 @@ describe("TalkBackToggle", () => {
     test("is idempotent when TalkBack is already disabled", async () => {
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -970,7 +1000,8 @@ describe("TalkBackToggle", () => {
 
   describe("previous state hook (#10146)", () => {
     const newToggle = () =>
-      new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1044,7 +1075,8 @@ describe("TalkBackToggle", () => {
         makeExecResult(""),
       );
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1061,7 +1093,8 @@ describe("TalkBackToggle", () => {
         makeExecResult(""),
       );
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1076,7 +1109,8 @@ describe("TalkBackToggle", () => {
         new Error("ADB connection failed"),
       );
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1097,7 +1131,8 @@ describe("TalkBackToggle", () => {
       );
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1115,7 +1150,8 @@ describe("TalkBackToggle", () => {
     test("enables an installed but disabled TalkBack that is absent from dumpsys", async () => {
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1136,7 +1172,8 @@ describe("TalkBackToggle", () => {
     test("uses the known TalkBack service component", async () => {
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1158,7 +1195,8 @@ describe("TalkBackToggle", () => {
       fakeSecureSettings.setGetResult({ success: true, found: false });
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1182,7 +1220,8 @@ describe("TalkBackToggle", () => {
       fakeSecureSettings.setPutResult({ success: false });
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+        timer: fakeTimer,
         secureSettings: fakeSecureSettings,
         dialogProbe: fakeProbe,
       });
@@ -1225,7 +1264,8 @@ describe("TalkBackToggle", () => {
         );
         fakeDetector.setDefaultResult(false);
 
-        const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, {
+        const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, {
+          timer: fakeTimer,
           secureSettings: fakeSecureSettings,
           dialogProbe: fakeProbe,
         });

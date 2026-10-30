@@ -90,20 +90,14 @@ async function resolveCreatedIosProvisionDeviceRollbackTarget(
     return { kind: "unresolved" };
   }
   try {
-    const discovery = await runOperationWithinDeadline(
-      deps.timer,
-      rollbackDeadlineMs,
-      undefined,
-      async (deadlineSignal) =>
+    const discovery = await runOperationWithinDeadline(deps.timer, rollbackDeadlineMs, undefined, {
+      operation: async (deadlineSignal) =>
         await deviceManager.getDeviceImagesDetailed("ios", {
           bypassIosDeviceListCache: true,
           signal: deadlineSignal,
         }),
-      {
-        timeoutError: () =>
-          new Error("iOS rollback identity discovery exceeded the rollback budget"),
-      },
-    );
+      timeoutError: () => new Error("iOS rollback identity discovery exceeded the rollback budget"),
+    });
     if (!discovery.succeededPlatforms.has("ios")) {
       logger.warn(
         `[DeviceTools] Cannot roll back iOS simulator '${identity.name}': identity discovery did not complete.`,

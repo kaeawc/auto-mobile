@@ -365,13 +365,10 @@ async function reserveBootReadiness(
               ),
           );
         } else {
-          await reserveInitialDeviceForReadiness(
-            daemonState,
-            state.boot!,
-            initialReservations,
-            internalMcpSessionId(args),
-            internalOneShotCli(args),
-          );
+          await reserveInitialDeviceForReadiness(daemonState, state.boot!, initialReservations, {
+            mcpSessionId: internalMcpSessionId(args),
+            oneShotCli: internalOneShotCli(args),
+          });
         }
         // A grant can win the mutex just as the caller loses its deadline race.
         // Never publish that orphan into the caller's already-drained release list.
@@ -466,11 +463,8 @@ async function bindPreparedDevice(
     const boundSessionId =
       readinessResult.preservedSessionId && !autolockEnabled
         ? readinessResult.preservedSessionId
-        : await runOperationWithinDeadline(
-            deps.timer,
-            budgets.automationDeadlineMs,
-            signal,
-            bindUndoneIfUndelivered(
+        : await runOperationWithinDeadline(deps.timer, budgets.automationDeadlineMs, signal, {
+            operation: bindUndoneIfUndelivered(
               async (receipt, bindSignal) => {
                 return await bindBootedDeviceSession(
                   state.boot!.device,
@@ -497,18 +491,16 @@ async function bindPreparedDevice(
               },
               () => state.boot,
             ),
-            {
-              timeoutError: () =>
-                acquisitionLifecycleTimeoutError(
-                  budgets,
-                  requestedIdentity,
-                  "binding the device session",
-                ),
-              onOrphan: (settlement) => {
-                state.bindingSettlements.push(settlement);
-              },
+            timeoutError: () =>
+              acquisitionLifecycleTimeoutError(
+                budgets,
+                requestedIdentity,
+                "binding the device session",
+              ),
+            onOrphan: (settlement) => {
+              state.bindingSettlements.push(settlement);
             },
-          );
+          });
     if (readinessResult.preservedSessionId && !autolockEnabled) {
       // Preserved-session validation can outlast the deadline; recheck before committing.
       await throwIfBindingAborted(signal, readinessResult);

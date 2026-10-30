@@ -94,8 +94,15 @@ export function createTeardownResponse(
   args: TeardownDeviceArgs,
   state: "destroyed" | "already_absent",
   command: { stop: "accepted" | "not_required"; destroy: "accepted" | "not_required" },
-  verification: { notRunning: "confirmed"; inventory: "complete_absence_confirmed" },
-  { resolved, timing }: { resolved?: DeviceInfo; timing?: unknown } = {},
+  {
+    verification,
+    resolved,
+    timing,
+  }: {
+    resolved?: DeviceInfo;
+    timing?: unknown;
+    verification: { notRunning: "confirmed"; inventory: "complete_absence_confirmed" };
+  },
 ) {
   return createStructuredToolResponse({
     mode: args.mode,
@@ -116,15 +123,16 @@ export function createTeardownFailureResponse(
   args: TeardownDeviceArgs,
   phase: TeardownFailurePhase,
   code: string,
-  message: string,
   {
+    message,
     resolved,
     details,
   }: {
+    message: string;
     resolved?: DeviceInfo;
     /** Typed refusal evidence carried beside the code (e.g. the broker binding holding the device). */
     details?: Record<string, unknown>;
-  } = {},
+  },
 ) {
   return {
     isError: true,

@@ -77,9 +77,10 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   async isVoiceOverEnabled(
     _deviceId: string,
     _client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    _signal?: AbortSignal,
+    {
+      featureFlags,
+      timeoutMs,
+    }: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<boolean> {
     this.callCount++;
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
@@ -98,9 +99,10 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   async isVoiceOverActiveOrUnknown(
     _deviceId: string,
     _client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    _signal?: AbortSignal,
+    {
+      featureFlags,
+      timeoutMs,
+    }: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<boolean> {
     this.callCount++;
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
@@ -115,9 +117,10 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   async resolveState(
     _deviceId: string,
     _client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    _signal?: AbortSignal,
+    {
+      featureFlags,
+      timeoutMs,
+    }: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<boolean | null> {
     this.callCount++;
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);

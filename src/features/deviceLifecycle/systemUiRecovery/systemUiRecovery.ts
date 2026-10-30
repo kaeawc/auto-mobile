@@ -75,18 +75,13 @@ export async function resolveSystemUiRecoveryImage({
       `Cannot restart Android device '${boot.device.deviceId}' after a System UI ANR because its AVD name is unknown.`,
     );
   }
-  const images = await operations.runWithinShutdownDeadline(
-    boot.device,
-    timer,
-    totalDeadlineMs,
-    "System UI recovery image lookup did not complete",
-    {
-      requestAbortSignal: signal,
-      operation: async () => await deviceManager.listDeviceImages("android"),
-      timeoutMs: undefined,
-      phase: "to resolve its AVD image for System UI ANR recovery",
-    },
-  );
+  const images = await operations.runWithinShutdownDeadline(boot.device, timer, totalDeadlineMs, {
+    detail: "System UI recovery image lookup did not complete",
+    requestAbortSignal: signal,
+    operation: async () => await deviceManager.listDeviceImages("android"),
+    timeoutMs: undefined,
+    phase: "to resolve its AVD image for System UI ANR recovery",
+  });
   const image = images.find(
     (candidate) => candidate.platform === "android" && candidate.name === avdName,
   );
@@ -143,8 +138,8 @@ export async function shutdownAndroidForSystemUiAnr(
     device,
     timer,
     totalDeadlineMs,
-    "System UI recovery shutdown command did not complete",
     {
+      detail: "System UI recovery shutdown command did not complete",
       requestAbortSignal: signal,
       operation: async (shutdownSignal, timeoutMs) => {
         shutdownSignal.throwIfAborted();
@@ -244,8 +239,13 @@ export async function handoffSystemUiAnrReplacement(
   devicePool: ReadinessDevicePool | undefined,
   shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
   replacementBoot: DeviceBootResult,
-  sourceImage: DeviceInfo,
-  publishReplacementReadinessMarker?: (replacement: BootedDevice) => void,
+  {
+    sourceImage,
+    publishReplacementReadinessMarker,
+  }: {
+    sourceImage: DeviceInfo;
+    publishReplacementReadinessMarker?: (replacement: BootedDevice) => void;
+  },
 ): Promise<Awaited<ReturnType<DevicePool["replaceDeviceForSystemUiAnrRecovery"]>> | undefined> {
   if (!devicePool || !shutdownReservation) {
     return undefined;
@@ -266,8 +266,8 @@ export async function retireSystemUiAnrReplacement(
   devicePool: ReadinessDevicePool | undefined,
   expectedReplacement: PooledDevice | undefined,
   replacementBoot: DeviceBootResult,
-  collectColdBootSettlement: ColdBootSettlementCollector,
   {
+    collectColdBootSettlement,
     operations,
     preservedSession,
   }: {
@@ -276,6 +276,7 @@ export async function retireSystemUiAnrReplacement(
       sessionId: string | undefined;
       release: (replacement: PooledDevice) => Promise<void>;
     };
+    collectColdBootSettlement: ColdBootSettlementCollector;
   },
 ): Promise<void> {
   const currentReplacement = devicePool?.getDevice(replacementBoot.device.deviceId);
@@ -337,8 +338,10 @@ export async function restartAndroidForSystemUiAnr(
     devicePool,
     state.shutdownReservation,
     adoptedReplacementBoot,
-    state.sourceImage,
-    context.publishReplacementReadinessMarker,
+    {
+      sourceImage: state.sourceImage,
+      publishReplacementReadinessMarker: context.publishReplacementReadinessMarker,
+    },
   );
   return {
     boot: adoptedReplacementBoot,
@@ -349,8 +352,8 @@ export async function restartAndroidForSystemUiAnr(
         devicePool,
         handoff?.replacementDevice,
         adoptedReplacementBoot,
-        context.collectColdBootSettlement,
         {
+          collectColdBootSettlement: context.collectColdBootSettlement,
           operations: context.operations,
           preservedSession: {
             sessionId: handoff?.preservedSessionId,
@@ -493,8 +496,13 @@ export async function reserveSystemUiAnrShutdown(
   devicePool: ReadinessDevicePool | undefined,
   deviceId: string,
   signal: AbortSignal | undefined,
-  autolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
-  assertHolder: () => void,
+  {
+    autolockClient,
+    assertHolder,
+  }: {
+    autolockClient?: { mcpSessionId?: string; expectedSessionId?: string };
+    assertHolder: () => void;
+  },
 ): Promise<Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>> {
   if (!devicePool) {
     return undefined;
@@ -550,8 +558,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
       devicePool,
       boot.device.deviceId,
       signal,
-      recoveryAutolockClient,
-      context.assertHolder,
+      { autolockClient: recoveryAutolockClient, assertHolder: context.assertHolder },
     );
     // Before dispatch the request still owns cancellation: nothing has been touched yet.
     signal?.throwIfAborted();

@@ -103,7 +103,7 @@
         let model: PrototypeModel
 
         var body: some View {
-            let parent = model.spec?.root.menuParent(of: node)
+            let parent = model.spec?.root.menuParent(of: node, data: model.spec?.data)
             ZStack {
                 Color.clear.contentShape(Rectangle())
                     .onTapGesture { model.closeModal(node) }

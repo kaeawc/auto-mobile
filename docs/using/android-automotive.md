@@ -82,10 +82,12 @@ injection. Other devices refuse these buttons. Unverified on an emulator.
 
 ## Prototypes
 
-The `prototype` tool's Android renderer is phone-oriented. On an AAOS emulator it may render in a wide
-landscape layout that was not designed for it, may be limited while driving restrictions are on, and
-`save` relies on pinned launcher shortcuts that the car launcher may not support. The goal is a working
-smoke path with truthful results, not a car design system (#14922).
+The `prototype` tool's Android renderer is phone-oriented, so on a car display a prototype renders in a
+wide landscape layout that was not designed for it. A successful `show` on a car reports
+`formFactor: "automotive"` so you can tell why. `save` with `pin: true` keeps the saved prototype and
+reports `pinned: "unsupported"` when the car launcher cannot pin shortcuts. Whether the dismiss button
+clears the car system bars and whether a prototype stays visible while driving restrictions are on is
+unverified.
 
 ## Not supported
 

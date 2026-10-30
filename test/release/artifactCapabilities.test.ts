@@ -48,6 +48,49 @@ describe("artifact capability parsers", () => {
     ]);
   });
 
+  test("android: reads string literals inside addAll(listOf/mutableSetOf/arrayOf(...)) (#15816)", () => {
+    const kotlin = `
+      addAll(listOf("prototype_gestures_v1", "prototype_swipe_actions_v1"))
+      addAll(
+        mutableSetOf(
+          "prototype_carousel_v1",
+          "prototype_style_polish_v2",
+        ),
+      )
+      addAll(arrayOf("prototype_loading_states_v1"))
+      addAll(registeredRequestTypes)
+      val unrelated = listOf("not_advertised_v1")
+    `;
+    expect(parseAndroidAdvertised(kotlin)).toEqual([
+      "prototype_carousel_v1",
+      "prototype_gestures_v1",
+      "prototype_loading_states_v1",
+      "prototype_style_polish_v2",
+      "prototype_swipe_actions_v1",
+    ]);
+  });
+
+  test("android: the CtrlProxy source's addAll(listOf(...)) capabilities are advertised (#15816)", () => {
+    const source = readFileSync(
+      path.join(
+        import.meta.dir,
+        "../../android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt",
+      ),
+      "utf8",
+    );
+    const parsed = parseAndroidAdvertised(source);
+    for (const capability of [
+      "prototype_gestures_v1",
+      "prototype_swipe_actions_v1",
+      "prototype_text_field_actions_v1",
+      "prototype_carousel_v1",
+      "prototype_loading_states_v1",
+      "prototype_style_polish_v2",
+    ]) {
+      expect(parsed).toContain(capability);
+    }
+  });
+
   test("android: expands SystemGlobalActions flagFor() names into global_action flags", () => {
     const kotlin = `
       private fun flagFor(wireName: String) = "global_action_\${wireName}_v1"

@@ -265,12 +265,22 @@ export async function readSessionBrokerHostConfig(path: string): Promise<Session
 }
 
 /**
- * Whether a booted Android emulator should skip the quick-boot snapshot save at exit (#15477):
- * only when the host config is read and configures no warm reuse, so released emulators are
- * destroyed. Snapshot and keep-booted resets, and an unread config, keep the default.
+ * Whether a booted Android emulator should skip the quick-boot snapshot save at exit (#15477,
+ * #15793): when the host config is read and no snapshot reset can use the saved state. That is no
+ * reset mode (released emulators are destroyed) or keep-booted without the snapshot fallback
+ * (`destroy` or omitted: a non-clean release deletes the AVD, a clean one keeps it running).
+ * Snapshot resets, keep-booted with the snapshot fallback, and an unread config keep the default.
  */
 export function discardsAndroidSnapshotOnExit(
-  config: SessionBrokerHostConfig | undefined,
+  config:
+    | Pick<SessionBrokerHostConfig, "androidResetMode" | "androidKeepBootedFallback">
+    | undefined,
 ): boolean {
-  return config !== undefined && config.androidResetMode === undefined;
+  if (config === undefined) {
+    return false;
+  }
+  return (
+    config.androidResetMode === undefined ||
+    (config.androidResetMode === "keep-booted" && config.androidKeepBootedFallback !== "snapshot")
+  );
 }

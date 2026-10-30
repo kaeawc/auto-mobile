@@ -1,0 +1,122 @@
+{
+  "spec": {
+    "id": "map-node",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "selectedDriver": ""
+    },
+    "data": {
+      "camera": {
+        "lat": 37.7749,
+        "lng": -122.4194,
+        "zoom": 13
+      },
+      "drivers": [
+        {
+          "id": "d1",
+          "name": "Ana",
+          "lat": 37.776,
+          "lng": -122.417,
+          "heading": 90
+        },
+        {
+          "id": "d2",
+          "name": "Ben",
+          "lat": 37.771,
+          "lng": -122.425,
+          "heading": 270
+        }
+      ],
+      "route": {
+        "points": [
+          {
+            "lat": 37.7749,
+            "lng": -122.4194
+          },
+          {
+            "lat": 37.78,
+            "lng": -122.41
+          }
+        ]
+      },
+      "lastCamera": {}
+    },
+    "requires": {
+      "platform": ["map", "location"],
+      "permissions": [
+        {
+          "name": "location",
+          "purpose": "Show where you are on the map."
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "map.markerTap": [
+          {
+            "type": "emit",
+            "name": "marker_tapped"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "map",
+          "id": "rideMap",
+          "style": {
+            "height": {
+              "dp": 360
+            }
+          },
+          "mapStyle": "streets",
+          "camera": {
+            "data": "/camera"
+          },
+          "fit": "markers",
+          "markers": {
+            "path": "/drivers",
+            "as": "driver",
+            "id": "{driver.id}",
+            "lat": "{driver.lat}",
+            "lng": "{driver.lng}",
+            "title": " ",
+            "icon": "directions_car",
+            "heading": "{driver.heading}",
+            "animateMs": 1000
+          },
+          "polylines": [
+            {
+              "path": "/route/points",
+              "width": 4,
+              "color": "primary"
+            }
+          ],
+          "showUserLocation": true,
+          "onMarkerTap": [
+            {
+              "type": "setState",
+              "key": "selectedDriver",
+              "value": "{driver.id}"
+            }
+          ],
+          "onCameraIdle": {
+            "into": "/data/lastCamera"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Selected: {selectedDriver}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].markers.title",
+  "expectedMessage": "Invalid string value"
+}

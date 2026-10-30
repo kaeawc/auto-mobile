@@ -45,11 +45,23 @@ function setup(options: GuestAudioCaptureOptions = {}) {
 }
 
 describe("AdbGuestAudioCapture", () => {
+  test("only the start broadcast carries the requested lease timeout", async () => {
+    const { adb, capture } = setup();
+    const handle = await capture.open("emulator-5554", { leaseMs: 3_720_000 });
+    await handle.close();
+    const commands = adb.getExecutedCommands();
+    expect(commands[0]).toContain("--el leaseTimeoutMs 3720000");
+    const subsequent = commands.slice(1);
+    expect(subsequent.some((command) => command.includes("--es op status"))).toBe(true);
+    expect(subsequent.some((command) => command.includes("--es op stop"))).toBe(true);
+    expect(subsequent.every((command) => !command.includes("leaseTimeoutMs"))).toBe(true);
+  });
+
   test("opens the explicit ordered broadcast and verifies the default settle window", async () => {
     const { adb, timer, capture } = setup();
-    const handle = await capture.open("emulator-5554");
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
     expect(adb.getExecutedCommands()[0]).toBe(
-      `shell am broadcast -n ${COMPONENT} -a ${ACTION} --es op start --es lease capture-1`,
+      `shell am broadcast -n ${COMPONENT} -a ${ACTION} --es op start --es lease capture-1 --el leaseTimeoutMs 60000`,
     );
     expect(timer.monotonicNow()).toBe(3_000);
     expect(
@@ -79,7 +91,7 @@ describe("AdbGuestAudioCapture", () => {
         reply(state),
         reply("running"),
       ]);
-      await expect(capture.open("emulator-5554")).rejects.toMatchObject({
+      await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toMatchObject({
         code: "audio_guest_capture_unavailable",
         message: expect.stringContaining(state),
       });
@@ -98,7 +110,7 @@ describe("AdbGuestAudioCapture", () => {
     test(`refuses start ${state} and stops its lease`, async () => {
       const { adb, capture } = setup();
       adb.setCommandResponse("--es op start", reply(state));
-      await expect(capture.open("emulator-5554")).rejects.toThrow(state);
+      await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow(state);
       expect(adb.getExecutedCommands().at(-1)).toContain("--es op stop --es lease capture-1");
     });
   }
@@ -107,7 +119,7 @@ describe("AdbGuestAudioCapture", () => {
     test(`reports a missing receiver for ${output.trim()}`, async () => {
       const { adb, capture } = setup();
       adb.setCommandResponse("--es op start", createExecResult(output, ""));
-      await expect(capture.open("emulator-5554")).rejects.toThrow(
+      await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow(
         "no guest capture receiver; reinstall the CtrlProxy APK",
       );
       expect(adb.getExecutedCommands().at(-1)).toContain("--es op stop");
@@ -140,7 +152,9 @@ describe("AdbGuestAudioCapture", () => {
       const { adb, capture } = setup();
       const diagnostic = `${output}: ${"x".repeat(4_000)}TAIL_MUST_BE_TRUNCATED`;
       adb.setCommandResponse("--es op start", createExecResult(diagnostic, ""));
-      const error = await capture.open("emulator-5554").catch((thrown: unknown) => thrown);
+      const error = await capture
+        .open("emulator-5554", { leaseMs: 60_000 })
+        .catch((thrown: unknown) => thrown);
       expect(error).toMatchObject({ code: "audio_guest_capture_unavailable" });
       if (!(error instanceof Error)) {
         throw new Error("Expected a capture failure");
@@ -161,7 +175,7 @@ describe("AdbGuestAudioCapture", () => {
 
   test("refuses deadline expiry and still sends best-effort stop", async () => {
     const { capture, adb, timer } = setup({ timeoutMs: 400, settleMs: 300, pollMs: 250 });
-    await expect(capture.open("emulator-5554")).rejects.toThrow("deadline");
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow("deadline");
     expect(timer.monotonicNow()).toBe(400);
     expect(adb.getExecutedCommands().at(-1)).toContain("--es op stop");
     expect(
@@ -189,14 +203,16 @@ describe("AdbGuestAudioCapture", () => {
       new CountingIdGenerator("capture"),
       timer,
     );
-    await expect(capture.open("emulator-5554")).rejects.toThrow("deadline");
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow("deadline");
     expect(adb.getExecutedCommands().at(-1)).toContain("--es op stop");
   });
 
   test("refusal diagnostics are bounded and come from the broadcast reply", async () => {
     const { adb, capture } = setup();
     adb.setCommandResponse("--es op status", reply(`failed ${"x".repeat(4_000)}`));
-    const error = await capture.open("emulator-5554").catch((thrown: unknown) => thrown);
+    const error = await capture
+      .open("emulator-5554", { leaseMs: 60_000 })
+      .catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(Error);
     if (!(error instanceof Error)) {
       throw new Error("Expected a capture failure");
@@ -212,7 +228,9 @@ describe("AdbGuestAudioCapture", () => {
     const { adb, capture } = setup();
     adb.setCommandError("--es op start", new Error("transport reset"));
     adb.setCommandError("--es op stop", new Error("cleanup failed"));
-    await expect(capture.open("emulator-5554")).rejects.toThrow("transport reset");
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow(
+      "transport reset",
+    );
     expect(adb.getExecutedCommands().at(-1)).toContain("--es op stop");
   });
 
@@ -235,14 +253,16 @@ describe("AdbGuestAudioCapture", () => {
       new CountingIdGenerator("capture"),
       timer,
     );
-    await expect(capture.open("emulator-5554")).rejects.toThrow("cannot query capture");
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow(
+      "cannot query capture",
+    );
     expect(adb.getExecutedCommands().at(-1)).toContain("--es op stop");
   });
 
   for (const state of ["stopped", "absent"]) {
     test(`close accepts ${state}`, async () => {
       const { adb, capture } = setup();
-      const handle = await capture.open("emulator-5554");
+      const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
       adb.setCommandResponse("--es op stop", reply(state));
       await handle.close();
     });
@@ -250,7 +270,7 @@ describe("AdbGuestAudioCapture", () => {
   for (const state of ["running", "failed cannot stop"]) {
     test(`close rejects ${state} with an actionable error and runs once`, async () => {
       const { adb, capture } = setup();
-      const handle = await capture.open("emulator-5554");
+      const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
       adb.setCommandResponse("--es op stop", reply(state));
       await expect(handle.close()).rejects.toBeInstanceOf(ActionableError);
       await handle.close();
@@ -261,14 +281,14 @@ describe("AdbGuestAudioCapture", () => {
   }
   test("close transport errors are actionable", async () => {
     const { adb, capture } = setup();
-    const handle = await capture.open("emulator-5554");
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
     adb.setCommandError("--es op stop", new Error("transport reset"));
     await expect(handle.close()).rejects.toBeInstanceOf(ActionableError);
   });
   for (const identity of ["changed", "missing", "unreadable"]) {
     test(`close skips an emulator identity that is ${identity}`, async () => {
       const { adb, capture, emulator, discovery } = setup();
-      const handle = await capture.open("emulator-5554");
+      const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
       adb.clearHistory();
       if (identity === "changed") {
         emulator.pid = 456;
@@ -286,7 +306,7 @@ describe("AdbGuestAudioCapture", () => {
   test("a missing emulator identity refuses before start", async () => {
     const { capture, adb, discovery } = setup();
     discovery.findByConsolePort = async () => undefined;
-    await expect(capture.open("emulator-5554")).rejects.toThrow(
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow(
       "incarnation could not be identified",
     );
     expect(adb.getExecutedCommands()).toEqual([]);

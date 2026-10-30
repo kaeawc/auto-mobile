@@ -93,6 +93,28 @@ export class WatchSimulatorProvisioner {
     }
   }
 
+  /** The listed watch with this UDID, else undefined; a failed listing throws. */
+  async find(udid: string, signal?: AbortSignal): Promise<ListedWatch | undefined> {
+    return (await this.listed(signal)).find((watch) => watch.deviceId === udid);
+  }
+
+  /**
+   * deleteDevice's destroy step: `simctl delete`, then a fresh watch listing that must no longer
+   * show the watch. A delete that fails, or a watch still listed afterwards, throws.
+   */
+  async deleteAndConfirmAbsent(udid: string, signal?: AbortSignal): Promise<void> {
+    try {
+      await this.creator.deleteSimulator(udid, { signal });
+    } catch (error) {
+      throw toActionableError(error, `Failed to delete Apple Watch simulator ${udid}`);
+    }
+    if (await this.find(udid, signal)) {
+      throw new ActionableError(
+        `simctl delete returned, but the watch listing still lists Apple Watch simulator ${udid}.`,
+      );
+    }
+  }
+
   private async findExisting(
     request: WatchProvisionRequest,
     signal: AbortSignal | undefined,

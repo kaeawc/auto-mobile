@@ -2685,7 +2685,7 @@
             "platform": {
               "description": "Platform reported by automobile:devices/booted",
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": ["android", "ios", "watchos"]
             },
             "isVirtual": {
               "description": "Virtual-device flag reported by automobile:devices/booted",

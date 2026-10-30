@@ -35035,6 +35035,14 @@
                     "positionKey": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                     },
+                    "visibleThreshold": {
+                      "type": "number",
+                      "minimum": 0.1,
+                      "maximum": 1
+                    },
+                    "resumePosition": {
+                      "type": "boolean"
+                    },
                     "captions": {
                       "type": "array",
                       "items": {

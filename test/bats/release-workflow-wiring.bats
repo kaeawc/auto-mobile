@@ -1019,3 +1019,15 @@ wiring_requires_yq() {
   [ "$output" = "0" ]
   grep -Fq 'dependsOn(verifyInputs)' android/build-logic/src/main/kotlin/automobile.protoviewer-play-release.gradle.kts
 }
+
+@test "ProtoViewer release smoke signs and versions its candidate like the APK builder (#15301)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/protoviewer-release-smoke.yml"
+  [ "$(yq -r '.on.workflow_dispatch.inputs."candidate-version".required' "$workflow")" = "true" ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_REQUIRE_RELEASE_SIGNING' "$workflow")" = "true" ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_RELEASE_VERSION' "$workflow")" = '${{ inputs.candidate-version }}' ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_KEYSTORE_PATH' "$workflow")" = '${{ github.workspace }}/android/keystore/release.keystore' ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_KEYSTORE_PASSWORD' "$workflow")" = '${{ secrets.RELEASE_KEYSTORE_PASSWORD }}' ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_KEY_ALIAS' "$workflow")" = '${{ secrets.RELEASE_KEY_ALIAS }}' ]
+  [ "$(yq -r '.jobs.android.env.PROTOVIEWER_KEY_PASSWORD' "$workflow")" = '${{ secrets.RELEASE_KEY_PASSWORD }}' ]
+}

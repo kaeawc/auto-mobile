@@ -297,7 +297,12 @@ export async function isForegroundLauncher(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  options: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
+  options: {
+    incarnationToken?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    formFactor?: BootedDevice["formFactor"];
+  } = {},
 ): Promise<boolean> {
   if (!appId) {
     return false;
@@ -311,6 +316,10 @@ export async function isForegroundLauncher(
     signal,
     timeoutMs,
   );
+  // AAOS embeds this map host in Home while the configured HOME package owns the shell.
+  if (options.formFactor === "automotive" && appId === "com.android.car.mapsplaceholder") {
+    return true;
+  }
   if (configuredHome) {
     return appId === configuredHome;
   }

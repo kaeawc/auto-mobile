@@ -599,7 +599,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
     const { action } = args;
     if (isDeviceRequestAction(action)) {
       const host = { store, events, reverses };
-      return responseFor(await deviceRequestAction(args, host, device, target, scope, signal));
+      return responseFor(await deviceRequestAction(args, host, device, target, { scope, signal }));
     }
     if (action === "awaitEvent") {
       const source = prototypeEventSource(target.transport);
@@ -640,14 +640,10 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
           };
         },
         (action) =>
-          performPrototypeAction(
-            handlerDependencies,
-            device,
-            { ...args, action },
-            scope,
-            host.patchQueue,
-            combineWithAmbientAbort(signal),
-          ),
+          performPrototypeAction(handlerDependencies, device, { ...args, action }, scope, {
+            queue: host.patchQueue,
+            signal: combineWithAmbientAbort(signal),
+          }),
       ),
     );
     return responseFor(dispatched);

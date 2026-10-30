@@ -298,13 +298,15 @@ export async function isForegroundLauncher(
   appId: string | null | undefined,
   adb: AdbExecutor,
   deviceId: string,
-  timer: Timer = defaultTimer,
-  options: {
+  {
+    timer = defaultTimer,
+    ...options
+  }: {
     incarnationToken?: string;
     signal?: AbortSignal;
     timeoutMs?: number;
     formFactor?: BootedDevice["formFactor"];
-  } = {},
+  } & { timer?: Timer } = {},
 ): Promise<boolean> {
   if (!appId) {
     return false;

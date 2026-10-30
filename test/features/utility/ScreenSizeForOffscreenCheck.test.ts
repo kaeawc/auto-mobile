@@ -242,13 +242,10 @@ test.each(rows)("four consumers: $name", (row) => {
       tapOn["getScreenSizeFromHierarchy"](hierarchy, options),
     ),
     wait:
-      findWaitForElement(
-        new ElementResolver(),
-        { text: "D43 target" },
-        hierarchy,
-        row.platform,
+      findWaitForElement(new ElementResolver(), { text: "D43 target" }, hierarchy, {
+        platform: row.platform,
         options,
-      ) !== null,
+      }) !== null,
     resolver: resolver.selectByText(hierarchy, "D43 target").element !== null,
   }).toEqual({
     tapAny: row.accepted,
@@ -303,7 +300,10 @@ test("fallback logs once per resolution, primary paths do not log", () => {
 test("platform precedence is explicit, snapshot, projection stamp, then Android order", () => {
   const raw = issue8379Hierarchy();
   expect(screenSizeForOffscreenCheck(raw)).toEqual({ width: 669, height: 951 });
-  identifyObservedHierarchy("ios", raw, "fresh", new FakeTimer(), { ids: new FakeIdGenerator() });
+  identifyObservedHierarchy("ios", raw, "fresh", {
+    timer: new FakeTimer(),
+    ids: new FakeIdGenerator(),
+  });
   expect(screenSizeForOffscreenCheck(raw)).toEqual({ width: 951, height: 669 });
   expect(screenSizeForOffscreenCheck(raw, { platform: "android" })).toEqual({
     width: 669,

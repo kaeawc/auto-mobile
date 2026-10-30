@@ -163,17 +163,12 @@ export class HomeForegroundVerifier {
       return "expired";
     }
     const { deviceId } = this;
-    const isLauncher = await isForegroundLauncher(
-      activeWindow.appId,
-      this.adb,
-      deviceId,
-      this.timer,
-      {
-        ...readBounds(),
-        incarnationToken: deviceIncarnationToken(deviceId),
-        formFactor: this.formFactor,
-      },
-    );
+    const isLauncher = await isForegroundLauncher(activeWindow.appId, this.adb, deviceId, {
+      timer: this.timer,
+      ...readBounds(),
+      incarnationToken: deviceIncarnationToken(deviceId),
+      formFactor: this.formFactor,
+    });
     // A successful launcher lookup is evidence only while it remains within
     // the caller's deadline; a fast cached lookup must not accept success
     // after a preceding foreground read spent the budget.

@@ -34,10 +34,16 @@ describe("Idle - Unit Tests", function () {
 
   test("marks missing frame stats and omits the marker for valid stats", () => {
     expect(
-      idle.processFrameStatsForStability(noFrameGfxinfoOutput, null, null, null, null),
+      idle.processFrameStatsForStability(noFrameGfxinfoOutput, null, null, {
+        prevFrameDeadlineMissed: null,
+        prevTotalFrames: null,
+      }),
     ).toHaveProperty("noFrameData", true);
     expect(
-      idle.processFrameStatsForStability(validGfxinfoOutput, null, null, null, null),
+      idle.processFrameStatsForStability(validGfxinfoOutput, null, null, {
+        prevFrameDeadlineMissed: null,
+        prevTotalFrames: null,
+      }),
     ).not.toHaveProperty("noFrameData");
   });
 
@@ -780,7 +786,7 @@ describe("Idle - Unit Tests", function () {
           return fn();
         });
         try {
-          await rotationIdle.getRotationStatus(1, 100, budget, perf);
+          await rotationIdle.getRotationStatus(1, 100, budget, { perf });
           expect(adb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([
             Math.max(budget - 17, ROTATION_READ_FLOOR_MS),
           ]);
@@ -843,13 +849,9 @@ describe("Idle - Unit Tests", function () {
           );
           const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
 
-          const result = await rotationIdle.getRotationStatus(
-            1,
-            0,
-            500,
-            undefined,
-            controller.signal,
-          );
+          const result = await rotationIdle.getRotationStatus(1, 0, 500, {
+            signal: controller.signal,
+          });
 
           expect(result).toEqual({
             rotationComplete: currentRotation === 1,
@@ -877,7 +879,7 @@ describe("Idle - Unit Tests", function () {
       const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
 
       await expect(
-        rotationIdle.getRotationStatus(1, timer.now(), 100, undefined, controller.signal),
+        rotationIdle.getRotationStatus(1, timer.now(), 100, { signal: controller.signal }),
       ).rejects.toBe(reason);
       expect(adb.getCommandCalls()).toEqual([]);
     });
@@ -895,7 +897,7 @@ describe("Idle - Unit Tests", function () {
       const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);
 
       await expect(
-        rotationIdle.getRotationStatus(1, timer.now(), 100, undefined, controller.signal),
+        rotationIdle.getRotationStatus(1, timer.now(), 100, { signal: controller.signal }),
       ).rejects.toBe(reason);
     });
 

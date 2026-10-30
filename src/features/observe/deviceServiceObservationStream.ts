@@ -43,8 +43,13 @@ export function buildScreenshotBackoffScheduler(
   deviceId: string,
   timer: Timer,
   capture: () => Promise<ScreenshotCaptureResult>,
-  emit: (result: ScreenshotCaptureResult) => void,
-  options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
+  {
+    emit,
+    options,
+  }: {
+    emit: (result: ScreenshotCaptureResult) => void;
+    options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2];
+  },
 ): ScreenshotBackoffScheduler {
   return new DefaultScreenshotBackoffScheduler(
     capture,

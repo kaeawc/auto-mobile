@@ -133,7 +133,7 @@ for (const platform of ["android", "ios"] as const) {
         capture: new FakeHierarchyCapture(async () => {
           const hierarchy = (await observe.getMostRecentCachedObserveResult()).viewHierarchy!;
           return projectCapture
-            ? identifyObservedHierarchy(platform, hierarchy, "fresh", timer).hierarchy
+            ? identifyObservedHierarchy(platform, hierarchy, "fresh", { timer }).hierarchy
             : hierarchy;
         }, platform),
       });

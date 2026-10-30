@@ -130,8 +130,7 @@ export class IdentifyInteractions {
       candidates,
       includeElementDetails,
       includeSuggestedParams,
-      includeNavigation ? navigationEdges : [],
-      currentScreen,
+      { navigationEdges: includeNavigation ? navigationEdges : [], currentScreen },
     );
 
     const filtered = this.applyFilters(interactions, options.filter);
@@ -200,8 +199,10 @@ export class IdentifyInteractions {
     candidates: InteractionCandidate[],
     includeElementDetails: boolean,
     includeSuggestedParams: boolean,
-    navigationEdges: NavigationEdge[],
-    currentScreen: string | null,
+    {
+      navigationEdges,
+      currentScreen,
+    }: { navigationEdges: NavigationEdge[]; currentScreen: string | null },
   ): IdentifiedInteraction[] {
     const interactions: IdentifiedInteraction[] = [];
     let index = 1;

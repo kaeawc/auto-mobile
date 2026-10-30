@@ -86,13 +86,16 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
 
     for (const [group, entries] of rootGroups) {
       keyboardPackage =
-        this.collectFromRoot(entries, group, platform, provenanceState, {
-          keyboardWindows,
-          clickable,
-          scrollable,
-          flattenedEntries,
-          uncollectedWrappers,
-          nextIndex: () => currentIndex++,
+        this.collectFromRoot(entries, group, platform, {
+          provenanceState,
+          collections: {
+            keyboardWindows,
+            clickable,
+            scrollable,
+            flattenedEntries,
+            uncollectedWrappers,
+            nextIndex: () => currentIndex++,
+          },
         }) ?? keyboardPackage;
     }
 
@@ -153,15 +156,20 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     entries: readonly SearchableEntry[],
     group: number,
     platform: "android" | "ios",
-    provenanceState: ProvenanceState,
-    collections: {
-      /** Keyboard window frames by window rank; read-only context, not a collection. */
-      keyboardWindows: ReadonlyMap<number, ElementBounds>;
-      clickable: Element[];
-      scrollable: Element[];
-      flattenedEntries: FlattenedElementEntry[];
-      uncollectedWrappers: Element[];
-      nextIndex: () => number;
+    {
+      provenanceState,
+      collections,
+    }: {
+      provenanceState: ProvenanceState;
+      collections: {
+        /** Keyboard window frames by window rank; read-only context, not a collection. */
+        keyboardWindows: ReadonlyMap<number, ElementBounds>;
+        clickable: Element[];
+        scrollable: Element[];
+        flattenedEntries: FlattenedElementEntry[];
+        uncollectedWrappers: Element[];
+        nextIndex: () => number;
+      };
     },
   ): string | undefined {
     const { keyboardWindows } = collections;
@@ -183,8 +191,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         keyboardRoot,
         nodeProperties.extras?.["automobile:imePackage"],
         nodeProperties,
-        depth,
-        platform,
+        { depth, platform },
       );
       capturedKeyboardPackage = keyboardRoot?.package ?? capturedKeyboardPackage;
       // Pop stale same-or-deeper entries for EVERY visited node, before the
@@ -277,8 +284,7 @@ function nextKeyboardRoot(
   current: KeyboardRoot | undefined,
   imePackage: unknown,
   nodeProperties: Element,
-  depth: number,
-  platform: "android" | "ios",
+  { depth, platform }: { depth: number; platform: "android" | "ios" },
 ): KeyboardRoot | undefined {
   if (platform === "android" && typeof imePackage === "string" && imePackage.length > 0) {
     return { depth, package: imePackage };

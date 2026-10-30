@@ -79,7 +79,8 @@ function harness(
   const transitions = new FakeDisplayTransitionReader();
   const previous = () => observation(previousKey);
   const prepare = (display = "inner", signal?: AbortSignal) =>
-    targetDisplayAction.prepareTargetDisplayAction(targetDevice, display, observe, adb, {
+    targetDisplayAction.prepareTargetDisplayAction(targetDevice, display, observe, {
+      adb,
       lastRenderedObservation: previous,
       signal,
       transitions,

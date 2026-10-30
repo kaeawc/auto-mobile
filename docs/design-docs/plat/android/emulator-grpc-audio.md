@@ -15,11 +15,11 @@ emulator's own audio forwarder:
 | `injectAudio(stream AudioPacket) returns (Empty)`       | client stream | host to guest microphone |
 | `streamAudio(AudioFormat) returns (stream AudioPacket)` | server stream | guest output to host     |
 
-Each emulator has its own gRPC port, so two emulators cannot hear each other's audio. Nothing
-touches a host audio stack, so this works the same on a laptop, a Linux CI host with no
-`/dev/snd` and no PulseAudio/PipeWire, and inside a container. Host-mic passthrough
-(`-allow-host-audio`) is not used. A per-emulator PulseAudio/PipeWire sink is a fallback that
-is only worth building if some supported environment cannot reach the gRPC port.
+Each emulator has its own gRPC port, so two emulators cannot hear each other's audio. The emulator's
+forwarder can still depend on host microphone voice initialization; guest recording alone does not
+prove that voice is healthy. Host-mic passthrough (`-allow-host-audio`) is not used. A per-emulator
+PulseAudio/PipeWire sink is a fallback that is only worth building if some supported environment
+cannot reach the gRPC port.
 
 ## Wire contract
 
@@ -34,6 +34,59 @@ is only worth building if some supported environment cannot reach the gRPC port.
 
 ## Injection
 
+- Before opening `injectAudio`, the host opens a CtrlProxy-owned guest microphone recording
+  through an ordered broadcast: component
+  `dev.jasonpearson.automobile.ctrlproxy/.GuestAudioCaptureReceiver`, action
+  `dev.jasonpearson.automobile.GUEST_AUDIO_CAPTURE`, string extras `op` (`start`, `status`,
+  `stop`) and `lease` (an injected host-generated id). The exported receiver requires
+  `android.permission.DUMP`, which the adb shell holds and third-party apps do not. CtrlProxy
+  requests `RECORD_AUDIO`; installation grants it for the setup user without an API-level gate.
+- The process-wide controller holds at most one lease. `start` checks microphone permission,
+  opens `AudioRecord` with MIC, mono S16 at 48 kHz and the platform minimum buffer size, and
+  starts a background reader that continuously discards PCM. Repeating the held lease's start
+  does not reopen it; a different lease is refused. The receiver sets result code 0 and a
+  single-line result data: `running`, `stopped`, `absent`, or `failed <reason>` (quotes and
+  CR/LF in reasons become spaces). Only the held lease may stop the recording. Stop is
+  idempotent; status and stop for another lease return `absent`.
+- A stopped record or read error releases the lease and reports `failed`; a read failure is
+  retained until the owner's next status or stop, or a new start. Each start requests a monotonic
+  lease timeout (default 30 minutes, capped at 62 minutes); the host covers the injection and
+  start delay plus a one-minute margin and refuses requests exceeding the cap. Expiry releases
+  abandoned recordings and subsequent status returns `absent`. A CtrlProxy
+  restart also loses the lease. No broadcast waits for PCM reads or joins the reader thread.
+- The host requires `running` from start and every status poll (100 ms by default) throughout
+  a three-second settle window, within an eight-second total deadline. Any other answer
+  immediately refuses injection with `audio_guest_capture_unavailable`. Before guest capture and
+  again before opening the gRPC session, injection also refuses captured host microphone failures
+  with `audio_host_microphone_unavailable`, and a repeat injection in the same serial + discovered
+  endpoint PID incarnation with `audio_repeat_injection_unsafe`. Both host safety errors carry
+  `retryable: false` and a remedy to grant macOS Microphone permission to the emulator's host app
+  (System Settings > Privacy and Security > Microphone) or restart the emulator. Permission alone
+  does not clear repeat history: a serial with a new PID starts with no repeat history. The host-voice
+  check also runs after authorization, immediately before the stream opens. No reliable
+  positive host-voice success line is known, so repeats remain refused even after successful guest
+  capture or a completed injection. Each broadcast uses
+  no retries and at most two seconds of the remaining deadline. A missing receiver requires
+  reinstalling CtrlProxy. Refusals include at most 2048 characters of the broadcast reply.
+- The launcher indexes its existing redacted output snapshots by PID and serial for the process
+  lifetime, including stdout and stderr after startup. The index holds at most 64 sources (oldest
+  evicted) and removes a source on exit or close. Existing snapshots retain at most 50 lines /
+  16,384 characters; audio lookups additionally cap the tail at 16 KiB of UTF-8. No extra log file
+  is written. Host microphone failure (`Failed to create voice virtio-snd-mic0`,
+  `Could not initialize record`, or `kAudioHardwareIllegalOperation`) is latched per incarnation
+  at ingestion before tail trimming and stays refused until exit or source eviction.
+  Emulators launched outside AutoMobile have no captured tail, so only the repeat rule applies.
+- Injection history is local to the audio service lifetime and retains at most 128 serial + PID
+  entries, evicting the oldest at capacity. An attempt is counted immediately before `injectAudio`,
+  including attempts whose RPC fails, because it may already have opened a stream. Source or guest
+  capture failures before that point do not count. Observing a new PID clears that serial's old PID
+  history and permits a first injection; stopping an
+  injection does not clear history. Service restarts and capacity eviction forget older history.
+- Failure after start attempts best-effort stop with a separate two-second cleanup budget.
+  Close runs once and accepts `stopped` or `absent`. Before cleanup the host verifies the
+  emulator PID still matches its starting incarnation; otherwise it skips cleanup. Ownership
+  is the lease plus the CtrlProxy process, so cleanup never signals a process or stops another
+  lease's recording. AutoMobile does not enable adb root.
 - Source audio is decoded from WAV, downmixed to mono S16, and resampled to 48 kHz when it is
   above that. The emulator rejects rates above 48 kHz and oversized packets with
   `INVALID_ARGUMENT`.

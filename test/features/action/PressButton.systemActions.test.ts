@@ -124,7 +124,7 @@ describe("PressButton Android system actions (#14095)", () => {
     }
     const client = new FrameRecordingClient(new Set(["global_action_lock_screen_v1"]));
     const { press } = pressButton(androidDevice, client);
-    await press.press("lock", undefined, "frame-3");
+    await press.press("lock", { frameContext: "frame-3" });
     expect(frameContexts).toEqual(["frame-3"]);
   });
 

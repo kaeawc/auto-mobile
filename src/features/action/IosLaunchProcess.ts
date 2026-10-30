@@ -104,8 +104,7 @@ export class IosLaunchProcess {
       bundleId,
       needsColdStart,
       isSystemBundleId,
-      perf,
-      signal,
+      { perf, signal },
     );
     if (missingBeforeLaunch) {
       return missingBeforeLaunch;
@@ -242,8 +241,7 @@ export class IosLaunchProcess {
     bundleId: string,
     needsColdStart: boolean,
     isSystemBundleId: boolean,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<LaunchAppResult | undefined> {
     if (
       needsColdStart &&

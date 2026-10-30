@@ -596,8 +596,69 @@ describe("CtrlProxyManager", function () {
 
       test("does not grant below API 37", async () => {
         const adb = await installOnApi("36\n");
-        expect(adb.wasCommandExecuted("pm grant")).toBe(false);
+        expect(adb.wasCommandExecuted(grantCommand)).toBe(false);
       });
+
+      test("grants RECORD_AUDIO on install", async () => {
+        const adb = await installOnApi("36\n");
+        const commands = adb.getExecutedCommands();
+        const grant = `shell pm grant ${AndroidCtrlProxyManager.PACKAGE} android.permission.RECORD_AUDIO`;
+        expect(commands.filter((command) => command === grant)).toHaveLength(1);
+        expect(commands.indexOf(grant)).toBeGreaterThan(
+          commands.indexOf('install "/tmp/ctrlproxy.apk"'),
+        );
+      });
+
+      test.each(["success", "transport", "unknown permission", "reinstall"])(
+        "%s upgrade grants RECORD_AUDIO and ACCESS_LOCAL_NETWORK after installation",
+        async (mode) => {
+          const adb = new FakeAdbExecutor();
+          adb.setCommandResponse("install ", createExecResult("Success", ""));
+          adb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult("37", ""));
+          const recordGrant = `shell pm grant ${AndroidCtrlProxyManager.PACKAGE} android.permission.RECORD_AUDIO`;
+          if (mode === "transport") {
+            adb.setCommandError(recordGrant, new Error("transport reset"));
+          } else if (mode === "unknown permission") {
+            adb.setCommandResponse(recordGrant, createExecResult("", "Unknown permission"));
+          } else if (mode === "reinstall") {
+            adb.setCommandError(
+              "install -r -d",
+              new Error("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]"),
+            );
+          }
+          const manager = createManager(new FakeTimer(), adb);
+          const enable = spyOn(manager, "enable").mockResolvedValue(undefined);
+          const warn = spyOn(logger, "warn").mockImplementation(() => {});
+          try {
+            const result = await manager.installDownloadedApkGuarded(
+              "/tmp/ctrlproxy.apk",
+              { status: "not_installed" },
+              true,
+              false,
+              new NoOpPerformanceTracker(),
+            );
+            expect(result.status).toBe(mode === "reinstall" ? "reinstalled" : "upgraded");
+            const commands = adb.getExecutedCommands();
+            const installCommand =
+              mode === "reinstall"
+                ? 'install "/tmp/ctrlproxy.apk"'
+                : 'install -r -d "/tmp/ctrlproxy.apk"';
+            for (const grant of [recordGrant, grantCommand]) {
+              expect(commands.filter((command) => command === grant)).toHaveLength(1);
+              expect(commands.indexOf(grant)).toBeGreaterThan(commands.indexOf(installCommand));
+            }
+            if (mode === "transport" || mode === "unknown permission") {
+              expect(warn).toHaveBeenCalledWith(
+                expect.stringContaining("android.permission.RECORD_AUDIO"),
+                ...(mode === "transport" ? [expect.any(Error)] : []),
+              );
+            }
+          } finally {
+            enable.mockRestore();
+            warn.mockRestore();
+          }
+        },
+      );
 
       test("tolerates an unknown-permission refusal", async () => {
         const adb = await installOnApi(

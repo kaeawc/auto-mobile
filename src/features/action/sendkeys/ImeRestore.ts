@@ -101,7 +101,10 @@ export class ImeRestore {
       if (!keyboardRestored) {
         return false;
       }
-      return await this.settleCommitImeEnabled(catalog, state, userId, snapshot.wasEnabled, signal);
+      return await this.settleCommitImeEnabled(catalog, state, userId, {
+        wasEnabled: snapshot.wasEnabled,
+        signal,
+      });
     } catch (error) {
       logger.warn("[SendKeys] Quarantined keyboard recovery could not be verified", error);
       return false;
@@ -112,8 +115,7 @@ export class ImeRestore {
     catalog: AndroidImeCatalog,
     state: ImeCatalogState,
     userId: number,
-    wasEnabled: boolean,
-    signal?: AbortSignal,
+    { wasEnabled, signal }: { wasEnabled: boolean; signal?: AbortSignal },
   ): Promise<boolean> {
     const isEnabled = (s: ImeCatalogState) =>
       s.installed.find((ime) => ime.id === AUTO_MOBILE_IME_ID)?.enabled ?? false;

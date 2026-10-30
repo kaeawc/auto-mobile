@@ -79,23 +79,25 @@ describe("Android rotation restores prior auto-rotate", () => {
           });
           const rotate = new Rotate(
             { name: "Test", platform: "android", deviceId: "test", source: "local" },
-            adb,
-            timer,
-            session
-              ? {
-                  sessionRotation: async (mutation) =>
-                    mutation({
-                      get: () => state,
-                      record: (original) => {
-                        state = original;
-                      },
-                      clear: () => {
-                        state = undefined;
-                      },
-                    }),
-                }
-              : undefined,
-            { awaitIdle: idle, observeScreen: observe, window },
+            {
+              adb,
+              timer,
+              options: session
+                ? {
+                    sessionRotation: async (mutation) =>
+                      mutation({
+                        get: () => state,
+                        record: (original) => {
+                          state = original;
+                        },
+                        clear: () => {
+                          state = undefined;
+                        },
+                      }),
+                  }
+                : undefined,
+              collaborators: { awaitIdle: idle, observeScreen: observe, window },
+            },
           );
           const execution = rotate.execute("landscape", { lockOrientation });
           if (prior === "unreadable" && session && lockOrientation !== undefined) {

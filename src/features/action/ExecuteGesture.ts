@@ -87,7 +87,7 @@ export class ExecuteGesture extends BaseVisualChange {
     adb: AdbExecutor | AdbClientFactory | null = null,
     timer: Timer = defaultTimer,
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.device = device;
   }
 
@@ -550,13 +550,10 @@ export class ExecuteGesture extends BaseVisualChange {
         // Single finger path - convert to simple swipe using CtrlProxy iOS
         const points = path as Point[];
         if (points.length >= 2) {
-          await this.executeIOSSingleFingerSwipe(
-            points[0],
-            points[points.length - 1],
-            duration,
+          await this.executeIOSSingleFingerSwipe(points[0], points[points.length - 1], duration, {
             signal,
             fence,
-          );
+          });
         }
       }
     }
@@ -572,8 +569,7 @@ export class ExecuteGesture extends BaseVisualChange {
     start: Point,
     end: Point,
     duration: number,
-    signal?: AbortSignal,
-    fence?: DisplayFence,
+    { signal, fence }: { signal?: AbortSignal; fence?: DisplayFence } = {},
   ): Promise<void> {
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);

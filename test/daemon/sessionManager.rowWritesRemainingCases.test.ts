@@ -174,7 +174,8 @@ describe("remaining session row writes (#11557)", () => {
         .assignedDevice;
     },
   });
-  const reissue = () => manager.getOrCreateSession(SESSION, pool(), "android", undefined, true);
+  const reissue = () =>
+    manager.getOrCreateSession(SESSION, pool(), "android", { requireIssuedSession: true });
 
   // #11799 W5: a release past its commit point has won; its late terminal row is the row the
   // session ends with, and no live row is rewritten over it.
@@ -651,7 +652,7 @@ describe("remaining session row writes (#11557)", () => {
       };
       const writesBefore = store.releases.length;
       await expect(
-        manager.getOrCreateSession(SESSION, assigner, "android", undefined, true),
+        manager.getOrCreateSession(SESSION, assigner, "android", { requireIssuedSession: true }),
       ).rejects.toMatchObject({
         name: "DaemonSessionCreationRejectedError",
         release: expect.objectContaining({ releaseReason: "daemon-shutdown", terminal: true }),
@@ -701,7 +702,8 @@ describe("remaining session row writes (#11557)", () => {
       const writesBefore = store.releases.length;
       await expect(
         runWithAbortSignal(controller.signal, () =>
-          manager.getOrCreateSession(SESSION, assigner, "android", undefined, true, {
+          manager.getOrCreateSession(SESSION, assigner, "android", {
+            requireIssuedSession: true,
             signal: controller.signal,
           }),
         ),

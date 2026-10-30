@@ -13,12 +13,15 @@ import type {
 import {
   EmulatorAudioError,
   emulatorExitedDuringInjection,
+  hostMicrophoneUnavailable,
+  repeatInjectionUnsafe,
   type EmulatorAudioErrorCode,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import type {
   EmulatorGrpcDiscovery,
   EmulatorGrpcEndpoint,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
+import type { EmulatorOutputTail } from "../../utils/android-cmdline-tools/EmulatorOutputTail";
 import {
   analyzeLevels,
   applyGainDb,
@@ -29,7 +32,12 @@ import {
 } from "../../utils/audio/pcm";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
-import type { GuestAudioCapture, GuestAudioCaptureHandle } from "./GuestAudioCapture";
+import {
+  GUEST_CAPTURE_LEASE_MARGIN_MS,
+  GUEST_CAPTURE_MAX_LEASE_MS,
+  type GuestAudioCapture,
+  type GuestAudioCaptureHandle,
+} from "./GuestAudioCapture";
 
 /** The client calls the service needs; one client per injection or capture. */
 export interface EmulatorAudioSession {
@@ -91,6 +99,8 @@ const DEFAULT_TONE_MS = 2_000;
 export const DEFAULT_LOOP_MAX_DURATION_MS = 10 * 60 * 1000;
 /** Ended injections kept so a late or repeated stop still returns the result. */
 export const FINISHED_INJECTIONS_KEPT = 64;
+/** Oldest incarnation evicted at this cap; state is local to this service's lifetime. */
+export const INJECTION_INCARNATIONS_KEPT = 128;
 
 /** The resources one started injection owns until it settles. */
 interface OpenedInjection {
@@ -112,6 +122,8 @@ interface ActiveInjection {
 export interface EmulatorAudioServiceDeps {
   discovery: EmulatorGrpcDiscovery;
   guestCapture: GuestAudioCapture;
+  /** Redacted live output, absent for emulators launched outside AutoMobile. */
+  outputTail?: EmulatorOutputTail;
   createSession: EmulatorAudioSessionFactory;
   /** A session over the host loopback devices, for iOS Simulators; absent where there is none. */
   createHostLoopbackSession?: () => EmulatorAudioSession;
@@ -149,6 +161,7 @@ function unsupported(code: EmulatorAudioErrorCode, reason: string): EmulatorAudi
  * release can stop everything still playing into a device.
  */
 export class EmulatorAudioService {
+  private readonly injectionStarts = new Map<string, number>();
   private readonly reservedDevices = new Set<string>();
   private readonly active = new Map<string, ActiveInjection>();
   /** A host-loopback start is between its busy check and registration. */
@@ -185,6 +198,7 @@ export class EmulatorAudioService {
     request: StartInjectionRequest,
   ): Promise<StartedInjection> {
     const route = await this.routeFor(deviceId, "audio_injection_unsupported");
+    this.assertInjectionSafe(deviceId, route.endpoint);
     const release = this.reserveHostLoopback(route.route);
     let opened: OpenedInjection;
     try {
@@ -380,6 +394,9 @@ export class EmulatorAudioService {
     endpoint: EmulatorGrpcEndpoint,
     error: unknown,
   ): Promise<ActionableError> {
+    if (error instanceof EmulatorAudioError && error.code === "audio_host_microphone_unavailable") {
+      return error;
+    }
     try {
       const current = await this.deps.discovery.findByConsolePort(endpoint.consolePort);
       if (!current || current.pid !== endpoint.pid) {
@@ -399,16 +416,37 @@ export class EmulatorAudioService {
     request: StartInjectionRequest,
   ): Promise<OpenedInjection> {
     const pcm = applyGainDb(await this.loadSource(request.source), request.gainDb ?? 0);
-    const guestCapture = route.endpoint ? await this.deps.guestCapture.open(deviceId) : undefined;
+    this.assertInjectionSafe(deviceId, route.endpoint);
+    const pcmDurationMs = Math.ceil((pcm.samples.length / pcm.channels / pcm.sampleRate) * 1000);
+    const maxDurationMs =
+      request.maxDurationMs ?? (request.loop ? DEFAULT_LOOP_MAX_DURATION_MS : undefined);
+    const injectionMaxMs = maxDurationMs ?? pcmDurationMs;
+    const leaseMs = (request.startDelayMs ?? 0) + injectionMaxMs + GUEST_CAPTURE_LEASE_MARGIN_MS;
+    if (route.endpoint && leaseMs > GUEST_CAPTURE_MAX_LEASE_MS) {
+      throw new ActionableError(
+        `Guest microphone capture lease exceeds the ${GUEST_CAPTURE_MAX_LEASE_MS} ms (62 minute) limit. ` +
+          "Reduce startDelayMs or maxDurationMs, or use a shorter clip.",
+      );
+    }
+    const guestCapture = route.endpoint
+      ? await this.deps.guestCapture.open(deviceId, { leaseMs })
+      : undefined;
     let session: EmulatorAudioSession | undefined;
     try {
+      // Guest capture settling can expose a host voice failure; recheck before opening gRPC.
+      this.assertInjectionSafe(deviceId, route.endpoint);
       session = route.open();
       const injectionId = this.deps.ids.next();
+      if (route.endpoint) {
+        // A rejected injectAudio may already have opened the unsafe stream. Do not undo this.
+        this.recordInjectionStart(deviceId, route.endpoint);
+      }
       const injection = await session.injectAudio(pcm, {
         loop: request.loop,
         startDelayMs: request.startDelayMs,
-        maxDurationMs:
-          request.maxDurationMs ?? (request.loop ? DEFAULT_LOOP_MAX_DURATION_MS : undefined),
+        maxDurationMs,
+        // This invocation already recorded its own start; only earlier starts are repeats.
+        beforeStreamOpen: () => this.assertInjectionSafe(deviceId, route.endpoint, 1),
       });
       return { session, injection, injectionId, guestCapture };
     } catch (error) {
@@ -416,6 +454,46 @@ export class EmulatorAudioService {
       throw route.endpoint
         ? await this.classifyInjectionError(deviceId, route.endpoint, error)
         : toActionableError(error, `Audio injection on ${deviceId} failed`);
+    }
+  }
+
+  private recordInjectionStart(deviceId: string, endpoint: EmulatorGrpcEndpoint): void {
+    this.pruneInjectionHistory(deviceId, endpoint.pid);
+    const key = `${deviceId}:${endpoint.pid}`;
+    this.injectionStarts.set(key, (this.injectionStarts.get(key) ?? 0) + 1);
+    while (this.injectionStarts.size > INJECTION_INCARNATIONS_KEPT) {
+      const oldest = this.injectionStarts.keys().next().value;
+      if (oldest !== undefined) {
+        this.injectionStarts.delete(oldest);
+      }
+    }
+  }
+
+  private pruneInjectionHistory(deviceId: string, pid: number): void {
+    const prefix = `${deviceId}:`;
+    const current = `${prefix}${pid}`;
+    for (const key of this.injectionStarts.keys()) {
+      if (key.startsWith(prefix) && key !== current) {
+        this.injectionStarts.delete(key);
+      }
+    }
+  }
+
+  private assertInjectionSafe(
+    deviceId: string,
+    endpoint?: EmulatorGrpcEndpoint,
+    currentAttemptStarts = 0,
+  ): void {
+    if (!endpoint) {
+      return;
+    }
+    this.pruneInjectionHistory(deviceId, endpoint.pid);
+    if (this.deps.outputTail?.hostMicrophoneFailed(deviceId, endpoint.pid)) {
+      throw hostMicrophoneUnavailable(deviceId);
+    }
+    // No reliable positive host-voice success line is known (#15902). Guest capture is not proof.
+    if ((this.injectionStarts.get(`${deviceId}:${endpoint.pid}`) ?? 0) > currentAttemptStarts) {
+      throw repeatInjectionUnsafe(deviceId);
     }
   }
 

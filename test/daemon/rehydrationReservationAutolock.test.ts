@@ -104,10 +104,12 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
     async () => {
       await autolockAsOtherClient().catch(() => undefined);
 
-      const recovery = await sessions.getOrCreateSession(ROW, pool, "ios", undefined, true).then(
-        (session) => `recovered on ${session.assignedDevice}`,
-        () => "lost",
-      );
+      const recovery = await sessions
+        .getOrCreateSession(ROW, pool, "ios", { requireIssuedSession: true })
+        .then(
+          (session) => `recovered on ${session.assignedDevice}`,
+          () => "lost",
+        );
 
       expect({
         recovery,

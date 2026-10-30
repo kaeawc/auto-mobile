@@ -14453,7 +14453,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Play a WAV file or a built-in tone into an Android emulator's or iOS Simulator's microphone, so an app under test records known audio (voice notes, voice search, calls). An emulator streams through its own gRPC audio API, isolated per emulator. A simulator goes through the host's loopback input device, which every simulator on the host shares, so one simulator injection runs per host. For Android, AutoMobile opens and verifies a guest microphone capture before streaming and closes its recorder when injection ends. Returns an injectionId once streaming starts; stop it with stopAudioInput. Session release stops it. Errors lead with a code: [audio_injection_busy] another injection holds the microphone; [audio_injection_unsupported] no route (not a local emulator with gRPC audio, or a host without a loopback default input); [audio_loopback_failed] the host loopback helper failed; [audio_guest_capture_unavailable] a safe Android guest capture could not be verified; [audio_emulator_exited] the emulator exited during injection. Physical devices are refused.",
+    "description": "Play a WAV file or a built-in tone into an Android emulator's or iOS Simulator's microphone, so an app under test records known audio (voice notes, voice search, calls). An emulator streams through its own gRPC audio API, isolated per emulator. A simulator goes through the host's loopback input device, which every simulator on the host shares, so one simulator injection runs per host. For Android, AutoMobile opens and verifies a guest microphone capture before streaming and closes its recorder when injection ends. Returns an injectionId once streaming starts; stop it with stopAudioInput. Session release stops it. Errors lead with a code: [audio_injection_busy] another injection holds the microphone; [audio_injection_unsupported] no route (not a local emulator with gRPC audio, or a host without a loopback default input); [audio_loopback_failed] the host loopback helper failed; [audio_record_permission_not_granted] CtrlProxy lacks android.permission.RECORD_AUDIO: run adb shell pm grant dev.jasonpearson.automobile.ctrlproxy android.permission.RECORD_AUDIO; [audio_guest_capture_unavailable] a safe Android guest capture could not be verified; [audio_emulator_exited] the emulator exited during injection. Physical devices are refused.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -35277,6 +35277,110 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["cameraPreview"]
+                    },
+                    "lensKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "flashKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "zoomKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "aspectRatio": {
+                      "type": "string",
+                      "enum": ["4:3", "16:9", "1:1"]
+                    },
+                    "contentScale": {
+                      "type": "string",
+                      "enum": ["fit", "crop", "fill"]
+                    },
+                    "tapToFocus": {
+                      "type": "boolean"
+                    },
+                    "pinchToZoom": {
+                      "type": "boolean"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": ["photo", "video"]
+                    }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/android"
+                    },
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "sharedKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/sharedKey"
+                    },
+                    "press": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/press"
+                    },
+                    "shared": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "keyframes": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "animate": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["chart"]
                     },
                     "variant": {
@@ -35446,7 +35550,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -35529,7 +35633,7 @@
                       "enum": ["tooltip"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
@@ -35649,7 +35753,7 @@
                       "enum": ["start", "end"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
                     },
                     "scrim": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
@@ -35738,7 +35842,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -35748,10 +35852,10 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm/properties/onTap"
                               },
                               "icon": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
@@ -35861,14 +35965,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -36217,10 +36321,10 @@
                       "maxItems": 1
                     },
                     "header": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/41/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/42/properties/children/items"
                     },
                     "footer": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/41/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/42/properties/children/items"
                     }
                   },
                   "required": ["type", "repeat", "children"],
@@ -36305,7 +36409,7 @@
                       "default": "vertical"
                     },
                     "refresh": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/41/properties/refresh"
+                      "$ref": "#/properties/spec/properties/root/anyOf/42/properties/refresh"
                     },
                     "fadeEdges": {
                       "type": "object",
@@ -36595,7 +36699,7 @@
                                 "maxItems": 32
                               },
                               "onBack": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/44/properties/routes/allOf/0/additionalProperties/properties/onEnter"
+                                "$ref": "#/properties/spec/properties/root/anyOf/45/properties/routes/allOf/0/additionalProperties/properties/onEnter"
                               }
                             },
                             "additionalProperties": false
@@ -36809,7 +36913,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/45/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/46/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -36899,7 +37003,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/35/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",

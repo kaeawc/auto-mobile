@@ -596,7 +596,13 @@ describe("ExecuteGesture path fences", () => {
   for (const site of ["android", "ios-single", "ios-multi"] as const) {
     test.each([...modes])(`${site}: %s`, async (mode: Mode) => {
       const h = harness(site === "android" ? "android" : "ios", mode);
-      const base = h.attach(new BaseVisualChange(h.device, h.adb, h.timer, undefined, h.deps));
+      const base = h.attach(
+        new BaseVisualChange(h.device, {
+          adb: h.adb,
+          timer: h.timer,
+          displayFence: h.deps,
+        }),
+      );
       const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
       let error: unknown;
       try {
@@ -1018,14 +1024,14 @@ describe("display fence options preserve public call shapes", () => {
                     "tap",
                     { x: 50, y: 70 },
                     50,
-                    element,
-                    { isTalkBackEnabled: false },
+                    { element, isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
-                ? () => tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element)
+                ? () => tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, { element })
                 : () =>
-                    tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element, {
+                    tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, {
+                      element,
                       options: { action: "tap", ...options },
                       isTalkBackEnabled: false,
                     });
@@ -1035,8 +1041,8 @@ describe("display fence options preserve public call shapes", () => {
             hash,
             { x: 50, y: 70 },
             "tap",
-            50,
             {
+              longPressDuration: 50,
               tapElement: element,
               options: { action: "tap", ...options },
               isTalkBackEnabled: false,

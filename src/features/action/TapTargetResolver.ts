@@ -454,8 +454,7 @@ export class TapTargetResolver {
     options: TapVerificationOptions,
     observeResult: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
     action: TapOnElementOptions["action"],
-    requireResourceId: boolean,
-    signal?: AbortSignal,
+    { requireResourceId, signal }: { requireResourceId: boolean; signal?: AbortSignal },
   ): Promise<StableTapTargetResult> {
     return resolveAndroidStableTapTarget(
       {
@@ -578,7 +577,9 @@ export class TapTargetResolver {
     );
     let selection = initialSearch.selection;
     const invisibleError = () =>
-      this.host.invisibleMatchFailure(selection, options, latestViewHierarchy, latestScreenSize);
+      this.host.invisibleMatchFailure(selection, options, latestViewHierarchy, {
+        screenSize: latestScreenSize,
+      });
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
     if (!element && selection.matchedElement) {
@@ -764,10 +765,17 @@ export class TapTargetResolver {
 
   async handleElementNotFound(
     options: TapOnElementOptions,
-    observeResult?: ObserveResult,
-    containerFound: boolean = true,
-    signal?: AbortSignal,
-    selection?: ElementSelectionResult,
+    {
+      observeResult,
+      containerFound = true,
+      signal,
+      selection,
+    }: {
+      observeResult?: ObserveResult;
+      containerFound?: boolean;
+      signal?: AbortSignal;
+      selection?: ElementSelectionResult;
+    } = {},
   ): Promise<never> {
     this.assertContainerFound(options, containerFound);
     const containerHint = this.containerHint(options);

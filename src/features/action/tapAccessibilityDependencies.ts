@@ -31,7 +31,7 @@ export function resolveTapAccessibilityDependencies(
   const featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
   const strategy =
     options.tapStrategy ??
-    createTapStrategy(device, adb, accessibilityDetector, iosVoiceOverDetector, featureFlags);
+    createTapStrategy(device, adb, accessibilityDetector, { iosVoiceOverDetector, featureFlags });
   return {
     talkBackDriverFactory,
     talkBackStrategy,

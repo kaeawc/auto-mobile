@@ -66,6 +66,7 @@ import {
   GestureExecutor,
   SwipeOnDependencies,
   SwipeOnResolvedOptions,
+  type ElementSwipeCall,
   BoomerangConfig,
   VoiceOverSwipeRunner,
   AutoTargetSelectorService,
@@ -165,7 +166,11 @@ export class SwipeOn extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SwipeOnDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.skipCallerDisplayFence = dependencies.skipCallerDisplayFence ?? false;
     this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
     this.iosLockScreenSwipe = dependencies.iosLockScreenSwipe;
@@ -422,19 +427,29 @@ export class SwipeOn extends BaseVisualChange {
     });
     const result =
       decision.element && context.observeResult
-        ? await this.executeElementSwipe(options, progress, perf, signal, {
-            element: decision.element,
-            observation: context.observeResult,
+        ? await this.executeElementSwipe(options, {
+            progress,
+            perf,
+            signal,
+            selected: {
+              element: decision.element,
+              observation: context.observeResult,
+            },
           })
         : decision.container
           ? await this.executeElementSwipe(
               { ...options, container: decision.container },
-              progress,
-              perf,
-              signal,
-              context.observeResult ? { observation: context.observeResult } : undefined,
+              {
+                progress,
+                perf,
+                signal,
+                selected: context.observeResult
+                  ? { observation: context.observeResult }
+                  : undefined,
+              },
             )
-          : await this.executeScreenSwipe(options, progress, perf, signal, {
+          : await this.executeScreenSwipe(options, progress, perf, {
+              signal,
               within: decision.scrollFrame,
             });
     return this.autoTargeting.withAutoTargetDecision({ result, decision });
@@ -465,7 +480,7 @@ export class SwipeOn extends BaseVisualChange {
       `[SwipeOn] execute: direction=${normalizedOptions.direction}, lookFor=${JSON.stringify(normalizedOptions.lookFor)}, container=${JSON.stringify(normalizedOptions.container)}, speed=${normalizedOptions.speed}, autoTarget=${normalizedOptions.autoTarget}`,
     );
     try {
-      return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
+      return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, { perf, signal });
     } catch (error) {
       perf.end();
       if (error instanceof SwipeSearchCancelledError) {
@@ -587,8 +602,7 @@ export class SwipeOn extends BaseVisualChange {
     action: SwipeOn,
     normalizedOptions: SwipeOnResolvedOptions,
     progress: ProgressCallback | undefined,
-    perf: PerformanceTracker,
-    signal: AbortSignal | undefined,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<SwipeOnResult> {
     // Determine which mode to use
     if (normalizedOptions.lookFor) {
@@ -599,7 +613,7 @@ export class SwipeOn extends BaseVisualChange {
       const autoTargetEnabled = normalizedOptions.autoTarget !== false;
       if (!autoTargetEnabled) {
         logger.info(`[SwipeOn] Mode: screen swipe (autoTarget disabled)`);
-        return action.executeScreenSwipe(normalizedOptions, progress, perf, signal);
+        return action.executeScreenSwipe(normalizedOptions, progress, perf, { signal });
       }
 
       return action.executeAutoTargetSwipe({
@@ -613,7 +627,7 @@ export class SwipeOn extends BaseVisualChange {
       logger.info(
         `[SwipeOn] Mode: element swipe (explicit container=${JSON.stringify(normalizedOptions.container)})`,
       );
-      return action.executeElementSwipe(normalizedOptions, progress, perf, signal);
+      return action.executeElementSwipe(normalizedOptions, { progress, perf, signal });
     }
   }
 
@@ -769,8 +783,7 @@ export class SwipeOn extends BaseVisualChange {
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    { within }: { within?: Element["bounds"] } = {},
+    { signal, within }: { signal?: AbortSignal; within?: Element["bounds"] } = {},
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
     let iosDispatchTimestamp: number | undefined;
@@ -887,10 +900,7 @@ export class SwipeOn extends BaseVisualChange {
 
   private async executeElementSwipe(
     options: SwipeOnResolvedOptions,
-    progress?: ProgressCallback,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    selected?: { element?: Element; observation: ObserveResult },
+    { progress, perf = new NoOpPerformanceTracker(), signal, selected }: ElementSwipeCall = {},
   ): Promise<SwipeOnResult> {
     logger.info(
       `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,

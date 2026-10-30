@@ -93,8 +93,7 @@ export class LaunchObservation {
         result,
         latestObservation,
         expectedPackageName,
-        nextShadeCollapseTime,
-        signal,
+        { nextShadeCollapseTime, signal },
       );
       latestObservation = collapseRetry.observation;
       nextShadeCollapseTime = collapseRetry.nextShadeCollapseTime;
@@ -105,21 +104,17 @@ export class LaunchObservation {
       }
     }
 
-    return this.resolveLaunchObservationTimeout(
-      result,
-      latestObservation,
-      expectedPackageName,
+    return this.resolveLaunchObservationTimeout(result, latestObservation, expectedPackageName, {
       timeoutMs,
-      { coldBoot, expectedUserId, signal },
-    );
+      options: { coldBoot, expectedUserId, signal },
+    });
   }
 
   private async retryNotificationShadeCollapseIfDue(
     result: LaunchAppResult,
     observation: ObserveResult,
     expectedPackageName: string,
-    nextShadeCollapseTime: number,
-    signal?: AbortSignal,
+    { nextShadeCollapseTime, signal }: { nextShadeCollapseTime: number; signal?: AbortSignal },
   ): Promise<{ observation: ObserveResult; nextShadeCollapseTime: number }> {
     const activeWindow = observation.activeWindow;
     if (
@@ -195,8 +190,13 @@ export class LaunchObservation {
     result: LaunchAppResult,
     latestObservation: ObserveResult,
     expectedPackageName: string,
-    timeoutMs: number,
-    options: { coldBoot?: boolean; expectedUserId?: number; signal?: AbortSignal },
+    {
+      timeoutMs,
+      options,
+    }: {
+      timeoutMs: number;
+      options: { coldBoot?: boolean; expectedUserId?: number; signal?: AbortSignal };
+    },
   ): Promise<LaunchAppResult> {
     const { coldBoot, expectedUserId, signal } = options;
     // Distinguish "genuinely launched but no foreground window could be read at
@@ -242,7 +242,7 @@ export class LaunchObservation {
       {
         ...result,
         success: false,
-        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, lock, foregroundDescription, expectedPackageName, coldBoot)}`,
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, lock, foregroundDescription, { expectedPackageName, coldBoot })}`,
       },
       expectedPackageName,
       latestObservation,
@@ -288,8 +288,7 @@ export class LaunchObservation {
     latestObservation: ObserveResult,
     lock: DeviceLockState | undefined,
     foregroundDescription: string,
-    expectedPackageName: string,
-    coldBoot?: boolean,
+    { expectedPackageName, coldBoot }: { expectedPackageName: string; coldBoot?: boolean },
   ): string {
     // The hierarchy read itself can name the keyguard (`device_locked`) when the
     // lock sample is missing from the observation.

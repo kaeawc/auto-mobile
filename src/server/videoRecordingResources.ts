@@ -290,13 +290,11 @@ export function registerVideoRecordingResources(): void {
     () => getVideoArchiveList(),
   );
 
-  ResourceRegistry.registerTemplate(
-    VIDEO_RESOURCE_URIS.ARCHIVE_ITEM,
-    "Video Recording",
-    "Video recording content and metadata for the specified recording ID.",
-    "video/mp4",
-    getVideoArchiveItem,
-  );
+  ResourceRegistry.registerTemplate(VIDEO_RESOURCE_URIS.ARCHIVE_ITEM, "Video Recording", {
+    description: "Video recording content and metadata for the specified recording ID.",
+    mimeType: "video/mp4",
+    handler: getVideoArchiveItem,
+  });
 
   logger.info("[VideoRecordingResources] Registered video recording resources");
 }

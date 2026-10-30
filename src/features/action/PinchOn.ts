@@ -184,7 +184,11 @@ export class PinchOn extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     deps: PinchOnDependencies = {},
   ) {
-    super(device, adb, deps.timer, deps.renderedDisplayRevision, deps);
+    super(device, {
+      adb,
+      timer: deps.timer,
+      displayFence: deps,
+    });
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.resolver = deps.resolver ?? new ElementResolver();
     this.capture =
@@ -576,8 +580,8 @@ export class PinchOn extends BaseVisualChange {
       this.device,
       options.display!,
       this.observeScreen,
-      this.adb,
       {
+        adb: this.adb,
         lastRenderedObservation: this.lastRenderedObservation,
         signal,
         transitions: this.displayTransitionReader,

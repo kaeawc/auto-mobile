@@ -76,7 +76,7 @@ export class AndroidLaunchActivity {
       for (let i = 0; i < approaches.length; i++) {
         this.assertLaunchNotAborted(signal);
         activities.push(
-          ...(await this.runActivityApproach(approaches[i], i, packageName, perf, signal)),
+          ...(await this.runActivityApproach(approaches[i], i, packageName, { perf, signal })),
         );
         if (activities.length > 0) {
           break;
@@ -122,24 +122,25 @@ export class AndroidLaunchActivity {
     } catch (error) {
       rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
+      // A missing CtrlProxy launch intent can still be resolved through PackageManager over ADB.
       logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
     }
     return undefined;
   }
 
   private buildActivityApproachCommands(packageName: string, userId: number): string[] {
-    return [
-      // Ask PackageManager for MAIN/LAUNCHER activities before parsing a full dump.
-      `shell cmd package query-activities --brief --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
-    ];
+    // Keep handheld resolution first; TV-only apps may expose only Leanback (#15957).
+    return LAUNCHER_CATEGORIES.map(
+      (category) =>
+        `shell cmd package query-activities --brief --user ${userId} -a android.intent.action.MAIN -c ${category} | grep ${shellQuote(packageName)}`,
+    );
   }
 
   private async runActivityApproach(
     command: string,
     index: number,
     packageName: string,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<string[]> {
     try {
       logger.info(`[LaunchApp] Trying approach ${index + 1}: ${command}`);
@@ -384,8 +385,7 @@ export class AndroidLaunchActivity {
     packageName: string,
     activityName: string | undefined,
     userId: number,
-    perf: PerformanceTracker,
-    options: AndroidPerformLaunchOptions = {},
+    { perf, options = {} }: { perf: PerformanceTracker; options?: AndroidPerformLaunchOptions },
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
     const { signal, intent } = options;
     this.assertLaunchNotAborted(signal);
@@ -396,7 +396,7 @@ export class AndroidLaunchActivity {
       perf.end();
       return launched;
     }
-    return this.performDiscoveredLaunch(packageName, activityName, userId, perf, signal);
+    return this.performDiscoveredLaunch(packageName, activityName, userId, { perf, signal });
   }
 
   /** Launch without an explicit intent: intent, monkey, then launcher-activity discovery. */
@@ -404,8 +404,7 @@ export class AndroidLaunchActivity {
     packageName: string,
     activityName: string | undefined,
     userId: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
     let targetActivity = activityName;
 
@@ -482,7 +481,8 @@ export class AndroidLaunchActivity {
             } catch (error) {
               rethrowDeviceTransportUnavailable(error);
               this.assertLaunchNotAborted(signal);
-              logger.info(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
+              // A missing conventional activity name does not rule out the next candidate.
+              logger.debug(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
             }
           }
           return { success: false, pattern: null };

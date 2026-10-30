@@ -107,11 +107,15 @@ describe("HomeScreen", () => {
     window: WindowInterface = fakeWindow,
     globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">,
   ): HomeScreen =>
-    new HomeScreen(mockDevice, fakeAdb, fakeTimer, undefined, {
-      observeScreen: fakeObserveScreen,
-      window,
-      awaitIdle: fakeAwaitIdle,
-      globalActionClient,
+    new HomeScreen(mockDevice, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      collaborators: {
+        observeScreen: fakeObserveScreen,
+        window,
+        awaitIdle: fakeAwaitIdle,
+        globalActionClient,
+      },
     });
 
   const globalActionResult = (
@@ -177,10 +181,15 @@ describe("HomeScreen", () => {
       platform: "ios",
       deviceId: options?.simulator ? "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" : "ios-device",
     };
-    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl, {
-      observeScreen: fakeObserveScreen,
-      awaitIdle: fakeAwaitIdle,
-      window: fakeWindow,
+    const action = new HomeScreen(iosDevice, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      simctl: options?.simctl,
+      collaborators: {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      },
     });
 
     const client = new FakeIOSCtrlProxy(fakeTimer);
@@ -1405,10 +1414,13 @@ describe("HomeScreen", () => {
       });
       fakeObserveScreen2.setObserveResult(() => createObserveResult());
 
-      const homeScreen2 = new HomeScreen(otherDevice, fakeAdb, undefined, undefined, {
-        observeScreen: fakeObserveScreen2,
-        window: fakeWindow2,
-        awaitIdle: fakeAwaitIdle2,
+      const homeScreen2 = new HomeScreen(otherDevice, {
+        adb: fakeAdb,
+        collaborators: {
+          observeScreen: fakeObserveScreen2,
+          window: fakeWindow2,
+          awaitIdle: fakeAwaitIdle2,
+        },
       });
 
       fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));

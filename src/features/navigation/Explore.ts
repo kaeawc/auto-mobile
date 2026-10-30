@@ -125,7 +125,7 @@ export class Explore extends BaseVisualChange {
     navigationManager?: NavigationGraphService,
     { sessionUuid, tapActionFactory }: ExploreSessionOptions = {},
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.exploredElements = new Map();
     this.elementParser = new DefaultElementParser();

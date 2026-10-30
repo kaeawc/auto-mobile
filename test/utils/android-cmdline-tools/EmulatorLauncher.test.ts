@@ -9,7 +9,8 @@ import {
   accelerationCheckCategory,
 } from "../../../src/utils/android-cmdline-tools/emulatorLaunchFailure";
 import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
-import type { DeviceInfo } from "../../../src/models";
+import { ActionableError, type DeviceInfo } from "../../../src/models";
+import { formatEarlyExitError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchDiagnostics";
 import {
   DefaultEmulatorLauncher,
   type EmulatorLauncherHost,
@@ -22,6 +23,17 @@ import {
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakePortAvailabilityChecker } from "../../fakes/FakePortAvailabilityChecker";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeEmulatorGrpcPortRegistry } from "../../fakes/FakeEmulatorGrpcPortRegistry";
+
+let grpcPortRegistry: FakeEmulatorGrpcPortRegistry;
+beforeEach(() => {
+  grpcPortRegistry = new FakeEmulatorGrpcPortRegistry();
+});
+import { defaultEmulatorOutputTail } from "../../../src/utils/android-cmdline-tools/EmulatorOutputTail";
+import { EmulatorAudioService } from "../../../src/features/audio/EmulatorAudioService";
+import { FakeEmulatorAudioSession } from "../../fakes/FakeEmulatorAudioSession";
+import { FakeGuestAudioCapture } from "../../fakes/FakeGuestAudioCapture";
+import { CountingIdGenerator } from "../../../src/utils/CountingIdGenerator";
 
 /** Members the launch pre-flight touches; everything else fails loudly if reached. */
 function createHost(overrides: Partial<EmulatorLauncherHost>): EmulatorLauncherHost {
@@ -44,6 +56,7 @@ describe("DefaultEmulatorLauncher pre-flight", () => {
       timer: () => timer,
       adbFactory: () => new FakeAdbClientFactory(),
       hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+      grpcPortRegistry,
     });
   });
 
@@ -92,10 +105,13 @@ function startupHarness(
   const timer = new FakeTimer();
   const child = new FakeChildProcess(timer);
   const targets = new WeakMap<HostChildProcess, string>();
+  const errors = new WeakMap<HostChildProcess, ActionableError>();
+  const finalizations = new WeakMap<HostChildProcess, Promise<ActionableError | undefined>>();
   const reservations = new DefaultEmulatorPortReservations({
     timer: () => timer,
     adbFactory: () => new FakeAdbClientFactory(),
     hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+    grpcPortRegistry,
   });
   reservations.addReservedEmulatorPort = async () => undefined;
   const overrides = {
@@ -115,6 +131,9 @@ function startupHarness(
       return child;
     },
     launchTargetDeviceIds: () => targets,
+    launchErrors: () => errors,
+    launchErrorFinalizations: () => finalizations,
+    formatEarlyExitError,
     captureLaunchTargetDeviceId: (_child: HostChildProcess, output: string) => {
       const serial = detectDeviceIdFromEmulatorOutput(output);
       if (serial) {
@@ -154,6 +173,155 @@ function expectNoStartupTimers(timer: FakeTimer) {
   expect(timer.getPendingTimeoutCount()).toBe(0);
   expect(timer.getPendingIntervalCount()).toBe(0);
 }
+
+for (const stream of ["stdout", "stderr"] as const) {
+  for (const afterStartup of [false, true]) {
+    test(`refuses injection after host failure and log churn on ${stream}, afterStartup=${afterStartup}`, async () => {
+      const harness = startupHarness();
+      const { launch } = await launchStartup(harness, "emulator-5554");
+      if (afterStartup) {
+        harness.timer.advanceTime(5_000);
+        await launch;
+      }
+      const pid = harness.child.pid;
+      if (pid === undefined) {
+        throw new Error("Fake child must have a PID");
+      }
+      harness.child[stream].emit("data", Buffer.from("Could not initialize record\n"));
+      const info = `INFO | ${"ordinary output ".repeat(24)}\n`;
+      expect(Buffer.byteLength(info) * 60).toBeGreaterThan(16 * 1024);
+      for (let line = 0; line < 60; line++) {
+        harness.child[stream].emit("data", Buffer.from(info));
+      }
+      expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).not.toContain(
+        "Could not initialize record",
+      );
+      const endpoint = {
+        pid,
+        consolePort: 5554,
+        address: "localhost:8554",
+        auth: { kind: "none" },
+        descriptionFile: `pid_${pid}.ini`,
+      } as const;
+      const session = new FakeEmulatorAudioSession(endpoint);
+      const guestCapture = new FakeGuestAudioCapture();
+      const service = new EmulatorAudioService({
+        discovery: { findByConsolePort: async () => endpoint },
+        outputTail: defaultEmulatorOutputTail,
+        guestCapture,
+        createSession: () => session,
+        readFile: async () => new Uint8Array(),
+        ids: new CountingIdGenerator("churn"),
+      });
+      if (!afterStartup) {
+        harness.timer.advanceTime(5_000);
+        await launch;
+      }
+      await expect(
+        service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 1 } }),
+      ).rejects.toMatchObject({ code: "audio_host_microphone_unavailable" });
+      expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(true);
+      expect(guestCapture.opened).toEqual([]);
+      expect(session.injected).toEqual([]);
+      expectNoStartupTimers(harness.timer);
+    });
+  }
+}
+
+test("indexes redacted stdout and stderr throughout the launch and prunes on exit", async () => {
+  const harness = startupHarness();
+  const { launch } = await launchStartup(harness, "emulator-5554");
+  const pid = harness.child.pid;
+  if (pid === undefined) {
+    throw new Error("Fake child must have a PID");
+  }
+  harness.child.stdout.emit("data", Buffer.from("coreaudio: Could not initialize record\n"));
+  expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(true);
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).toContain(
+    "Could not initialize record",
+  );
+  harness.timer.advanceTime(5_000);
+  await launch;
+  // Short, chunk-split output is visible through safe redactor snapshots after startup too.
+  harness.child.stderr.emit("data", Buffer.from("\ntoken=private-"));
+  harness.child.stderr.emit("data", Buffer.from("credential\nFailed to create voice virtio-"));
+  harness.child.stderr.emit("data", Buffer.from("snd-mic0\n"));
+  const output = defaultEmulatorOutputTail.tailFor("emulator-5554", pid);
+  expect(output).toContain("Failed to create voice virtio-snd-mic0");
+  expect(output).not.toContain("private-");
+  expect(output).not.toContain("credential");
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid + 1)).toBeUndefined();
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5556", pid)).toBeUndefined();
+  // A real ChildProcess sets exitCode before it emits exit.
+  harness.child.exitCode = 0;
+  harness.child.emit("exit", 0, null);
+  expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(false);
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).toBeUndefined();
+  // Draining stdio after exit cannot re-register this incarnation.
+  harness.child.stderr.emit("data", Buffer.from("late output\n"));
+  harness.child.emit("close", 0, null);
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).toBeUndefined();
+});
+
+test("latches a failure in a single chunk larger than the diagnostic tail", async () => {
+  const harness = startupHarness();
+  const { launch } = await launchStartup(harness, "emulator-5554");
+  const pid = harness.child.pid;
+  if (pid === undefined) {
+    throw new Error("Fake child must have a PID");
+  }
+  harness.child.stdout.emit(
+    "data",
+    Buffer.from("Could not initialize record\n" + "INFO | ordinary output\n".repeat(2_000)),
+  );
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).not.toContain(
+    "Could not initialize record",
+  );
+  expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(true);
+  harness.timer.advanceTime(5_000);
+  await launch;
+});
+
+test("latches a short chunk-split post-startup failure and ignores stale output after exit", async () => {
+  const harness = startupHarness();
+  const { launch } = await launchStartup(harness, "emulator-5554");
+  harness.timer.advanceTime(5_000);
+  await launch;
+  const pid = harness.child.pid;
+  if (pid === undefined) {
+    throw new Error("Fake child must have a PID");
+  }
+  harness.child.stderr.emit("data", Buffer.from("Failed to create voice virtio-"));
+  expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(false);
+  harness.child.stderr.emit("data", Buffer.from("snd-mic0\n"));
+  expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(true);
+  harness.child.exitCode = 0;
+  harness.child.emit("exit", 0, null);
+  // Re-register without a lookup in between: exit must have removed the old source and latch.
+  const remove = defaultEmulatorOutputTail.register(pid, {
+    deviceId: () => "emulator-5554",
+    snapshot: () => "replacement incarnation",
+  });
+  harness.child.stderr.emit("data", Buffer.from("Could not initialize record\n"));
+  harness.child.emit("close", 0, null);
+  expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(false);
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).toBe("replacement incarnation");
+  remove();
+});
+
+test("keeps stderr failure text adjacent to its own redactor suffix while stdout is pending", async () => {
+  const harness = startupHarness();
+  const { launch } = await launchStartup(harness, "emulator-5554");
+  harness.timer.advanceTime(5_000);
+  await launch;
+  const pid = harness.child.pid;
+  if (pid === undefined) {
+    throw new Error("Fake child must have a PID");
+  }
+  harness.child.stdout.emit("data", Buffer.from("INFO | unrelated stdout\n"));
+  harness.child.stderr.emit("data", Buffer.from("Could not initialize record\n" + " ".repeat(120)));
+  expect(defaultEmulatorOutputTail.hostMicrophoneFailed("emulator-5554", pid)).toBe(true);
+});
 
 test("wipe-data arguments append to operator GPU and memory arguments rather than replacing them", async () => {
   const previous = process.env.AUTOMOBILE_EMULATOR_ARGS;
@@ -378,6 +546,17 @@ describe("existing stdout startup markers", () => {
 });
 
 describe("DefaultEmulatorLauncher gRPC port", () => {
+  test("spawn failure releases the gRPC lease", async () => {
+    const harness = startupHarness(
+      async () => false,
+      () => {
+        throw new Error("spawn failed");
+      },
+    );
+    await expect(harness.launcher.startEmulatorProcess("Pixel_9")).rejects.toThrow("spawn failed");
+    expect((await harness.reservations.reserveEmulatorGrpcPort()).port).toBe(8554);
+  });
+
   test("pre-spawn cancellation releases the gRPC lease on consecutive launches", async () => {
     let spawned = false;
     const harness = startupHarness(
@@ -448,6 +627,7 @@ describe("DefaultEmulatorLauncher gRPC port", () => {
       timer: () => new FakeTimer(),
       adbFactory: () => new FakeAdbClientFactory(),
       hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+      grpcPortRegistry,
     });
     expect((await reservations.reserveEmulatorGrpcPort()).port).toBe(8555);
   });

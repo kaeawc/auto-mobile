@@ -190,13 +190,10 @@ export class SetUIStateFields {
           continue;
         }
 
-        const verification = await this.verifyAppliedFieldValue(
-          fieldSpec,
-          fieldType,
-          element,
+        const verification = await this.verifyAppliedFieldValue(fieldSpec, fieldType, element, {
           attempts,
           signal,
-        );
+        });
         if (!verification.error) {
           return {
             selector: fieldSpec.selector,
@@ -240,8 +237,7 @@ export class SetUIStateFields {
     fieldSpec: FieldSpec,
     fieldType: FieldType,
     element: Element,
-    attempts: number,
-    signal?: AbortSignal,
+    { attempts, signal }: { attempts: number; signal?: AbortSignal },
   ): Promise<FieldVerificationOutcome> {
     if (this.shouldSkipFieldVerification(fieldSpec, fieldType, element)) {
       return {};
@@ -398,7 +394,7 @@ export class SetUIStateFields {
     }
     const control = android
       ? element
-      : findIosToggleControl(this.hierarchy, element, text, viewHierarchy, screenSizeOptions);
+      : findIosToggleControl(this.hierarchy, element, text, { viewHierarchy, screenSizeOptions });
     const fieldType = this.fieldTypeDetector.detect(control);
     return fieldType === "toggle" || fieldType === "checkbox" ? control : null;
   }
@@ -541,8 +537,7 @@ export class SetUIStateFields {
     element: Element,
     fieldSpec: FieldSpec,
     recovery: TextFocusRecovery,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): ReturnType<TapOnElementLike["execute"]> {
     const focus = (target: Element) =>
       this.getTapOnElement().execute(
@@ -623,13 +618,10 @@ export class SetUIStateFields {
 
         case "checkbox":
         case "toggle":
-          return await this.applySelectedFieldValue(
-            element,
-            fieldSpec,
-            tapOnElement,
+          return await this.applySelectedFieldValue(element, fieldSpec, tapOnElement, {
             progress,
             signal,
-          );
+          });
 
         case "dropdown":
           return await this.applyDropdownFieldValue(fieldSpec, tapOnElement, progress, signal);
@@ -684,13 +676,10 @@ export class SetUIStateFields {
     // previously focused field, owns input before ClearText can mutate it.
     logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
     const tapStart = Date.now();
-    const tapResult = await this.focusTextField(
-      element,
-      fieldSpec,
-      focusRecovery,
+    const tapResult = await this.focusTextField(element, fieldSpec, focusRecovery, {
       progress,
       signal,
-    );
+    });
     signal?.throwIfAborted();
     logger.debug(
       `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
@@ -771,8 +760,7 @@ export class SetUIStateFields {
     element: Element,
     fieldSpec: FieldSpec,
     tapOnElement: TapOnElementLike,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): Promise<FieldApplicationResult> {
     if (fieldSpec.selected === undefined) {
       return { success: false, error: "selected is required for checkbox/toggle fields" };

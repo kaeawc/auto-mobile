@@ -400,22 +400,20 @@ async function getStorageEntriesResource(
  */
 export function registerStorageResources(deps: StorageResourceDependencies = {}): void {
   // Register template for listing storage files
-  ResourceRegistry.registerTemplate(
-    STORAGE_RESOURCE_TEMPLATES.FILES,
-    "App Storage Files",
-    "List all storage files in an app (Android SharedPreferences or iOS UserDefaults suites). Requires app to have AutoMobile SDK with storage inspection enabled.",
-    "application/json",
-    (params: Record<string, string>) => getStorageFilesResource(params, deps),
-  );
+  ResourceRegistry.registerTemplate(STORAGE_RESOURCE_TEMPLATES.FILES, "App Storage Files", {
+    description:
+      "List all storage files in an app (Android SharedPreferences or iOS UserDefaults suites). Requires app to have AutoMobile SDK with storage inspection enabled.",
+    mimeType: "application/json",
+    handler: (params: Record<string, string>) => getStorageFilesResource(params, deps),
+  });
 
   // Register template for getting storage entries
-  ResourceRegistry.registerTemplate(
-    STORAGE_RESOURCE_TEMPLATES.ENTRIES,
-    "Storage File Entries",
-    "Get all key-value entries from a storage file (Android SharedPreferences or iOS UserDefaults suite).",
-    "application/json",
-    (params: Record<string, string>) => getStorageEntriesResource(params, deps),
-  );
+  ResourceRegistry.registerTemplate(STORAGE_RESOURCE_TEMPLATES.ENTRIES, "Storage File Entries", {
+    description:
+      "Get all key-value entries from a storage file (Android SharedPreferences or iOS UserDefaults suite).",
+    mimeType: "application/json",
+    handler: (params: Record<string, string>) => getStorageEntriesResource(params, deps),
+  });
 
   logger.info("[StorageResources] Registered storage resources");
 }

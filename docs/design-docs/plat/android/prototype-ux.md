@@ -289,6 +289,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | bottomSheet     | material | material | —     |
 | box             | neutral  | neutral  | —     |
 | button          | native   | material | —     |
+| cameraPreview   | material | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
 | castButton      | material | material | —     |
@@ -2385,11 +2386,34 @@ calls `media.next`, `previous` (restarts after 3 s), `skipTo` (`itemId`), `setSh
 `camera.takePhoto` writes an image item to `into`, `camera.startRecording` (optional `audio` boolean and
 `maxDurationMs` 1-600000) and `camera.stopRecording` (writes a video item to `into`). Each takes
 `preview`, the id of the viewfinder it acts on, needs `camera` in `requires.permissions` and is
-`sensitive`; the viewfinder node itself is a separate slice. Recording also needs
-`prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
+`sensitive`. Recording also needs `prototype_platform_camera_video_v1`. The `camera.statusChanged` event and the
 `/platform/camera/status` state report `starting`, `ready`, `capturing`, `recording`, `unavailable`,
 `permission_denied` or `error`; `/platform/camera/flashAvailable`, `recordingMs` and `source`
 (`camera` or `injected`, the fake frame source on a Simulator) complete the state.
+
+The `cameraPreview` node is that viewfinder; a story-capture screen pairs it with ordinary buttons:
+
+```json
+{
+  "type": "cameraPreview",
+  "lensKey": "lens",
+  "flashKey": "flash",
+  "zoomKey": "zoom",
+  "aspectRatio": "4:3",
+  "contentScale": "crop",
+  "tapToFocus": true,
+  "pinchToZoom": true,
+  "mode": "photo"
+}
+```
+
+- A spec has at most one `cameraPreview`. It needs an `id` that is a state key, which `camera.*`
+  calls name as their literal `preview` (`platform-camera-live.json` is the full story-capture spec).
+- It needs `camera` in `requires.platform` and in `requires.permissions`.
+- `lensKey` and `flashKey` name declared string state keys (`back` or `front`; `off`, `on`, `auto`
+  or `torch`) and `zoomKey` a declared number key (0-1), so `setState` and a slider drive them.
+- Optional: `aspectRatio` (`4:3`, `16:9`, `1:1`), `contentScale` (`fit`, `crop`, `fill`),
+  `tapToFocus`, `pinchToZoom` and `mode` (`photo` or `video`). No renderer draws it yet.
 
 **Per-call capabilities.** A `platformModules` call may name a `capability` it needs on top of its
 module's, named `prototype_platform_<module>_<op>_vN`. The host, Kotlin and Swift validators add it to

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   invalidateInstalledAppsCache,
   queryInstalledApps,
@@ -9,8 +9,17 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createIdentityQuarantinePool } from "../helpers/identityQuarantinePool";
+import { FakeDeviceTraits, androidDeviceTraits } from "../fakes/FakeDeviceTraits";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { defaultDeviceTraits } from "../../src/utils/android-cmdline-tools/deviceTraits";
+import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
+import { createExecResult } from "../../src/utils/execResult";
 
-let deps: AppResourceDependencies = {};
+let deps: AppResourceDependencies = { injectedDeviceTraits: null };
 function useListInstalledAppsFactoryForTests(
   value: AppResourceDependencies["listInstalledAppsFactory"] | null,
 ): void {
@@ -22,6 +31,153 @@ const device: BootedDevice = {
   name: "Pixel 8",
   platform: "android",
 };
+
+describe("queryInstalledApps device traits before app construction", () => {
+  const androidDevice: BootedDevice = {
+    deviceId: "apps-traits-device",
+    name: "Android TV",
+    platform: "android",
+  };
+  let constructedDevices: BootedDevice[];
+  let adb: FakeAdbExecutor;
+  let adbFactorySpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    const devices = new FakeDeviceUtils();
+    devices.setBootedDevices("android", [androidDevice]);
+    devices.setBootedDevices("ios", []);
+    PlatformDeviceManagerFactory.setInstance(devices);
+    constructedDevices = [];
+    adb = new FakeAdbExecutor();
+    adbFactorySpy = spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
+  });
+
+  afterEach(() => {
+    adbFactorySpy.mockRestore();
+    PlatformDeviceManagerFactory.setInstance(null);
+    invalidateInstalledAppsCache(androidDevice.deviceId);
+  });
+
+  const listInstalledAppsFactory: NonNullable<
+    AppResourceDependencies["listInstalledAppsFactory"]
+  > = (resolvedDevice) => {
+    constructedDevices.push(resolvedDevice);
+    return {
+      executeDetailedResult: async () => ({
+        apps: { profiles: {}, system: [] },
+        successful: true,
+      }),
+      executeIosDetailedResult: async () => ({ apps: [], successful: true }),
+    };
+  };
+
+  test.each(["tv", null] as const)(
+    "resolves trait formFactor %s before constructing the app lister",
+    async (formFactor) => {
+      const reader = new FakeDeviceTraits(androidDeviceTraits({ formFactor }));
+      const content = await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, {
+        injectedDeviceTraits: reader,
+        listInstalledAppsFactory,
+      });
+
+      expect(constructedDevices[0]?.formFactor).toBe(formFactor ?? undefined);
+      expect(androidDevice.formFactor).toBeUndefined();
+      expect(content.observationComplete).toBe(true);
+      expect(reader.reads.map((read) => read.deviceId)).toEqual([androidDevice.deviceId]);
+    },
+  );
+
+  test("a rejecting traits reader leaves the listing successful", async () => {
+    const reader = new FakeDeviceTraits(new Error("traits unavailable"));
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, {
+      injectedDeviceTraits: reader,
+      listInstalledAppsFactory,
+    });
+
+    expect(constructedDevices[0]?.formFactor).toBeUndefined();
+    expect(content.observationComplete).toBe(true);
+    expect(reader.reads).toHaveLength(1);
+  });
+
+  test("an explicit null reader skips traits entirely", async () => {
+    await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, {
+      injectedDeviceTraits: null,
+      listInstalledAppsFactory,
+    });
+
+    expect(constructedDevices[0]?.formFactor).toBeUndefined();
+    expect(adbFactorySpy).not.toHaveBeenCalled();
+  });
+
+  test("an undefined reader uses the process-wide traits source", async () => {
+    const reader = spyOn(defaultDeviceTraits, "read").mockResolvedValue(
+      androidDeviceTraits({ formFactor: "tv" }),
+    );
+    try {
+      await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, {
+        listInstalledAppsFactory,
+      });
+
+      expect(constructedDevices[0]?.formFactor).toBe("tv");
+      expect(reader).toHaveBeenCalledTimes(1);
+    } finally {
+      reader.mockRestore();
+    }
+  });
+
+  test("an iOS device never reads Android traits", async () => {
+    const iosDevice: BootedDevice = { ...androidDevice, platform: "ios" };
+    const devices = new FakeDeviceUtils();
+    devices.setBootedDevices("android", []);
+    devices.setBootedDevices("ios", [iosDevice]);
+    PlatformDeviceManagerFactory.setInstance(devices);
+    const reader = new FakeDeviceTraits(androidDeviceTraits({ formFactor: "tv" }));
+
+    const content = await queryInstalledApps({ deviceId: iosDevice.deviceId }, undefined, {
+      injectedDeviceTraits: reader,
+      listInstalledAppsFactory,
+    });
+
+    expect(constructedDevices[0]?.formFactor).toBeUndefined();
+    expect(content.observationComplete).toBe(true);
+    expect(reader.reads).toHaveLength(0);
+    expect(adbFactorySpy).not.toHaveBeenCalled();
+  });
+
+  test("a discovered TV exposes a LEANBACK-only package as launchable", async () => {
+    const reader = new FakeDeviceTraits(androidDeviceTraits({ formFactor: "tv" }));
+    adb.setCommandResponse(
+      "shell cmd package query-activities --brief --user 0 " +
+        "-a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER",
+      createExecResult("com.android.tv.settings/.MainSettings\n", ""),
+    );
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId }, undefined, {
+      injectedDeviceTraits: reader,
+      listInstalledAppsFactory: (resolvedDevice) =>
+        new ListInstalledApps(resolvedDevice, new FakeAdbClientFactory(adb), null, {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer: new FakeTimer(),
+          installedPackageSource: {
+            requestInstalledPackages: async () => ({
+              available: true,
+              result: {
+                userId: 0,
+                packages: [
+                  { packageName: "com.android.tv.settings", isSystem: true, launchable: false },
+                ],
+              },
+            }),
+          },
+        }),
+    });
+
+    expect(content.query.type).toBe("launchable");
+    expect(content.devices[0].apps).toEqual([
+      expect.objectContaining({ packageName: "com.android.tv.settings", launchable: true }),
+    ]);
+    expect(content.observationComplete).toBe(true);
+  });
+});
 
 describe("queryInstalledApps honest-failure contract (#6155)", () => {
   let fakeDeviceUtils: FakeDeviceUtils;

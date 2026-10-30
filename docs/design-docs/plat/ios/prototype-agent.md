@@ -23,6 +23,7 @@ use native controls. No rendering changes accompany this default.
 | bottomSheet     | material | material | —     |
 | box             | neutral  | neutral  | —     |
 | button          | native   | material | —     |
+| cameraPreview   | material | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
 | castButton      | material | material | —     |

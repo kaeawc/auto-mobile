@@ -84,7 +84,7 @@ export function defaultRotationRestorerFactory(
 ): (device: BootedDevice) => RotationRestorer {
   return (device) => ({
     restore: (state, signal) =>
-      new Rotate(device, null, timer).restoreRotationSettings(state, signal),
+      new Rotate(device, { adb: null, timer }).restoreRotationSettings(state, signal),
   });
 }
 

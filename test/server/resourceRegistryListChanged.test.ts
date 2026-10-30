@@ -511,14 +511,12 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
   beforeEach(() => {
     ResourceRegistry.clearResources();
     ResourceRegistry.clearServersForTesting();
-    ResourceRegistry.registerTemplate(
-      PAGINATED_TEMPLATE,
-      "Paginated",
-      "Paginated test resource",
-      "application/json",
-      async (params) => ({ uri: getRequestedResourceUri(params) ?? "", text: "{}" }),
-      ["limit", "offset"],
-    );
+    ResourceRegistry.registerTemplate(PAGINATED_TEMPLATE, "Paginated", {
+      description: "Paginated test resource",
+      mimeType: "application/json",
+      handler: async (params) => ({ uri: getRequestedResourceUri(params) ?? "", text: "{}" }),
+      paginationParams: ["limit", "offset"],
+    });
   });
 
   test("distinct per-page URIs are tracked as distinct subscription identities", async () => {
@@ -604,13 +602,11 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server);
     // A non-paginated template (no pagination params declared).
-    ResourceRegistry.registerTemplate(
-      "automobile:plain/{id}{?appId}",
-      "Plain",
-      "Non-paginated test resource",
-      "application/json",
-      async (params) => ({ uri: getRequestedResourceUri(params) ?? "", text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("automobile:plain/{id}{?appId}", "Plain", {
+      description: "Non-paginated test resource",
+      mimeType: "application/json",
+      handler: async (params) => ({ uri: getRequestedResourceUri(params) ?? "", text: "{}" }),
+    });
     // A subscription that differs only by a would-be pagination query key.
     await subscribe(server, "automobile:plain/one?appId=x&limit=10");
 
@@ -672,13 +668,11 @@ describe("ResourceRegistry URI-template matching", () => {
   });
 
   test("captures a raw query-string template with multiple query parameters", () => {
-    ResourceRegistry.registerTemplate(
-      "automobile:test?{params}",
-      "Test",
-      "Test raw query template",
-      "application/json",
-      async () => ({ uri: "automobile:test", text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test?{params}", "Test", {
+      description: "Test raw query template",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "automobile:test", text: "{}" }),
+    });
 
     expect(ResourceRegistry.matchTemplate("automobile:test?first=one&second=two")).toMatchObject({
       params: { params: "first=one&second=two" },
@@ -687,19 +681,17 @@ describe("ResourceRegistry URI-template matching", () => {
 
   test("passes the registered server's read context to template handlers", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerTemplateWithReadContext(
-      "automobile:test/{id}",
-      "Test",
-      "Test contextual template",
-      "application/json",
-      async (params, context) => ({
+    ResourceRegistry.registerTemplateWithReadContext("automobile:test/{id}", "Test", {
+      description: "Test contextual template",
+      mimeType: "application/json",
+      handler: async (params, context) => ({
         uri: `automobile:test/${params.id}`,
         text: JSON.stringify({
           sessionUuid: context.sessionUuid,
           hasSignal: context.signal === controller.signal,
         }),
       }),
-    );
+    });
     const controller = new AbortController();
     ResourceRegistry.registerWithServer(server, (signal) => ({
       sessionUuid: "session-bound",
@@ -722,13 +714,11 @@ describe("ResourceRegistry URI-template matching", () => {
   });
 
   test("matches an RFC 6570 query expansion in any parameter order", () => {
-    ResourceRegistry.registerTemplate(
-      "automobile:test{?first,second}",
-      "Test",
-      "Test query template",
-      "application/json",
-      async () => ({ uri: "automobile:test", text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test{?first,second}", "Test", {
+      description: "Test query template",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "automobile:test", text: "{}" }),
+    });
 
     expect(ResourceRegistry.matchTemplate("automobile:test?second=two&first=one")).toMatchObject({
       params: { first: "one", second: "two" },
@@ -736,13 +726,11 @@ describe("ResourceRegistry URI-template matching", () => {
   });
 
   test("ignores an undeclared query key instead of overwriting a path-captured param (issue #6188)", () => {
-    ResourceRegistry.registerTemplate(
-      "automobile:test/{id}/data{?first}",
-      "Test",
-      "Test path/query collision",
-      "application/json",
-      async () => ({ uri: "automobile:test", text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test/{id}/data{?first}", "Test", {
+      description: "Test path/query collision",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "automobile:test", text: "{}" }),
+    });
 
     const match = ResourceRegistry.matchTemplate("automobile:test/one/data?first=a&id=two");
 
@@ -750,13 +738,11 @@ describe("ResourceRegistry URI-template matching", () => {
   });
 
   test("forwards an undeclared query key that does not collide with a path param, for handler-side validation (issue #6188)", () => {
-    ResourceRegistry.registerTemplate(
-      "automobile:test{?first}",
-      "Test",
-      "Test unknown-key passthrough",
-      "application/json",
-      async () => ({ uri: "automobile:test", text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("automobile:test{?first}", "Test", {
+      description: "Test unknown-key passthrough",
+      mimeType: "application/json",
+      handler: async () => ({ uri: "automobile:test", text: "{}" }),
+    });
 
     // e.g. a typo'd `limt=10` — sibling handlers (parsePerformanceParams,
     // parseTrafficParams, parseAppsQueryParams) reject unknown keys
@@ -769,16 +755,14 @@ describe("ResourceRegistry URI-template matching", () => {
   test("retains the requested URI for an RFC 6570 template handler", async () => {
     const server = new FakeMcpServer();
     let handlerUri = "";
-    ResourceRegistry.registerTemplate(
-      "automobile:test{?first,second}",
-      "Test",
-      "Test query template",
-      "application/json",
-      async (params) => {
+    ResourceRegistry.registerTemplate("automobile:test{?first,second}", "Test", {
+      description: "Test query template",
+      mimeType: "application/json",
+      handler: async (params) => {
         handlerUri = getRequestedResourceUri(params) ?? "";
         return { uri: handlerUri, text: "{}" };
       },
-    );
+    });
     ResourceRegistry.registerWithServer(server);
 
     const readHandler = server.server.handlersBySchema.get("resources/read");
@@ -815,14 +799,12 @@ describe("ResourceRegistry process-wide update event", () => {
     const canonical = "automobile:event/one?appId=x";
     const page = `${canonical}&limit=10&offset=20`;
     const resolved: string[][] = [];
-    ResourceRegistry.registerTemplate(
-      "automobile:event/{id}{?appId,limit,offset}",
-      "Event",
-      "Event",
-      "text/plain",
-      async () => ({ uri: canonical, text: "value" }),
-      ["limit", "offset"],
-    );
+    ResourceRegistry.registerTemplate("automobile:event/{id}{?appId,limit,offset}", "Event", {
+      description: "Event",
+      mimeType: "text/plain",
+      handler: async () => ({ uri: canonical, text: "value" }),
+      paginationParams: ["limit", "offset"],
+    });
     const stop = ResourceUpdatedBroadcaster.subscribe((resolve) => {
       resolved.push(resolve(new Set([canonical, page, "automobile:event/one?appId=y&limit=10"])));
     });

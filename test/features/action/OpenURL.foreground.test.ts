@@ -41,7 +41,12 @@ const openWithForeground = async (url: string, before: string, after: string[]) 
   const observe = new FakeObserveScreen();
   observe.setObserveSequence(after.map((appId) => observation(appId)));
   interactionSpy.mockImplementation(runBlockWith(() => observation(before)));
-  const action = new OpenURL(simulator, new FakeAdbExecutor(), simctl, null, timer);
+  const action = new OpenURL(simulator, {
+    adb: new FakeAdbExecutor(),
+    simctl,
+    devicectl: null,
+    timer,
+  });
   action.observeScreen = observe;
   try {
     const result = await action.execute(url);
@@ -155,8 +160,7 @@ test("any other verified app confirms when a previous app is given", async () =>
     safari,
     { read: async () => observation(playground) },
     timer,
-    undefined,
-    "com.example.Other",
+    { previousApp: "com.example.Other" },
   );
   expect(confirmed).toBe(true);
   expect(timer.now()).toBe(0);
@@ -169,8 +173,7 @@ test("an unchanged previous app is not a confirmation", async () => {
     safari,
     { read: async () => observation(playground) },
     timer,
-    undefined,
-    playground,
+    { previousApp: playground },
   );
   expect(confirmed).toBe(false);
   expect(timer.now()).toBe(5_000);
@@ -185,8 +188,7 @@ test("a stale other-app snapshot does not confirm even with a previous app", asy
     safari,
     { read: async () => snapshots[reads++]! },
     timer,
-    undefined,
-    "com.example.Other",
+    { previousApp: "com.example.Other" },
   );
   expect(confirmed).toBe(true);
   expect(reads).toBe(2);

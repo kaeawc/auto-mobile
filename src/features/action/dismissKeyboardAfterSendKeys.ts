@@ -5,8 +5,10 @@ export async function dismissKeyboardAfterSendKeys(
   device: BootedDevice,
   enabled: boolean,
   succeeded: boolean,
-  close: (signal?: AbortSignal) => Promise<KeyboardResult>,
-  signal?: AbortSignal,
+  {
+    close,
+    signal,
+  }: { close: (signal?: AbortSignal) => Promise<KeyboardResult>; signal?: AbortSignal },
 ): Promise<{ keyboardDismissed?: boolean; warnings?: string[] }> {
   if (!enabled || !succeeded || device.platform !== "android") {
     return {};

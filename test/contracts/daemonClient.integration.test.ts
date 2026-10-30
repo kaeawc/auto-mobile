@@ -59,10 +59,13 @@ async function realHarness(options: DaemonClientHarnessOptions): Promise<DaemonC
   }
 
   const timer = new FakeTimer();
-  const client = new DaemonClient(socketPath, 1000, timer, {}, null, {
-    idGenerator: new FakeIdGenerator(),
-    platformOverride: "linux",
-  });
+  const client = new DaemonClient(
+    socketPath,
+    1000,
+    timer,
+    {},
+    { clientIdentity: null, idGenerator: new FakeIdGenerator(), platformOverride: "linux" },
+  );
 
   const connected = async (): Promise<void> => {
     for (let i = 0; i < 200 && sockets.size === 0; i++) {

@@ -1,6 +1,9 @@
 import { defaultDaemonContext, type DaemonContext } from "../../daemon/daemonContext";
 import { ObserveResult } from "../../models";
-import { type DisplayTransitionReader } from "../observe/DisplayTransition";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { Timer } from "../../utils/SystemTimer";
+import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { AwaitIdle } from "../observe/interfaces/AwaitIdle";
 import type {
   ObserveScreen,
@@ -68,6 +71,33 @@ export interface DisplayFenceDependencies {
   displayTransitions?: DisplayTransitionReader;
   renderedDisplayRevision?: RenderedDisplayRevisionReader;
   renderedDisplayGeneration?: RenderedDisplayRevisionReader;
+}
+
+/** Optional collaborators for `BaseVisualChange`; each falls back to its production default. */
+export interface BaseVisualChangeOptions {
+  /** AdbClientFactory instance, AdbExecutor instance, or null (uses the default factory). */
+  adb?: AdbClientFactory | AdbExecutor | null;
+  /** Clock for this instance and its default collaborators; a seam for FakeTimer tests. */
+  timer?: Timer;
+  /** Fallback rendered-display revision reader when `displayFence` does not supply one. */
+  renderedDisplayRevision?: RenderedDisplayRevisionReader;
+  displayFence?: DisplayFenceDependencies;
+}
+
+export function resolveDisplayReaders(
+  displayFence: DisplayFenceDependencies,
+  renderedDisplayRevision: RenderedDisplayRevisionReader,
+): {
+  renderedDisplayRevision: RenderedDisplayRevisionReader;
+  displayTransitionReader: DisplayTransitionReader;
+  renderedDisplayGeneration: RenderedDisplayRevisionReader;
+} {
+  return {
+    renderedDisplayRevision: displayFence.renderedDisplayRevision ?? renderedDisplayRevision,
+    displayTransitionReader: displayFence.displayTransitions ?? displayTransitions,
+    renderedDisplayGeneration:
+      displayFence.renderedDisplayGeneration ?? sessionRenderedDisplayGeneration,
+  };
 }
 
 export function sessionRenderedDisplayGeneration(

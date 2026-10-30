@@ -384,8 +384,7 @@ export interface SendKeysTextClient {
     text: string,
     priorImeId: string | null,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
-    trace?: boolean,
+    options?: { delivery?: "commit" | "keyEvents" | "clearField"; trace?: boolean },
   ): Promise<TextActionResult>;
 }
 
@@ -394,7 +393,7 @@ export interface SendKeysInputKey {
     key: InputKeyName,
     timeoutMs?: number,
     frameContext?: string,
-    modifiers?: readonly InputKeyModifier[],
+    options?: { modifiers?: readonly InputKeyModifier[] },
   ): Promise<{
     success: boolean;
     error?: string;
@@ -470,9 +469,7 @@ export class SendKeys {
           });
           const result = await tap.execute(
             { ...selector, ...options, action: "focus", display },
-            undefined,
-            signal,
-            { throwOnKeyboardOcclusion: true },
+            { signal, recovery: { throwOnKeyboardOcclusion: true } },
           );
           return {
             success: result.success,
@@ -495,8 +492,8 @@ export class SendKeys {
     this.requestBudget = new SendKeysRequestBudget({
       platform: () => this.device.platform,
       timer: this.timer,
-      executeUnbounded: (commands, selector, progress, signal, routing) =>
-        this.executeUnbounded(commands, selector, progress, signal, routing),
+      executeUnbounded: (commands, selector, progress, routing) =>
+        this.executeUnbounded(commands, selector, progress, routing),
     });
     this.focusRecovery = new FocusKeyboardRecovery({
       platform: () => this.device.platform,
@@ -582,13 +579,10 @@ export class SendKeys {
         };
       }
       try {
-        const target = await this.prepareExplicitDisplay(
-          commands,
-          selector,
-          display,
+        const target = await this.prepareExplicitDisplay(commands, selector, display, {
           signal,
-          options,
-        );
+          ...options,
+        });
         displayId = target.displayId;
         selector = target.selector;
         assertCurrent = target.assertCurrent;
@@ -658,10 +652,12 @@ export class SendKeys {
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
     display: string,
-    signal?: AbortSignal,
-    options: SendKeysFocusOptions = {},
+    { signal, ...options }: SendKeysFocusOptions & { signal?: AbortSignal } = {},
   ): Promise<{ displayId?: number; selector?: SendKeysSelector; assertCurrent: () => void }> {
-    return this.targetFocus.prepareExplicitDisplay(commands, selector, display, signal, options);
+    return this.targetFocus.prepareExplicitDisplay(commands, selector, display, {
+      signal,
+      ...options,
+    });
   }
 
   private executeBoundedIosIme(
@@ -676,8 +672,7 @@ export class SendKeys {
     commands: SendKeysCommand[],
     selector?: SendKeysSelector,
     progress?: ProgressCallback,
-    signal?: AbortSignal,
-    routing: SendKeysRouting = {},
+    { signal, ...routing }: SendKeysRouting & { signal?: AbortSignal } = {},
   ): Promise<SendKeysResult> {
     signal?.throwIfAborted();
     const preflight = this.preflightCommands(commands);

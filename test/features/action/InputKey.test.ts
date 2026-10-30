@@ -49,8 +49,13 @@ describe("InputKey", () => {
           return { success: outcome !== "refused", error: "Stale frame context" };
         },
       };
-      const key = new InputKey(androidDevice, createAdbFactory(adb), validator, timer);
-      const pending = key.press("enter", 500, "frame", ["ctrl"], {
+      const key = new InputKey(androidDevice, {
+        adbFactory: createAdbFactory(adb),
+        frameContextValidator: validator,
+        timer,
+      });
+      const pending = key.press("enter", 500, "frame", {
+        modifiers: ["ctrl"],
         signal: controller.signal,
         onDispatch: () => {
           expect(adb.getExecutedArgv()).toEqual([]);
@@ -83,13 +88,12 @@ describe("InputKey", () => {
         }
         throw new Error(`ADB keyevent ${reason}`);
       });
-      const inputKey = new InputKey(
-        androidDevice,
-        createAdbFactory(fakeAdb),
-        undefined,
-        new FakeTimer(),
-      );
-      const result = inputKey.press("enter", 500, undefined, [], {
+      const inputKey = new InputKey(androidDevice, {
+        adbFactory: createAdbFactory(fakeAdb),
+        timer: new FakeTimer(),
+      });
+      const result = inputKey.press("enter", 500, undefined, {
+        modifiers: [],
         signal: controller.signal,
         onDispatch,
       });
@@ -105,12 +109,10 @@ describe("InputKey", () => {
   test("tracks dispatch even when the direct caller supplies no onDispatch", async () => {
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandError("KEYCODE_ENTER", new Error("ADB reply timed out"));
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      undefined,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+    });
 
     await expect(inputKey.press("enter", 500)).rejects.toThrow("Key outcome is indeterminate");
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_ENTER"]);
@@ -124,13 +126,12 @@ describe("InputKey", () => {
       const controller = new AbortController();
       controller.abort(reason);
       const onDispatch = mock(() => {});
-      const inputKey = new InputKey(
-        androidDevice,
-        createAdbFactory(fakeAdb),
-        undefined,
-        new FakeTimer(),
-      );
-      const result = inputKey.press("enter", 500, undefined, [], {
+      const inputKey = new InputKey(androidDevice, {
+        adbFactory: createAdbFactory(fakeAdb),
+        timer: new FakeTimer(),
+      });
+      const result = inputKey.press("enter", 500, undefined, {
+        modifiers: [],
         signal: controller.signal,
         onDispatch,
       });
@@ -158,15 +159,18 @@ describe("InputKey", () => {
           return { success, error: success ? undefined : "Stale frame context" };
         },
       };
-      const inputKey = new InputKey(
-        androidDevice,
-        createAdbFactory(fakeAdb),
-        validator,
-        new FakeTimer(),
-      );
+      const inputKey = new InputKey(androidDevice, {
+        adbFactory: createAdbFactory(fakeAdb),
+        frameContextValidator: validator,
+        timer: new FakeTimer(),
+      });
 
       await expect(
-        inputKey.press("enter", 500, "frame-1", [], { signal: controller.signal, onDispatch }),
+        inputKey.press("enter", 500, "frame-1", {
+          modifiers: [],
+          signal: controller.signal,
+          onDispatch,
+        }),
       ).rejects.toThrow("Operation cancelled");
       expect(onDispatch).not.toHaveBeenCalled();
       expect(fakeAdb.getExecutedCommands()).toEqual([]);
@@ -177,14 +181,15 @@ describe("InputKey", () => {
     const fakeAdb = new FakeAdbExecutor();
     const controller = new AbortController();
     fakeAdb.abortAfterCommand("KEYCODE_ENTER", controller);
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      undefined,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+    });
 
-    const result = inputKey.press("enter", 500, undefined, [], { signal: controller.signal });
+    const result = inputKey.press("enter", 500, undefined, {
+      modifiers: [],
+      signal: controller.signal,
+    });
     await expect(result).rejects.toThrow("Key outcome is indeterminate");
     await expect(result).rejects.toThrow("Do not retry automatically");
     await expect(result).rejects.not.toThrow("no result was confirmed");
@@ -199,15 +204,13 @@ describe("InputKey", () => {
       controller.abort();
       throw new Error("ADB keyevent cancelled");
     });
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      undefined,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+    });
 
     await expect(
-      inputKey.press("enter", 500, undefined, [], { signal: controller.signal }),
+      inputKey.press("enter", 500, undefined, { modifiers: [], signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(execute).toHaveBeenCalledTimes(1);
   });
@@ -224,13 +227,11 @@ describe("InputKey", () => {
       verified: undefined as boolean | undefined,
     };
     const requestPressKey = mock(async () => response);
-    const inputKey = new InputKey(
-      iosDevice,
-      createAdbFactory(new FakeAdbExecutor()),
-      undefined,
-      new FakeTimer(),
-      () => ({ requestPressKey }),
-    );
+    const inputKey = new InputKey(iosDevice, {
+      adbFactory: createAdbFactory(new FakeAdbExecutor()),
+      timer: new FakeTimer(),
+      iosClientFactory: () => ({ requestPressKey }),
+    });
 
     expect(await inputKey.press("arrow_left")).toMatchObject({
       success: false,
@@ -251,13 +252,11 @@ describe("InputKey", () => {
       dispatched: true,
       acknowledged: true,
     }));
-    const inputKey = new InputKey(
-      iosDevice,
-      createAdbFactory(new FakeAdbExecutor()),
-      undefined,
-      new FakeTimer(),
-      () => ({ requestPressKey }),
-    );
+    const inputKey = new InputKey(iosDevice, {
+      adbFactory: createAdbFactory(new FakeAdbExecutor()),
+      timer: new FakeTimer(),
+      iosClientFactory: () => ({ requestPressKey }),
+    });
 
     expect(await inputKey.press("arrow_right")).toEqual({
       success: false,
@@ -290,13 +289,11 @@ describe("InputKey", () => {
         error: undefined as string | undefined,
       }),
     );
-    const inputKey = new InputKey(
-      iosDevice,
-      createAdbFactory(new FakeAdbExecutor()),
-      undefined,
-      new FakeTimer(),
-      () => ({ requestPressKey }),
-    );
+    const inputKey = new InputKey(iosDevice, {
+      adbFactory: createAdbFactory(new FakeAdbExecutor()),
+      timer: new FakeTimer(),
+      iosClientFactory: () => ({ requestPressKey }),
+    });
     expect(await inputKey.press("backspace")).toMatchObject({
       success: true,
       warning: "Key 'backspace' value did not change; delivery could not be confirmed",
@@ -316,12 +313,10 @@ describe("InputKey", () => {
     const fakeAdb = new FakeAdbExecutor();
     // Inject a FakeTimer so `now()` is constant: with the real timer, a 1ms tick between the two
     // `timer.now()` calls in press() intermittently made the forwarded timeout 1233 not 1234 (#4696).
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      undefined,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+    });
 
     const result = await inputKey.press("enter", 1234);
 
@@ -344,7 +339,7 @@ describe("InputKey", () => {
 
   test("maps the full first-version key set to Android keyevents", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+    const inputKey = new InputKey(androidDevice, { adbFactory: createAdbFactory(fakeAdb) });
 
     for (const key of [
       "enter",
@@ -376,9 +371,9 @@ describe("InputKey", () => {
   test("sends modifier chords through Android input keycombination", async () => {
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setAndroidApiLevel(31);
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+    const inputKey = new InputKey(androidDevice, { adbFactory: createAdbFactory(fakeAdb) });
 
-    const result = await inputKey.press("tab", 500, undefined, ["shift", "ctrl"]);
+    const result = await inputKey.press("tab", 500, undefined, { modifiers: ["shift", "ctrl"] });
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([
@@ -389,9 +384,9 @@ describe("InputKey", () => {
   test("rejects modifier chords below Android API 31", async () => {
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setAndroidApiLevel(30);
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+    const inputKey = new InputKey(androidDevice, { adbFactory: createAdbFactory(fakeAdb) });
 
-    const result = await inputKey.press("tab", 500, undefined, ["shift"]);
+    const result = await inputKey.press("tab", 500, undefined, { modifiers: ["shift"] });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Android API 31+");
@@ -406,12 +401,11 @@ describe("InputKey", () => {
         error: "Stale frame context for input/key; observe a fresh frame before retrying",
       }),
     };
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      validator,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      frameContextValidator: validator,
+      timer: new FakeTimer(),
+    });
 
     const result = await inputKey.press("enter", 1234, "epoch:2");
 
@@ -433,12 +427,11 @@ describe("InputKey", () => {
         return { success: true };
       },
     };
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      validator,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      frameContextValidator: validator,
+      timer: new FakeTimer(),
+    });
 
     await inputKey.press("tab", 1234, "epoch:3");
 
@@ -457,7 +450,11 @@ describe("InputKey", () => {
         return { success: true };
       },
     };
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, timer);
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      frameContextValidator: validator,
+      timer,
+    });
 
     const result = await inputKey.press("tab", 1_000, "epoch:4");
 
@@ -483,7 +480,11 @@ describe("InputKey", () => {
         return { success: true };
       },
     };
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, timer);
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      frameContextValidator: validator,
+      timer,
+    });
 
     const result = await inputKey.press("tab", 1_000, "epoch:5");
 
@@ -529,14 +530,13 @@ describe("InputKey", () => {
       await options?.beforeDispatch?.(options.timeoutMs);
       throw error;
     });
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      undefined,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+    });
 
-    const result = await inputKey.press("tab", 500, undefined, [], {
+    const result = await inputKey.press("tab", 500, undefined, {
+      modifiers: [],
       signal: new AbortController().signal,
       onDispatch,
     });
@@ -558,14 +558,15 @@ describe("InputKey", () => {
       controller.abort();
       throw new Error("device offline");
     });
-    const inputKey = new InputKey(
-      androidDevice,
-      createAdbFactory(fakeAdb),
-      undefined,
-      new FakeTimer(),
-    );
+    const inputKey = new InputKey(androidDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+    });
 
-    const result = inputKey.press("tab", 500, undefined, [], { signal: controller.signal });
+    const result = inputKey.press("tab", 500, undefined, {
+      modifiers: [],
+      signal: controller.signal,
+    });
     await expect(result).rejects.toThrow("Operation cancelled");
     await expect(result).rejects.not.toThrow("Key outcome is indeterminate");
   });
@@ -586,12 +587,10 @@ describe("InputKey", () => {
     async (error) => {
       const fakeAdb = new FakeAdbExecutor();
       fakeAdb.setCommandError("KEYCODE_TAB", error);
-      const inputKey = new InputKey(
-        androidDevice,
-        createAdbFactory(fakeAdb),
-        undefined,
-        new FakeTimer(),
-      );
+      const inputKey = new InputKey(androidDevice, {
+        adbFactory: createAdbFactory(fakeAdb),
+        timer: new FakeTimer(),
+      });
 
       await expect(inputKey.press("tab", 500)).rejects.toThrow("Key outcome is indeterminate");
     },
@@ -600,15 +599,13 @@ describe("InputKey", () => {
   test("routes iOS discrete keys and modifiers through CtrlProxy", async () => {
     const fakeAdb = new FakeAdbExecutor();
     const requestPressKey = mock(async () => ({ success: true }));
-    const inputKey = new InputKey(
-      iosDevice,
-      createAdbFactory(fakeAdb),
-      undefined,
-      new FakeTimer(),
-      () => ({ requestPressKey }),
-    );
+    const inputKey = new InputKey(iosDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+      iosClientFactory: () => ({ requestPressKey }),
+    });
 
-    const result = await inputKey.press("enter", 500, undefined, ["meta"]);
+    const result = await inputKey.press("enter", 500, undefined, { modifiers: ["meta"] });
 
     expect(result).toEqual({
       success: true,

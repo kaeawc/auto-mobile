@@ -19,7 +19,7 @@ function arrange() {
   const plist = new FakeWatchBundleIds();
   plist.byPath.set(APP, BUNDLE);
   const simctl = new FakeWatchAppsSimctl(plist);
-  return { simctl, plist, apps: new WatchAppManager(watch, simctl, plist) };
+  return { simctl, plist, apps: new WatchAppManager(watch, { simctl, plist }) };
 }
 
 const installed = async (apps: WatchAppManager) =>
@@ -64,7 +64,7 @@ describe("WatchAppManager", () => {
     const simctl = new FakeWatchAppsSimctl(plist);
     const fromLaunchDir = (artifactPath: string) =>
       artifactPath.startsWith("/") ? artifactPath : `/launch-dir/${artifactPath}`;
-    const apps = new WatchAppManager(watch, simctl, plist, fromLaunchDir);
+    const apps = new WatchAppManager(watch, { simctl, plist, resolveArtifactPath: fromLaunchDir });
 
     expect(await apps.install(APP.slice(1))).toMatchObject({
       success: true,
@@ -174,7 +174,7 @@ describe("WatchAppManager", () => {
       plist.byPath.set(launched, BUNDLE);
       const simctl = new FakeWatchAppsSimctl(plist);
 
-      expect(await new WatchAppManager(watch, simctl, plist).install(relative)).toMatchObject({
+      expect(await new WatchAppManager(watch, { simctl, plist }).install(relative)).toMatchObject({
         artifactPath: launched,
         packageName: BUNDLE,
       });

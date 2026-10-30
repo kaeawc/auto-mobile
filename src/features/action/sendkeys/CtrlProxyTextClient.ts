@@ -49,7 +49,7 @@ export function createSendKeysTextClient(
       supportsImeTrace: async () => client.supportsCommand("ime_commit_trace_v1"),
       supportsKeyboardProfiles: async () => client.supportsCommand("request_set_keyboard_profile"),
       setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
-      commitViaIme: async (text, priorImeId, signal, delivery, trace) => {
+      commitViaIme: async (text, priorImeId, signal, { delivery, trace } = {}) => {
         const result = await client.commitViaIme(
           text,
           priorImeId ?? undefined,

@@ -89,7 +89,7 @@ function createObserver(device: BootedDevice): FocusObserver {
 }
 
 function createKeyPresser(device: BootedDevice): FocusKeyPresser {
-  const input = new InputKey(device, defaultAdbClientFactory, undefined, defaultTimer);
+  const input = new InputKey(device, { adbFactory: defaultAdbClientFactory, timer: defaultTimer });
   return { press: (key) => input.press(key) };
 }
 

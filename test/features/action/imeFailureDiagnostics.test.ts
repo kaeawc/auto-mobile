@@ -543,7 +543,9 @@ describe("IME failure diagnostics", () => {
     const h = harness("");
     const commit = h.client.commitViaIme;
     h.client.commitViaIme = async (...args) =>
-      args[3] === "clearField" ? { success: false, error: "clear rejected" } : commit(...args);
+      args[3]?.delivery === "clearField"
+        ? { success: false, error: "clear rejected" }
+        : commit(...args);
     const result = await h.action.execute([
       { action: "type", text: "@everyone", operation: "replace" },
     ]);

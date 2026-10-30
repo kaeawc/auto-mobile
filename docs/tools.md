@@ -182,7 +182,7 @@ A read never writes settings on a device another session holds. A sessionless re
 while the input-focused element (`focusedElement`) does not match `until` (`text`, `contentDesc` and/or `resourceId`) it
 presses the D-pad arrow toward the nearest match, or `direction` when given, then observes again. With no focused
 element or no match on screen it presses down. It returns the `path` of focused elements and a `status`: `focused`,
-`max_steps` (default 30, at most 100) or `stuck` (two presses left focus unchanged). Activate the focused item
+`max_steps` (default 30, at most 100) or `stuck` (every direction toward the nearest match is blocked on the current element; an explicit `direction` stops after two unchanged presses). A direction that leaves focus unchanged is skipped for that element for the rest of the call, so steering tries the next-best axis. Activate the focused item
 afterwards with `sendKeys` key `enter`; Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so no
 separate `select` key exists. Android only; not yet verified on a TV image
 (see `docs/design-docs/plat/android/form-factors.md`).

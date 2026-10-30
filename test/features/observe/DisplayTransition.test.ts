@@ -401,7 +401,11 @@ describe("display transitions", () => {
       expect(afterObserve).toBe(before);
       expect(displayTransitions.identityRevision(duo.deviceId)).toBe(before);
       executeSpy.mockClear();
-      const action = new BaseVisualChange(duo, adbFactory, timer, () => undefined);
+      const action = new BaseVisualChange(duo, {
+        adb: adbFactory,
+        timer,
+        renderedDisplayRevision: () => undefined,
+      });
       action.observeScreen = screen;
       action.window = new FakeWindow();
       const result = await action.observedInteraction(

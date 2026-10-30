@@ -1039,9 +1039,12 @@ export function registerDeviceImageResources(): void {
   ResourceRegistry.registerTemplate(
     DEVICE_IMAGE_RESOURCE_URIS.PLATFORM_TEMPLATE,
     "Platform-specific Device Images",
-    "Configured device inventory and completeness evidence for android, ios or watchos.",
-    "application/json",
-    handler.getDeviceImagesByPlatform,
+    {
+      description:
+        "Configured device inventory and completeness evidence for android, ios or watchos.",
+      mimeType: "application/json",
+      handler: handler.getDeviceImagesByPlatform,
+    },
   );
 
   logger.info("[DeviceImageResources] Registered device image resources");

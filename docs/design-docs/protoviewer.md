@@ -228,11 +228,13 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   share about credential-like headers and query keys and private or loopback hosts. No thumbnails in
   the first release.
 - Importing a prototype whose `spec.id` already exists creates a new entry with its own library id
-  and empty storage. Replace and keep-both are later work.
+  and empty storage. On iOS, a matching spec SHA-256 plus identical image and font resource IDs,
+  media types and byte SHA-256 values instead reuses the existing entry, preserving its label,
+  provenance and storage. Unreadable candidates are skipped. Replace and keep-both are later work.
 - Not in the first release: user-facing URL import, universal links, compact `?spec=` links, QR. The
-  one custom URL scheme in the first release is the internal launch scheme `automobile-proto://`
-  (section 7): it imports a host-staged inbox bundle or opens an existing library entry.
-  The scheme never fetches or carries spec bytes.
+  internal scheme `automobile-proto://` remains for legacy callers (section 7): it imports a
+  host-staged inbox bundle or opens an existing library entry. Simulator hosts use the file inbox
+  instead. The scheme never fetches or carries spec bytes.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 
@@ -343,10 +345,10 @@ Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When 
   sets up `adb reverse`.
 - A provenance indicator lives in an app-reserved region outside the spec's drawable bounds and
   stays visible while network is enabled.
-- Storage is keyed by library id; a new import starts empty. The bundle carries no prototype id (its
-  identity is `specSha256` plus the `spec.id` inside `spec.json`), so there is no bundle-id
-  comparison; the only identity checks are `bundle.json.specSha256` against the inflated
-  `spec.json` and the app-assigned library id.
+- Storage is keyed by library id; a new entry starts empty. The bundle carries `spec.id` inside
+  `spec.json` but no app-assigned library id, so there is no bundle-id comparison. The transport
+  verifies `bundle.json.specSha256` against the inflated `spec.json` before the composite import
+  identity comparison described above.
 - Imported-prototype content is marked as imported in `observe` and `awaitEvent`; `open` states
   when an entry is imported; host attach is off by default for imported prototypes.
 - Limits: 200 prototypes and 100 MiB per library, enforced at commit and on load, plus a render
@@ -383,25 +385,31 @@ The shared request-policy and storage work is tracked in #13622.
   folders cannot be prepared, the push is refused, or the app answers `rejected` at `inbox` (it
   cannot see the pushed file), nothing was imported and the host keeps the CtrlProxy save path
   with a logged warning instead of failing the call.
-- iOS simulators use the host filesystem and `simctl openurl`, without a new socket or broadcast.
-  The host first brings ProtoViewer to the foreground with `simctl launch`; if launch fails,
-  it raises `ProtoViewerForegroundError` without opening the URL or polling for a result, since
-  `openurl` can succeed while an unanswered "Open in ProtoViewer?" alert blocks delivery.
+- iOS simulators use the host filesystem inbox without a socket or custom-scheme launch.
   The host resolves the app's own data container and creates
   `Library/Application Support/ProtoViewer/mcp/inbox/` and `results/` (same host uid as the app);
   the app also creates them idempotently on start and never purges this inbox at launch.
-  Import writes `inbox/<request>.automobile-proto.tmp` then renames it, and delivers
-  `automobile-proto://import?request=<request>&label=<percent-encoded-label>` (label optional).
-  Open delivers `automobile-proto://open?request=<request>&id=<libraryId>`.
-  Request ids match `[A-Za-z0-9_-]{1,64}`. The scheme carries no spec bytes. The app validates the
-  full import, sets `source: mcp` itself, removes the inbox file after every attempt, and atomically
-  publishes `results/<request>.json` using the same result shapes as Android. Rejections are
-  reported in that file rather than an alert. Open reports `opened` only after the viewer loads.
+  Import writes `inbox/<request>.automobile-proto.tmp` then renames it. The host foregrounds
+  ProtoViewer with `simctl launch` and waits within the call budget for `mcp/delivery` to contain
+  `file-inbox-v1`; a missing capability returns `unsupported_capability` with rebuild/install
+  guidance, without publishing a command or falling back to URL delivery.
+  It then atomically publishes `inbox/<request>.request` via a `.tmp` file: JSON with
+  `action: "import"` and optional `label`, or `action: "open"` and `libraryId`.
+  Request ids match `[A-Za-z0-9_-]{1,64}` and come from filenames. On activation and every
+  250 ms while active, the app consumes final request files through the same handler as legacy
+  URLs. It validates imports, sets `source: mcp` for new entries, and removes each command and bundle
+  after the attempt, including malformed commands. Malformed JSON produces a typed rejected
+  result. Imports with identical spec bytes and image/font resource identity return the existing
+  entry without writes or label changes.
+  The app atomically publishes `results/<request>.json` using the same result shapes as Android.
+  Rejections are reported in that file rather than an alert. Open reports `opened` only after
+  the viewer loads. Polling stops when the scene becomes inactive.
   Host polling treats a missing result as pending until the timer deadline; finally it removes
-  results and leftover inbox files even after cancellation, with an independent cleanup timeout.
-  An absent app, unresolved container, unusable inbox, or nonzero `openurl` exit keeps the template
-  save path with a logged warning. Command timeout or result deadline after delivery is a hard
-  failure: the save may still have landed, so check ProtoViewer before retrying.
+  results, commands, bundles and temporary files even after cancellation, with an independent
+  cleanup timeout. The app sweeps inbox and result files older than ten minutes; fresh files,
+  folders and files with unknown ages are retained. An absent app, unresolved container, or
+  unusable inbox keeps the template save path with a logged warning. A result deadline is a
+  hard failure; retrying the same bundle is safe because imports are idempotent.
   Physical devices keep the template path's existing behavior; `open` needs an iOS simulator.
   `devicectl` delivery to dev-signed physical devices remains later work.
 - `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is installed, build a
@@ -418,9 +426,14 @@ The shared request-policy and storage work is tracked in #13622.
 Both platforms ship in the first release, from **GitHub releases only** (no Play Store or App Store
 listing):
 
-- Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum.
-- iOS: dev-signed builds installed on the owner's iPhones (an Apple Developer team is configured).
-  The simulator template remains available.
+- Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum. Prepare Release
+  builds it (`build-protoviewer-apk.yml`, release keystore, fail-closed signing), pins it as
+  `protoViewerApkSha256` in `src/constants/release.ts`, and Release checks it against
+  `RELEASE_CHECKSUM_REGISTRY` before publishing `automobile-protoviewer-<version>.apk` plus a
+  `.sha256`; see [Installing ProtoViewer](../using/protoviewer-install.md).
+- iOS: the simulator template remains available. A physical-iPhone build is not part of the release
+  yet: the Apple Developer signing certificate and provisioning profile are not configured as
+  repository secrets.
 
 ### 8.1 Release-artifact policy gate (#14154)
 
@@ -471,38 +484,54 @@ manual, advisory Android lane that downloads the previous release's APK; it is n
 release workflow. All of this is unverified on devices until someone runs it (label
 `needs-device-verify` on #15387). The iOS forbidden-symbol rule stays advisory until #14150 lands.
 
-### 8.2 Play-ready Android artifact (#14146)
+### 8.2 Android release signing and versioning (#14146)
+
+The GitHub release APK is signed with the shared release keystore, the same as CtrlProxy, through
+`PROTOVIEWER_*` inputs mapped from the shared `RELEASE_*` secrets. This key is permanent for the
+package's update path: moving to its own key or a Play upload key (#14146) requires uninstalling the
+existing app first. Its `versionCode` is derived from the release version as described below, so
+updates across releases need strictly increasing codes, which the derived scheme provides.
+
+#### Play-ready artifact configuration
 
 The Android module builds a Play-uploadable AAB next to the APK. The Gradle side is the
 `automobile.protoviewer-play-release` convention in `android/build-logic`; it replaces the shared
 `automobile.android-app-signing` for ProtoViewer, which falls back open to the debug key.
 
-**Dedicated keystore.** ProtoViewer has its own signing key, never CtrlProxy's `RELEASE_KEYSTORE_*`.
-Inputs are read from the environment (CI) or `gradle.properties` (local):
+**Release keystore inputs.** The convention reads inputs from the environment (CI) or
+`gradle.properties` (local). `build-protoviewer-apk.yml` sets the `PROTOVIEWER_*` inputs at job level
+using the shared release keystore secrets and the required `release-version` input, supplied by
+`prepare-release.yml` from `inputs.version`. The `gradle-task-run` action decodes
+`RELEASE_KEYSTORE_BASE64` into the keystore file under the Gradle project directory; no dedicated ProtoViewer keystore
+secrets are wired.
 
-| Input                                 | Purpose                                                   | CI secret                       |
-| ------------------------------------- | --------------------------------------------------------- | ------------------------------- |
-| `PROTOVIEWER_KEYSTORE_PATH`           | keystore file (relative paths resolve against `android/`) | `PROTOVIEWER_KEYSTORE_BASE64`   |
-| `PROTOVIEWER_KEYSTORE_PASSWORD`       | store password                                            | `PROTOVIEWER_KEYSTORE_PASSWORD` |
-| `PROTOVIEWER_KEY_ALIAS`               | key alias                                                 | `PROTOVIEWER_KEY_ALIAS`         |
-| `PROTOVIEWER_KEY_PASSWORD`            | key password                                              | `PROTOVIEWER_KEY_PASSWORD`      |
-| `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | (workflow input)                |
-| `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | (workflow env)                  |
+| Input                                 | Purpose                                                   | CI source                                              |
+| ------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------ |
+| `PROTOVIEWER_KEYSTORE_PATH`           | keystore file (relative paths resolve against `android/`) | workflow env: the workspace path of that keystore file |
+| `PROTOVIEWER_KEYSTORE_PASSWORD`       | store password                                            | `RELEASE_KEYSTORE_PASSWORD` secret                     |
+| `PROTOVIEWER_KEY_ALIAS`               | key alias                                                 | `RELEASE_KEY_ALIAS` secret                             |
+| `PROTOVIEWER_KEY_PASSWORD`            | key password                                              | `RELEASE_KEY_PASSWORD` secret                          |
+| `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | required `release-version` workflow input              |
+| `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | workflow env: `true`                                   |
 
-The workflow decodes `PROTOVIEWER_KEYSTORE_BASE64` to a file and exports its path as
-`PROTOVIEWER_KEYSTORE_PATH`. Whether this key is the Play upload key or the app-signing key is
-decided at Play App Signing enrolment; record it next to the key.
+Whether the key is the Play upload key or the app-signing key is decided at Play App Signing
+enrolment; record it next to the key.
 
-**Fail closed.** With `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, `verifyProtoViewerReleaseInputs`
+**Fail closed.** The release workflow sets `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, so a release
+assemble without complete signing inputs fails instead of falling back to the debug key.
+`verifyProtoViewerReleaseInputs`
 (a `preReleaseBuild` dependency, so it fails before compilation) rejects a missing signing input, a
 missing keystore file, a missing `PROTOVIEWER_RELEASE_VERSION`, or a `-SNAPSHOT`/suffixed version.
-Without it (local and pull-request builds) an incomplete keystore falls back to the debug key and
-the version code stays `1`. Debug builds always use the debug key, never the release key.
+Local and pull-request builds without `PROTOVIEWER_RELEASE_VERSION` stay debug-signed and keep
+`versionCode` `1`. Debug builds always use the debug key, never the release key.
 
-**versionCode.** `major * 1_000_000 + minor * 1_000 + patch` of `PROTOVIEWER_RELEASE_VERSION`
+**Tag-derived versionCode.** When `PROTOVIEWER_RELEASE_VERSION` is supplied, the convention uses
+`major * 1_000_000 + minor * 1_000 + patch`
 (`ProtoViewerVersioning`). It is strictly monotonic in version order, bounded under Play's
 2,100,000,000 cap (major <= 2099, minor and patch <= 999), and `0.0.89` gives `89`. The release
-`versionName` is the same plain version, so a published build never carries `-SNAPSHOT`.
+`versionName` is the same plain version.
+The APK build receives the release version's MAJOR.MINOR.PATCH core, so prerelease and build-metadata
+suffixes do not reach the convention and share the core's `versionCode`.
 
 **AAB, R8 and mapping.** `:protoviewer:bundleRelease` writes
 `build/outputs/bundle/release/protoviewer-release.aab` and is finalized by
@@ -514,7 +543,7 @@ locally with `-Pautomobile.protoviewer.minifyRelease=false`); `verifyReleaseR8Ke
 the manifest components, the saved-prototype `@Serializable` contract and the reflectively resolved
 icon set survive. Unused `:protocol` wire models are shrunk away.
 
-Not yet wired: the release workflow step that exports these inputs and uploads the AAB and mapping,
+Not yet wired: the release workflow step that uploads the AAB and mapping,
 `lintRelease` in CI, and the `bundletool build-apks` install smoke test on a device.
 
 ## 9. Phased plan

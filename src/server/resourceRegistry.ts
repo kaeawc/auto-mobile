@@ -88,6 +88,20 @@ interface ResourceTemplateMetadata {
   paginationParamNames: string[];
 }
 
+// What a caller supplies when registering a resource template, beyond its URI
+// template and name. `paginationParams` names the query params that scope a
+// page rather than the resource's identity (see `paginationParamNames`).
+interface TemplateRegistration<Handler> {
+  description: string;
+  mimeType: string;
+  handler: Handler;
+  paginationParams?: string[];
+}
+
+type ResourceTemplateRegistration = TemplateRegistration<ResourceTemplateHandler>;
+type ContextualResourceTemplateRegistration =
+  TemplateRegistration<ContextualResourceTemplateHandler>;
+
 const requestedResourceUri = Symbol("requestedResourceUri");
 
 // Collapse a URI to its *page-independent* subscription identity by dropping
@@ -317,10 +331,7 @@ class ResourceRegistryClass {
   registerTemplate(
     uriTemplate: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handler: ResourceTemplateHandler,
-    paginationParams: string[] = [],
+    { description, mimeType, handler, paginationParams = [] }: ResourceTemplateRegistration,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     ListChangedBroadcaster.invalidate("resources");
@@ -340,10 +351,12 @@ class ResourceRegistryClass {
   registerTemplateWithReadContext(
     uriTemplate: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handlerWithReadContext: ContextualResourceTemplateHandler,
-    paginationParams: string[] = [],
+    {
+      description,
+      mimeType,
+      handler: handlerWithReadContext,
+      paginationParams = [],
+    }: ContextualResourceTemplateRegistration,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     ListChangedBroadcaster.invalidate("resources");

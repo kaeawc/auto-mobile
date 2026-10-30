@@ -72,7 +72,11 @@ export class DragPath extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: DragPathDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.androidClientOverride = dependencies.androidClient;
     this.iosClientOverride = dependencies.iosClient;
     this.idGenerator = dependencies.idGenerator ?? new NodeIdGenerator();
@@ -112,15 +116,15 @@ export class DragPath extends BaseVisualChange {
           this.device,
           options.display,
           this.observeScreen,
-          this.adb,
           {
+            adb: this.adb,
             lastRenderedObservation: this.lastRenderedObservation,
             signal,
             transitions: this.displayTransitionReader,
           },
         );
         return await this.observedInteraction(
-          () => this.drive(options, observation, call, displayId, assertCurrent),
+          () => this.drive(options, observation, call, { displayId, assertCurrent }),
           {
             changeExpected: false,
             display: observation.display.key,
@@ -133,7 +137,9 @@ export class DragPath extends BaseVisualChange {
       }
       return await this.observedInteraction(
         (observation, fence) =>
-          this.drive(options, observation, call, undefined, fence && (() => fence.assertCurrent())),
+          this.drive(options, observation, call, {
+            assertCurrent: fence && (() => fence.assertCurrent()),
+          }),
         { changeExpected: false, progress, perf, signal },
       );
     } finally {
@@ -178,8 +184,7 @@ export class DragPath extends BaseVisualChange {
     options: DragPathOptions,
     observation: ObserveResult,
     call: ActionCall,
-    displayId: number | undefined,
-    assertCurrent: (() => void) | undefined,
+    { displayId, assertCurrent }: { displayId?: number; assertCurrent?: () => void },
   ): Promise<DragPathResult> {
     const prepared = this.preparePlan(options, observation, call);
     if ("refusal" in prepared) {
@@ -187,10 +192,10 @@ export class DragPath extends BaseVisualChange {
     }
     const { plan } = prepared;
     if (options.pointer) {
-      return this.driveStylus(options, plan, call, displayId, assertCurrent);
+      return this.driveStylus(options, plan, call, { displayId, assertCurrent });
     }
     if (this.device.platform === "ios") {
-      return this.driveIos(plan, observation, call, displayId, assertCurrent);
+      return this.driveIos(plan, observation, call, { displayId, assertCurrent });
     }
     if (!(await supportsCtrlProxyGestureDisplay(this.androidClient, displayId))) {
       throw new ActionableError(
@@ -258,8 +263,7 @@ export class DragPath extends BaseVisualChange {
     options: DragPathOptions,
     plan: DragPathPlan,
     call: ActionCall,
-    displayId: number | undefined,
-    assertCurrent: (() => void) | undefined,
+    { displayId, assertCurrent }: { displayId?: number; assertCurrent?: () => void },
   ): Promise<DragPathResult> {
     // Cold start and teardown of the instrumentation count against the request budget too.
     assertDragPathFitsRequestBudget(
@@ -316,8 +320,7 @@ export class DragPath extends BaseVisualChange {
     plan: DragPathPlan,
     observation: ObserveResult,
     call: ActionCall,
-    displayId: number | undefined,
-    assertCurrent: (() => void) | undefined,
+    { displayId, assertCurrent }: { displayId?: number; assertCurrent?: () => void },
   ): Promise<DragPathResult> {
     if (displayId !== undefined && displayId !== 0) {
       throw new ActionableError(

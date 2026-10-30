@@ -148,7 +148,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SwipeAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
@@ -211,17 +215,12 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     }
     let target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     try {
-      target = await prepareTargetDisplayAction(
-        this.device,
-        display,
-        this.observeScreen,
-        this.adb,
-        {
-          lastRenderedObservation: this.lastRenderedObservation,
-          signal,
-          transitions: this.displayTransitionReader,
-        },
-      );
+      target = await prepareTargetDisplayAction(this.device, display, this.observeScreen, {
+        adb: this.adb,
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      });
     } catch (error) {
       if (
         error instanceof StaleDisplayError ||
@@ -390,8 +389,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     resolved: { from: NativePoint; to: NativePoint },
     duration: number,
     fence: { assertCurrent: () => void } | undefined,
-    pointer: PointerOption | undefined,
-    signal?: AbortSignal,
+    { pointer, signal }: { pointer?: PointerOption; signal?: AbortSignal } = {},
   ): Promise<SwipeResult> {
     const { from, to } = resolved;
     const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
@@ -498,7 +496,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
             options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
           const result = await perf.track("executeSwipe", () =>
             options.pointer
-              ? this.dispatchStylus(resolved, duration, fence, options.pointer, signal)
+              ? this.dispatchStylus(resolved, duration, fence, { pointer: options.pointer, signal })
               : this.executeGesture.swipe(
                   {
                     x1: resolved.from.x,

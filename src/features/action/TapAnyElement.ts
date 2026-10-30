@@ -184,7 +184,11 @@ export class TapAnyElement extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     options: TapAnyElementDependencies = {},
   ) {
-    super(device, adb, options.timer, options.renderedDisplayRevision, options);
+    super(device, {
+      adb,
+      timer: options.timer,
+      displayFence: options,
+    });
     this.lastRenderedObservation = options.lastRenderedObservation ?? sessionRenderedObservation;
     this.geometry = new DefaultElementGeometry();
     this.elementSelector =
@@ -637,7 +641,7 @@ export class TapAnyElement extends BaseVisualChange {
       action,
     });
     perf.end();
-    return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
+    return this.createSuccessResult(action, target, startTime, { requestCount, changeCount });
   }
 
   private async refreshCachedHierarchy(
@@ -762,37 +766,34 @@ export class TapAnyElement extends BaseVisualChange {
           assertSelectedCapture(selectedCapture);
           await dispatch(tapPoint);
         } else {
-          await this.androidTapper.executeAndroidTap(
-            action,
-            tapPoint,
-            longPressDuration,
+          await this.androidTapper.executeAndroidTap(action, tapPoint, longPressDuration, {
             target,
-            tapContext,
-          );
+            fenceOptions: tapContext,
+          });
         }
-        await this.androidTapper.retryAndroidTapIfNoChange(
-          preTapHash,
-          target,
-          action,
-          longPressDuration,
-          {
+        await this.androidTapper.retryAndroidTapIfNoChange(preTapHash, target, action, {
+          durationMs: longPressDuration,
+          fenceOptions: {
             ...tapContext,
             screenSize: observeResult.screenSize,
             selectionOptions: options,
             refresh,
             dispatch,
           },
-        );
+        });
         break;
       }
       case "ios":
         targetDisplay?.assertCurrent();
         assertSelectedCapture(selectedCapture);
-        await this.iosTapper.executeIosTap(action, tapPoint, longPressDuration, element, {
-          signal,
-          displayFence: fence,
-          scoped: target.scoped,
-          voiceOverEnabled: target.talkBackState ?? undefined,
+        await this.iosTapper.executeIosTap(action, tapPoint, longPressDuration, {
+          element,
+          fenceOptions: {
+            signal,
+            displayFence: fence,
+            scoped: target.scoped,
+            voiceOverEnabled: target.talkBackState ?? undefined,
+          },
         });
         break;
       default:
@@ -858,31 +859,23 @@ export class TapAnyElement extends BaseVisualChange {
       const targetDisplay =
         options.display === undefined
           ? undefined
-          : await prepareTargetDisplayAction(
-              this.device,
-              options.display,
-              this.observeScreen,
-              this.adb,
-              {
-                lastRenderedObservation: this.lastRenderedObservation,
-                signal,
-                transitions: this.displayTransitionReader,
-              },
-            );
+          : await prepareTargetDisplayAction(this.device, options.display, this.observeScreen, {
+              adb: this.adb,
+              lastRenderedObservation: this.lastRenderedObservation,
+              signal,
+              transitions: this.displayTransitionReader,
+            });
       const refresh: RefreshViewHierarchy =
         targetDisplay && this.device.platform === "android"
           ? (timeoutMs, _screenSize, refreshSignal) =>
-              refreshTargetDisplayHierarchy(
-                targetDisplay,
-                this.hierarchyCapture,
-                timeoutMs,
-                () =>
+              refreshTargetDisplayHierarchy(targetDisplay, this.hierarchyCapture, timeoutMs, {
+                stale: () =>
                   this.staleDisplay(
                     targetDisplay.observation.display.generation ??
                       this.displayTransitionReader.identityRevision(this.device.deviceId),
                   ),
-                refreshSignal,
-              )
+                signal: refreshSignal,
+              })
           : this.refreshViewHierarchy.bind(this);
       const warnings = new Set<string>();
       const onActivationWarnings = (messages: string[] = []) => {
@@ -970,8 +963,7 @@ export class TapAnyElement extends BaseVisualChange {
     action: TapAnyElementOptions["action"],
     target: CapturedTapTarget,
     startTime: number,
-    requestCount: number,
-    changeCount: number,
+    { requestCount, changeCount }: { requestCount: number; changeCount: number },
   ): TapAnyElementResult {
     return {
       success: true,

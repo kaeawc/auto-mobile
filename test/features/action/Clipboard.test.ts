@@ -58,13 +58,12 @@ describe("Clipboard iOS", () => {
     hierarchy = new FakeKeyboardHierarchyProvider();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
-    clipboard = new Clipboard(
-      mockDevice,
-      new FakeAdbClientFactory(),
-      () => fakeIOSCtrlProxy,
-      hierarchy,
+    clipboard = new Clipboard(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(),
+      ctrlProxyFactory: () => fakeIOSCtrlProxy,
+      hierarchyProvider: hierarchy,
       timer,
-    );
+    });
   });
 
   test("get returns clipboard text", async () => {
@@ -435,13 +434,12 @@ describe("Clipboard iOS", () => {
           throw new Error("read failed");
         },
       };
-      const action = new Clipboard(
-        mockDevice,
-        new FakeAdbClientFactory(),
-        () => fakeIOSCtrlProxy,
-        reader,
+      const action = new Clipboard(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(),
+        ctrlProxyFactory: () => fakeIOSCtrlProxy,
+        hierarchyProvider: reader,
         timer,
-      );
+      });
       expect((await action.execute("paste")).success).toBe(true);
       expect(warning).toHaveBeenCalled();
     } finally {
@@ -460,13 +458,12 @@ describe("Clipboard iOS", () => {
         return new Promise<ViewHierarchyResult>(() => {});
       },
     };
-    const action = new Clipboard(
-      mockDevice,
-      new FakeAdbClientFactory(),
-      () => fakeIOSCtrlProxy,
-      reader,
+    const action = new Clipboard(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(),
+      ctrlProxyFactory: () => fakeIOSCtrlProxy,
+      hierarchyProvider: reader,
       timer,
-    );
+    });
     const result = await action.execute("paste");
     expect(result.success).toBe(false);
     expect(result.error).toContain("could not be read after the paste");
@@ -486,13 +483,11 @@ describe("Clipboard iOS", () => {
       .mockResolvedValueOnce(focusedIOSForm("AB"))
       .mockResolvedValueOnce(focusedIOSForm("Z1"));
     try {
-      const action = new Clipboard(
-        mockDevice,
-        new FakeAdbClientFactory(),
-        () => fakeIOSCtrlProxy,
-        undefined,
+      const action = new Clipboard(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(),
+        ctrlProxyFactory: () => fakeIOSCtrlProxy,
         timer,
-      );
+      });
       expect((await action.execute("paste")).success).toBe(true);
       expect(invalidations).toHaveLength(2);
       expect(read).toHaveBeenCalledTimes(2);
@@ -521,13 +516,12 @@ describe("Clipboard iOS", () => {
       },
     };
     try {
-      const action = new Clipboard(
-        mockDevice,
-        new FakeAdbClientFactory(),
-        () => client,
-        hierarchy,
+      const action = new Clipboard(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(),
+        ctrlProxyFactory: () => client,
+        hierarchyProvider: hierarchy,
         timer,
-      );
+      });
       expect((await action.execute("paste")).success).toBe(true);
       expect(requests).toEqual(["get", "paste"]);
       expect(hierarchy.getCallCount()).toBe(2);
@@ -639,10 +633,9 @@ describe("Clipboard Android", () => {
     const undelivered = reason === "WebSocket not connected" || reason === "send failed";
     const acknowledged =
       reason === "device refused" || reason === "unsupported" || reason === "success";
-    const action = new Clipboard(
-      androidDevice,
-      factory,
-      () => ({
+    const action = new Clipboard(androidDevice, {
+      adbFactory: factory,
+      ctrlProxyFactory: () => ({
         requestClipboard: async (
           _action,
           _text,
@@ -659,9 +652,8 @@ describe("Clipboard Android", () => {
           return { success: reason === "success", totalTimeMs: 5000, error: reason, acknowledged };
         },
       }),
-      undefined,
       timer,
-    );
+    });
     const result = await action.execute("paste");
     const indeterminate = !undelivered && !acknowledged;
     expect(result.success).toBe(undelivered || reason === "success");
@@ -693,18 +685,16 @@ describe("Clipboard Android", () => {
         createExecResult("", "No shell command implementation.\n"),
       );
       const error = "No focused input field found. Focus a text field before pasting.";
-      const clipboard = new Clipboard(
-        androidDevice,
-        new FakeAdbClientFactory(adb),
-        () => ({
+      const clipboard = new Clipboard(androidDevice, {
+        adbFactory: new FakeAdbClientFactory(adb),
+        ctrlProxyFactory: () => ({
           requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
             onDispatch?.();
             return { success: false, acknowledged: true, error, totalTimeMs: 1 };
           },
         }),
-        undefined,
-        new FakeTimer(),
-      );
+        timer: new FakeTimer(),
+      });
 
       expect(await clipboard.execute(action, "x")).toEqual({
         success: false,
@@ -772,10 +762,9 @@ describe("Clipboard Android", () => {
           proxyFailure === "timeout"
             ? "Clipboard request timed out"
             : "Failed to connect to accessibility service";
-        const clipboard = new Clipboard(
-          androidDevice,
-          new FakeAdbClientFactory(adb),
-          () => ({
+        const clipboard = new Clipboard(androidDevice, {
+          adbFactory: new FakeAdbClientFactory(adb),
+          ctrlProxyFactory: () => ({
             requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
               if (proxyFailure === "pre-send throw") {
                 throw new Error(reason);
@@ -786,9 +775,8 @@ describe("Clipboard Android", () => {
               return { success: false, acknowledged: false, error: reason, totalTimeMs: 1 };
             },
           }),
-          undefined,
-          new FakeTimer(),
-        );
+          timer: new FakeTimer(),
+        });
 
         expect(await clipboard.execute(action, "x")).toEqual({
           success: outcome === "success",
@@ -819,10 +807,9 @@ describe("Clipboard Android", () => {
             availability === "unimplemented" ? "No shell command implementation.\n" : "",
           ),
         );
-        const clipboard = new Clipboard(
-          androidDevice,
-          new FakeAdbClientFactory(adb),
-          () => ({
+        const clipboard = new Clipboard(androidDevice, {
+          adbFactory: new FakeAdbClientFactory(adb),
+          ctrlProxyFactory: () => ({
             requestClipboard: async () => {
               if (proxyFailure === "pre-send throw") {
                 throw new Error("Failed to connect to accessibility service");
@@ -835,9 +822,8 @@ describe("Clipboard Android", () => {
               };
             },
           }),
-          undefined,
-          new FakeTimer(),
-        );
+          timer: new FakeTimer(),
+        });
         expect(await clipboard.execute("paste")).toEqual({
           success: true,
           action: "paste",
@@ -863,10 +849,9 @@ describe("Clipboard Android", () => {
         failure === "wrapped transport" ? wrapCommandError(error, { command }) : error;
       adb.setCommandError(command, rejection);
       const reason = "Failed to connect to accessibility service";
-      const clipboard = new Clipboard(
-        androidDevice,
-        new FakeAdbClientFactory(adb),
-        () => ({
+      const clipboard = new Clipboard(androidDevice, {
+        adbFactory: new FakeAdbClientFactory(adb),
+        ctrlProxyFactory: () => ({
           requestClipboard: async () => ({
             success: false,
             acknowledged: false,
@@ -874,9 +859,8 @@ describe("Clipboard Android", () => {
             totalTimeMs: 1,
           }),
         }),
-        undefined,
-        new FakeTimer(),
-      );
+        timer: new FakeTimer(),
+      });
       expect(await clipboard.execute("paste")).toEqual({
         success: false,
         action: "paste",
@@ -895,10 +879,9 @@ describe("Clipboard Android", () => {
     async (failure) => {
       const adb = new FakeAdbExecutor();
       const reason = "Clipboard read is restricted";
-      const clipboard = new Clipboard(
-        androidDevice,
-        new FakeAdbClientFactory(adb),
-        () => ({
+      const clipboard = new Clipboard(androidDevice, {
+        adbFactory: new FakeAdbClientFactory(adb),
+        ctrlProxyFactory: () => ({
           requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
             onDispatch?.();
             if (failure === "throw") {
@@ -912,9 +895,8 @@ describe("Clipboard Android", () => {
             };
           },
         }),
-        undefined,
-        new FakeTimer(),
-      );
+        timer: new FakeTimer(),
+      });
       expect(await clipboard.execute("get")).toEqual({
         success: false,
         action: "get",
@@ -929,18 +911,16 @@ describe("Clipboard Android", () => {
     "CtrlProxy %s success is unchanged",
     async (action) => {
       const adb = new FakeAdbExecutor();
-      const clipboard = new Clipboard(
-        androidDevice,
-        new FakeAdbClientFactory(adb),
-        () => ({
+      const clipboard = new Clipboard(androidDevice, {
+        adbFactory: new FakeAdbClientFactory(adb),
+        ctrlProxyFactory: () => ({
           requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
             onDispatch?.();
             return { success: true, acknowledged: true, text: "hello", totalTimeMs: 1 };
           },
         }),
-        undefined,
-        new FakeTimer(),
-      );
+        timer: new FakeTimer(),
+      });
       expect(await clipboard.execute(action, "x")).toEqual({
         success: true,
         action,
@@ -959,11 +939,14 @@ describe("Clipboard Android", () => {
   test("passes the injected AdbClientFactory (not AdbExecutor) to AndroidCtrlProxyClient.getInstance", async () => {
     const factory = new FakeAdbClientFactory();
     let passedFactory: FakeAdbClientFactory | undefined;
-    const clipboard = new Clipboard(androidDevice, factory, (_device, adbFactory) => {
-      passedFactory = adbFactory as FakeAdbClientFactory;
-      return {
-        requestClipboard: async () => ({ success: true, action: "copy", totalTimeMs: 1 }),
-      };
+    const clipboard = new Clipboard(androidDevice, {
+      adbFactory: factory,
+      ctrlProxyFactory: (_device, adbFactory) => {
+        passedFactory = adbFactory as FakeAdbClientFactory;
+        return {
+          requestClipboard: async () => ({ success: true, action: "copy", totalTimeMs: 1 }),
+        };
+      },
     });
 
     await clipboard.execute("copy", "hello");
@@ -977,14 +960,17 @@ describe("Clipboard Android", () => {
   test("get returns accessibility restriction error without ADB fallback when Android denies clipboard reads", async () => {
     const factory = new FakeAdbClientFactory();
     const fakeAdb = factory.getFakeClient();
-    const clipboard = new Clipboard(androidDevice, factory, () => ({
-      requestClipboard: async () => ({
-        success: false,
-        action: "get",
-        totalTimeMs: 1,
-        error: "Clipboard read is restricted while CtrlProxy is not foreground",
+    const clipboard = new Clipboard(androidDevice, {
+      adbFactory: factory,
+      ctrlProxyFactory: () => ({
+        requestClipboard: async () => ({
+          success: false,
+          action: "get",
+          totalTimeMs: 1,
+          error: "Clipboard read is restricted while CtrlProxy is not foreground",
+        }),
       }),
-    }));
+    });
     const result = await clipboard.execute("get");
 
     expect(result.success).toBe(false);
@@ -997,13 +983,16 @@ describe("Clipboard Android", () => {
   test("get returns default accessibility error when Android read fails without details", async () => {
     const factory = new FakeAdbClientFactory();
     const fakeAdb = factory.getFakeClient();
-    const clipboard = new Clipboard(androidDevice, factory, () => ({
-      requestClipboard: async () => ({
-        success: false,
-        action: "get",
-        totalTimeMs: 1,
+    const clipboard = new Clipboard(androidDevice, {
+      adbFactory: factory,
+      ctrlProxyFactory: () => ({
+        requestClipboard: async () => ({
+          success: false,
+          action: "get",
+          totalTimeMs: 1,
+        }),
       }),
-    }));
+    });
     const result = await clipboard.execute("get");
 
     expect(result.success).toBe(false);
@@ -1016,14 +1005,17 @@ describe("Clipboard Android", () => {
     const factory = new FakeAdbClientFactory();
     const fakeAdb = factory.getFakeClient();
     fakeAdb.setCommandResult("shell cmd clipboard get", "No shell command implementation");
-    const clipboard = new Clipboard(androidDevice, factory, () => ({
-      requestClipboard: async () => ({
-        success: true,
-        action: "get",
-        text: "",
-        totalTimeMs: 1,
+    const clipboard = new Clipboard(androidDevice, {
+      adbFactory: factory,
+      ctrlProxyFactory: () => ({
+        requestClipboard: async () => ({
+          success: true,
+          action: "get",
+          text: "",
+          totalTimeMs: 1,
+        }),
       }),
-    }));
+    });
     const result = await clipboard.execute("get");
 
     expect(result.success).toBe(true);
@@ -1042,10 +1034,9 @@ describe("Clipboard iOS dispatch outcomes", () => {
     async (outcome) => {
       const controller = new AbortController();
       const reason = outcome === "timeout" ? "Clipboard operation timed out after 5000ms" : outcome;
-      const clipboard = new Clipboard(
-        device,
-        new FakeAdbClientFactory(),
-        () => ({
+      const clipboard = new Clipboard(device, {
+        adbFactory: new FakeAdbClientFactory(),
+        ctrlProxyFactory: () => ({
           requestClipboard: async (action, _text, _timeout, _perf, { signal, onDispatch } = {}) => {
             if (action === "get") {
               return { success: true, text: "", totalTimeMs: 0 };
@@ -1070,9 +1061,9 @@ describe("Clipboard iOS dispatch outcomes", () => {
             };
           },
         }),
-        new FakeKeyboardHierarchyProvider(),
-        new FakeTimer(),
-      );
+        hierarchyProvider: new FakeKeyboardHierarchyProvider(),
+        timer: new FakeTimer(),
+      });
       const result = await clipboard.execute("paste", undefined, { signal: controller.signal });
       if (["timeout", "socket closed", "abort"].includes(outcome)) {
         expect(result).toEqual({
@@ -1093,16 +1084,19 @@ describe("Clipboard iOS dispatch outcomes", () => {
     "paste: %p is a plain refusal without replay",
     async (BusyError) => {
       let pasteRequests = 0;
-      const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
-        requestClipboard: async (action, _text, _timeout, _perf, { onDispatch } = {}) => {
-          if (action === "get") {
-            return { success: true, text: "", totalTimeMs: 0 };
-          }
-          pasteRequests++;
-          onDispatch?.();
-          throw new BusyError("runner busy");
-        },
-      }));
+      const clipboard = new Clipboard(device, {
+        adbFactory: new FakeAdbClientFactory(),
+        ctrlProxyFactory: () => ({
+          requestClipboard: async (action, _text, _timeout, _perf, { onDispatch } = {}) => {
+            if (action === "get") {
+              return { success: true, text: "", totalTimeMs: 0 };
+            }
+            pasteRequests++;
+            onDispatch?.();
+            throw new BusyError("runner busy");
+          },
+        }),
+      });
       const result = await clipboard.execute("paste");
       expect(result).toEqual({ success: false, action: "paste", error: "runner busy" });
       expect(pasteRequests).toBe(1);
@@ -1114,12 +1108,15 @@ describe("Clipboard iOS dispatch outcomes", () => {
     const controller = new AbortController();
     const reason = new Error("cancelled");
     controller.abort(reason);
-    const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
-      requestClipboard: async () => {
-        requests++;
-        return { success: true, totalTimeMs: 0 };
-      },
-    }));
+    const clipboard = new Clipboard(device, {
+      adbFactory: new FakeAdbClientFactory(),
+      ctrlProxyFactory: () => ({
+        requestClipboard: async () => {
+          requests++;
+          return { success: true, totalTimeMs: 0 };
+        },
+      }),
+    });
     await expect(
       clipboard.execute("paste", undefined, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
@@ -1129,12 +1126,15 @@ describe("Clipboard iOS dispatch outcomes", () => {
   test.each(["copy", "clear", "get"] as const)(
     "%s remains a plain failure after dispatch without acknowledgement",
     async (action) => {
-      const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
-        requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
-          onDispatch?.();
-          return { success: false, acknowledged: false, error: "timeout", totalTimeMs: 0 };
-        },
-      }));
+      const clipboard = new Clipboard(device, {
+        adbFactory: new FakeAdbClientFactory(),
+        ctrlProxyFactory: () => ({
+          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
+            onDispatch?.();
+            return { success: false, acknowledged: false, error: "timeout", totalTimeMs: 0 };
+          },
+        }),
+      });
       expect(await clipboard.execute(action, "hello")).toEqual({
         success: false,
         action,

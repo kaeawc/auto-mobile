@@ -213,8 +213,7 @@ export async function prepareTargetDisplayAction(
   device: BootedDevice,
   display: string,
   observe: Pick<ObserveScreen, "execute">,
-  adb: AdbCommandRunner,
-  call: TargetDisplayCall = {},
+  { adb, ...call }: TargetDisplayCall & { adb: AdbCommandRunner },
 ): Promise<{ observation: ObserveResult; displayId?: number; assertCurrent: () => void }> {
   const {
     lastRenderedObservation = sessionRenderedObservation,
@@ -267,8 +266,7 @@ export async function refreshTargetDisplayHierarchy(
   target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
   capture: HierarchyCapture,
   timeoutMs: number,
-  stale: () => StaleDisplayError,
-  signal?: AbortSignal,
+  { stale, signal }: { stale: () => StaleDisplayError; signal?: AbortSignal },
 ) {
   throwIfAborted(signal);
   target.assertCurrent();

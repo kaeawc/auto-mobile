@@ -6,58 +6,57 @@ import type { EmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/em
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
-import { shellQuote } from "../../utils/shellQuote";
+import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { parseBroadcastOutput } from "../intent/SendBroadcast";
+import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
+import {
+  grantRecordAudioPermission,
+  RECORD_AUDIO_PERMISSION,
+} from "../../ctrlProxy/grantRecordAudioPermission";
+import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 
 export interface GuestAudioCaptureHandle {
   close(): Promise<void>;
 }
 
+export const GUEST_CAPTURE_LEASE_MARGIN_MS = 60_000;
+export const GUEST_CAPTURE_MAX_LEASE_MS = 3_720_000;
+
+export interface GuestAudioCaptureOpenOptions {
+  leaseMs: number;
+}
+
 /** Resolves only after an owned guest capture has been observed alive and settled. */
 export interface GuestAudioCapture {
-  open(deviceId: string): Promise<GuestAudioCaptureHandle>;
+  open(deviceId: string, options: GuestAudioCaptureOpenOptions): Promise<GuestAudioCaptureHandle>;
 }
 
 export interface GuestAudioCaptureOptions {
-  /** Includes discovery, launch, liveness polling and settling. Default 8 seconds. */
+  /** Includes discovery, broadcast start, status polling and settling. Default 8 seconds. */
   timeoutMs?: number;
   pollMs?: number;
   /** Default 3 seconds: a capture opened only 2.5 seconds earlier has crashed the emulator. */
   settleMs?: number;
+  resolveSetupUser?: (deviceId: string) => Promise<number | undefined>;
 }
 
 function unavailable(deviceId: string, detail: string): EmulatorAudioError {
   return new EmulatorAudioError(
     "audio_guest_capture_unavailable",
     `Cannot verify an open guest microphone capture on ${deviceId}: ${detail}. ` +
-      "Injection was refused to protect the emulator. Use an image with tinycap available to the " +
-      "ADB shell user; stop competing recordings and retry. " +
-      "AutoMobile does not enable adb root.",
+      "Injection was refused to protect the emulator. The guest microphone capture is provided " +
+      "by the CtrlProxy app. " +
+      "Stop competing recordings and retry. AutoMobile does not enable adb root.",
   );
 }
 
-// The emulator virtio-snd capture device is card 0, device 0 (tinycap -D 0 -d 0).
-const CAPTURE_PCM = { card: 0, device: 0 };
+const COMPONENT = `${CTRL_PROXY_PACKAGE}/.GuestAudioCaptureReceiver`;
+const ACTION = "dev.jasonpearson.automobile.GUEST_AUDIO_CAPTURE";
+const BROADCAST_TIMEOUT_MS = 2_000;
 
-function matchesRecorder(pid: number, marker: string): string {
-  return (
-    `tr '\\000' '\\n' < /proc/${pid}/environ 2>/dev/null | ` + `grep -Fqx -- ${shellQuote(marker)}`
-  );
-}
-
-/** Check the marker and stat together; a zombie can retain its PID after tinycap exits. */
-function recorderProbe(pid: number, marker: string): string {
-  return (
-    `if ${matchesRecorder(pid, marker)} && stat=$(cat /proc/${pid}/stat 2>/dev/null); then ` +
-    // comm (field 2) can contain spaces and parentheses; strip through its final closing paren.
-    "fields=${stat##*) }; state=${fields%% *}; " +
-    'case "$state" in ""|Z|X) echo exited;; ?) ' +
-    `if ${matchesRecorder(pid, marker)}; then echo running; else echo exited; fi;; ` +
-    "*) echo exited;; esac; else echo exited; fi"
-  );
-}
-
-/** One owned tinycap process per lease; the service excludes overlapping injections per device. */
+/** One CtrlProxy recording per lease; injection waits until the recording has settled. */
 export class AdbGuestAudioCapture implements GuestAudioCapture {
   private readonly now: () => number;
   private readonly timeoutMs: number;
@@ -68,8 +67,11 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     private readonly adbFor: (deviceId: string) => Pick<AdbExecutor, "execute">,
     private readonly discovery: EmulatorGrpcDiscovery,
     private readonly ids: IdGenerator,
-    private readonly timer: Pick<Timer, "now" | "monotonicNow" | "sleep"> = defaultTimer,
-    options: GuestAudioCaptureOptions = {},
+    private readonly timer: Pick<
+      Timer,
+      "now" | "monotonicNow" | "sleep" | "setTimeout" | "clearTimeout"
+    > = defaultTimer,
+    private readonly options: GuestAudioCaptureOptions = {},
   ) {
     this.now = timer.monotonicNow?.bind(timer) ?? timer.now.bind(timer);
     this.timeoutMs = options.timeoutMs ?? 8_000;
@@ -88,150 +90,235 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     }
   }
 
-  async open(deviceId: string): Promise<GuestAudioCaptureHandle> {
+  async open(
+    deviceId: string,
+    { leaseMs }: GuestAudioCaptureOpenOptions,
+  ): Promise<GuestAudioCaptureHandle> {
     const deadline = this.now() + this.timeoutMs;
-    let pid: number | undefined;
     let emulatorPid: number | undefined;
-    let recorderLogPath: string | undefined;
-    let recorderMarker: string;
+    let lease: string | undefined;
+    let startAttempted = false;
     let closed = false;
-    // The executor survives session release, but its serial can resolve to a replacement guest.
     let adb: Pick<AdbExecutor, "execute">;
     try {
       adb = this.adbFor(deviceId);
     } catch (error) {
       throw unavailable(deviceId, errorMessage(error));
     }
+    const broadcast = async (
+      op: "start" | "status" | "stop",
+      callDeadline: number,
+    ): Promise<string> => {
+      const remaining = callDeadline - this.now();
+      if (remaining <= 0) {
+        throw unavailable(deviceId, "capture verification deadline expired");
+      }
+      const result = await adb.execute(
+        [
+          "shell",
+          "am",
+          "broadcast",
+          "-n",
+          COMPONENT,
+          "-a",
+          ACTION,
+          "--es",
+          "op",
+          op,
+          "--es",
+          "lease",
+          shellQuoteUnlessSafe(lease ?? ""),
+          ...(op === "start" ? ["--el", "leaseTimeoutMs", String(leaseMs)] : []),
+        ],
+        {
+          timeoutMs: Math.min(BROADCAST_TIMEOUT_MS, remaining),
+          noRetry: true,
+          signal: new AbortController().signal,
+        },
+      );
+      if (this.now() >= callDeadline) {
+        throw unavailable(deviceId, "capture verification deadline expired");
+      }
+      if (result.error) {
+        throw unavailable(deviceId, result.error);
+      }
+      const reply = parseBroadcastOutput(`${result.stdout}\n${result.stderr}`);
+      const missingReceiver =
+        "the CtrlProxy on the device has no guest capture receiver; reinstall the CtrlProxy APK";
+      if (!reply.delivered) {
+        const output = reply.output.trim().slice(0, 2_048);
+        switch (reply.errorCode) {
+          case "permission_denied":
+            throw unavailable(
+              deviceId,
+              "the adb shell was refused the CtrlProxy receiver, which needs " +
+                `android.permission.DUMP (held by the adb shell): ${output}`,
+            );
+          case "no_matching_receiver":
+            throw unavailable(deviceId, missingReceiver);
+          case "protected_broadcast":
+            throw unavailable(deviceId, `the guest capture broadcast is protected: ${output}`);
+          default:
+            // The parser classifies am's explicit missing-receiver error as broadcast_failed.
+            if (reply.output.trimStart().startsWith("Error: receiver not found")) {
+              throw unavailable(deviceId, missingReceiver);
+            }
+            throw unavailable(deviceId, `the guest capture broadcast failed: ${output}`);
+        }
+      }
+      if (!reply.resultData) {
+        throw unavailable(deviceId, missingReceiver);
+      }
+      return reply.resultData.slice(0, 2_048);
+    };
     const close = async (): Promise<void> => {
-      if (closed || pid === undefined) {
+      if (closed || !startAttempted) {
         return;
       }
       closed = true;
-      // Never dispatch a kill to a replacement emulator or an unverified recorder PID.
-      const identityCheck = matchesRecorder(pid, recorderMarker);
-      // Best-effort: the log name is unique to this lease, and it is removed only with the verified kill.
-      const logCleanup =
-        recorderLogPath === undefined
-          ? ""
-          : ` rm -f -- ${shellQuote(recorderLogPath)} 2>/dev/null;`;
-      const cleanupOptions = {
-        timeoutMs: 1_000,
-        noRetry: true,
-        signal: new AbortController().signal,
-      };
       try {
         if (emulatorPid === undefined || (await this.emulatorPidFor(deviceId)) !== emulatorPid) {
           logger.debug(`Skipping guest capture cleanup on ${deviceId}: emulator identity changed`);
           return;
         }
-        const identity = await adb.execute(
-          ["shell", "sh", "-c", shellQuote(`if ${identityCheck}; then echo matched; fi`)],
-          cleanupOptions,
-        );
-        if (identity.error || identity.stdout.trim() !== "matched") {
-          logger.debug(
-            `Skipping guest capture cleanup on ${deviceId}: recorder identity unverified`,
-          );
-          return;
-        }
       } catch (error) {
-        // Skipping cleanup is safe when identity cannot be verified; signaling a reused PID is not.
+        // Skipping cleanup is safe when the emulator identity cannot be verified.
         logger.debug(`Skipping guest capture cleanup on ${deviceId}: ${errorMessage(error)}`);
         return;
       }
       try {
-        // Recheck in the signaling shell: ADB may resolve a new transport after the preflight.
-        const result = await adb.execute(
-          [
-            "shell",
-            "sh",
-            "-c",
-            shellQuote(
-              `if ${identityCheck}; then kill ${pid};${logCleanup} else echo identity_changed; fi`,
-            ),
-          ],
-          cleanupOptions,
-        );
-        if (result.error) {
-          throw new ActionableError(
-            `Failed to close guest audio capture PID ${pid} on ${deviceId}: ${result.error}`,
-          );
-        }
-        if (result.stdout.trim() === "identity_changed") {
-          logger.debug(`Skipped guest capture kill on ${deviceId}: recorder identity changed`);
+        // Cleanup has its own bounded budget even when verification used the entire deadline.
+        const reply = await broadcast("stop", this.now() + BROADCAST_TIMEOUT_MS);
+        const state = reply.split(" ", 1)[0];
+        if (state !== "stopped" && state !== "absent") {
+          throw new ActionableError(`Guest capture stop refused: ${reply}`);
         }
       } catch (error) {
-        throw toActionableError(
-          error,
-          `Failed to close guest audio capture PID ${pid} on ${deviceId}`,
-        );
+        throw toActionableError(error, `Failed to close guest audio capture on ${deviceId}`);
       }
-    };
-    const shell = async (script: string, onStdout?: (chunk: string) => void): Promise<string> => {
-      const remaining = deadline - this.now();
-      if (remaining <= 0) {
-        throw unavailable(deviceId, "capture verification deadline expired");
-      }
-      const result = await adb.execute(["shell", "sh", "-c", shellQuote(script)], {
-        timeoutMs: Math.min(1_000, remaining),
-        noRetry: true,
-        onStdout,
-        waitForProcessSettlementAfterAbort: true,
-      });
-      if (result.error) {
-        throw unavailable(deviceId, result.error);
-      }
-      return result.stdout;
     };
     try {
       emulatorPid = await this.emulatorPidFor(deviceId);
-      const recorderId = this.ids.next();
-      recorderMarker = `AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=${recorderId}`;
-      if (/[\r\n\0]/.test(recorderMarker)) {
-        throw unavailable(deviceId, "the recorder marker is invalid");
+      await this.ensureRecordAudioPermission(adb, deviceId, deadline);
+      lease = this.ids.next();
+      if (!lease || /[\r\n\0]/.test(lease)) {
+        throw unavailable(deviceId, "the capture lease is invalid");
       }
-      // Keep lease logs for image temporary-file cleanup, including when identity is lost.
-      const logPath = `/data/local/tmp/automobile-guest-capture-${encodeURIComponent(recorderId)}.log`;
-      recorderLogPath = logPath;
-      let launchOutput = "";
-      const recordPid = (chunk: string) => {
-        launchOutput += chunk;
-        const value = /^([0-9]+)\r?\n/.exec(launchOutput)?.[1];
-        if (value && Number.isSafeInteger(Number(value)) && Number(value) > 1) {
-          pid = Number(value);
+      startAttempted = true;
+      const started = await broadcast("start", deadline);
+      if (started.split(" ", 1)[0] !== "running") {
+        throw unavailable(deviceId, started);
+      }
+      const runningSince = this.now();
+      while (this.now() < deadline) {
+        const now = this.now();
+        if (now - runningSince >= this.settleMs) {
+          return { close };
         }
-      };
-      // All streams are redirected so ADB can return while nohup keeps this exact PID alive.
-      const output = await shell(
-        `env ${shellQuote(recorderMarker)} nohup tinycap /dev/null -D ${CAPTURE_PCM.card} -d ${CAPTURE_PCM.device} -c 1 -r 48000 -b 16 </dev/null >/dev/null 2>${shellQuote(logPath)} & echo $!`,
-        recordPid,
-      );
-      // Executors may not stream stdout; parse the completed output in that case.
-      if (pid === undefined) {
-        launchOutput = "";
-        recordPid(output);
+        await this.timer.sleep(Math.min(this.pollMs, deadline - now));
+        const status = await broadcast("status", deadline);
+        // A non-running sample refuses immediately; a later sample cannot revive this open.
+        if (status.split(" ", 1)[0] !== "running") {
+          throw unavailable(deviceId, status);
+        }
       }
-      if (pid === undefined) {
-        throw unavailable(deviceId, "the recorder did not return a valid PID");
-      }
-      await this.waitForRunning(
-        deviceId,
-        recorderProbe(pid, recorderMarker),
-        logPath,
-        deadline,
-        shell,
-      );
-      return { close };
+      throw unavailable(deviceId, "capture verification deadline expired");
     } catch (error) {
       await close().catch((cleanupError: unknown) => {
         logger.warn(
           `Failed guest capture start cleanup on ${deviceId}: ${errorMessage(cleanupError)}`,
         );
-        return false;
       });
       throw error instanceof EmulatorAudioError
         ? error
         : unavailable(deviceId, errorMessage(error));
+    }
+  }
+
+  private async ensureRecordAudioPermission(
+    adb: Pick<AdbExecutor, "execute">,
+    deviceId: string,
+    deadline: number,
+  ): Promise<void> {
+    const timeout = () => {
+      const remaining = deadline - this.now();
+      if (remaining <= 0) {
+        throw unavailable(deviceId, "capture verification deadline expired");
+      }
+      return Math.min(BROADCAST_TIMEOUT_MS, remaining);
+    };
+    const unverifiable = (error: unknown, operation: "read" | "grant"): EmulatorAudioError => {
+      if (error instanceof EmulatorAudioError) {
+        return error;
+      }
+      timeout();
+      return unavailable(
+        deviceId,
+        `the RECORD_AUDIO check could not ${operation}: ${errorMessage(error)}`,
+      );
+    };
+    let userId: number | undefined;
+    try {
+      timeout();
+      const resolveSetupUser = this.options.resolveSetupUser;
+      if (resolveSetupUser) {
+        userId = await raceWithDeadline(() => resolveSetupUser(deviceId), {
+          timer: this.timer,
+          timeoutMs: deadline - this.now(),
+          label: "CtrlProxy setup user resolution",
+          timeoutError: () => unavailable(deviceId, "capture verification deadline expired"),
+        });
+      }
+      timeout();
+    } catch (error) {
+      throw unverifiable(error, "read");
+    }
+    const permissionDenied = (reason: string) =>
+      new EmulatorAudioError(
+        "audio_record_permission_not_granted",
+        `${RECORD_AUDIO_PERMISSION} is not granted to ${CTRL_PROXY_PACKAGE}: ${reason}. ` +
+          `Run: adb shell pm grant ${CTRL_PROXY_PACKAGE} ${RECORD_AUDIO_PERMISSION}`,
+      );
+    const isGranted = async () => {
+      let result;
+      try {
+        result = await adb.execute(["shell", "dumpsys", "package", CTRL_PROXY_PACKAGE], {
+          noRetry: true,
+          timeoutMs: timeout(),
+        });
+      } catch (error) {
+        throw unverifiable(error, "read");
+      }
+      timeout();
+      if (result.error) {
+        throw unverifiable(result.error, "read");
+      }
+      const permission = parseAndroidRuntimePermissions(
+        result.stdout,
+        CTRL_PROXY_PACKAGE,
+        userId,
+      )?.runtimePermissions.get(RECORD_AUDIO_PERMISSION);
+      if (!permission) {
+        throw permissionDenied("the runtime permission row is absent");
+      }
+      return permission.state === "granted";
+    };
+    if (await isGranted()) {
+      return;
+    }
+    const grant = await grantRecordAudioPermission(adb, userId, timeout(), timeout);
+    if (!grant.granted && grant.transportError instanceof EmulatorAudioError) {
+      throw grant.transportError;
+    }
+    timeout();
+    if (!grant.granted) {
+      if ("transportError" in grant) {
+        throw unverifiable(grant.transportError, "grant");
+      }
+      throw permissionDenied(grant.reason);
+    }
+    if (!(await isGranted())) {
+      throw permissionDenied("the runtime permission remains ungranted after pm grant");
     }
   }
 
@@ -243,49 +330,5 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       throw unavailable(deviceId, "the emulator incarnation could not be identified");
     }
     return endpoint.pid;
-  }
-
-  private async waitForRunning(
-    deviceId: string,
-    probe: string,
-    logPath: string,
-    deadline: number,
-    shell: (script: string) => Promise<string>,
-  ): Promise<void> {
-    let runningSince: number | undefined;
-    while (this.now() < deadline) {
-      const status = (await shell(probe)).trim();
-      if (status !== "running") {
-        // Any exit refuses outright: a recorder that stopped cannot be trusted to have stayed open.
-        const diagnostic = await this.recorderDiagnostic(deviceId, logPath, shell);
-        throw unavailable(
-          deviceId,
-          "the recorder exited before its capture stayed running through the settle window" +
-            (diagnostic ? `; tinycap stderr: ${diagnostic}` : ""),
-        );
-      }
-      const now = this.now();
-      runningSince = runningSince ?? now;
-      if (now - runningSince >= this.settleMs && now < deadline) {
-        return;
-      }
-      await this.timer.sleep(Math.min(this.pollMs, Math.max(0, deadline - now)));
-    }
-    throw unavailable(deviceId, "the recorder did not stay running through the settle window");
-  }
-
-  private async recorderDiagnostic(
-    deviceId: string,
-    logPath: string,
-    shell: (script: string) => Promise<string>,
-  ): Promise<string> {
-    try {
-      const tail = await shell(`tail -n 5 ${shellQuote(logPath)} 2>/dev/null | tail -c 2048`);
-      return tail.slice(-2_048).trim();
-    } catch (error) {
-      // Diagnostics are optional; unreadable logs must never permit capture verification.
-      logger.debug(`Cannot read guest capture log on ${deviceId}: ${errorMessage(error)}`);
-      return "";
-    }
   }
 }

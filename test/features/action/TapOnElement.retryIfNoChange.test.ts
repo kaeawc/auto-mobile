@@ -91,7 +91,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", {
+      longPressDuration: 0,
       tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
@@ -114,7 +115,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", {
+      longPressDuration: 0,
       tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
@@ -137,7 +139,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", {
+      longPressDuration: 0,
       tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
@@ -163,7 +166,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", {
+      longPressDuration: 0,
       tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
@@ -455,15 +459,15 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
         _action: string,
         _point: Point,
         _dur: number,
-        _el: Element,
-        context,
+        { isTalkBackEnabled },
       ) => {
-        capturedIsTalkBackEnabled = context?.isTalkBackEnabled;
+        capturedIsTalkBackEnabled = isTalkBackEnabled;
       };
 
       const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", {
+        longPressDuration: 0,
         tapElement: makeElement(),
         options: { action: "tap" },
         isTalkBackEnabled: talkBackEnabled,

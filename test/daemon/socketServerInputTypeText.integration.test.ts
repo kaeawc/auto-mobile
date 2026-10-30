@@ -1241,8 +1241,9 @@ describe("UnixSocketServer input/typeText", () => {
       return {
         appendText: async (
           text: string,
-          _timeoutMs: number,
-          beforeKeyEvent?: () => Promise<{ success: boolean; error?: string }>,
+          {
+            beforeKeyEvents: beforeKeyEvent,
+          }: { beforeKeyEvents?: () => Promise<{ success: boolean; error?: string }> } = {},
         ) => {
           helperCalls++;
           validatorsReceived.push(beforeKeyEvent);
@@ -1315,12 +1316,15 @@ describe("UnixSocketServer input/typeText", () => {
         // with zero characters sent, tagged as the RUNNER's verdict.
         appendText: async (
           text: string,
-          _timeoutMs: number,
-          beforeKeyEvent?: () => Promise<{
-            success: boolean;
-            error?: string;
-            failureSource?: "runner" | "helper";
-          }>,
+          {
+            beforeKeyEvents: beforeKeyEvent,
+          }: {
+            beforeKeyEvents?: () => Promise<{
+              success: boolean;
+              error?: string;
+              failureSource?: "runner" | "helper";
+            }>;
+          } = {},
         ) => {
           if (beforeKeyEvent) {
             const validation = await beforeKeyEvent();
@@ -1393,8 +1397,9 @@ describe("UnixSocketServer input/typeText", () => {
       return {
         appendText: async (
           text: string,
-          _timeoutMs: number,
-          beforeKeyEvent?: () => Promise<{ success: boolean; error?: string }>,
+          {
+            beforeKeyEvents: beforeKeyEvent,
+          }: { beforeKeyEvents?: () => Promise<{ success: boolean; error?: string }> } = {},
         ) => {
           helperCalls++;
           validatorsReceived.push(beforeKeyEvent);

@@ -92,7 +92,7 @@ export async function pressButtonHandler(
 const defaultRotateFactory: NonNullable<InteractionToolDependencies["rotateFactory"]> = (
   device,
   options,
-) => new Rotate(device, null, defaultTimer, options);
+) => new Rotate(device, { adb: null, timer: defaultTimer, options });
 
 const defaultSetPostureFactory: NonNullable<InteractionToolDependencies["setPostureFactory"]> = (
   device,

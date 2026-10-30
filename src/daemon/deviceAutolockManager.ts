@@ -507,7 +507,7 @@ export class DeviceAutolockManager {
     // admission from being judged as earlier work still in flight (#11400).
     const refreshed = await this.pool
       .getSessionManager()
-      .getOrCreateSession(session.sessionId, undefined, undefined, undefined, false, {
+      .getOrCreateSession(session.sessionId, undefined, undefined, {
         callerExecutionId: getToolSelectionContext()?.execution?.executionId,
         signal,
       });

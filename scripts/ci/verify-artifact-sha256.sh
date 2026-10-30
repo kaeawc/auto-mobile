@@ -4,7 +4,7 @@
 #
 # Usage: verify-artifact-sha256.sh <artifact-path> <platform>
 #
-# Platform is "android", "ios", "videojar", "screencapturehelper", "prototypeagent", "prototypeviewer", or "networkfilter", which
+# Platform is "android", "protoviewerapk", "ios", "videojar", "screencapturehelper", "prototypeagent", "prototypeviewer", or "networkfilter", which
 # selects the matching checksum from the first (newest) registry entry.
 #
 # Example:
@@ -44,6 +44,8 @@ echo "Built artifact SHA256: $BUILT_SHA256"
 
 if [ "$PLATFORM" = "android" ]; then
   FIELD="apkSha256"
+elif [ "$PLATFORM" = "protoviewerapk" ]; then
+  FIELD="protoViewerApkSha256"
 elif [ "$PLATFORM" = "ios" ]; then
   FIELD="ipaSha256"
 elif [ "$PLATFORM" = "videojar" ]; then
@@ -57,7 +59,7 @@ elif [ "$PLATFORM" = "prototypeviewer" ]; then
 elif [ "$PLATFORM" = "networkfilter" ]; then
   FIELD="networkFilterSha256"
 else
-  echo "ERROR: Platform must be 'android', 'ios', 'videojar', 'screencapturehelper', 'prototypeagent', 'prototypeviewer', or 'networkfilter', got '$PLATFORM'"
+  echo "ERROR: Platform must be 'android', 'protoviewerapk', 'ios', 'videojar', 'screencapturehelper', 'prototypeagent', 'prototypeviewer', or 'networkfilter', got '$PLATFORM'"
   exit 1
 fi
 

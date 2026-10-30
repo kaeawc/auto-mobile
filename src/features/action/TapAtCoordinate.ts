@@ -164,7 +164,11 @@ export class TapAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: TapAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.androidClient =
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
@@ -222,8 +226,8 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.device,
       display,
       this.observeScreen,
-      this.adb,
       {
+        adb: this.adb,
         lastRenderedObservation: this.lastRenderedObservation,
         signal,
         transitions: this.displayTransitionReader,
@@ -588,8 +592,12 @@ export class TapAtCoordinate extends BaseVisualChange {
     const { transitionRevision, onTapDelivered, signal } = context;
     this.assertDisplayRevisionCurrent(transitionRevision);
     const dispatch = options.action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap;
-    await dispatch(this.iosClient, point, tapDurationMs(options, "ios"), frameContext, {
-      signal,
+    await dispatch(this.iosClient, point, {
+      durationMs: tapDurationMs(options, "ios"),
+      frameContext,
+      options: {
+        signal,
+      },
     });
     try {
       onTapDelivered();
@@ -638,13 +646,10 @@ export class TapAtCoordinate extends BaseVisualChange {
       onActivationWarnings: context.onActivationWarnings,
     };
     try {
-      await this.androidTalkBack.dispatchTap(
-        options,
-        resolved,
-        frameContext,
+      await this.androidTalkBack.dispatchTap(options, resolved, frameContext, {
         signal,
-        dispatchContext,
-      );
+        context: dispatchContext,
+      });
     } catch (error) {
       throwIfAborted(signal);
       const actionable = toActionableError(error, "Failed to dispatch Android coordinate tap");
@@ -675,13 +680,10 @@ export class TapAtCoordinate extends BaseVisualChange {
         throw actionable;
       }
       // No loop: a second stale rejection surfaces to the caller.
-      await this.androidTalkBack.dispatchTap(
-        options,
-        retry.point,
-        retry.frameContext,
+      await this.androidTalkBack.dispatchTap(options, retry.point, retry.frameContext, {
         signal,
-        dispatchContext,
-      );
+        context: dispatchContext,
+      });
     }
   }
 
@@ -832,9 +834,11 @@ export class TapAtCoordinate extends BaseVisualChange {
         await (action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap)(
           this.iosClient,
           point,
-          duration,
-          observation.viewHierarchy?.frameContext,
-          { signal },
+          {
+            durationMs: duration,
+            frameContext: observation.viewHierarchy?.frameContext,
+            options: { signal },
+          },
         );
         context.onTapDelivered();
         if (action === "doubleTap") {

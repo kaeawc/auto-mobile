@@ -25,7 +25,11 @@ describe("Telephony", () => {
 
     consoleClient = new FakeEmulatorConsoleClient();
     device = { deviceId: "emulator-5554", platform: "android", name: "Pixel_5" } as BootedDevice;
-    telephony = new Telephony(device, adb, () => consoleClient, undefined, deviceTraits);
+    telephony = new Telephony(device, {
+      adbFactoryOrExecutor: adb,
+      consoleFactory: () => consoleClient,
+      deviceTraits,
+    });
   });
 
   describe("phoneCall", () => {
@@ -68,12 +72,11 @@ describe("Telephony", () => {
 
     test("iOS never contacts the emulator console", async () => {
       const sender = new FakeIosSdkTriggerSender();
-      telephony = new Telephony(
-        iosDevice,
-        adb,
-        () => consoleClient,
-        () => sender,
-      );
+      telephony = new Telephony(iosDevice, {
+        adbFactoryOrExecutor: adb,
+        consoleFactory: () => consoleClient,
+        iosSdkTriggers: () => sender,
+      });
 
       const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
 
@@ -83,7 +86,11 @@ describe("Telephony", () => {
 
     test("returns supported:false for a physical Android device (non-emulator serial)", async () => {
       device = { deviceId: "HT85N1A02890", platform: "android", name: "Pixel" } as BootedDevice;
-      telephony = new Telephony(device, adb, () => consoleClient, undefined, deviceTraits);
+      telephony = new Telephony(device, {
+        adbFactoryOrExecutor: adb,
+        consoleFactory: () => consoleClient,
+        deviceTraits,
+      });
 
       const result = await telephony.phoneCall({ action: "call", phoneNumber: "5551234567" });
 
@@ -134,7 +141,11 @@ describe("Telephony", () => {
 
     test("returns supported:false on physical devices", async () => {
       device = { deviceId: "HT85N1A02890", platform: "android", name: "Pixel" } as BootedDevice;
-      telephony = new Telephony(device, adb, () => consoleClient, undefined, deviceTraits);
+      telephony = new Telephony(device, {
+        adbFactoryOrExecutor: adb,
+        consoleFactory: () => consoleClient,
+        deviceTraits,
+      });
 
       const result = await telephony.sendSms({ phoneNumber: "5551234567", message: "hi" });
 
@@ -159,16 +170,14 @@ describe("Telephony", () => {
     test("uses port from the device serial when constructing the console client", async () => {
       let receivedPort = -1;
       device = { deviceId: "emulator-5560", platform: "android", name: "Pixel_5" } as BootedDevice;
-      telephony = new Telephony(
-        device,
-        adb,
-        (port) => {
+      telephony = new Telephony(device, {
+        adbFactoryOrExecutor: adb,
+        consoleFactory: (port) => {
           receivedPort = port;
           return consoleClient;
         },
-        undefined,
         deviceTraits,
-      );
+      });
 
       await telephony.sendSms({ phoneNumber: "5551234567", message: "hi" });
 
@@ -181,12 +190,11 @@ describe("Telephony", () => {
 
     beforeEach(() => {
       sender = new FakeIosSdkTriggerSender();
-      telephony = new Telephony(
-        iosDevice,
-        adb,
-        () => consoleClient,
-        () => sender,
-      );
+      telephony = new Telephony(iosDevice, {
+        adbFactoryOrExecutor: adb,
+        consoleFactory: () => consoleClient,
+        iosSdkTriggers: () => sender,
+      });
     });
 
     test("each phoneCall action maps to the callkit trigger of the same name", async () => {

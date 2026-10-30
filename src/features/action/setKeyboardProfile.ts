@@ -14,9 +14,15 @@ import { KEYBOARD_PROFILE_IDS } from "./keyboardProfiles";
 export async function setKeyboardProfile(
   device: BootedDevice,
   profile: string | undefined,
-  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">,
-  signal?: AbortSignal,
-  onWritten?: (previousProfileId: string | undefined) => void,
+  {
+    client,
+    signal,
+    onWritten,
+  }: {
+    client?: Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">;
+    signal?: AbortSignal;
+    onWritten?: (previousProfileId: string | undefined) => void;
+  } = {},
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   if (!profile) {
     throw new ActionableError(

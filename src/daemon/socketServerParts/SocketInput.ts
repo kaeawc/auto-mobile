@@ -631,13 +631,12 @@ export class SocketInput {
                 "Button press request",
               ),
           });
-          return await pressButton.press(
-            args.button,
-            remainingTimeoutMs,
-            args.frameContext,
+          return await pressButton.press(args.button, {
+            timeoutMs: remainingTimeoutMs,
+            frameContext: args.frameContext,
             signal,
-            dispatching,
-          );
+            onDispatch: dispatching,
+          });
         },
       },
     );
@@ -679,7 +678,10 @@ export class SocketInput {
           totalTimeoutMs,
         }) => {
           return await this.callbacks.executeSocketInputKey(
-            new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.state.timer),
+            new InputKey(targetDevice, {
+              adbFactory: defaultAdbClientFactory,
+              timer: this.state.timer,
+            }),
             {
               key: args.key,
               frameContext: args.frameContext,
@@ -718,7 +720,11 @@ export class SocketInput {
     const { key, frameContext, totalTimeoutMs, remainingTimeoutMs, signal, dispatching } = options;
     let dispatched = false;
     const send = (fenced: AbortSignal | undefined, onDispatch: () => void) =>
-      inputKey.press(key, remainingTimeoutMs, frameContext, [], { signal: fenced, onDispatch });
+      inputKey.press(key, remainingTimeoutMs, frameContext, {
+        modifiers: [],
+        signal: fenced,
+        onDispatch,
+      });
     return this.callbacks.runHeldInputOperation(
       "input/key",
       signal,

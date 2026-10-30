@@ -34,6 +34,34 @@ is only worth building if some supported environment cannot reach the gRPC port.
 
 ## Injection
 
+- Before opening `injectAudio`, the host opens a CtrlProxy-owned guest microphone recording
+  through an ordered broadcast: component
+  `dev.jasonpearson.automobile.ctrlproxy/.GuestAudioCaptureReceiver`, action
+  `dev.jasonpearson.automobile.GUEST_AUDIO_CAPTURE`, string extras `op` (`start`, `status`,
+  `stop`) and `lease` (an injected host-generated id). The exported receiver requires
+  `android.permission.DUMP`, which the adb shell holds and third-party apps do not. CtrlProxy
+  requests `RECORD_AUDIO`; installation grants it for the setup user without an API-level gate.
+- The process-wide controller holds at most one lease. `start` checks microphone permission,
+  opens `AudioRecord` with MIC, mono S16 at 48 kHz and the platform minimum buffer size, and
+  starts a background reader that continuously discards PCM. Repeating the held lease's start
+  does not reopen it; a different lease is refused. The receiver sets result code 0 and a
+  single-line result data: `running`, `stopped`, `absent`, or `failed <reason>` (quotes and
+  CR/LF in reasons become spaces). Only the held lease may stop the recording. Stop is
+  idempotent; status and stop for another lease return `absent`.
+- A stopped record or read error releases the lease and reports `failed`; a read failure is
+  retained until the owner's next status or stop, or a new start. A monotonic 30-minute
+  timeout releases abandoned recordings and subsequent status returns `absent`. A CtrlProxy
+  restart also loses the lease. No broadcast waits for PCM reads or joins the reader thread.
+- The host requires `running` from start and every status poll (100 ms by default) throughout
+  a three-second settle window, within an eight-second total deadline. Any other answer
+  immediately refuses injection with `audio_guest_capture_unavailable`. Each broadcast uses
+  no retries and at most two seconds of the remaining deadline. A missing receiver requires
+  reinstalling CtrlProxy. Refusals include at most 2048 characters of the broadcast reply.
+- Failure after start attempts best-effort stop with a separate two-second cleanup budget.
+  Close runs once and accepts `stopped` or `absent`. Before cleanup the host verifies the
+  emulator PID still matches its starting incarnation; otherwise it skips cleanup. Ownership
+  is the lease plus the CtrlProxy process, so cleanup never signals a process or stops another
+  lease's recording. AutoMobile does not enable adb root.
 - Source audio is decoded from WAV, downmixed to mono S16, and resampled to 48 kHz when it is
   above that. The emulator rejects rates above 48 kHz and oversized packets with
   `INVALID_ARGUMENT`.

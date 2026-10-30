@@ -45,17 +45,18 @@ pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments is used as
 
 ## injectAudioInput
 
-Plays audio into the microphone and returns as soon as streaming starts. On Android, it first
-opens a guest microphone capture and verifies it is running for three seconds, so the app need
-not already be recording. The emulator image must provide `tinycap` to the ADB shell user;
-AutoMobile does not enable `adb root`. If the recorder cannot be verified to stay running for
-three seconds within an eight-second deadline, injection is refused. A competing app recording may prevent the
-recorder from opening; stop that recording and retry.
+Plays audio into the microphone and returns as soon as streaming starts. On Android, the
+AutoMobile app on the emulator records the guest microphone, so the receiving app need not
+already be recording and no image tool is needed. AutoMobile verifies that capture stays
+running for three seconds within an eight-second deadline before injection starts. If capture
+cannot be verified, injection is refused. Stop competing recordings and retry; if microphone
+permission is missing, reinstall the AutoMobile app on the emulator. AutoMobile does not enable
+`adb root`.
 
-Only one injection may start or run per device. On Android, AutoMobile closes only its own recorder when
-injection stops, finishes, reaches its duration limit, or fails, including on session release.
-Cleanup skips signaling a recorder if the emulator restarted or the recorder's identity cannot
-be verified.
+Only one injection may start or run per device. On Android, AutoMobile stops only its own
+recording when injection stops, finishes, reaches its duration limit, or fails, including on
+session release. Cleanup is skipped if the emulator restarted; a restarted app no longer holds
+the recording.
 
 | Parameter       | Description                                                                     |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -112,12 +113,12 @@ recording is read later. A device that plays nothing gets a silent track.
 
 Errors start with a code in brackets:
 
-| Code                              | Meaning and what to do                                                                                                                                                                                      |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `audio_injection_busy`            | Another injection is starting or already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                             |
-| `audio_injection_unsupported`     | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above. |
-| `audio_capture_unsupported`       | The same, for capture; a simulator needs a loopback default output.                                                                                                                                         |
-| `audio_grpc_failed`               | Any other emulator error; the message carries its detail.                                                                                                                                                   |
-| `audio_loopback_failed`           | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                              |
-| `audio_guest_capture_unavailable` | The guest recorder could not be verified to stay running for three seconds. Use an image with shell-accessible `tinycap`, stop competing recordings, and retry. AutoMobile does not enable `adb root`.      |
-| `audio_emulator_exited`           | The emulator exited during injection. Restart the named emulator and start a new injection.                                                                                                                 |
+| Code                              | Meaning and what to do                                                                                                                                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audio_injection_busy`            | Another injection is starting or already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                                                                             |
+| `audio_injection_unsupported`     | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above.                                                 |
+| `audio_capture_unsupported`       | The same, for capture; a simulator needs a loopback default output.                                                                                                                                                                                         |
+| `audio_grpc_failed`               | Any other emulator error; the message carries its detail.                                                                                                                                                                                                   |
+| `audio_loopback_failed`           | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                                                                              |
+| `audio_guest_capture_unavailable` | The guest microphone capture could not be verified for three seconds. Stop competing recordings and retry. If microphone permission is missing or the app is outdated, reinstall the AutoMobile app on the emulator. AutoMobile does not enable `adb root`. |
+| `audio_emulator_exited`           | The emulator exited during injection. Restart the named emulator and start a new injection.                                                                                                                                                                 |

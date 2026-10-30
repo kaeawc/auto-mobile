@@ -120,6 +120,24 @@ class NetworkControlPermissionManifestTest {
     )
   }
 
+  @Test
+  fun `guest capture requests audio and restricts the exported receiver to shell`() {
+    val document = readManifest("control-proxy")
+    assertTrue(usesPermissions(document).contains("android.permission.RECORD_AUDIO"))
+    val receiver =
+      elements(document, "receiver").single {
+        it.androidAttribute("name") == ".GuestAudioCaptureReceiver"
+      }
+    assertEquals("true", receiver.androidAttribute("exported"))
+    assertEquals(PLATFORM_DUMP_PERMISSION, receiver.androidAttribute("permission"))
+    val actions = receiver.getElementsByTagName("action")
+    assertEquals(1, actions.length)
+    assertEquals(
+      "dev.jasonpearson.automobile.GUEST_AUDIO_CAPTURE",
+      (actions.item(0) as Element).androidAttribute("name"),
+    )
+  }
+
   private fun readManifest(module: String, sourceSet: String = "main"): Document =
     DocumentBuilderFactory.newInstance().run {
       isNamespaceAware = true

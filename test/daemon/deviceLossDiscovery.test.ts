@@ -13,6 +13,7 @@ import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { AndroidOfflineProbeError } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 type AliasPool = Parameters<typeof getAndroidOfflineCanonicalIds>[0];
 
@@ -159,14 +160,14 @@ describe("device-loss discovery helpers (#11808)", () => {
   });
 
   test("a plan-time tick lowers recorded misses to the plan cap", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const result = {
       missed: [{ deviceId: "emu-1", misses: PLAN_DEVICE_DISCONNECT_MISS_CAP + 5 }],
       transitional: [],
     };
     logDisconnectMisses(misses, result, new Set(["emu-1"]), new Set());
     expect(misses.get("emu-1")).toBe(PLAN_DEVICE_DISCONNECT_MISS_CAP);
-    const idle = new Map<string, number>();
+    const idle = new DeviceLossMisses();
     logDisconnectMisses(idle, result, new Set(), new Set());
     expect(idle.size).toBe(0);
   });

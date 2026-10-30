@@ -8,7 +8,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/deviceLossMisses";
 
 // The pool's own refresh and loss monitor sweep Apple Watch simulators beside Android and iOS, under
 // the watch source only: a failed watch sweep never prunes a watch, and a watch never counts toward

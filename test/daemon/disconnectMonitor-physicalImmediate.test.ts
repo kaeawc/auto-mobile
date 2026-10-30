@@ -5,6 +5,7 @@ import {
 } from "../../src/daemon/disconnectMonitor";
 import type { Platform } from "../../src/models";
 import { isPhysicalAndroidUsbSerial } from "../../src/utils/androidSerial";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 const PHONE = "57281FDCH00462";
 const EMULATOR = "emulator-5554";
@@ -62,7 +63,7 @@ describe("selectImmediateDisconnectCandidates", () => {
 
 describe("evaluateDeviceDisconnects with immediate candidates", () => {
   const evaluate = (
-    misses: Map<string, number>,
+    misses: DeviceLossMisses,
     succeededPlatforms: Set<Platform>,
     immediate: Set<string>,
   ) =>
@@ -77,7 +78,7 @@ describe("evaluateDeviceDisconnects with immediate candidates", () => {
     });
 
   test("one miss disconnects the phone while the emulator only counts a miss", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const result = evaluate(misses, new Set(["android"]), new Set([PHONE]));
     expect(result.disconnected).toEqual([PHONE]);
     expect(misses.get(PHONE)).toBe(3);
@@ -85,7 +86,7 @@ describe("evaluateDeviceDisconnects with immediate candidates", () => {
   });
 
   test("a failed Android listing never fast-paths the phone", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const result = evaluate(misses, new Set(["ios"]), new Set([PHONE]));
     expect(result.disconnected).toEqual([]);
     expect(misses.has(PHONE)).toBe(false);

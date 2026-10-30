@@ -1,7 +1,8 @@
 import type { DisconnectCandidateIncarnation, OfflineEpisode } from "./disconnectMonitor";
+import { DeviceLossMisses } from "./deviceLossMisses";
 
 export class DeviceLossState {
-  readonly misses: Map<string, number>;
+  readonly misses: DeviceLossMisses;
   readonly missIncarnations: Map<string, DisconnectCandidateIncarnation>;
   readonly confirmedDisconnectedIds: Set<string>;
   readonly forceDisconnectedIds: Set<string>;
@@ -19,7 +20,7 @@ export class DeviceLossState {
   readonly offlineEpisodes: Map<string, OfflineEpisode>;
 
   constructor(initial: Partial<DeviceLossState> = {}) {
-    this.misses = initial.misses ?? new Map();
+    this.misses = initial.misses ?? new DeviceLossMisses();
     this.missIncarnations = initial.missIncarnations ?? new Map();
     this.confirmedDisconnectedIds = initial.confirmedDisconnectedIds ?? new Set();
     this.forceDisconnectedIds = initial.forceDisconnectedIds ?? new Set();

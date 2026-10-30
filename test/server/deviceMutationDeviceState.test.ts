@@ -244,15 +244,11 @@ describe("DeviceStateMutationPriorReader", () => {
       "shell getprop persist.sys.timezone",
       createExecResult("Europe/Paris\n", ""),
     );
-    const defaultReader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      () => {
+    const defaultReader = new DefaultMutationPriorReader({
+      stateFor: () => {
         throw new Error("the clock state must not be read for a time zone row");
       },
-      undefined,
-      {
+      observationReaders: {
         dataReader: {
           read: async (_device, mutations) => mutations.map(() => ({ state: "unobservable" })),
         },
@@ -260,7 +256,7 @@ describe("DeviceStateMutationPriorReader", () => {
           create: () => adb,
         }),
       },
-    );
+    });
     expect(await defaultReader.read(ANDROID, [{ kind: "clock", key: "timezone" }])).toEqual([
       { state: "present", value: "Europe/Paris" },
     ]);
@@ -352,19 +348,14 @@ describe("DeviceStateMutationPriorReader", () => {
 
   test("the default reader routes power intents to it and keeps the other priors", async () => {
     const adb = new FakePowerAdb();
-    const defaultReader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    const defaultReader = new DefaultMutationPriorReader({
+      observationReaders: {
         dataReader: {
           read: async (_device, mutations) => mutations.map(() => ({ state: "unobservable" })),
         },
         deviceStateReader: reader(adb),
       },
-    );
+    });
     const priors = await defaultReader.read(ANDROID, [setting("power:dataSaver")]);
     expect(priors).toEqual([{ state: "present", value: false }]);
   });

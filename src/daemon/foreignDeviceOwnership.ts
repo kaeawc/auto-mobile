@@ -358,6 +358,12 @@ export const watchDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   claimPath: (udid) => watchDeviceAllocationClaimPath(udid),
 };
 
+/** The clock a foreign-ownership reader runs on, and its CtrlProxy forward evidence. */
+export interface ForeignOwnershipTiming {
+  timer?: Timer;
+  forwardEvidence?: ForeignCtrlProxyForwardEvidence;
+}
+
 /**
  * Reads two per-device lock files: the CtrlProxy forwarding lease (#10485) a daemon takes in its
  * coordination directory when it first talks to a device's CtrlProxy, and the allocation claim a
@@ -385,6 +391,8 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private readonly unanswered = new Map<number, UnansweredRun>();
   private readonly ownerToken = defaultIdGenerator.next();
   private claimMirror: DeviceClaimMirror | undefined;
+  private readonly timer: Timer;
+  private readonly forwardEvidence: ForeignCtrlProxyForwardEvidence | undefined;
 
   constructor(
     private readonly selfPid: number = process.pid,
@@ -394,9 +402,11 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     private readonly ownerSocketPath: () =>
       | string
       | undefined = getCtrlProxyForwardLeaseOwnerSocketPath,
-    private readonly timer: Timer = defaultTimer,
-    private readonly forwardEvidence?: ForeignCtrlProxyForwardEvidence,
-  ) {}
+    { timer = defaultTimer, forwardEvidence }: ForeignOwnershipTiming = {},
+  ) {
+    this.timer = timer;
+    this.forwardEvidence = forwardEvidence;
+  }
 
   async refresh(deviceIds: readonly string[], signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();

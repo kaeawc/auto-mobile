@@ -444,8 +444,10 @@ export async function observeAndroidPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   { states, notFoldable }: { states: AndroidDeviceState[]; notFoldable?: NotFoldableRefusal },
-  timer: Timer,
-  observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
+  {
+    timer,
+    observe,
+  }: { timer: Timer; observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>> },
   operation: PostureOperation,
 ): Promise<void> {
   const { signal, assertCurrent } = operation;

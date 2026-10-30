@@ -9,7 +9,7 @@ import {
 } from "./detection";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 
-import { type AdbExecuteOptions } from "./interfaces/AdbExecutor";
+import type { AdbSignalExecOptions } from "./AdbSignalExecutor";
 
 import { Timer } from "../SystemTimer";
 
@@ -19,14 +19,7 @@ import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 
 export interface AdbPathDiscoveryContext {
   timer: Timer;
-  execWithSignal(
-    file: string,
-    args: string[],
-    maxBuffer?: number,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    options?: Pick<AdbExecuteOptions, "waitForProcessSettlementAfterAbort" | "onStdout">,
-  ): Promise<ExecResult>;
+  execWithSignal(file: string, args: string[], options?: AdbSignalExecOptions): Promise<ExecResult>;
   systemDetectionFactory: () => SystemDetection;
   getAbortError(signal?: AbortSignal): Error;
 }
@@ -125,7 +118,7 @@ export class AdbPathDiscovery {
         `Command timed out before ADB path discovery: ${file} ${args.join(" ")}`,
       );
     }
-    return this.context.execWithSignal(file, args, undefined, timeoutMs, signal);
+    return this.context.execWithSignal(file, args, { timeoutMs, signal });
   }
 
   createDeadlineBoundSystemDetection(

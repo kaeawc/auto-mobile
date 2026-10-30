@@ -686,6 +686,11 @@ export function pickAndroidSystemImage(
     if (minorDelta !== 0) {
       return minorDelta;
     }
+    // A higher SDK extension (android-34-ext9) is newer than the base level (android-34).
+    const extensionDelta = (b.extensionLevel ?? 0) - (a.extensionLevel ?? 0);
+    if (extensionDelta !== 0) {
+      return extensionDelta;
+    }
     return a.packageName.localeCompare(b.packageName);
   })[0];
 }

@@ -264,8 +264,7 @@ export class DragAndDrop extends BaseVisualChange {
         this.adb,
         `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${inputDurationArgument(duration)}`,
         target.displayId,
-        signal,
-        target.assertCurrent,
+        { signal, assertCurrent: target.assertCurrent },
       );
     }
     return {
@@ -488,8 +487,7 @@ export class DragAndDrop extends BaseVisualChange {
             viewHierarchy,
             searchCriteria,
             this.visionConfig,
-            finalErrorMessage,
-            { signal, visionAnalyzer: this.visionAnalyzer },
+            { baseError: finalErrorMessage, signal, visionAnalyzer: this.visionAnalyzer },
           );
         }
       }

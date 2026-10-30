@@ -104,6 +104,8 @@ export const requestActionSchema = z
       .optional(),
     statusKey: stateKeySchema.optional(),
     via: z.enum(["host", "device"]).optional(),
+    // Lets this request send a storage.secure key (#14321); without it any reference is refused.
+    allowSecureInRequest: z.boolean().optional(),
     timeoutMs: z
       .number()
       .finite()

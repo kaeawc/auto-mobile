@@ -142,16 +142,19 @@ export class NavigationGraphManager implements NavigationGraphService {
       this.testCoverageRepository,
       this.timer,
       this.recordingState,
-      this.navigationWriteState,
       {
-        setCurrentApp: (appId, epoch, options) => this.setCurrentAppUnlocked(appId, epoch, options),
-        followDevice: (deviceId) => this.followDevice(deviceId),
-        findCorrelatedToolCall: (receivedAt) => this.toolCalls.findCorrelatedToolCall(receivedAt),
-        resolveProvenance: (appId) => this.resolveProvenance(appId),
-        retireToolCalls: (matches) => this.toolCalls.retireToolCalls(matches),
-        notifyGraphUpdated: () => this.notifyGraphUpdated(),
-        forgetFailedEdgeReplay: (pairKey, actionKey) =>
-          this.replayFailures.forgetFailedEdgeReplay(pairKey, actionKey),
+        navigationWriteState: this.navigationWriteState,
+        context: {
+          setCurrentApp: (appId, epoch, options) =>
+            this.setCurrentAppUnlocked(appId, epoch, options),
+          followDevice: (deviceId) => this.followDevice(deviceId),
+          findCorrelatedToolCall: (receivedAt) => this.toolCalls.findCorrelatedToolCall(receivedAt),
+          resolveProvenance: (appId) => this.resolveProvenance(appId),
+          retireToolCalls: (matches) => this.toolCalls.retireToolCalls(matches),
+          notifyGraphUpdated: () => this.notifyGraphUpdated(),
+          forgetFailedEdgeReplay: (pairKey, actionKey) =>
+            this.replayFailures.forgetFailedEdgeReplay(pairKey, actionKey),
+        },
       },
     );
     this.queries = new NavigationGraphQueries(this.repository, {

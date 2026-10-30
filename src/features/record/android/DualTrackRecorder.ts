@@ -77,6 +77,12 @@ export const MERGE_WINDOW_MS = 750;
  */
 export const GEOMETRY_FINALIZE_BUDGET_MS = 3_000;
 
+/** Test overrides; default: geometry built from the device at start, CtrlProxy display changes. */
+export interface DualTrackDisplayOverrides {
+  geometry?: DisplayGeometryTracker;
+  displaySource?: DisplayChangeSource;
+}
+
 export const GEOMETRY_UNCONFIRMED_WARNING =
   "rotation/size could not be confirmed at stop; tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction";
 
@@ -107,6 +113,7 @@ export class DualTrackRecorder {
   private firstTouchTrackFailure?: TouchTrackFailure;
   /** Rotation/size timeline for the touch track; built at start in real mode (#10174). */
   private geometry?: DisplayGeometryTracker;
+  private readonly displaySource?: DisplayChangeSource;
   private unsubscribeDisplay: (() => void) | null = null;
   /** Touch time span of each step whose coordinates or direction depend on the geometry. */
   private readonly geometrySpans = new Map<PlanStep, { downAt: number; upAt: number }>();
@@ -138,12 +145,10 @@ export class DualTrackRecorder {
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
     private readonly timer: Timer = defaultTimer,
-    /** Optional override for testing — defaults to the timeline built from the device at start */
-    geometry?: DisplayGeometryTracker,
-    /** Optional override for testing — defaults to the CtrlProxy client's display changes */
-    private readonly displaySource?: DisplayChangeSource,
+    overrides: DualTrackDisplayOverrides = {},
   ) {
-    this.geometry = geometry;
+    this.geometry = overrides.geometry;
+    this.displaySource = overrides.displaySource;
   }
 
   async start(): Promise<void> {

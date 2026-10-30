@@ -10,7 +10,7 @@ export interface HierarchyReadOptions {
   requireFreshExtraction?: boolean;
 }
 
-/** The options-form read seam for consumers that never need the deprecated positional overload. */
+/** The narrow read seam for consumers that only read the hierarchy. */
 export interface ViewHierarchyRequestReader {
   getViewHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
@@ -34,26 +34,14 @@ export interface ViewHierarchy {
   /**
    * Retrieve the view hierarchy of the current screen.
    * @param queryOptions - Optional query options for targeted element retrieval
-   * @param perf - Optional performance tracker for timing data
-   * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method
-   * @param minTimestamp - If provided, cached data must have updatedAt >= this value
-   * @param signal - Optional abort signal
-   * @param readOptions - Optional read policy or overall budget; bounds both the fresh-data
+   * @param request - Optional performance tracker, freshness floor (`skipWaitForFresh`,
+   *   `minTimestamp`), abort signal and read policy; `timeoutMs` bounds both the fresh-data
    *   wait and the sync fallback so a caller with its own deadline cannot be blocked past it
    * @returns Promise with parsed view hierarchy
    */
   getViewHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
     request?: ViewHierarchyReadRequest,
-  ): Promise<ViewHierarchyResult>;
-  /** @deprecated Pass a {@link ViewHierarchyReadRequest} instead of positional arguments. */
-  getViewHierarchy(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal,
-    readOptions?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult>;
 
   /**

@@ -155,6 +155,7 @@
     "notify-channels-block.json",
     "notify-post-messaging.json",
     "notify-post-styles.json",
+    "notify-schedule.json",
     "ns-accessory-chart.json",
     "ns-android-ignored-on-ios.json",
     "ns-block-both.json",
@@ -249,6 +250,8 @@
     "search-bar-docked.json",
     "search-bar-minimal.json",
     "search-bar.json",
+    "secure-storage-request-opt-in.json",
+    "secure-storage-request-other-keys.json",
     "secure-storage.json",
     "select-dropdown.json",
     "selection-controls.json",
@@ -1139,6 +1142,12 @@
     "notify-post-without-channels-block.json",
     "notify-progress-indeterminate-false.json",
     "notify-progress-over.json",
+    "notify-schedule-delay-fraction.json",
+    "notify-schedule-delay-over.json",
+    "notify-schedule-delay-zero.json",
+    "notify-schedule-duplicate-action-id.json",
+    "notify-schedule-missing-delay.json",
+    "notify-schedule-undeclared-channel.json",
     "notify-set-badge-missing-permission.json",
     "notify-set-badge-negative.json",
     "notify-title-over-limit.json",
@@ -1650,6 +1659,15 @@
     "secure-storage-emit-context-template.json",
     "secure-storage-emit-context.json",
     "secure-storage-non-string.json",
+    "secure-storage-request-body.json",
+    "secure-storage-request-follow-up.json",
+    "secure-storage-request-form.json",
+    "secure-storage-request-header-binding.json",
+    "secure-storage-request-query-text.json",
+    "secure-storage-request-repeat-template.json",
+    "secure-storage-request-repeat-text.json",
+    "secure-storage-request-unbalanced-text.json",
+    "secure-storage-request-url-placeholder.json",
     "secure-storage-too-many.json",
     "secure-storage-undeclared-module.json",
     "secure-storage-undeclared-state.json",
@@ -1952,6 +1970,7 @@
     "strict-gate-prototype_platform_media_queue_v1.json",
     "strict-gate-prototype_platform_media_v1.json",
     "strict-gate-prototype_platform_namespace_v1.json",
+    "strict-gate-prototype_platform_notifications_scheduled_v1.json",
     "strict-gate-prototype_platform_notifications_v1.json",
     "strict-gate-prototype_platform_power_v1.json",
     "strict-gate-prototype_platform_realtime_device_v1.json",
@@ -3271,6 +3290,24 @@
     ],
     "sensors-block-rates.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
     "sensors-block-minimal.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
+    "secure-storage-request-opt-in.json": [
+      "prototype_emit_context_v1",
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
+    ],
+    "secure-storage-request-other-keys.json": [
+      "prototype_emit_context_v1",
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
+    ],
     "commerce-catalog.json": [
       "prototype_data_model_v1",
       "prototype_platform_commerce_v1",
@@ -3281,6 +3318,11 @@
       "prototype_platform_media_v1",
       "prototype_platform_v1"
     ],
-    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"]
+    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "notify-schedule.json": [
+      "prototype_platform_notifications_scheduled_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_v1"
+    ]
   }
 }

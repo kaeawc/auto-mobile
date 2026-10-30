@@ -312,7 +312,7 @@ export function registerNavigationTools({
         null,
         undefined,
         navigationManagerFactory(args.sessionUuid),
-        args.sessionUuid,
+        { sessionUuid: args.sessionUuid },
       );
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,

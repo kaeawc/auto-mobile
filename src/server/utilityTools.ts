@@ -848,8 +848,7 @@ export function registerUtilityTools(
       input.networkCondition
         ? runSessionNetworkMutation(
             sessionManager,
-            args.sessionUuid,
-            device.deviceId,
+            { sessionUuid: args.sessionUuid, deviceId: device.deviceId },
             registerNetworkRestore,
             (rule) => {
               useIosAppNetworkRule(rule);

@@ -23,6 +23,7 @@ import {
   type SessionLifecycleSlots,
 } from "./internalContracts";
 import { SessionActivityPersistenceError } from "./SessionActivityPersistenceError";
+import type { RefusedRowWriteRelease } from "./supersededRows";
 
 export interface SessionActivityPersistenceHost {
   readonly rowWriter: Pick<
@@ -38,12 +39,7 @@ export interface SessionActivityPersistenceHost {
     write: (
       guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
     ) => Promise<T>,
-    releaseReason?: string,
-    releaseOptions?: {
-      unlessDaemonShutdown?: boolean;
-      resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
-      incarnation?: Session;
-    },
+    release?: RefusedRowWriteRelease,
   ): Promise<T>;
   isAdmittedForAutomation(session: Session): boolean;
   trackReleaseDrainWrite(write: Promise<void>): void;

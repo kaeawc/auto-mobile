@@ -63,6 +63,12 @@ function isTypedFailureResult(value: unknown): boolean {
   return "success" in record && record.success === false;
 }
 
+/** The session whose lifecycle owns a network-condition mutation, and the device it shapes. */
+export interface SessionNetworkTarget {
+  sessionUuid: string | undefined;
+  deviceId: string;
+}
+
 /**
  * Bind a device-wide network-condition mutation to the session lifecycle,
  * paralleling {@link runSessionBiometricMutation} (issue #6012 review).
@@ -79,8 +85,7 @@ function isTypedFailureResult(value: unknown): boolean {
  */
 export async function runSessionNetworkMutation<T>(
   sessionManager: SessionManager | undefined,
-  sessionUuid: string | undefined,
-  deviceId: string,
+  { sessionUuid, deviceId }: SessionNetworkTarget,
   registerRestore: boolean | IosAppNetworkRulePlan,
   mutation: (iosRule?: IosAppNetworkRuleCommandContext) => Promise<T>,
   expiresInSeconds?: number,

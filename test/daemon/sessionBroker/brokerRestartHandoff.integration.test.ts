@@ -134,7 +134,7 @@ describe("session broker provider restart handoff", () => {
         scopeKey,
         { acquire: () => {}, release: () => {} },
         timer,
-        new InMemoryMutationRecordingGaps(),
+        { recordingGaps: new InMemoryMutationRecordingGaps() },
       );
       return { broker, service, sessions };
     }

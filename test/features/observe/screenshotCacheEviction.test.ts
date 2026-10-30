@@ -86,9 +86,9 @@ describe("selectScreenshotsToEvict", () => {
     const referenced = new Set(["cached"]);
 
     expect(
-      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now, (filePath) =>
-        referenced.has(filePath),
-      ),
+      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now, {
+        isReferenced: (filePath) => referenced.has(filePath),
+      }),
     ).toEqual({
       toEvict: ["unreferenced-2", "unreferenced"],
       overBudgetAfterEviction: false,
@@ -108,13 +108,9 @@ describe("selectScreenshotsToEvict", () => {
     ];
 
     expect(
-      selectScreenshotsToEvict(
-        files,
-        50 * MB,
-        SCREENSHOT_PATH_MIN_LIFETIME_MS,
-        now,
-        (filePath) => filePath === "cached",
-      ),
+      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now, {
+        isReferenced: (filePath) => filePath === "cached",
+      }),
     ).toEqual({
       toEvict: ["unreferenced"],
       overBudgetAfterEviction: true,

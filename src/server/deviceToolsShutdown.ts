@@ -180,9 +180,11 @@ function rethrowShutdownFailure(
 async function runPostShutdownStep(
   context: ShutdownDeadlineContext,
   perf: ReturnType<typeof createPerformanceTracker>,
-  operationName: "cleanup" | "notifyResources",
-  detail: string,
-  strictDeadline: boolean,
+  {
+    operationName,
+    detail,
+    strictDeadline,
+  }: { operationName: "cleanup" | "notifyResources"; detail: string; strictDeadline: boolean },
   operation: () => Promise<void>,
 ): Promise<void> {
   perf.startOperation(operationName);
@@ -234,10 +236,12 @@ type ShutdownEntryContext = Pick<
 async function resolvePooledAvdKillTarget(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
-  pooledAvdIdentity: PooledAvdKillIdentity | undefined,
   devicePool: DevicePool | undefined,
   budget: Pick<ShutdownEntryContext, "deadlineMs" | "requestAbortSignal">,
-  assertStopIdentity?: (stopIdentity?: RestartStopIdentity) => void,
+  {
+    pooledAvdIdentity,
+    assertHolder: assertStopIdentity,
+  }: Pick<ShutdownDeviceOptions, "pooledAvdIdentity" | "assertHolder">,
 ): Promise<BootedDevice> {
   if (!pooledAvdIdentity?.capture) {
     return device;
@@ -248,12 +252,14 @@ async function resolvePooledAvdKillTarget(
     devicePool,
     dependencies.resolveRunningAndroidAvdName,
     {
-      timer: dependencies.timer,
-      deadlineMs: budget.deadlineMs,
-      signal: budget.requestAbortSignal,
-      processStopper: dependencies.androidEmulatorProcessStopper,
+      budget: {
+        timer: dependencies.timer,
+        deadlineMs: budget.deadlineMs,
+        signal: budget.requestAbortSignal,
+        processStopper: dependencies.androidEmulatorProcessStopper,
+      },
+      force: pooledAvdIdentity.force,
     },
-    pooledAvdIdentity.force,
   ).catch((error: unknown) => {
     logger.warn(`[DeviceTools] Pooled stop identity probe failed for ${device.deviceId}`, error);
     assertStopIdentity?.({ unconfirmed: true });
@@ -717,9 +723,11 @@ async function finishShutdownCleanup(
   await runPostShutdownStep(
     shutdownContext,
     perf,
-    "cleanup",
-    "installed-app cleanup did not complete",
-    strictDeadline,
+    {
+      operationName: "cleanup",
+      detail: "installed-app cleanup did not complete",
+      strictDeadline,
+    },
     async () => {
       await cleanup;
     },
@@ -727,9 +735,11 @@ async function finishShutdownCleanup(
   await runPostShutdownStep(
     shutdownContext,
     perf,
-    "notifyResources",
-    "resource notification did not complete",
-    strictDeadline,
+    {
+      operationName: "notifyResources",
+      detail: "resource notification did not complete",
+      strictDeadline,
+    },
     async () => await notification,
   );
 }
@@ -760,10 +770,9 @@ async function resolveRestartStopKillTarget(
   const pooledKillTarget = await resolvePooledAvdKillTarget(
     dependencies,
     device,
-    options.pooledAvdIdentity,
     devicePool,
     context,
-    options.assertHolder,
+    options,
   );
   // A kill-time re-probe supersedes entry evidence before any destructive preparation.
   const stopIdentity =
@@ -844,8 +853,7 @@ export async function shutdownDevice(
                 signal,
                 undefined,
                 assertHolder,
-                options.foreignClaim,
-                { fenceUnpooled: true },
+                { foreignClaim: options.foreignClaim, fenceUnpooled: true },
               ),
             timeoutMs: timeoutMs,
           },

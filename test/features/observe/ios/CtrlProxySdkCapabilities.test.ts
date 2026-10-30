@@ -678,7 +678,13 @@ describe("SDK capability caller budgets", () => {
       {
         name: "table data",
         run: (client) =>
-          client.getTableDataForIos("com.example.sdk", "app.db", "items", 50, 0, 250),
+          client.getTableDataForIos(
+            "com.example.sdk",
+            "app.db",
+            "items",
+            { limit: 50, offset: 0 },
+            250,
+          ),
       },
       {
         name: "table structure",

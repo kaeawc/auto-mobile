@@ -319,14 +319,7 @@ describe("systemTray list", () => {
     const { adb } = setup([page(row("first"))]);
     const signal = AbortSignal.abort(new Error("cancelled"));
     await expect(
-      listSystemTrayNotifications(
-        device,
-        "com.example.messages",
-        "Messages",
-        5000,
-        undefined,
-        signal,
-      ),
+      listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000, { signal }),
     ).rejects.toThrow("cancelled");
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -338,14 +331,9 @@ describe("systemTray list", () => {
       return page(row("first"));
     });
     await expect(
-      listSystemTrayNotifications(
-        device,
-        "com.example.messages",
-        "Messages",
-        5000,
-        undefined,
-        controller.signal,
-      ),
+      listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000, {
+        signal: controller.signal,
+      }),
     ).rejects.toThrow("cancelled");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd statusbar collapse",

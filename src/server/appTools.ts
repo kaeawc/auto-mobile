@@ -10,7 +10,7 @@ import {
   type InstallGuardOptions,
 } from "../features/action/InstallApp";
 import { ResetKeychain } from "../features/action/ResetKeychain";
-import { TerminateApp, type TerminateAppCall } from "../features/action/TerminateApp";
+import type { TerminateAppCall } from "../features/action/TerminateApp";
 import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
 import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
@@ -83,8 +83,11 @@ import {
   uninstallAppSchema,
 } from "./appToolsSchemas";
 import {
+  assertWatchLaunchSupported,
   createPlatformInstallApp,
+  createPlatformLaunchApp,
   createPlatformQueryInstalledApps,
+  createPlatformTerminateApp,
   createPlatformUninstallApp,
   type WatchAppManagerFactory,
 } from "./appToolsWatch";
@@ -171,9 +174,11 @@ export interface TerminateAppToolDependencies {
   createTerminateApp(device: BootedDevice): TerminateAppExecutor;
 }
 
-const defaultTerminateAppToolDependencies: TerminateAppToolDependencies = {
-  createTerminateApp: (device) => new TerminateApp(device),
-};
+const createDefaultTerminateAppToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): TerminateAppToolDependencies => ({
+  createTerminateApp: (device) => createPlatformTerminateApp(device, watchApps),
+});
 
 export interface CrashAppExecutor {
   execute(appId: string, call?: ActionCall): Promise<CrashAppResult>;
@@ -408,6 +413,7 @@ const createLaunchAppHandler =
     let prototypeLaunch: PrototypeLaunch | undefined;
     try {
       signal?.throwIfAborted();
+      assertWatchLaunchSupported(device, args);
       prototypeLaunch = args.prototype
         ? await beginPrototypeLaunch(dependencies, device, args.appId)
         : undefined;
@@ -725,7 +731,7 @@ export interface AppToolsDependencies {
   appLifecycle?: Partial<AppLifecycleToolDependencies>;
   inspectPackageSigning?: Partial<InspectPackageSigningToolDependencies>;
   appPermissionsFactory?: AppPermissionsFactory;
-  /** The Apple Watch app manager installApp, uninstallApp and listApps use for a watch. */
+  /** The Apple Watch app manager the app tools use for a watch (install through terminate). */
   watchApps?: WatchAppManagerFactory;
 }
 
@@ -737,11 +743,15 @@ function createAppToolHandlers(dependencies: AppToolsDependencies) {
   });
   const launchAppDependencies: LaunchAppToolDependencies = {
     ...createDefaultLaunchAppToolDependencies(),
+    createLaunchApp: (device) => createPlatformLaunchApp(device, dependencies.watchApps),
     ...dependencies.launchApp,
   };
   const launchAppHandler = createLaunchAppHandler(launchAppDependencies);
   const terminateAppHandler = createTerminateAppHandler(
-    { ...defaultTerminateAppToolDependencies, ...dependencies.terminateApp },
+    {
+      ...createDefaultTerminateAppToolDependencies(dependencies.watchApps),
+      ...dependencies.terminateApp,
+    },
     launchAppDependencies,
   );
   const uninstallAppHandler = createUninstallAppHandler({

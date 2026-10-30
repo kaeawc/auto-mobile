@@ -702,8 +702,13 @@ export class Rotate extends BaseVisualChange {
       value,
       currentOrientation,
       autoRotateState,
-      { preserveLock, restoreAutomaticRotation, beforeWrite: settings.beforeWrite, cleanup },
-      signal,
+      {
+        preserveLock,
+        restoreAutomaticRotation,
+        beforeWrite: settings.beforeWrite,
+        cleanup,
+        signal,
+      },
     );
     if (alreadyApplied.kind === "handled") {
       await this.outcomes.restoreAutoRotateAfterFailedLock(

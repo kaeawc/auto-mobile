@@ -147,7 +147,10 @@ export async function supplementAndroidHierarchy(
     await execute(["shell", "uiautomator", "dump", path]);
     const result = await execute(["shell", "cat", path]);
     throwIfAborted(signal);
-    return await verifyAndMergeDump(original, result.stdout, foreground, deps, deadline, signal);
+    return await verifyAndMergeDump(original, result.stdout, foreground, deps, {
+      deadline,
+      signal,
+    });
   } catch (error) {
     throwIfAborted(signal);
     logger.debug("[HierarchyFallback] Could not supplement incomplete CtrlProxy hierarchy", error);
@@ -198,14 +201,20 @@ function dumpPath(idGenerator: IdGenerator = defaultIdGenerator): string {
   return `/data/local/tmp/automobile-hierarchy-${idGenerator.next()}.xml`;
 }
 
+/** The absolute host-clock deadline and abort signal bounding one supplemental dump. */
+interface DumpBound {
+  deadline: number;
+  signal?: AbortSignal;
+}
+
 async function verifyAndMergeDump(
   original: ViewHierarchyResult,
   contents: string,
   foreground: { packageName: string; userId: number },
   deps: AndroidHierarchyFallbackDeps,
-  deadline: number,
-  signal?: AbortSignal,
+  bound: DumpBound,
 ): Promise<ViewHierarchyResult> {
+  const { deadline, signal } = bound;
   const parsed: { hierarchy?: XmlNode } = await parseStringPromise(contents, {
     explicitArray: true,
   });

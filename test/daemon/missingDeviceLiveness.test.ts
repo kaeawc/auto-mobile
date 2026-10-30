@@ -160,13 +160,9 @@ function harness() {
 }
 
 function emptyRefresh(h: ReturnType<typeof harness>) {
-  return h.liveness.removeMissingDevicesForRefresh(
-    false,
-    1,
-    new Set(),
-    new Set(),
-    new Set(["android"]),
-  );
+  return h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), {
+    succeededPlatforms: new Set(["android"]),
+  });
 }
 
 describe("MissingDeviceLiveness", () => {
@@ -328,13 +324,9 @@ describe("MissingDeviceLiveness", () => {
           candidatePlatforms: new Map([[deviceId, "android" as const]]),
         });
       const refresh = (sourceSucceeded: boolean) =>
-        h.liveness.removeMissingDevicesForRefresh(
-          false,
-          1,
-          new Set(),
-          bootedPlatforms,
-          new Set(sourceSucceeded ? ["android" as const] : []),
-        );
+        h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), bootedPlatforms, {
+          succeededPlatforms: new Set(sourceSucceeded ? ["android" as const] : []),
+        });
 
       for (let miss = 1; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {
         h.timer.advanceTime(5_000);
@@ -371,7 +363,9 @@ describe("MissingDeviceLiveness", () => {
     const device = pooled();
     h.devices.set(deviceId, device);
     expect(
-      await h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), new Set()),
+      await h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), {
+        succeededPlatforms: new Set(),
+      }),
     ).toBe(0);
     expect(h.misses.has(deviceId)).toBe(false);
     device.sessionId = "session";

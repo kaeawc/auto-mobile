@@ -304,8 +304,7 @@ export class PinchOn extends BaseVisualChange {
         viewHierarchy,
         searchCriteria,
         this.visionConfig,
-        finalErrorMessage,
-        { visionAnalyzer: this.visionAnalyzer },
+        { baseError: finalErrorMessage, visionAnalyzer: this.visionAnalyzer },
       );
     }
 
@@ -663,8 +662,7 @@ export class PinchOn extends BaseVisualChange {
           scoped,
           snapshot.requestedFreshness,
           this.timer,
-          undefined,
-          snapshot.captureId,
+          { captureId: snapshot.captureId },
         );
   }
 

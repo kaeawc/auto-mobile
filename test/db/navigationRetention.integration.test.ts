@@ -157,16 +157,13 @@ describe("NavigationRetention prune", () => {
     yieldBetweenBatches: () => Promise<void> = async () => {},
     protectedBuildKeyResolver?: typeof computeProtectedBuildKeyIds,
   ): NavigationRetention {
-    return new NavigationRetention(
-      db,
-      config,
-      async (filePath) => {
+    return new NavigationRetention(db, config, {
+      removeScreenshotFile: async (filePath) => {
         removed.push(filePath);
       },
-      undefined,
       yieldBetweenBatches,
-      protectedBuildKeyResolver,
-    );
+      resolveProtectedBuildKeyIds: protectedBuildKeyResolver,
+    });
   }
 
   async function seedNode(screen: string, timestamp: number): Promise<number> {
@@ -422,7 +419,13 @@ describe("NavigationRetention prune", () => {
 
   test("prunes old node + edge observations, keeps recent ones", async () => {
     const nodeId = await seedNode("Home", 100);
-    const edge = await repo.createEdge(APP, "Home", "Detail", "tapOn", null, 100);
+    const edge = await repo.createEdge(
+      APP,
+      "Home",
+      "Detail",
+      { toolName: "tapOn", toolArgs: null },
+      100,
+    );
     const bkOld = await buildKey(APP, 1);
     const bkNew = await buildKey(APP, 2);
     await nodeObs(nodeId, bkOld, "s-old", 100);
@@ -445,7 +448,13 @@ describe("NavigationRetention prune", () => {
 
   test("revalidates each TTL batch only for apps represented in that batch", async () => {
     const nodeId = await seedNode("Home", 100);
-    const edge = await repo.createEdge(APP, "Home", "Detail", "tapOn", null, 100);
+    const edge = await repo.createEdge(
+      APP,
+      "Home",
+      "Detail",
+      { toolName: "tapOn", toolArgs: null },
+      100,
+    );
     const oldBuild = await buildKey(APP, 1);
     const activeBuild = await buildKey(APP, 2);
     for (let index = 0; index < 5; index += 1) {
@@ -1261,9 +1270,7 @@ describe("prune releases the connection between chunks (issue #6650)", () => {
         perAppMaxObservations: 1,
         evictionChunkSize: 2,
       },
-      undefined,
-      undefined,
-      async () => {},
+      { yieldBetweenBatches: async () => {} },
     );
 
     const transactionSpy = spyOn(db, "transaction");
@@ -1294,33 +1301,33 @@ describe("prune releases the connection between chunks (issue #6650)", () => {
         perAppMaxObservations: 1,
         evictionChunkSize: 1,
       },
-      undefined,
-      undefined,
-      async () => {
-        yields += 1;
-        if (yields === 1) {
-          // Queue the read before the next batch, but do not await it here:
-          // a pass holding one transaction would park it until commit. Letting
-          // prune finish makes that regression fail the snapshot assertions
-          // below instead of deadlocking inside this yield.
-          readPromise = track(
-            db
-              .selectFrom("navigation_build_keys")
-              .innerJoin(
-                "navigation_node_observations",
-                "navigation_node_observations.build_key_id",
-                "navigation_build_keys.id",
-              )
-              .select(["version_code", "session_uuid"])
-              .orderBy("session_uuid")
-              .execute()
-              .then((rows) => {
-                observedRows = rows;
-                readSettledMidPass = !pruneSettled;
-                yieldsAtRead = yields;
-              }),
-          );
-        }
+      {
+        yieldBetweenBatches: async () => {
+          yields += 1;
+          if (yields === 1) {
+            // Queue the read before the next batch, but do not await it here:
+            // a pass holding one transaction would park it until commit. Letting
+            // prune finish makes that regression fail the snapshot assertions
+            // below instead of deadlocking inside this yield.
+            readPromise = track(
+              db
+                .selectFrom("navigation_build_keys")
+                .innerJoin(
+                  "navigation_node_observations",
+                  "navigation_node_observations.build_key_id",
+                  "navigation_build_keys.id",
+                )
+                .select(["version_code", "session_uuid"])
+                .orderBy("session_uuid")
+                .execute()
+                .then((rows) => {
+                  observedRows = rows;
+                  readSettledMidPass = !pruneSettled;
+                  yieldsAtRead = yields;
+                }),
+            );
+          }
+        },
       },
     );
     const prunePromise = track(

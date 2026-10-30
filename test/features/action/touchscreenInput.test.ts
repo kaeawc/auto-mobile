@@ -50,14 +50,11 @@ describe("touchscreen input", () => {
     const assertCurrent = () => {
       assertions++;
     };
-    await executeTouchscreenInput(
-      adb,
-      "swipe 10 20 10 20 20000",
-      2,
-      controller.signal,
-      fenced ? assertCurrent : undefined,
-      { timeoutMs: 22000 },
-    );
+    await executeTouchscreenInput(adb, "swipe 10 20 10 20 20000", 2, {
+      signal: controller.signal,
+      assertCurrent: fenced ? assertCurrent : undefined,
+      timeoutMs: 22000,
+    });
     expect(adb.getCommandCalls()[0]).toMatchObject({ timeoutMs: 22000, signal: controller.signal });
     expect(assertions).toBe(fenced ? 1 : 0);
   });

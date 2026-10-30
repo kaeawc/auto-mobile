@@ -26,6 +26,7 @@ import {
 } from "./prototypeNotifications";
 import {
   prototypeSecureStorageEmitError,
+  prototypeSecureStorageRequestError,
   prototypeSecureStorageError,
 } from "./prototypeSecureStorage";
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
@@ -368,7 +369,12 @@ function argumentsError(
       }
       continue;
     }
-    const error = argumentValueError(action, name, args[name], at, declared.value, check);
+    const error = argumentValueError(
+      action,
+      { name, value: args[name], at },
+      declared.value,
+      check,
+    );
     if (error) {
       return error;
     }
@@ -632,7 +638,10 @@ export function prototypePlatformError(
     }
   }
   for (const { value, path } of actions) {
-    const found = emitNameError(value, path) ?? prototypeSecureStorageEmitError(value, path, root);
+    const found =
+      emitNameError(value, path) ??
+      prototypeSecureStorageEmitError(value, path, root) ??
+      prototypeSecureStorageRequestError(value, path, root);
     if (found) {
       return found;
     }
@@ -859,9 +868,7 @@ export const PROTOTYPE_PLATFORM_MODULE_GATES = [
 
 function argumentValueError(
   action: Raw,
-  name: string,
-  value: unknown,
-  at: string,
+  { name, value, at }: { name: string; value: unknown; at: string },
   rule: Rule,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {

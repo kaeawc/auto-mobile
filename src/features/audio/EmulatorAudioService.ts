@@ -92,6 +92,14 @@ export const DEFAULT_LOOP_MAX_DURATION_MS = 10 * 60 * 1000;
 /** Ended injections kept so a late or repeated stop still returns the result. */
 export const FINISHED_INJECTIONS_KEPT = 64;
 
+/** The resources one started injection owns until it settles. */
+interface OpenedInjection {
+  session: EmulatorAudioSession;
+  injection: AudioInjection;
+  injectionId: string;
+  guestCapture?: GuestAudioCaptureHandle;
+}
+
 interface ActiveInjection {
   deviceId: string;
   route: AudioRoute;
@@ -178,22 +186,15 @@ export class EmulatorAudioService {
   ): Promise<StartedInjection> {
     const route = await this.routeFor(deviceId, "audio_injection_unsupported");
     const release = this.reserveHostLoopback(route.route);
-    let opened: Awaited<ReturnType<EmulatorAudioService["openInjection"]>>;
+    let opened: OpenedInjection;
     try {
       opened = await this.openInjection(deviceId, route, request);
     } finally {
       // Registration below has no intervening await, preserving the global reservation.
       release();
     }
-    const { session, injection, injectionId, guestCapture } = opened;
-    const result = this.settle(
-      injectionId,
-      deviceId,
-      route.endpoint,
-      injection,
-      session,
-      guestCapture,
-    );
+    const { injection, injectionId } = opened;
+    const result = this.settle(deviceId, route.endpoint, opened);
     this.active.set(injectionId, {
       deviceId,
       route: route.route,
@@ -341,13 +342,11 @@ export class EmulatorAudioService {
   }
 
   private async settle(
-    injectionId: string,
     deviceId: string,
     endpoint: EmulatorGrpcEndpoint | undefined,
-    injection: AudioInjection,
-    session: EmulatorAudioSession,
-    guestCapture: GuestAudioCaptureHandle | undefined,
+    opened: OpenedInjection,
   ): Promise<StoppedInjection> {
+    const { injectionId, injection, session, guestCapture } = opened;
     try {
       return { injectionId, ...(await injection.done) };
     } catch (error) {
@@ -398,12 +397,7 @@ export class EmulatorAudioService {
     deviceId: string,
     route: { open: () => EmulatorAudioSession; endpoint?: EmulatorGrpcEndpoint },
     request: StartInjectionRequest,
-  ): Promise<{
-    session: EmulatorAudioSession;
-    injection: AudioInjection;
-    injectionId: string;
-    guestCapture?: GuestAudioCaptureHandle;
-  }> {
+  ): Promise<OpenedInjection> {
     const pcm = applyGainDb(await this.loadSource(request.source), request.gainDb ?? 0);
     const guestCapture = route.endpoint ? await this.deps.guestCapture.open(deviceId) : undefined;
     let session: EmulatorAudioSession | undefined;

@@ -314,9 +314,11 @@ async function waitForMotion(
 async function motionAlreadyApplied(
   adb: AdbExecutor,
   speed: VehicleSpeedInjection,
-  current: PropertyValues,
-  target: PropertyValues,
-  driving: boolean,
+  {
+    current,
+    target,
+    driving,
+  }: { current: PropertyValues; target: PropertyValues; driving: boolean },
   signal?: AbortSignal,
 ): Promise<boolean> {
   if (speed.failure) {
@@ -383,7 +385,7 @@ function createMotionInjector(adb: AdbExecutor, timer: Timer): DeviceConditionIn
         const target = MOTION_TARGETS[value];
         const current = await readAll(signal);
         const driving = value === "driving";
-        if (await motionAlreadyApplied(adb, speed, current, target, driving, signal)) {
+        if (await motionAlreadyApplied(adb, speed, { current, target, driving }, signal)) {
           const line = await waitForMotion(adb, timer, driving, signal);
           return {
             status: "unchanged",

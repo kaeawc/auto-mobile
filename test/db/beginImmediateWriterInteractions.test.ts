@@ -140,7 +140,7 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
     for (let i = 0; i < 8; i++) {
       await recordStorageEvent(storageEvent(`v${i}`, 9_000 - i), db);
     }
-    await pruneEventTableByCount(db, "storage_events", state, 3, 1);
+    await pruneEventTableByCount(db, "storage_events", state, { maxRows: 3, checkInterval: 1 });
 
     const kept = await db
       .selectFrom("storage_events")

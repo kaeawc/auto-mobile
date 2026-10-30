@@ -1,4 +1,4 @@
-import { SimCtlShutdown } from "./SimCtlShutdown";
+import { SimCtlShutdown, type SimctlArgvOptions } from "./SimCtlShutdown";
 import { SimCtlScreenshot } from "./SimCtlScreenshot";
 import { SimCtlInventory } from "./SimCtlInventory";
 import { SimCtlBoot } from "./SimCtlBoot";
@@ -314,7 +314,7 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
   ): Promise<ExecResult> {
     const hostArgs = splitCommandArgs(command);
-    return this.executeCommandArgv(hostArgs, timeoutMs, command, signal);
+    return this.executeCommandArgv(hostArgs, timeoutMs, command, { signal });
   }
 
   async executeCommandArgs(
@@ -322,7 +322,7 @@ export class SimCtlClient implements SimCtl {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<ExecResult> {
-    return this.executeCommandArgv(args, timeoutMs, args.join(" "), signal);
+    return this.executeCommandArgv(args, timeoutMs, args.join(" "), { signal });
   }
 
   async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
@@ -339,33 +339,23 @@ export class SimCtlClient implements SimCtl {
     args: string[],
     timeoutMs = SIMCTL_COMMAND_TIMEOUT_MS,
     displayCommand?: string,
-    explicitSignal?: AbortSignal,
-    waitForTimedOutCommandSettlement = false,
-    env?: NodeJS.ProcessEnv,
+    options: SimctlArgvOptions = {},
   ): Promise<ExecResult> {
     // One span per simctl invocation, named by the leading subcommand so spans
     // aggregate (e.g. `simctl boot`), recorded against the ambient
     // device-lifecycle tracker when one is in scope (see PerfContext).
     return trackAmbient(`simctl ${args[0] ?? ""}`.trimEnd(), () =>
-      this.executeCommandArgvInner(
-        args,
-        timeoutMs,
-        displayCommand,
-        explicitSignal,
-        waitForTimedOutCommandSettlement,
-        env,
-      ),
+      this.executeCommandArgvInner(args, timeoutMs, displayCommand, options),
     );
   }
 
   private async executeCommandArgvInner(
     args: string[],
-    timeoutMs?: number,
-    displayCommand?: string,
-    explicitSignal?: AbortSignal,
-    waitForTimedOutCommandSettlement = false,
-    env?: NodeJS.ProcessEnv,
+    timeoutMs: number | undefined,
+    displayCommand: string | undefined,
+    options: SimctlArgvOptions,
   ): Promise<ExecResult> {
+    const { signal: explicitSignal, waitForTimedOutCommandSettlement, env } = options;
     if (args.length === 0) {
       throw new Error("Command cannot be empty");
     }
@@ -830,9 +820,7 @@ export class SimCtlClient implements SimCtl {
         launchArgs,
         DEFAULT_DEVICE_READY_TIMEOUT_MS,
         `launch ${targetDevice} ${bundleId} [app arguments redacted]`,
-        undefined,
-        false,
-        launchEnvironment(options?.environment),
+        { waitForTimedOutCommandSettlement: false, env: launchEnvironment(options?.environment) },
       );
 
       // Parse the output to extract PID if available

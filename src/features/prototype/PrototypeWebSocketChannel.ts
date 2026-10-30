@@ -110,6 +110,13 @@ export const createWsPrototypeSocket: PrototypeSocketFactory = (connect, events)
   return socket;
 };
 
+/** The clock, socket constructor and destination pinning one channel connects through. */
+export interface PrototypeWebSocketChannelTransport {
+  timer: PrototypeChannelTimer;
+  socketFactory: PrototypeSocketFactory;
+  pinning: PrototypeDestinationPinning;
+}
+
 export class PrototypeWebSocketChannel implements PrototypeChannelHandle {
   private socket: PrototypeSocket | undefined;
   private isOpen = false;
@@ -119,15 +126,19 @@ export class PrototypeWebSocketChannel implements PrototypeChannelHandle {
   private readonly deadline = new AbortController();
   private pingTimer: NodeJS.Timeout | undefined;
   private readonly sink: PrototypeChannelSink;
+  private readonly timer: PrototypeChannelTimer;
+  private readonly socketFactory: PrototypeSocketFactory;
+  private readonly pinning: PrototypeDestinationPinning;
 
   constructor(
     private readonly request: PrototypeChannelOpenRequest,
     private readonly guarded: ReturnType<typeof onceClosedSink>,
     private readonly signal: AbortSignal,
-    private readonly timer: PrototypeChannelTimer,
-    private readonly socketFactory: PrototypeSocketFactory,
-    private readonly pinning: PrototypeDestinationPinning,
+    { timer, socketFactory, pinning }: PrototypeWebSocketChannelTransport,
   ) {
+    this.timer = timer;
+    this.socketFactory = socketFactory;
+    this.pinning = pinning;
     this.sink = guarded.sink;
     signal.addEventListener("abort", () => this.abort(), { once: true });
   }

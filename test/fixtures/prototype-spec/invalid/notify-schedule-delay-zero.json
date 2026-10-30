@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "id": "ns",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "reminderStatus": ""
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Remind you about your order"
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "reminders",
+          "name": "Reminders",
+          "importance": "default"
+        }
+      ]
+    },
+    "platform": {
+      "on": {
+        "notifications.scheduledFired": [
+          {
+            "type": "setState",
+            "key": "reminderStatus",
+            "value": "fired"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Remind me",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "notifications.schedule",
+          "statusKey": "reminderStatus",
+          "args": {
+            "id": {
+              "value": "order-eta"
+            },
+            "channel": {
+              "value": "reminders"
+            },
+            "title": {
+              "value": "Your order arrives soon"
+            },
+            "delaySeconds": {
+              "value": 0
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.delaySeconds.value"
+}

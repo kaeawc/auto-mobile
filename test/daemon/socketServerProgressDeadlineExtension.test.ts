@@ -78,15 +78,11 @@ function callHandleIdeRequest(
   originalTimeoutMs: number = timeoutMs,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return server.forwardIdeRequest(
-    mcpClient,
-    request,
-    timeoutMs,
-    socketSessionId,
+  return server.forwardIdeRequest(mcpClient, request, timeoutMs, socketSessionId, {
     deadline,
     originalTimeoutMs,
     signal,
-  );
+  });
 }
 
 describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6222)", () => {
@@ -688,7 +684,7 @@ describe("pushProgressNotification is independent of the general notification su
     progressToken: string | number,
     progress: number,
   ): void {
-    server.pushProgress(sessionId, "request-1", progressToken, progress);
+    server.pushProgress(sessionId, { requestId: "request-1", progressToken, progress });
   }
 
   test("delivers a progress tick to a session that never subscribed to general notifications", () => {

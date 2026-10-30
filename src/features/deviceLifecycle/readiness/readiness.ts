@@ -98,8 +98,7 @@ export async function reserveRecoveredDeviceForReadiness(
         boot.device,
         boot.sourceImage?.name ?? boot.device.name,
         undefined,
-        undefined,
-        boot.device.platform === "android",
+        { enforceAndroidRecoveryExclusion: boot.device.platform === "android" },
       ),
     );
   }
@@ -130,8 +129,10 @@ export async function reserveInitialDeviceForReadiness(
       boot.device,
       boot.sourceImage?.name ?? boot.device.name,
       undefined,
-      oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
-      true,
+      {
+        autolockClient: oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
+        enforceAndroidRecoveryExclusion: true,
+      },
     ),
   );
 }

@@ -401,9 +401,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
-    options.sessionContext?.initialReleasedSession,
-    namesLiveSessionOfBoundPlan,
-    bindingStore.store,
+    {
+      initialReleasedSessionUuid: options.sessionContext?.initialReleasedSession,
+      namesLiveSessionOfBoundPlan,
+      store: bindingStore.store,
+    },
   );
   const bindingKey = serverBindingKey(options);
   // Plan execution lock with per-session scope to prevent interference during executePlan

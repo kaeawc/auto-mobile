@@ -202,8 +202,7 @@ export class McpBindings {
       route,
       route.sessionUuid ?? sessionUuid,
       sessionWasActiveBeforeForward,
-      request.params?.name,
-      request.params?.arguments,
+      { toolName: request.params?.name, args: request.params?.arguments },
     );
   }
   /**
@@ -278,8 +277,7 @@ export class McpBindings {
     route: McpForwardRoute,
     sessionUuid: string,
     sessionWasActiveBeforeForward: boolean,
-    toolName: unknown,
-    args: unknown,
+    { toolName, args }: { toolName: unknown; args: unknown },
   ): void {
     if (this.callbacks.isReleasedBoundSession(args, socketSessionId)) {
       this.callbacks.clearBoundMcpClientKey(socketSessionId);

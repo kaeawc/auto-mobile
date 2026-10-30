@@ -439,9 +439,11 @@ function createStreamRecord(
   streamId: string,
   device: BootedDevice,
   config: ReturnType<typeof resolveWebRtcStreamingConfig>,
-  jarPath: string | null,
-  bitrateBps: number | undefined,
-  requestReceived: string,
+  {
+    jarPath,
+    bitrateBps,
+    requestReceived,
+  }: { jarPath: string | null; bitrateBps: number | undefined; requestReceived: string },
 ): WebRtcStreamRecord {
   const publisherRef: { current?: WebRtcStreamPublisher } = {};
   let publisherStarted = false;
@@ -824,14 +826,11 @@ export async function startWebRtcStream(
   const streamId = request.streamId ?? `webrtc_${dependencies.idGenerator.next()}`;
   assertNewStreamIdAvailable(streamId);
   const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
-  const record = createStreamRecord(
-    streamId,
-    request.device,
-    config,
-    null,
+  const record = createStreamRecord(streamId, request.device, config, {
+    jarPath: null,
     bitrateBps,
     requestReceived,
-  );
+  });
   const leaseId = acquireLease(record, {
     requestedLeaseId: request.leaseId,
     sessionUuid: request.sessionUuid,

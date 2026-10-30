@@ -372,8 +372,7 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
       this.effectiveCap(state),
       SCREENSHOT_PATH_MIN_LIFETIME_MS,
       this.timer.now(),
-      isReferenced,
-      isProtected,
+      { isReferenced, isProtected },
     );
     // Both size pressure and the idle age sweep obey exactly the same guarantee.
     const candidates = new Set([

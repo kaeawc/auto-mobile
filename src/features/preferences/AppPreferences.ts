@@ -642,9 +642,11 @@ export class AppPreferences {
               store.client.setPreference(
                 input.appId!,
                 iosSdkStoreName(store.store),
-                input.key,
-                stringValue(input.value),
-                IOS_PREFERENCE_WRITE_TYPES[input.type],
+                {
+                  key: input.key,
+                  value: stringValue(input.value),
+                  type: IOS_PREFERENCE_WRITE_TYPES[input.type],
+                },
                 timeoutMs,
               ),
             deadlineMs,

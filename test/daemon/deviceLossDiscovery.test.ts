@@ -53,9 +53,11 @@ describe("device-loss discovery helpers (#11808)", () => {
           },
         },
         true,
-        new Set(["emu-1"]),
-        new Set(),
-        android,
+        {
+          candidateDeviceIds: new Set(["emu-1"]),
+          bootedDeviceIds: new Set(),
+          candidatePlatforms: android,
+        },
       );
       expect(listed).toEqual({});
       expect(probes).toBe(0);
@@ -72,9 +74,11 @@ describe("device-loss discovery helpers (#11808)", () => {
           },
         },
         false,
-        new Set(["emu-1"]),
-        new Set(["emu-1"]),
-        android,
+        {
+          candidateDeviceIds: new Set(["emu-1"]),
+          bootedDeviceIds: new Set(["emu-1"]),
+          candidatePlatforms: android,
+        },
       );
       expect(probes).toBe(0);
     });
@@ -84,9 +88,11 @@ describe("device-loss discovery helpers (#11808)", () => {
         aliasPool({ "emu-1": ["alias-1"] }),
         { getAndroidListedDeviceStates: async () => new Map([["alias-1", "offline"]]) },
         false,
-        new Set(["emu-1"]),
-        new Set(),
-        android,
+        {
+          candidateDeviceIds: new Set(["emu-1"]),
+          bootedDeviceIds: new Set(),
+          candidatePlatforms: android,
+        },
       );
       expect([...listed.offlineDeviceIds!]).toEqual(["emu-1"]);
       expect([...listed.transitionalAdbDeviceIds!]).toEqual(["emu-1"]);
@@ -103,9 +109,11 @@ describe("device-loss discovery helpers (#11808)", () => {
           },
         },
         false,
-        new Set(["emu-1"]),
-        new Set(),
-        android,
+        {
+          candidateDeviceIds: new Set(["emu-1"]),
+          bootedDeviceIds: new Set(),
+          candidatePlatforms: android,
+        },
       );
       expect(listed).toEqual({});
     });
@@ -120,9 +128,11 @@ describe("device-loss discovery helpers (#11808)", () => {
             },
           },
           false,
-          new Set(["emu-1"]),
-          new Set(),
-          android,
+          {
+            candidateDeviceIds: new Set(["emu-1"]),
+            bootedDeviceIds: new Set(),
+            candidatePlatforms: android,
+          },
         ),
       ).rejects.toThrow("boom");
     });

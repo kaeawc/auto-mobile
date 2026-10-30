@@ -831,7 +831,10 @@ export class SqliteSessionBrokerStore {
       return {
         ...decision,
         request: await this.updateRequest(trx, request.requestId, {
-          ...pendingAcquisitionTiming(input, request, resetting, "wait", this.clock.now()),
+          ...pendingAcquisitionTiming(input, request, resetting, {
+            kind: "wait",
+            now: this.clock.now(),
+          }),
         }),
       };
     }
@@ -883,14 +886,11 @@ export class SqliteSessionBrokerStore {
       resource,
       request: await this.updateRequest(trx, request.requestId, {
         resource_id: resource.resourceId,
-        ...pendingAcquisitionTiming(
-          input,
-          request,
-          resource,
-          decision.kind,
-          this.clock.now(),
+        ...pendingAcquisitionTiming(input, request, resource, {
+          kind: decision.kind,
+          now: this.clock.now(),
           creationProfile,
-        ),
+        }),
       }),
     };
   }

@@ -62,13 +62,17 @@ import type {
   PrototypeToolDependencies,
 } from "./types";
 
+interface MutationEventOutcome {
+  action: PrototypeMutation;
+  success: boolean;
+  clearFailedShow: boolean;
+}
+
 function clearMutationEvents(
   events: PrototypeEventCoordinator,
   scope: PrototypeScope,
   target: { id?: string; all?: true },
-  action: PrototypeMutation,
-  success: boolean,
-  clearFailedShow: boolean,
+  { action, success, clearFailedShow }: MutationEventOutcome,
 ): void {
   if ((action === "dismiss" && success) || (action === "show" && !success && clearFailedShow)) {
     events.dismiss(scope.deviceId, target.id);
@@ -143,8 +147,7 @@ export async function performPrototypeAction(
   device: BootedDevice,
   args: Omit<z.infer<typeof prototypeSchema>, "action"> & { action: PrototypeMutation | "patch" },
   scope: PrototypeScope,
-  queue: PrototypePatchQueue,
-  signal?: AbortSignal,
+  { queue, signal }: { queue: PrototypePatchQueue; signal?: AbortSignal },
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
     const { store, target, cacheInvalidator } = dependencies;
@@ -210,12 +213,11 @@ async function performMutation(
   try {
     const resolved = await preflightWithGeneration(ordering, () =>
       preflightMutation(
-        { inPlace, shownDisplayId: shown?.displayId },
+        { inPlace, shownDisplayId: shown?.displayId, signal },
         prototypeTarget,
         device,
         args,
         dependencies,
-        signal,
       ),
     );
     // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
@@ -242,7 +244,9 @@ async function performMutation(
     const { result, warning, mutationReply } = await withdrawOnAbort(
       ordering,
       undefined,
-      sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
+      sendPrototype(prototypeTarget, sendArgs, stage, {
+        signal,
+        displayId,
         env: dependencies.env,
         superseded: () => isSuperseded(commits, scope, target, generation),
         beforeSend: async () => {
@@ -624,18 +628,16 @@ function commitMutation(
   const { store, events } = dependencies;
   const { args, target, result, placed, inPlace, previouslyShown } = outcome;
   settleShowEvents(events, scope, source, { target, inPlace, success: result.success });
-  clearMutationEvents(
-    events,
-    scope,
-    target,
-    args.action,
-    result.success,
-    outcome.startedFreshEvents && !previouslyShown,
-  );
+  clearMutationEvents(events, scope, target, {
+    action: args.action,
+    success: result.success,
+    clearFailedShow: outcome.startedFreshEvents && !previouslyShown,
+  });
   if (args.action === "show" && result.success && target.id && args.replaceOthers !== false) {
     events.replaceShown(scope.deviceId, target.id);
   }
-  const lastResult = store.record(scope, args.action, target, result, placed.displayId, {
+  const lastResult = store.record(scope, args.action, target, result, {
+    displayId: placed.displayId,
     data: args.action === "show" ? (args.spec as PrototypeSpec | undefined)?.data : undefined,
     chrome: placed.chrome,
     replaceOthers: args.replaceOthers,

@@ -143,9 +143,7 @@ describe("navigation_edges distinct-transition readers (#10194)", () => {
       APP,
       "Home",
       "Settings",
-      "tapOn",
-      { text: "Settings" },
-      // A device clock that stepped backwards must not demote the newest row.
+      { toolName: "tapOn", toolArgs: { text: "Settings" } }, // A device clock that stepped backwards must not demote the newest row.
       5,
     );
 
@@ -282,8 +280,10 @@ describe("navigation_edges traversal retention (#10194)", () => {
     maxEdgeTraversalsPerTransition?: number;
     evictionChunkSize?: number;
   }) {
-    return new NavigationRetention(db, config, undefined, undefined, async () => {
-      yields += 1;
+    return new NavigationRetention(db, config, {
+      yieldBetweenBatches: async () => {
+        yields += 1;
+      },
     });
   }
 
@@ -375,8 +375,20 @@ describe("navigation_edges traversal retention (#10194)", () => {
   });
 
   test("deleting a surplus row cascades its child rows and keeps the newest row's", async () => {
-    const oldest = await repo.createEdge(APP, "Home", "Settings", "tapOn", { text: "S" }, 1);
-    const newest = await repo.createEdge(APP, "Home", "Settings", "tapOn", { text: "S" }, 2);
+    const oldest = await repo.createEdge(
+      APP,
+      "Home",
+      "Settings",
+      { toolName: "tapOn", toolArgs: { text: "S" } },
+      1,
+    );
+    const newest = await repo.createEdge(
+      APP,
+      "Home",
+      "Settings",
+      { toolName: "tapOn", toolArgs: { text: "S" } },
+      2,
+    );
     await repo.setEdgeModals(oldest.id, "from", ["old-modal"]);
     await repo.setEdgeModals(newest.id, "from", ["new-modal"]);
 
@@ -389,9 +401,27 @@ describe("navigation_edges traversal retention (#10194)", () => {
   test("a row referenced by a test-coverage session is never deleted", async () => {
     const coverage = new TestCoverageRepository(db);
     const session = await coverage.startSession("session-1", APP);
-    const oldest = await repo.createEdge(APP, "Home", "Settings", "tapOn", { text: "S" }, 1);
-    await repo.createEdge(APP, "Home", "Settings", "tapOn", { text: "S" }, 2);
-    await repo.createEdge(APP, "Home", "Settings", "tapOn", { text: "S" }, 3);
+    const oldest = await repo.createEdge(
+      APP,
+      "Home",
+      "Settings",
+      { toolName: "tapOn", toolArgs: { text: "S" } },
+      1,
+    );
+    await repo.createEdge(
+      APP,
+      "Home",
+      "Settings",
+      { toolName: "tapOn", toolArgs: { text: "S" } },
+      2,
+    );
+    await repo.createEdge(
+      APP,
+      "Home",
+      "Settings",
+      { toolName: "tapOn", toolArgs: { text: "S" } },
+      3,
+    );
     await coverage.recordEdgeTraversal(session.id, oldest.id, 1);
 
     await retention({ maxEdgeTraversalsPerTransition: 1 }).prune(1_000_000);

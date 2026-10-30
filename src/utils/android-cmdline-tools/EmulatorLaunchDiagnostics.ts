@@ -6,6 +6,7 @@ import type { Timer } from "../SystemTimer";
 import { ActionableError, type ExecResult } from "../../models";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
 import { boundedEmulatorOutputTail, type LaunchFailureCategory } from "./EmulatorLauncher";
+import type { EarlyExitStatus } from "./EmulatorLaunchSupport";
 import {
   detectArchitecturePanic,
   detectCorruptImage,
@@ -91,9 +92,7 @@ export function appendCategory(error: ActionableError, category: LaunchFailureCa
 
 export function formatEarlyExitError(
   avdName: string,
-  code: number | null,
-  signal: NodeJS.Signals | null,
-  category: LaunchFailureCategory | undefined,
+  { code, signal, category }: EarlyExitStatus,
   output: string,
   accelCheckOutput: string,
 ): ActionableError {

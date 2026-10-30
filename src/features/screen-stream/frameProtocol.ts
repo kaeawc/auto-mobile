@@ -228,7 +228,7 @@ export class FrameDecoder {
       // avoids the former concatenate-on-every-chunk behavior while retaining
       // no more than this one completed payload.
       const payload = this.buffer.takeDetached(expected);
-      this.emitRecord(pending, payload, frames, onAudio, onFrame, onEncodedVideo);
+      this.emitRecord(pending, payload, frames, { onAudio, onFrame, onEncodedVideo });
       this.pendingHeader = null;
       madeProgress = true;
     }
@@ -239,9 +239,15 @@ export class FrameDecoder {
     header: FrameHeader,
     payload: Buffer,
     frames: DecodedFrame[],
-    onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void,
-    onEncodedVideo?: (video: DecodedEncodedVideo) => void,
+    {
+      onAudio,
+      onFrame,
+      onEncodedVideo,
+    }: {
+      onAudio?: (audio: DecodedAudio) => void;
+      onFrame?: (frame: DecodedFrame) => void;
+      onEncodedVideo?: (video: DecodedEncodedVideo) => void;
+    },
   ): void {
     if (isAudioHeader(header)) {
       onAudio?.({ pcm16le: payload });

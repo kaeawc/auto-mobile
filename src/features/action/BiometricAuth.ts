@@ -41,6 +41,21 @@ export interface BiometricAuthOptions {
 }
 
 /** Minimal simctl surface needed by the iOS biometric path (injectable for tests). */
+/** Display-fence collaborators plus the iOS seams BiometricAuth drives; all optional. */
+export type BiometricAuthCollaborators = DisplayFenceDependencies & {
+  deviceTraits?: DeviceTraits;
+  simctl?: BiometricSimctl | null;
+  iosSdkTriggers?: IosSdkTriggerSenderFactory;
+};
+
+/** The simulator, enrollment reader and notification targets for one BiometricKit post. */
+interface IosBiometricPost {
+  simctl: BiometricSimctl;
+  enrollment: DeviceState;
+  targets: string[];
+  udid: string;
+}
+
 export interface BiometricSimctl {
   executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
 }
@@ -85,17 +100,19 @@ export class BiometricAuth extends BaseVisualChange {
   } as const;
 
   private readonly deviceTraits: DeviceTraits;
+  private readonly simctl: BiometricSimctl | null;
+  private readonly iosSdkTriggers: IosSdkTriggerSenderFactory;
 
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
-    private simctl: BiometricSimctl | null = null,
-    private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,
-    collaborators: DisplayFenceDependencies & { deviceTraits?: DeviceTraits } = {},
+    collaborators: BiometricAuthCollaborators = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
     this.device = device;
+    this.simctl = collaborators.simctl ?? null;
+    this.iosSdkTriggers = collaborators.iosSdkTriggers ?? defaultIosSdkTriggerSenderFactory;
     this.deviceTraits = collaborators.deviceTraits ?? defaultDeviceTraits;
   }
 
@@ -319,14 +336,12 @@ export class BiometricAuth extends BaseVisualChange {
       return { ...base, message: armed };
     }
     const simctl = this.simctl ?? new SimCtlClient(this.device);
-    const posted = await this.postIosBiometricResult(
-      options,
-      modality,
+    const posted = await this.postIosBiometricResult(options, modality, {
       simctl,
-      new DeviceState(this.device, { simctl }),
-      this.getIosBiometricTargets(options.action, modality),
-      this.device.deviceId,
-    );
+      enrollment: new DeviceState(this.device, { simctl }),
+      targets: this.getIosBiometricTargets(options.action, modality),
+      udid: this.device.deviceId,
+    });
     if (posted.success) {
       return { ...base, message: `${armed} ${posted.message ?? ""}`.trim() };
     }
@@ -386,7 +401,12 @@ export class BiometricAuth extends BaseVisualChange {
     }
 
     const targets = this.getIosBiometricTargets(options.action, modality);
-    return this.postIosBiometricResult(options, modality, simctl, enrollment, targets, udid);
+    return this.postIosBiometricResult(options, modality, {
+      simctl,
+      enrollment,
+      targets,
+      udid,
+    });
   }
 
   private iosBiometricEnrollmentResult(
@@ -432,11 +452,9 @@ export class BiometricAuth extends BaseVisualChange {
   private async postIosBiometricResult(
     options: BiometricAuthOptions,
     modality: NonNullable<BiometricAuthOptions["modality"]>,
-    simctl: BiometricSimctl,
-    enrollment: DeviceState,
-    targets: string[],
-    udid: string,
+    post: IosBiometricPost,
   ): Promise<BiometricAuthResult> {
+    const { simctl, enrollment, targets, udid } = post;
     try {
       const enrollmentState = await enrollment.getBiometricEnrollmentState();
       if (enrollmentState.error) {

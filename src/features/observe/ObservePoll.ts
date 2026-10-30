@@ -425,9 +425,11 @@ async function capturePoll(
   observeScreen: PollingObserveScreen,
   timer: Timer,
   options: ObservePollOptions,
-  minTimestamp: number,
-  timeoutMs?: number,
-  readBackStackEachPoll = options.readBackStackEachPoll,
+  {
+    minTimestamp,
+    timeoutMs,
+    readBackStackEachPoll = options.readBackStackEachPoll,
+  }: { minTimestamp: number; timeoutMs?: number; readBackStackEachPoll?: boolean },
 ): Promise<PollCapture> {
   const generation = observeScreen.captureCacheGeneration?.();
   const cachedAt = timer.now();
@@ -474,7 +476,8 @@ async function reconcileTerminalCapture(
     // No exhausted remaining budget: use execute's normal capture timeout,
     // while the outer race (like the terminal read) is bounded only by abort.
     const capture = await raceWithDeadline(
-      () => capturePoll(observeScreen, timer, options, minTimestamp, undefined, true),
+      () =>
+        capturePoll(observeScreen, timer, options, { minTimestamp, readBackStackEachPoll: true }),
       { timer, signal: options.signal, label: "Observe poll attribution reconciliation" },
     );
     throwIfAborted(options.signal);
@@ -580,13 +583,10 @@ export async function pollObserveUntil(
       freshnessState.deviceFloor,
       freshnessState.enteringReference,
     );
-    const capture = await capturePoll(
-      observeScreen,
-      timer,
-      options,
+    const capture = await capturePoll(observeScreen, timer, options, {
       minTimestamp,
-      Math.max(1, options.timeoutMs - (timer.now() - start)),
-    );
+      timeoutMs: Math.max(1, options.timeoutMs - (timer.now() - start)),
+    });
     const { observation, generation: cacheGeneration, cachedAt: cacheStartedAt } = capture;
     polls++;
     lastCapture = capture;

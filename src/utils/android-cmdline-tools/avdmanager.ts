@@ -252,6 +252,9 @@ function parseSystemImageRow(line: string): SystemImage | undefined {
     packageName,
     apiLevel: parsedRuntime.apiLevel,
     apiIdentifier: parsedRuntime.apiIdentifier,
+    ...(parsedRuntime.extensionLevel === undefined
+      ? {}
+      : { extensionLevel: parsedRuntime.extensionLevel }),
     tag: parsedRuntime.tag,
     abi: parsedRuntime.abi,
     versionInfo: line.split(/\s+/).slice(1).join(" "),
@@ -278,6 +281,8 @@ export interface SystemImage {
   apiIdentifier: string;
   /** Integer major API used for capability, minSdk, and range checks. */
   apiLevel: number;
+  /** SDK extension level of an `android-<api>-ext<N>` package; absent for the base image. */
+  extensionLevel?: number;
   tag: string;
   abi: string;
   versionInfo: string;

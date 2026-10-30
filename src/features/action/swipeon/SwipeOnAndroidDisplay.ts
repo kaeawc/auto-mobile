@@ -799,9 +799,7 @@ export class SwipeOnAndroidDisplay {
         this.ctx().adb,
         `swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
         target.displayId,
-        signal,
-        target.assertCurrent,
-        { onDispatch: onDispatched },
+        { signal, assertCurrent: target.assertCurrent, onDispatch: onDispatched },
       );
     }
   }

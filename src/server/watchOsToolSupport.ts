@@ -9,6 +9,8 @@ export const WATCHOS_SUPPORTED_TOOLS: ReadonlySet<string> = new Set<string>([
   "installApp",
   "uninstallApp",
   "listApps",
+  "launchApp",
+  "terminateApp",
   "observe",
 ]);
 

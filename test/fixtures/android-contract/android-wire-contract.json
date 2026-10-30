@@ -13509,6 +13509,12 @@
         "hasDefault": true
       },
       {
+        "name": "allowSecureInRequest",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "timeoutMs",
         "type": "int",
         "nullable": true,

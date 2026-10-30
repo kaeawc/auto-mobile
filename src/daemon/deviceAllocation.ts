@@ -142,6 +142,13 @@ export interface DeviceAllocationPort extends Pick<
   isPotentialAllocationSupply(device: PooledDevice): boolean;
 }
 
+/** The recovery a single-attempt assignment serves, and the caller's cancellation. */
+export interface AssignFromOptions {
+  recoveryTarget?: SessionRecoveryTarget;
+  settledRecoveryLoss?: boolean;
+  signal?: AbortSignal;
+}
+
 export class DeviceAllocation {
   constructor(private readonly port: DeviceAllocationPort) {}
 
@@ -452,7 +459,6 @@ export class DeviceAllocation {
         () => this.port.getGenericallyAllocatableDevices(platform),
         "platform pool empty",
         () => this.port.hasPendingAndroidRecovery(platform),
-        undefined,
         { signal },
       );
     }
@@ -465,8 +471,7 @@ export class DeviceAllocation {
       () => this.port.getDevicesMatchingRecoveryTarget(recoveryTarget),
       "recovery target pool empty",
       () => this.port.hasPendingAndroidRecovery(platform),
-      recoveryTarget,
-      { settledRecoveryLoss, signal },
+      { recoveryTarget, settledRecoveryLoss, signal },
     );
     if (ownership && result.success && result.deviceId !== undefined && result.session) {
       await this.claimRecoveredDevice(
@@ -561,7 +566,6 @@ export class DeviceAllocation {
             .filter((device) => !this.port.isDrivenByForeignDaemon(device)),
         "platform pool empty",
         () => this.port.hasPendingAndroidRecovery(platform),
-        undefined,
         { signal },
       ),
     );
@@ -634,7 +638,6 @@ export class DeviceAllocation {
         () => this.port.getUnownedDevicesMatchingCriteria(criteria),
         "criteria pool empty",
         () => this.port.hasPendingAndroidRecoveryMatching(criteria),
-        undefined,
         { signal },
       ),
     );
@@ -656,11 +659,7 @@ export class DeviceAllocation {
     selectCandidates: () => PooledDevice[],
     emptyCandidatePoolReason: string,
     hasPendingRecovery: () => boolean,
-    recoveryTarget?: SessionRecoveryTarget,
-    {
-      settledRecoveryLoss = false,
-      signal,
-    }: { settledRecoveryLoss?: boolean; signal?: AbortSignal } = {},
+    options: AssignFromOptions = {},
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -672,6 +671,7 @@ export class DeviceAllocation {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
+    const { recoveryTarget, settledRecoveryLoss = false, signal } = options;
     let livenessUnknown = false;
     let refreshCompleteness: DiscoveryCompleteness | undefined;
     let refreshFailure: string | undefined;

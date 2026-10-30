@@ -67,7 +67,12 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
   });
 
   function startRoute(): void {
-    routes.start(DEVICE, WAYPOINTS, 60_000, 1_000, true, async () => undefined);
+    routes.start(
+      DEVICE,
+      WAYPOINTS,
+      { durationMs: 60_000, updateIntervalMs: 1_000, loop: true },
+      async () => undefined,
+    );
   }
 
   /** A is released for idleness and B then takes the device, with its own route running. */

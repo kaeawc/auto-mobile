@@ -60,6 +60,12 @@ export function createDefaultObserveScreen(
   return create(device, { create: () => adb });
 }
 
+/** The session a setup runs in and the seam it calls internal tools through. */
+export interface DefaultUIStateSetupOptions {
+  sessionUuid?: string;
+  internalToolCaller?: InternalToolCaller;
+}
+
 export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -73,8 +79,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
     adb: AdbExecutor,
     observeScreenProvider?: () => ObserveScreenLike,
     timer: Timer = defaultTimer,
-    sessionUuid?: string,
-    internalToolCaller: InternalToolCaller = registeredInternalToolCaller,
+    {
+      sessionUuid,
+      internalToolCaller = registeredInternalToolCaller,
+    }: DefaultUIStateSetupOptions = {},
   ) {
     this.internalTools = internalToolCaller;
     this.device = device;

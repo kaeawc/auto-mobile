@@ -102,7 +102,8 @@ export class IosBaselineReset {
       }
       throw toActionableError(error, "Cannot reserve iOS reset boot slot");
     }
-    const operation = () => this.eraseAndBoot(device, profile, owned, phases, deferredBoot, signal);
+    const operation = () =>
+      this.eraseAndBoot(device, profile, owned, phases, { deferredBoot, signal });
     try {
       return await (reservation ? reservation.run(operation) : operation());
     } finally {
@@ -183,8 +184,7 @@ export class IosBaselineReset {
     profile: IosProfile,
     assertOwned: () => Promise<void>,
     phases: Record<string, number>,
-    deferredBoot: boolean,
-    signal?: AbortSignal,
+    { deferredBoot, signal }: { deferredBoot: boolean; signal?: AbortSignal },
   ): Promise<ResetOutcome> {
     if (this.dependencies.iosBootInstrumentation.reserveBoot) {
       await assertOwned();
@@ -278,12 +278,9 @@ export class IosBaselineReset {
     expectedState: ExpectedState,
     action: string,
   ): Promise<void> {
-    await readExpectedIosResetTarget(
-      this.dependencies.simctl,
-      udid,
-      profile,
-      expectedState,
+    await readExpectedIosResetTarget(this.dependencies.simctl, udid, profile, {
+      state: expectedState,
       action,
-    );
+    });
   }
 }

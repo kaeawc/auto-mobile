@@ -110,9 +110,9 @@ export function runDaemonClientContract(
       await withHarness({ result: {} }, async ({ client, requestCount }) => {
         const reason = new Error("caller gave up");
         const signal = AbortSignal.abort(reason);
-        expect(await rejection(client.callTool("observe", {}, undefined, undefined, signal))).toBe(
-          reason,
-        );
+        expect(
+          await rejection(client.callTool("observe", {}, undefined, undefined, { signal })),
+        ).toBe(reason);
         expect(await rejection(client.readResource("automobile:test", {}, { signal }))).toBe(
           reason,
         );
@@ -128,7 +128,7 @@ export function runDaemonClientContract(
         const controller = new AbortController();
         const reason = new Error("caller gave up");
         const call = rejection(
-          client.callTool("observe", {}, undefined, undefined, controller.signal),
+          client.callTool("observe", {}, undefined, undefined, { signal: controller.signal }),
         );
         await settle();
         controller.abort(reason);

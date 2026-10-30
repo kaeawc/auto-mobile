@@ -27,6 +27,7 @@ import {
 } from "../../../src/features/observe/androidLauncherPackages";
 import { setDeviceIncarnationResolver } from "../../../src/utils/deviceIncarnation";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import type { AndroidGlobalActionOptions } from "../../../src/features/observe/android/AndroidClientRequests";
 import type { BootedDevice } from "../../../src/models";
 import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
 import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
@@ -102,7 +103,7 @@ describe("PressButton Android keycode dispatch", () => {
         viewHierarchy: { packageName: appId, hierarchy: { node: {} } },
       }),
     );
-    const action = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+    const action = new PressButton(androidDevice, fakeAdb, fakeTimer, {
       window,
       observeScreen: observe,
       awaitIdle: new FakeAwaitIdle(),
@@ -138,7 +139,7 @@ describe("PressButton Android keycode dispatch", () => {
           return { success: outcome !== "refused", totalTimeMs: 0, error: "stale frame" };
         },
       };
-      const action = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const action = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
       });
@@ -168,7 +169,7 @@ describe("PressButton Android keycode dispatch", () => {
       requestGlobalAction: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
       ) => {
-        args[5]?.();
+        args[3]?.onDispatch?.();
         expect(marks).toBe(1);
         return {
           success: false,
@@ -179,7 +180,7 @@ describe("PressButton Android keycode dispatch", () => {
         };
       },
     };
-    const result = await new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+    const result = await new PressButton(androidDevice, fakeAdb, fakeTimer, {
       globalActionClient,
       frameContextClient,
     }).press("back", 500, undefined, undefined, () => marks++);
@@ -189,7 +190,7 @@ describe("PressButton Android keycode dispatch", () => {
   });
 
   const press = async (button: string, window?: WindowInterface) => {
-    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
       ...(window ? { window } : {}),
       globalActionClient,
       frameContextClient,
@@ -298,7 +299,7 @@ describe("PressButton Android keycode dispatch", () => {
             requestGlobalAction: async (
               ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
             ) => {
-              args[5]?.();
+              args[3]?.onDispatch?.();
               if (reason === "thrown after send") {
                 throw new Error(reason);
               }
@@ -327,7 +328,7 @@ describe("PressButton Android keycode dispatch", () => {
             ) => {
               const acknowledged = reason === "device refused" || reason === "unsupported";
               if (acknowledged) {
-                args[5]?.();
+                args[3]?.onDispatch?.();
               }
               return {
                 success: false,
@@ -347,7 +348,7 @@ describe("PressButton Android keycode dispatch", () => {
           requestGlobalAction: async (
             ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
           ) => {
-            args[5]?.();
+            args[3]?.onDispatch?.();
             return { success: true, action: button, totalTimeMs: 1, acknowledged: true };
           },
         };
@@ -360,7 +361,7 @@ describe("PressButton Android keycode dispatch", () => {
         requestGlobalAction: async (
           ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
         ) => {
-          args[5]?.();
+          args[3]?.onDispatch?.();
           return {
             success: false,
             action: "home",
@@ -391,19 +392,12 @@ describe("PressButton Android keycode dispatch", () => {
         "resolve-activity",
         createExecResult("com.android.car.carlauncher/.CarLauncher", ""),
       );
-      const action = new PressButton(
-        { ...androidDevice, formFactor },
-        fakeAdb,
-        fakeTimer,
-        undefined,
-        undefined,
-        {
-          window: sequencedWindow([appId]),
-          globalActionClient: {
-            requestGlobalAction: async () => ({ success: false, action: "home", totalTimeMs: 0 }),
-          },
+      const action = new PressButton({ ...androidDevice, formFactor }, fakeAdb, fakeTimer, {
+        window: sequencedWindow([appId]),
+        globalActionClient: {
+          requestGlobalAction: async () => ({ success: false, action: "home", totalTimeMs: 0 }),
         },
-      );
+      });
       const result = await dispatch(action, "home");
       expect(result.success).toBe(success);
       expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
@@ -431,8 +425,6 @@ describe("PressButton Android keycode dispatch", () => {
         { ...androidDevice, formFactor: "automotive" },
         fakeAdb,
         fakeTimer,
-        undefined,
-        undefined,
         {
           window,
           observeScreen: observe,
@@ -530,7 +522,7 @@ describe("PressButton Android keycode dispatch", () => {
   // press as failed for the rest of the cache window.
   describe("home verification self-heals a stale launcher cache", () => {
     const verifier = (window: WindowInterface): PressButton => {
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window,
@@ -552,7 +544,9 @@ describe("PressButton Android keycode dispatch", () => {
 
       fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
-        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
+        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, {
+          incarnationToken: "1",
+        }),
       ).toBe("com.launcher.b");
     });
 
@@ -568,7 +562,9 @@ describe("PressButton Android keycode dispatch", () => {
 
       fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
-        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
+        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, {
+          incarnationToken: "1",
+        }),
       ).toBe("com.launcher.a");
     });
   });
@@ -583,7 +579,7 @@ describe("PressButton Android keycode dispatch", () => {
       const window = launcherWindow();
       const controller = new AbortController();
 
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window,
@@ -607,7 +603,7 @@ describe("PressButton Android keycode dispatch", () => {
       const controller = new AbortController();
       controller.abort();
 
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window: launcherWindow(),
@@ -631,7 +627,7 @@ describe("PressButton Android keycode dispatch", () => {
         },
       };
       const window = launcherWindow();
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window,
@@ -655,7 +651,7 @@ describe("PressButton Android keycode dispatch", () => {
       // verifyAndroidHomeForeground only needs these collaborators. Avoid the
       // production constructor here because it allocates a CtrlProxy port that
       // is unrelated to this pre-read deadline gate.
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window,
@@ -680,7 +676,7 @@ describe("PressButton Android keycode dispatch", () => {
         }
       }
       const window = new BudgetSpendingWindow();
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window,
@@ -699,16 +695,15 @@ describe("PressButton Android keycode dispatch", () => {
           _action: string,
           _timeoutMs?: number,
           _perf?: unknown,
-          _frameContext?: string,
-          signal?: AbortSignal,
+          options?: AndroidGlobalActionOptions,
         ) => {
-          capturedSignal = signal;
+          capturedSignal = options?.signal;
           // Report failure so the flow falls back to the ADB keyevent path.
           return { success: false, action: "home", totalTimeMs: 0, error: "not now" };
         },
       };
       const controller = new AbortController();
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window: launcherWindow(),
@@ -726,13 +721,13 @@ describe("PressButton Android keycode dispatch", () => {
           _action: string,
           _timeoutMs?: number,
           _perf?: unknown,
-          frameContext?: string,
+          options?: AndroidGlobalActionOptions,
         ) => {
-          frameContexts.push(frameContext);
+          frameContexts.push(options?.frameContext);
           return { success: true, action: "back", totalTimeMs: 0 };
         },
       };
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window: launcherWindow(),
@@ -759,7 +754,7 @@ describe("PressButton Android keycode dispatch", () => {
         },
       };
       const controller = new AbortController();
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
       });
@@ -782,7 +777,7 @@ describe("PressButton Android keycode dispatch", () => {
         activityName: "Settings",
         layoutSeqSum: 0,
       });
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, {
         globalActionClient,
         frameContextClient,
         window,
@@ -817,7 +812,7 @@ describe("PressButton Android keycode dispatch", () => {
       }),
     };
 
-    const pressButton = new PressButton(androidDevice, fakeAdb, undefined, undefined, undefined, {
+    const pressButton = new PressButton(androidDevice, fakeAdb, undefined, {
       globalActionClient,
       frameContextClient,
     });
@@ -837,7 +832,7 @@ describe("PressButton Android keycode dispatch", () => {
       }),
     };
 
-    const pressButton = new PressButton(androidDevice, fakeAdb, undefined, undefined, undefined, {
+    const pressButton = new PressButton(androidDevice, fakeAdb, undefined, {
       globalActionClient,
       frameContextClient,
     });

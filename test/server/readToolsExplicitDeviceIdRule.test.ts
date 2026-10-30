@@ -1073,7 +1073,7 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
     current.simctl,
     client,
     new FakeVirtualDeviceLifecycleCoordinator(),
-    current.timer,
+    { timer: current.timer },
   );
   const restoreFactory = snapshotPlatformDeviceManagerFactory();
   const previousInstance = Reflect.get(PlatformDeviceManagerFactory, "instance");

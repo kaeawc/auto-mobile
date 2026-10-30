@@ -139,7 +139,6 @@ export interface PrototypeStatusStore {
     action: PrototypeMutation,
     target: { id?: string; all?: true },
     result: PrototypeResult,
-    displayId?: number,
     details?: PrototypeRecordDetails,
   ): PrototypeLastResult;
   readonly shownSpecs: PrototypeShownSpecs;
@@ -147,8 +146,12 @@ export interface PrototypeStatusStore {
   /** The device wiped this prototype's stored values (#12522): drop the reported `storage`. */
   forgetStorage(deviceId: string, id: string): void;
 }
-/** What a show placed besides its display: the spec's data (#11673) and the chrome drawn (#12064). */
+/**
+ * Where a mutation landed and what a show placed: its display, the spec's data (#11673) and the
+ * chrome drawn (#12064). An absent display falls back to the one the prototype is already shown on.
+ */
 export interface PrototypeRecordDetails {
+  displayId?: number;
   data?: PrototypeData;
   chrome?: PrototypeWindowChrome;
   replaceOthers?: boolean;
@@ -358,9 +361,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     action: PrototypeMutation,
     target: { id?: string; all?: true },
     result: PrototypeResult,
-    displayId?: number,
     details: PrototypeRecordDetails = {},
   ): PrototypeLastResult {
+    const { displayId } = details;
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
     // A dismiss acts on the prototype already shown, wherever it was shown.

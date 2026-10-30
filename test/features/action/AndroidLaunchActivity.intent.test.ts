@@ -55,9 +55,11 @@ describe("Android explicit intent launch (#14080)", () => {
       ),
     );
 
-    const result = await launcher(adb).performLaunch(APP, undefined, 10, perf(), undefined, {
-      component: ".DebugActivity",
-      extras: [{ key: "screen", type: "string", value: "settings" }],
+    const result = await launcher(adb).performLaunch(APP, undefined, 10, perf(), {
+      intent: {
+        component: ".DebugActivity",
+        extras: [{ key: "screen", type: "string", value: "settings" }],
+      },
     });
 
     expect(result).toEqual({
@@ -82,7 +84,7 @@ describe("Android explicit intent launch (#14080)", () => {
     );
 
     const thrown = await launcher(adb)
-      .performLaunch(APP, undefined, 0, perf(), undefined, { component: ".Secret" })
+      .performLaunch(APP, undefined, 0, perf(), { intent: { component: ".Secret" } })
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -97,8 +99,8 @@ describe("Android explicit intent launch (#14080)", () => {
   test("a component in another package is refused before any adb command", async () => {
     const adb = new FakeAdbExecutor();
     await expect(
-      launcher(adb).performLaunch(APP, undefined, 0, perf(), undefined, {
-        component: "com.android.settings/.Settings",
+      launcher(adb).performLaunch(APP, undefined, 0, perf(), {
+        intent: { component: "com.android.settings/.Settings" },
       }),
     ).rejects.toBeInstanceOf(AndroidLaunchIntentError);
     expect(adb.getExecutedCommands()).toEqual([]);

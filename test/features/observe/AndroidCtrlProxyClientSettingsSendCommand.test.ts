@@ -166,7 +166,7 @@ const methods = [
   {
     operation: "put",
     invoke: (client: AndroidCtrlProxyClient, signal?: AbortSignal) =>
-      client.requestSettingsPut("secure", "key", null, "string", 50, perf, signal),
+      client.requestSettingsPut("secure", "key", null, "string", { timeoutMs: 50, perf, signal }),
     oldFrame: (requestId: string) =>
       serializeCtrlProxyRequest(
         ctrlProxyRequests.requestSettingsPut({

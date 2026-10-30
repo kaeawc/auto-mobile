@@ -112,10 +112,6 @@ export async function bindWatchSession(
     timer,
     deadlineMs,
     signal,
-    () =>
-      new ActionableError(
-        `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
-      ),
     bindUndoneIfUndelivered(
       async (receipt, bindSignal) =>
         await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
@@ -124,6 +120,12 @@ export async function bindWatchSession(
           signal: bindSignal,
         }),
     ),
+    {
+      timeoutError: () =>
+        new ActionableError(
+          `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
+        ),
+    },
   );
 }
 

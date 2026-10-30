@@ -1,6 +1,7 @@
 import type { RawTouchFrame, GestureEvent, PointerToolType, StylusButton } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import type { CoordScaler, GestureScaler } from "./AxisRanges";
+import type { Point } from "../../../models/Point";
 
 interface ContactInfo {
   /** First observed raw position per axis; unknownAxes retains missing START axes. */
@@ -225,7 +226,12 @@ export class GestureClassifier {
             frame.arrivedAt,
             contact.pen.toolType,
           )
-        : this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
+        : this.evaluateSwipe(
+            { x: downX, y: downY },
+            { x: upX, y: upY },
+            durationMs,
+            frame.arrivedAt,
+          );
     return { ...gesture, ...this.downStamp(contact), ...this.penFields(contact) };
   }
 
@@ -331,13 +337,13 @@ export class GestureClassifier {
   }
 
   private evaluateSwipe(
-    downX: number,
-    downY: number,
-    upX: number,
-    upY: number,
+    down: Point,
+    up: Point,
     durationMs: number,
     arrivedAt: number,
   ): GestureEvent {
+    const { x: downX, y: downY } = down;
+    const { x: upX, y: upY } = up;
     const dx = upX - downX;
     const dy = upY - downY;
     const displacement = dist(downX, downY, upX, upY);

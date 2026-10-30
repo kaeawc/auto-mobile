@@ -48,6 +48,9 @@ export interface KeyValueEntry {
   redacted?: true;
 }
 
+/** The key, value and type a `setPreference` write sends; `value: null` removes the key. */
+export type KeyValueWrite = Pick<KeyValueEntry, "key" | "value" | "type">;
+
 /**
  * Active subscription to storage changes for a preference file.
  */

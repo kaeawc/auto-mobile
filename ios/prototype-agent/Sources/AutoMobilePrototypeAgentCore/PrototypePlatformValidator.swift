@@ -338,6 +338,7 @@ enum PrototypePlatformValidator {
                 )
             }
             try PrototypeSecureStorageRules.validateEmit(fields, path: path, secure: declared.secureKeys)
+            try PrototypeSecureStorageRules.validateRequest(fields, path: path, secure: declared.secureKeys)
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)

@@ -77,6 +77,8 @@ export interface DaemonProxyToolCallOptions {
    * the daemon answer with a task handle.
    */
   readonly declaresTasks?: boolean;
+  /** The client's cancellation of this call. */
+  readonly signal?: AbortSignal;
 }
 
 /** Failures that give no evidence the forwarded session is still live and admitted. */

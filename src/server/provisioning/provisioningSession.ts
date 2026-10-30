@@ -66,7 +66,6 @@ export async function bindProvisionedDeviceSession(
     binding.timer,
     binding.totalDeadlineMs,
     binding.signal,
-    "binding the device session",
     bindUndoneIfUndelivered(
       async (receipt, bindSignal) =>
         ctx.bindBootedDeviceSession(
@@ -86,8 +85,11 @@ export async function bindProvisionedDeviceSession(
         ),
       () => boot,
     ),
-    (settlement) => {
-      settlementState.bindingSettlements.push(settlement);
+    {
+      phase: "binding the device session",
+      onPendingSettlement: (settlement) => {
+        settlementState.bindingSettlements.push(settlement);
+      },
     },
   );
 }

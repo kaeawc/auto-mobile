@@ -41,8 +41,7 @@ test("audit reports the grey foreground failure despite a composited captured ic
   const result = await new WcagAudit(new FakeTimer(), noBaseline, checker).audit(
     [{ text: "Sample", bounds: { left: 0, top: 0, right: 100, bottom: 50 }, textSize: 16 }],
     { node: [] },
-    screenshot,
-    "real-pixel-composite",
+    { screenshotPath: screenshot, packageName: "real-pixel-composite" },
     { level: "AA", failureMode: "report", useBaseline: false },
     160,
   );

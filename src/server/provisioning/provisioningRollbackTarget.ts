@@ -94,12 +94,15 @@ async function resolveCreatedIosProvisionDeviceRollbackTarget(
       deps.timer,
       rollbackDeadlineMs,
       undefined,
-      () => new Error("iOS rollback identity discovery exceeded the rollback budget"),
       async (deadlineSignal) =>
         await deviceManager.getDeviceImagesDetailed("ios", {
           bypassIosDeviceListCache: true,
           signal: deadlineSignal,
         }),
+      {
+        timeoutError: () =>
+          new Error("iOS rollback identity discovery exceeded the rollback budget"),
+      },
     );
     if (!discovery.succeededPlatforms.has("ios")) {
       logger.warn(

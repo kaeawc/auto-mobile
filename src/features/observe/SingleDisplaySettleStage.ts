@@ -147,14 +147,12 @@ export class SingleDisplaySettleStage {
       .attributeFocusedOwnWindowToForeground(result, foregroundIdentity, minTimestamp);
     const windowIdentityMismatch = await this.d
       .windowIdentity()
-      .resolveWindowIdentityMismatch(
-        result,
-        foregroundIdentity,
+      .resolveWindowIdentityMismatch(result, foregroundIdentity, {
         postCaptureForeground,
         getConfirmedFrameworkErrorDialog,
         minTimestamp,
         signal,
-      );
+      });
     result.freshness = computeFreshness({
       requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
       actualTimestamp: this.d.resolveObservationTimestampMs(result),

@@ -2,7 +2,11 @@ import type { HostChildProcess } from "../HostCommandExecutor";
 import { logger } from "../logger";
 import { redactAndroidCommandOutput } from "./redactAndroidCommandOutput";
 import { errorMessage } from "../describeUnknownError";
-import type { EmulatorLauncherHost, EmulatorLaunchState } from "./EmulatorLaunchSupport";
+import type {
+  EmulatorLauncherHost,
+  EmulatorLaunchState,
+  EmulatorProcessOptions,
+} from "./EmulatorLaunchSupport";
 
 export const STARTUP_SERIAL_POLL_INTERVAL_MS = 500;
 export const STARTUP_STDOUT_GRACE_MS = 1_000;
@@ -14,8 +18,7 @@ export class EmulatorStartupValidation {
     private readonly state: EmulatorLaunchState,
     private readonly child: HostChildProcess,
     private readonly resolveStartup: () => void,
-    private readonly expectedDeviceId?: string,
-    private readonly signal?: AbortSignal,
+    private readonly options: Pick<EmulatorProcessOptions, "expectedDeviceId" | "signal"> = {},
   ) {}
 
   observeOutput(output: string, isStdout: boolean, diagnosticOutput: string): void {
@@ -57,7 +60,7 @@ export class EmulatorStartupValidation {
   }
 
   private serial(): string | undefined {
-    return this.expectedDeviceId ?? this.host.launchTargetDeviceIds().get(this.child);
+    return this.options.expectedDeviceId ?? this.host.launchTargetDeviceIds().get(this.child);
   }
 
   private canCompleteEarly(): boolean {
@@ -77,7 +80,7 @@ export class EmulatorStartupValidation {
     }
     this.state.serialProbeInFlight = true;
     try {
-      if (await this.host.isEmulatorSerialListed(serial, this.signal)) {
+      if (await this.host.isEmulatorSerialListed(serial, this.options.signal)) {
         if (this.canCompleteEarly()) {
           this.resolveStartup();
         }

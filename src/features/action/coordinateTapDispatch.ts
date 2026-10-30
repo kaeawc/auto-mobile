@@ -8,6 +8,7 @@ import {
 import { ActionableError, type Point } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
+import type { IosFrameDispatchOptions } from "../observe/ios/CtrlProxyDispatch";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -37,9 +38,7 @@ export interface IosCoordinateTapClient {
     x: number,
     y: number,
     timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: IosFrameDispatchOptions,
   ): ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>;
 
   requestTapCoordinates(request: TapCoordinatesRequest): Promise<{
@@ -134,9 +133,9 @@ export async function dispatchAndroidCoordinateTap(
       ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`
       : `tap ${x} ${y}`,
     undefined,
-    signal,
-    assertCurrent,
     {
+      signal,
+      assertCurrent,
       timeoutMs:
         durationMs >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
     },
@@ -206,7 +205,11 @@ async function dispatchIosTap(
   let result: IosTapReply;
   try {
     result = doubleTap
-      ? await client.requestDoubleTapCoordinates(x, y, timeoutMs, frameContext, signal, onDispatch)
+      ? await client.requestDoubleTapCoordinates(x, y, timeoutMs, {
+          frameContext,
+          signal,
+          onDispatch,
+        })
       : await client.requestTapCoordinates({
           x,
           y,
@@ -417,9 +420,9 @@ export async function androidDisplayTapDispatch(
         ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
         : `tap ${x} ${y}`,
       target.displayId,
-      signal,
-      target.assertCurrent,
       {
+        signal,
+        assertCurrent: target.assertCurrent,
         timeoutMs:
           options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
       },

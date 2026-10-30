@@ -152,6 +152,8 @@ export async function observeWatch(
     dependencies.screenshots ?? simctlWatchScreenshotSource,
     signal,
   );
+  // A cancelled call must not leave a retained screenshot nobody will read.
+  signal?.throwIfAborted();
   const capturedAt = timer.now();
   const screenshotPath = path.join(
     directory,

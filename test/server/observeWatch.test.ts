@@ -52,8 +52,8 @@ function arrange(result?: Buffer | Error) {
   const screenshots = new FakeWatchScreenshotSource(result);
   const writer = new FakeScreenshotFileWriter();
   const protection = new FakeScreenshotPathProtection(timer);
-  const observe = (args: ObserveArgs = {}, device: BootedDevice = watch) =>
-    observeWatch(device, args, undefined, {
+  const observe = (args: ObserveArgs = {}, device: BootedDevice = watch, signal?: AbortSignal) =>
+    observeWatch(device, args, signal, {
       screenshots,
       timer,
       idGenerator: new CountingIdGenerator("watch"),
@@ -198,6 +198,23 @@ describe("observe on an Apple Watch simulator (#14910)", () => {
     expect(String(error)).toContain(`Failed to capture a screenshot of watch simulator`);
     expect(String(error)).toContain("simctl io screenshot exited 1");
     expect(writer.written).toEqual([]);
+  });
+
+  test("a call cancelled while the screenshot is captured stores nothing", async () => {
+    const { observe, screenshots, writer, protection } = arrange();
+    const controller = new AbortController();
+    const capture = screenshots.capture.bind(screenshots);
+    screenshots.capture = async (device, display) => {
+      const png = await capture(device, display);
+      controller.abort(new Error("caller cancelled"));
+      return png;
+    };
+
+    const error = await failure(observe({}, watch, controller.signal));
+
+    expect(String(error)).toContain("caller cancelled");
+    expect(writer.written).toEqual([]);
+    expect(protection.calls).toEqual([]);
   });
 
   test("bytes that are not a PNG are refused instead of guessing a screen size", async () => {

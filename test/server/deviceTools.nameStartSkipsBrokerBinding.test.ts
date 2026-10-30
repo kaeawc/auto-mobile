@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
@@ -26,6 +26,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
+import { warmedTests } from "../helpers/warmedTests";
 
 isolateToolRegistry();
 
@@ -58,8 +59,8 @@ const avd = (name: string, osVersion: string): DeviceInfo => ({
 });
 
 describe("startDevice by name with a binding device matching the same name", () => {
-  let timer: FakeTimer;
-  let sessions: SessionManager;
+  let timer: FakeTimer | undefined;
+  let sessions: SessionManager | undefined;
   let devices: FakeDeviceUtils;
   let registry: FakeBindingRegistry;
   let pool: DevicePool;
@@ -106,9 +107,22 @@ describe("startDevice by name with a binding device matching the same name", () 
     registerDeviceTools();
   }
 
-  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function teardown(): void {
+    resetDeviceToolsDependencies();
+    DaemonState.getInstance().reset();
+    sessions?.stopCleanupTimer();
+    clearDirectSessionDevices();
+    setDeviceManager(null);
+    PlatformDeviceManagerFactory.reset();
+    timer?.reset();
+  }
+
+  // The first startDevice call in a process loads the tool, pool and provisioning paths (~100 ms):
+  // each scenario runs once in beforeAll, outside the per-test budget, then again as the measured
+  // test. Each test still builds its own DevicePool harness in its body.
+  const warmed = warmedTests(teardown);
   function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
-    test(
+    warmed(
       name,
       async () => {
         await arrangeHarness();
@@ -117,16 +131,6 @@ describe("startDevice by name with a binding device matching the same name", () 
       timeout,
     );
   }
-
-  afterEach(() => {
-    resetDeviceToolsDependencies();
-    DaemonState.getInstance().reset();
-    sessions.stopCleanupTimer();
-    clearDirectSessionDevices();
-    setDeviceManager(null);
-    PlatformDeviceManagerFactory.reset();
-    timer.reset();
-  });
 
   const start = async (args: Record<string, unknown>): Promise<Record<string, any>> => {
     const result = (await ToolRegistry.getTool("startDevice")!.handler(args)) as {

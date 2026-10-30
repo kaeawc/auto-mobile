@@ -219,6 +219,15 @@ naming the capture the swipe was resolved against. Edge swipes reach system UI t
 see and stay on XCTest without a `backend`. A boomerang has no bridge form, so XCTest runs it and
 reports `fallbackReason: unsupported`. Other fallbacks and fail-closed results follow `tapOn`. A bridge scroll has no timed stroke, so its result marks the duration as ignored (`durationIgnored`, with a warning when `durationMs` was passed). The display fence is checked right before the bridge dispatch, as it is before an XCTest swipe. The
 bridge budget is the gesture's duration plus 3 s, and never less than 5 s. Scroll searches
-(`lookFor`) stay on XCTest.
+(`lookFor`) swipe with XCTest, after one web-view step: when the target is not in view, the search is
+unscoped (no container, scoped `lookFor` or layer, which the snapshot cannot express), the screen
+shows exactly one web view, and `lookFor.text` names exactly one enabled, visible DOM element of its
+snapshot by label or value (matched exactly, case and quote style aside; a redacted value never matches), the page
+scrolls that element into view with `scrollIntoView`. The snapshot lists off-screen elements, which
+the merged observation drops. The search then waits 250 ms for the page's next snapshot, re-reads
+the screen and searches again; a hit reports `backend: sdk` with no swipe. An unavailable bridge
+leaves the search to swipe and reports `fallbackReason: unavailable`; a rejected scroll fails
+closed; a target that is no single page element (an `elementId` selector, an ambiguous or partial
+text) swipes as before with no `backend`.
 
 WKWebView DOM nodes (#5162) extend the same observation under their WKWebView node.

@@ -24,15 +24,16 @@ export type ProvisioningHooks = {
   bindBootedDeviceSession: (
     device: BootedDevice,
     args: StartDeviceArgs,
-    sourceImage?: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    options?: {
+    sourceImage: DeviceInfo | undefined,
+    childProcess: ChildProcess | null | undefined,
+    options: {
       autolockEnabled?: boolean;
       readinessReservationOwners?: ReadonlySet<symbol>;
       verifiedAndroidAvdIdentity?: DeviceInfo;
       achievedReadiness?: DeviceReadinessLevel;
       collectCancellationSettlement?: (settlement: Promise<void>) => void;
       receipt?: AcquisitionReceipt;
+      signal: AbortSignal | undefined;
     },
   ) => Promise<string>;
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;

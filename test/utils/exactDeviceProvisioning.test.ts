@@ -359,6 +359,34 @@ describe("DefaultExactDeviceProvisioner", () => {
     },
   );
 
+  test("creates an automotive AVD from an explicit car image and car profile (#15879)", async () => {
+    const calls: unknown[] = [];
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [],
+      isCreationAllowed: () => true,
+      avdManager: {
+        createAvd: async (params) => {
+          calls.push(params);
+          return { success: true, message: "created", avdName: params.name };
+        },
+      },
+      androidConfigReader: { readConfig: async () => null },
+      androidConfigWriter: { setMemoryMb: async () => undefined },
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+    const spec = {
+      runtime: "system-images;android-34;android-automotive;x86_64",
+      deviceType: "automotive_1024p_landscape",
+    };
+
+    const result = await provisioner.provision({ platform: "android", name: "car-34", spec });
+
+    expect(result).toMatchObject({ created: true, device: androidImage("car-34") });
+    expect(calls).toEqual([
+      { name: "car-34", package: spec.runtime, device: "automotive_1024p_landscape" },
+    ]);
+  });
+
   test("adopts an existing iOS simulator only when its exact runtime and device type match", async () => {
     let created = false;
     const iosSimulator: ExactIosSimulatorClient = {

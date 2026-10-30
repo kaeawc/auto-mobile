@@ -404,6 +404,39 @@ describe("binding Android family constraints", () => {
     },
   );
 
+  test("a family-only automotive request creates the default car profile (#15879)", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve(
+        "android",
+        {
+          runtime: "system-images;android-34;android-automotive;x86_64",
+          deviceFamily: "automotive",
+        },
+        {},
+      ),
+    ).toMatchObject({
+      kind: "resolved",
+      resolvedSpec: { deviceType: "automotive_1024p_landscape" },
+    });
+  });
+
+  test.each(["automotive_1024p_landscape", "automotive_1080p_landscape"])(
+    "an explicit car profile %s on a car image passes the automotive family check (#15879)",
+    async (deviceType) => {
+      expect(
+        await new DefaultManagedSpecResolver().resolve(
+          "android",
+          {
+            runtime: "system-images;android-34;android-automotive-playstore;x86_64",
+            deviceType,
+            deviceFamily: "automotive",
+          },
+          {},
+        ),
+      ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType } });
+    },
+  );
+
   test("a tv runtime with deviceFamily tv resolves to the tv default profile", async () => {
     expect(
       await new DefaultManagedSpecResolver().resolve(

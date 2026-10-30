@@ -477,7 +477,7 @@ async function bindPreparedDevice(
                 "binding the device session",
               ),
             bindUndoneIfUndelivered(
-              async (receipt) => {
+              async (receipt, bindSignal) => {
                 return await bindBootedDeviceSession(
                   state.boot!.device,
                   args,
@@ -497,6 +497,7 @@ async function bindPreparedDevice(
                       state.bindingSettlements.push(settlement);
                     },
                     receipt,
+                    signal: bindSignal,
                   },
                 );
               },
@@ -613,8 +614,8 @@ export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Pro
 export async function bindBootedDeviceSession(
   device: BootedDevice,
   args: StartDeviceSessionArgs,
-  sourceImage?: DeviceInfo,
-  childProcess?: ChildProcess | null,
+  sourceImage: DeviceInfo | undefined,
+  childProcess: ChildProcess | null | undefined,
   {
     autolockEnabled = captureAutolockPolicy(getDeviceToolsDependencies().env),
     readinessReservationOwners,
@@ -622,6 +623,7 @@ export async function bindBootedDeviceSession(
     achievedReadiness = "automationReady",
     collectCancellationSettlement,
     receipt,
+    signal,
   }: {
     autolockEnabled?: boolean;
     readinessReservationOwners?: ReadonlySet<symbol>;
@@ -630,7 +632,9 @@ export async function bindBootedDeviceSession(
     collectCancellationSettlement?: (settlement: Promise<void>) => void;
     /** Filled in with the session this bind mints, for a caller that may have to take it back. */
     receipt?: AcquisitionReceipt;
-  } = {},
+    /** The bind's cancel signal; autolock acquisition stops when it aborts (#15671). */
+    signal: AbortSignal | undefined;
+  },
 ): Promise<string> {
   if (device.platform === "android") {
     // A deliberate startDevice/provisionDevice boot owns this serial now; a tombstone left by a
@@ -666,7 +670,7 @@ export async function bindBootedDeviceSession(
         verifiedAndroidAvdIdentity,
         achievedReadiness,
         collectCancellationSettlement,
-        { autolockEnabled, receipt },
+        { autolockEnabled, receipt, signal },
       );
     if (autolockSessionId) {
       // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before

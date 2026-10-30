@@ -147,7 +147,11 @@ export class InputText extends BaseVisualChange {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
     dependencies: InputTextDependencies = {},
   ) {
-    super(device, adbFactoryOrExecutor, dependencies.timer, undefined, dependencies);
+    super(device, {
+      adb: adbFactoryOrExecutor,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.device = device;
     this.keyboardCloserFactory = dependencies.keyboardCloserFactory ?? defaultKeyboardCloserFactory;
     this.targetFocuser = (dependencies.targetFocuserFactory ?? defaultTargetFocuserFactory)(device);

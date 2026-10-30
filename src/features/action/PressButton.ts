@@ -199,7 +199,7 @@ export class PressButton extends BaseVisualChange {
     timer: Timer = defaultTimer,
     collaborators: PressButtonCollaborators = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.device = device;
     this.simctl = collaborators.simctl ?? new SimCtlClient(device);
     this.holdRequest = collaborators.holdRequest;

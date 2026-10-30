@@ -390,7 +390,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     adb: AdbExecutor | null = null,
     options: TapOnElementDependencies = {},
   ) {
-    super(device, adb, options.timer, options.renderedDisplayRevision, options);
+    super(device, {
+      adb,
+      timer: options.timer,
+      displayFence: options,
+    });
     this.refreshedDisplayTransitions = options.displayTransitions ?? displayTransitions;
     this.lastRenderedObservation = options.lastRenderedObservation;
     this.waitForCondition =

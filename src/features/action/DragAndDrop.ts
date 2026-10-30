@@ -170,7 +170,11 @@ export class DragAndDrop extends BaseVisualChange {
     timer: Timer = defaultTimer,
     deps: DragAndDropDeps = {},
   ) {
-    super(device, adb, timer, deps.renderedDisplayRevision, deps);
+    super(device, {
+      adb,
+      timer,
+      displayFence: deps,
+    });
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.selector =
       deps.selector ??

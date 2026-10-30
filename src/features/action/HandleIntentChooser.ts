@@ -35,7 +35,7 @@ export class HandleIntentChooser extends BaseVisualChange {
       collaborators?: DisplayFenceDependencies;
     } = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.device = device;
     this.deepLinkManagerFactory = deepLinkManagerFactory;
   }

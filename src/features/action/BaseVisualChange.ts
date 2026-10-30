@@ -46,7 +46,7 @@ import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
 } from "../observe/DeviceWindowCacheInvalidator";
-import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
+import { type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { AwaitIdle, UiStabilityState } from "../observe/interfaces/AwaitIdle";
 import type {
   ObserveScreen,
@@ -83,16 +83,17 @@ import { PostActionObservationReader } from "./PostActionObservationReader";
 import { withForwardDeliveredNote } from "./swipeon/boomerangReturnLeg";
 import {
   CallerFenceState,
+  type BaseVisualChangeOptions,
   COORDINATE_ACTIONS,
   DisplayFence,
-  DisplayFenceDependencies,
   INTERMEDIATE_OBSERVATION_OPTIONS,
   PostActionCapture,
   RenderedDisplayRevisionReader,
-  sessionRenderedDisplayGeneration,
+  resolveDisplayReaders,
   sessionRenderedDisplayRevision,
 } from "./visualChangeDisplayFence";
 export {
+  type BaseVisualChangeOptions,
   type DisplayFence,
   type DisplayFenceDependencies,
   type DisplayFenceOption,
@@ -150,15 +151,16 @@ export class BaseVisualChange {
   /**
    * Create an BaseVisualChange instance
    * @param device - The target device
-   * @param adbFactoryOrExecutor - AdbClientFactory instance, AdbExecutor instance, or null (uses default factory)
-   * @param timer - Optional timer for testing
+   * @param options - Optional collaborators; see {@link BaseVisualChangeOptions}
    */
   constructor(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    timer: Timer = defaultTimer,
-    renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
-    displayFence: DisplayFenceDependencies = {},
+    {
+      adb: adbFactoryOrExecutor = defaultAdbClientFactory,
+      timer = defaultTimer,
+      renderedDisplayRevision = sessionRenderedDisplayRevision,
+      displayFence = {},
+    }: BaseVisualChangeOptions = {},
   ) {
     this.actionClockSkewCache = getActionClockSkewCache(timer, displayFence.actionClockSkewCache);
     this.device = device;
@@ -180,10 +182,10 @@ export class BaseVisualChange {
     this.window = displayFence.window ?? new RealWindow(device, this.adbFactory, timer);
     this.predictionAnalyzer = displayFence.predictionAnalyzer ?? new PredictionAnalyzer();
     this.timer = timer;
-    this.renderedDisplayRevision = displayFence.renderedDisplayRevision ?? renderedDisplayRevision;
-    this.displayTransitionReader = displayFence.displayTransitions ?? displayTransitions;
-    this.renderedDisplayGeneration =
-      displayFence.renderedDisplayGeneration ?? sessionRenderedDisplayGeneration;
+    const readers = resolveDisplayReaders(displayFence, renderedDisplayRevision);
+    this.renderedDisplayRevision = readers.renderedDisplayRevision;
+    this.displayTransitionReader = readers.displayTransitionReader;
+    this.renderedDisplayGeneration = readers.renderedDisplayGeneration;
   }
 
   private static resolveAdb(

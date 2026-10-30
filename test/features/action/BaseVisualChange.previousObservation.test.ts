@@ -204,7 +204,7 @@ function harness(initiallyVerified = true, revealAfterAction = false) {
       accessibilityDetector: accessibility,
     }),
   );
-  const base = attach(new BaseVisualChange(device, adb, timer));
+  const base = attach(new BaseVisualChange(device, { adb, timer }));
   const settle = new RealSettleObserve(screen, timer);
   const settleExecute = settle.execute.bind(settle);
   settle.execute = async (...args) => {

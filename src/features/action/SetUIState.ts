@@ -149,7 +149,7 @@ export class SetUIState extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SetUIStateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer ?? defaultTimer);
+    super(device, { adb, timer: dependencies.timer ?? defaultTimer });
     this.fields = new SetUIStateFields({
       device,
       adb: this.adb,

@@ -113,7 +113,7 @@ export class HomeScreen extends BaseVisualChange {
       };
     } = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.simctl = simctl;
     this.device = device;
     this.globalActionClient = collaborators.globalActionClient;

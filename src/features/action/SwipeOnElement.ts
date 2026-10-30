@@ -26,7 +26,7 @@ export class SwipeOnElement extends BaseVisualChange {
     geometry: ElementGeometry = new DefaultElementGeometry(),
     executeGesture?: Pick<ExecuteGesture, "swipe">,
   ) {
-    super(device, adb);
+    super(device, { adb });
     this.executeGesture = executeGesture ?? new ExecuteGesture(device, adb);
     this.geometry = geometry;
   }

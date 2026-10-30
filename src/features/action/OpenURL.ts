@@ -190,7 +190,7 @@ export class OpenURL extends BaseVisualChange {
       iosOpenUrlBackend,
     }: OpenURLOptions = {},
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.iosOpenUrlBackend = iosOpenUrlBackend;
     this.device = device;
     this.simctl = simctl;

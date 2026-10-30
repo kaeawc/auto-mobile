@@ -158,7 +158,10 @@ describe("shared foreground cache invalidation", () => {
   test("shared action seam invalidates a partially failed app-changing dispatch", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const action = new BaseVisualChange(device, new FakeAdbExecutor(), timer);
+    const action = new BaseVisualChange(device, {
+      adb: new FakeAdbExecutor(),
+      timer,
+    });
     const invalidator = wire(action);
     await expect(
       action.observedInteraction(

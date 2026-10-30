@@ -121,13 +121,11 @@ describe("typed BaseVisualChange fences A/B/C", () => {
   for (const site of ["A", "B", "C"] as const) {
     test.each(cases)(`${site}: $label`, async (scenario) => {
       const h = harness(scenario);
-      const action = new BaseVisualChange(
-        h.targetDevice,
-        h.adb,
-        h.timer,
-        h.deps.renderedDisplayRevision,
-        h.deps,
-      );
+      const action = new BaseVisualChange(h.targetDevice, {
+        adb: h.adb,
+        timer: h.timer,
+        displayFence: h.deps,
+      });
       action.observeScreen = h.observe;
       let calls = 0;
       const transition = () => h.transitions.transition(scenario.count);
@@ -388,13 +386,11 @@ describe("typed explicit-display fences G", () => {
   test("a push without a newly observed panel omits currentDisplayKey", async () => {
     const h = harness(cases[0]);
     h.transitions.transition(1, false);
-    const action = new BaseVisualChange(
-      device,
-      h.adb,
-      h.timer,
-      h.deps.renderedDisplayRevision,
-      h.deps,
-    );
+    const action = new BaseVisualChange(device, {
+      adb: h.adb,
+      timer: h.timer,
+      displayFence: h.deps,
+    });
     assertStale(
       await rejection(() =>
         action.observedInteraction(async () => ({ success: true }), {
@@ -582,13 +578,11 @@ function staleCallerHarness(platform: "android" | "ios") {
 describe("unscoped selector actions re-resolve against a new display generation", () => {
   function baseHarness(platform: "android" | "ios") {
     const { h, fresh } = staleCallerHarness(platform);
-    const action = new BaseVisualChange(
-      h.targetDevice,
-      h.adb,
-      h.timer,
-      h.deps.renderedDisplayRevision,
-      h.deps,
-    );
+    const action = new BaseVisualChange(h.targetDevice, {
+      adb: h.adb,
+      timer: h.timer,
+      displayFence: h.deps,
+    });
     action.observeScreen = h.observe;
     return { h, fresh, action };
   }

@@ -596,7 +596,13 @@ describe("ExecuteGesture path fences", () => {
   for (const site of ["android", "ios-single", "ios-multi"] as const) {
     test.each([...modes])(`${site}: %s`, async (mode: Mode) => {
       const h = harness(site === "android" ? "android" : "ios", mode);
-      const base = h.attach(new BaseVisualChange(h.device, h.adb, h.timer, undefined, h.deps));
+      const base = h.attach(
+        new BaseVisualChange(h.device, {
+          adb: h.adb,
+          timer: h.timer,
+          displayFence: h.deps,
+        }),
+      );
       const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
       let error: unknown;
       try {

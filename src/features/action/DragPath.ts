@@ -72,7 +72,11 @@ export class DragPath extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: DragPathDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.androidClientOverride = dependencies.androidClient;
     this.iosClientOverride = dependencies.iosClient;
     this.idGenerator = dependencies.idGenerator ?? new NodeIdGenerator();

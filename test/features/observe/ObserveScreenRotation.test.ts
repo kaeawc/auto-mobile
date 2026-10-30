@@ -135,7 +135,7 @@ test("recapture uses pixel-settled size and updates only observation rotation", 
 
 test("post-action observation inherits the fallback from real ObserveScreen", async () => {
   const { screen, adb, timer } = setup(issue8379Hierarchy());
-  const action = new BaseVisualChange(device, adb, timer);
+  const action = new BaseVisualChange(device, { adb, timer });
   action.observeScreen = screen;
   const result = await action["takeObservation"]({ success: true }, null, {
     changeExpected: false,

@@ -101,7 +101,7 @@ export class Rotate extends BaseVisualChange {
       collaborators?: DisplayFenceDependencies;
     } = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.options = options;
     const ctx = (): RotationContext => ({
       device: this.device,

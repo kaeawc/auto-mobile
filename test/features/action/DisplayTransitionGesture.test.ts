@@ -29,12 +29,11 @@ test("a raw swipe can dispatch coordinates after a completed display transition"
 });
 
 test("a coordinate action rejects a transition already detected before it starts", async () => {
-  const action = new BaseVisualChange(
-    transitionDevice,
-    new FakeAdbExecutor(),
-    new FakeTimer(),
-    () => 0,
-  );
+  const action = new BaseVisualChange(transitionDevice, {
+    adb: new FakeAdbExecutor(),
+    timer: new FakeTimer(),
+    renderedDisplayRevision: () => 0,
+  });
   displayTransitions.notifyTransition(transitionDevice.deviceId, "fold found by discovery");
   let dispatched = false;
   await expect(

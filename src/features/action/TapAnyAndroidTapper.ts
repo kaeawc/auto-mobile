@@ -408,7 +408,7 @@ export class TapAnyAndroidTapper {
         requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
         probe.hierarchy,
         "cached-ok",
-        this.deps.timer,
+        { timer: this.deps.timer },
       );
       const refound = this.deps.findClickableElement(options, capture.hierarchy, {
         observationScreenSize: screenSize,
@@ -468,7 +468,7 @@ export class TapAnyAndroidTapper {
       requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
       hierarchy,
       "fresh",
-      this.deps.timer,
+      { timer: this.deps.timer },
     );
     const found = this.deps.findClickableElement(options, capture.hierarchy, {
       observationScreenSize: screenSize,

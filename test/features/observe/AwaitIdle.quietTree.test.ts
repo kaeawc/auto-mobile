@@ -132,7 +132,6 @@ describe("Android stability signal regressions", () => {
         totalFrames: null,
       },
       false,
-      undefined,
       { timeoutMs: 50, signal: controller.signal },
     );
     expect(result.isStable).toBe(true);
@@ -190,7 +189,6 @@ describe("Android stability signal regressions", () => {
         totalFrames: null,
       },
       false,
-      undefined,
       { timeoutMs: 50 },
     );
     expect(result.isStable).toBe(true);

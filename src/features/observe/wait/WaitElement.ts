@@ -41,8 +41,7 @@ function retryCompoundText<T>(
   waitFor: ObserveWaitForOptions,
   negative: boolean,
   predicates: ResolverSelector[],
-  sets: T[][],
-  resolve: (selector: ResolverSelector) => T[],
+  { sets, resolve }: { sets: T[][]; resolve: (selector: ResolverSelector) => T[] },
 ): void {
   if (!shouldRetryCompoundText(waitFor, negative, sets)) {
     return;
@@ -171,8 +170,7 @@ function chooseWaitElement(
   finder: ConditionResolver,
   eligible: SearchableEntry[],
   waitFor: ObserveWaitForOptions,
-  negative: boolean,
-  evaluation: ConditionEvaluation,
+  { negative, evaluation }: { negative: boolean; evaluation: ConditionEvaluation },
 ): Element | null {
   if (!usesScopedWait(waitFor)) {
     return eligible[0]?.element ?? null;
@@ -197,8 +195,10 @@ export const findWaitForElement = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform?: AndroidOrIosPlatform,
-  options: boolean | WaitForElementOptions = false,
+  {
+    platform,
+    options = false,
+  }: { platform?: AndroidOrIosPlatform; options?: boolean | WaitForElementOptions } = {},
 ): Element | null => {
   const evaluation = waitElementEvaluation(options);
   const modes =
@@ -307,7 +307,7 @@ export const findWaitForElement = (
     }
     return candidates;
   });
-  retryCompoundText(waitFor, negative, predicates, sets, resolve);
+  retryCompoundText(waitFor, negative, predicates, { sets, resolve });
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );
@@ -316,7 +316,7 @@ export const findWaitForElement = (
       ? sets.some((set) => set.includes(candidate))
       : sets.every((set) => set.includes(candidate)),
   );
-  return chooseWaitElement(selectionFinder, eligible, waitFor, negative, evaluation);
+  return chooseWaitElement(selectionFinder, eligible, waitFor, { negative, evaluation });
 };
 
 export const hasElementPredicate = (

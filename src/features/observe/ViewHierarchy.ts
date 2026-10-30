@@ -36,6 +36,7 @@ import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "./DeviceServiceUtils";
 import { findAccessibilityFocusedElement, findFocusedElement } from "./HierarchyFocus";
 import {
   filterOffscreenNodes,
+  type IosHierarchyNormalization,
   normalizeIosHierarchy,
   projectActionableHierarchy,
 } from "./HierarchyNormalization";
@@ -182,7 +183,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const deadline = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
     const result =
       this.device.platform === "ios"
-        ? await this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal)
+        ? await this.getiOSViewHierarchy(perf, {
+            skipWaitForFresh,
+            minTimestamp,
+            timeoutMs,
+            signal,
+          })
         : await this.getAndroidViewHierarchy(queryOptions, {
             perf,
             skipWaitForFresh,
@@ -266,13 +272,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       }
       return result;
     }
-    return this.getiOSViewHierarchy(
-      context.perf,
-      context.skipWaitForFresh,
-      context.minTimestamp,
-      this.remainingRecoveryBudget(context),
-      context.signal,
-    );
+    return this.getiOSViewHierarchy(context.perf, {
+      skipWaitForFresh: context.skipWaitForFresh,
+      minTimestamp: context.minTimestamp,
+      timeoutMs: this.remainingRecoveryBudget(context),
+      signal: context.signal,
+    });
   }
 
   private async retryAndroidAfterRecovery(
@@ -391,10 +396,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    */
   async getiOSViewHierarchy(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    {
+      skipWaitForFresh = false,
+      minTimestamp = 0,
+      timeoutMs,
+      signal,
+    }: Omit<ViewHierarchyReadRequest, "perf" | "requireFreshExtraction"> = {},
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
     logger.info(
@@ -456,13 +463,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // device on this call or served a host-side cache entry unverified; carry
       // it so ObserveScreen can report freshness instead of assuming it.
       return Object.assign(
-        this.normalizeIosHierarchy(
-          xcTestClient.convertToViewHierarchyResult(result.hierarchy),
-          result.updatedAt,
-          result.reconnectStatus,
-          result.frameContext,
-          result.fresh,
-        ),
+        this.normalizeIosHierarchy(xcTestClient.convertToViewHierarchyResult(result.hierarchy), {
+          updatedAt: result.updatedAt,
+          ctrlProxyReconnect: result.reconnectStatus,
+          frameContext: result.frameContext,
+          fresh: result.fresh,
+        }),
         { [iosHierarchyAcquisition]: result[iosHierarchyAcquisition] },
       );
     });
@@ -481,18 +487,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    */
   normalizeIosHierarchy(
     hierarchy: ViewHierarchyResult,
-    updatedAt?: number,
-    ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
-    frameContext?: string,
-    fresh?: boolean,
+    metadata: IosHierarchyNormalization = {},
   ): ViewHierarchyResult {
-    return normalizeIosHierarchy(
-      hierarchy,
-      updatedAt ?? hierarchy.updatedAt ?? this.timer.now(),
-      ctrlProxyReconnect,
-      frameContext,
-      fresh,
-    );
+    const updatedAt = metadata.updatedAt ?? hierarchy.updatedAt ?? this.timer.now();
+    return normalizeIosHierarchy(hierarchy, { ...metadata, updatedAt });
   }
 
   projectActionableHierarchy(hierarchy: ViewHierarchyResult): ViewHierarchyResult {

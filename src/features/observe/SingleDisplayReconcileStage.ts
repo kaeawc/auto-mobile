@@ -135,9 +135,12 @@ export class SingleDisplayReconcileStage {
     }
     await this.d
       .staleRecovery()
-      .refreshKnownStaleHierarchy(result, initialMismatch.foreground, options, remainingMs, {
-        skipBackStack,
-        displayId: run.requestedDisplayId ?? run.observedAndroid?.logicalId ?? 0,
+      .refreshKnownStaleHierarchy(result, initialMismatch.foreground, options, {
+        remainingMs,
+        sideSamples: {
+          skipBackStack,
+          displayId: run.requestedDisplayId ?? run.observedAndroid?.logicalId ?? 0,
+        },
       });
     return true;
   }

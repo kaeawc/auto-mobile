@@ -435,7 +435,9 @@ describe("DragAndDrop - iOS", () => {
     const controller = new AbortController();
     spyOn(dragAndDrop["hierarchyCapture"], "capture").mockImplementation(async (request) => {
       expect(request.signal).toBe(controller.signal);
-      const snapshot = identifyObservedHierarchy("ios", createHierarchy(), "fresh", fakeTimer);
+      const snapshot = identifyObservedHierarchy("ios", createHierarchy(), "fresh", {
+        timer: fakeTimer,
+      });
       // Model the legacy null-on-abort boundary despite the capture's non-null type contract.
       Object.defineProperty(snapshot, "hierarchy", { value: null });
       controller.abort();

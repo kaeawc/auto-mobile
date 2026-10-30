@@ -663,8 +663,8 @@ export class RealObserveScreen implements ObserveScreen {
         requireAndroidOrIosPlatform(this.device.platform, "Observing the view hierarchy"),
         result.viewHierarchy,
         freshness,
-        this.timer,
         {
+          timer: this.timer,
           ids: this.idGenerator,
           captureId: result.observationId,
           iosMultiPanel: this.platformTraits.isIosMultiPanel(),

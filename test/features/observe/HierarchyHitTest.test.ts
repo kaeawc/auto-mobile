@@ -171,16 +171,14 @@ test("application fallback avoids multiple covering windows and the IME", () => 
   });
   const target = new DefaultElementParser().parseNodeBounds(row)!;
   expect(
-    applicationWindowSafeTapPoint(hierarchy, target, row.bounds, { x: 200, y: 50 }).point,
+    applicationWindowSafeTapPoint(hierarchy, target, row.bounds, { point: { x: 200, y: 50 } })
+      .point,
   ).toEqual({ x: 380, y: 50 });
   expect(
-    applicationWindowSafeTapPoint(
-      hierarchy,
-      target,
-      row.bounds,
-      { x: 200, y: 50 },
-      { imeBounds: { left: 360, top: 0, right: 400, bottom: 100 } },
-    ),
+    applicationWindowSafeTapPoint(hierarchy, target, row.bounds, {
+      point: { x: 200, y: 50 },
+      imeBounds: { left: 360, top: 0, right: 400, bottom: 100 },
+    }),
   ).toEqual({ point: null, coveredBy: "Dialog" });
 });
 
@@ -292,13 +290,10 @@ describe("AutoMobile prototype covers (#10715)", () => {
       prototypeWindow(rect(200, 400)),
     ]);
     expect(
-      applicationWindowSafeTapPoint(
-        hierarchy,
-        target(hierarchy),
-        row.bounds,
-        { x: 200, y: 50 },
-        { ownWindows: "touch" },
-      ).point,
+      applicationWindowSafeTapPoint(hierarchy, target(hierarchy), row.bounds, {
+        point: { x: 200, y: 50 },
+        ownWindows: "touch",
+      }).point,
     ).toBeNull();
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
   });

@@ -128,8 +128,7 @@ export abstract class DeviceServiceClientDelegates {
       this.device.deviceId,
       this.timer,
       capture,
-      emit,
-      options,
+      { emit, options },
     ));
   }
 }

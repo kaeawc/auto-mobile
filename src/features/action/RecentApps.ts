@@ -186,7 +186,8 @@ export class RecentApps extends BaseVisualChange {
     if (overview?.visibleToUser !== true) {
       return false;
     }
-    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, this.timer, {
+    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, {
+      timer: this.timer,
       incarnationToken: deviceIncarnationToken(this.device.deviceId),
       signal,
       timeoutMs: 3000,

@@ -37730,6 +37730,38 @@
               "additionalProperties": false,
               "description": "Notification channels for notifications.post (prototype_platform_notifications_v1); unique ids"
             },
+            "sensors": {
+              "type": "object",
+              "properties": {
+                "shake": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                },
+                "orientation": {
+                  "type": "object",
+                  "properties": {
+                    "rateHz": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 30
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "steps": {
+                  "$ref": "#/properties/spec/properties/sensors/properties/shake"
+                },
+                "proximity": {
+                  "$ref": "#/properties/spec/properties/sensors/properties/shake"
+                },
+                "light": {
+                  "$ref": "#/properties/spec/properties/sensors/properties/orientation"
+                }
+              },
+              "additionalProperties": false,
+              "description": "Sensors the device listens to for /platform/sensors and sensors.shake (prototype_platform_sensors_v1); needs sensors in requires.platform, and steps needs the motion permission"
+            },
             "media": {
               "type": "object",
               "properties": {

@@ -5,7 +5,7 @@ export const platformSchema = z.enum(["android", "ios"]);
 
 /**
  * `platform` for a tool that accepts an Apple Watch simulator (installApp, uninstallApp, listApps,
- * observe; #14908, #14910). Every other tool keeps the shared Android/iOS {@link platformSchema}.
+ * launchApp, terminateApp, observe; #14908, #14910). Every other tool keeps the shared Android/iOS {@link platformSchema}.
  * A fresh instance per field, so the tool schema never emits a dangling `$ref`.
  */
 export const watchAwarePlatformSchema = () =>

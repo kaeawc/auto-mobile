@@ -262,6 +262,11 @@ export class DevicePoolMultiAllocation {
       let result: Awaited<ReturnType<typeof allocate>>;
       try {
         result = await allocate();
+        if (result.success) {
+          // An attempt can succeed after a cancel it never read (e.g. its same-session release
+          // wait): roll back what it claimed rather than hand cancelled devices to the caller.
+          throwIfAllocationAborted(signal);
+        }
       } catch (error) {
         await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         throw error;
@@ -522,6 +527,8 @@ export class DevicePoolMultiAllocation {
               `  - Increase device allocation timeout`,
           );
         }
+        // As in the platform path: a success that outran a cancel goes through the rollback below.
+        throwIfAllocationAborted(signal);
         allocationCompleted = true;
       } finally {
         if (!allocationCompleted) {

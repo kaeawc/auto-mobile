@@ -2,6 +2,7 @@ import type {
   AudioInjection,
   AudioStream,
   CaptureResult,
+  PcmSink,
   InjectAudioOptions,
   InjectionResult,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
@@ -184,7 +185,9 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     const helper = await this.start(
       "capture",
       ["capture", "--duration-ms", String(options.durationMs), "--sample-rate", String(sampleRate)],
-      (chunk) => received.push(chunk),
+      (chunk) => {
+        received.push(chunk);
+      },
     );
     let timedOut = false;
     const deadline = this.timer.setTimeout(() => {
@@ -208,10 +211,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     };
   }
 
-  async streamCapture(
-    sink: (pcm: Uint8Array) => void,
-    options: { sampleRate?: number } = {},
-  ): Promise<AudioStream> {
+  async streamCapture(sink: PcmSink, options: { sampleRate?: number } = {}): Promise<AudioStream> {
     const sampleRate = helperRate(options.sampleRate ?? CAPTURE_SAMPLE_RATE);
     const helper = await this.start(
       "capture",
@@ -275,7 +275,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
   private async start(
     operation: LoopbackOperation,
     args: string[],
-    onStdout?: (chunk: Uint8Array) => void,
+    onStdout?: PcmSink,
   ): Promise<RunningLoopbackHelper> {
     const path = this.deps.helperPath();
     if (!path) {

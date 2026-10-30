@@ -1,6 +1,9 @@
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../models/describeUnknownError";
-import type { AudioStream } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
+import type {
+  AudioStream,
+  PcmSink,
+} from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { logger } from "../../utils/logger";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 import type {
@@ -15,14 +18,15 @@ import type {
 export interface AudioTrackSource {
   startStream(
     deviceId: string,
-    sink: (pcm: Uint8Array) => void,
+    sink: PcmSink,
     options?: { sampleRate?: number },
   ): Promise<AudioStream>;
 }
 
 /** Where captured PCM goes while a recording runs, so a long recording never sits in memory. */
 export interface PcmFile {
-  write(chunk: Uint8Array): void;
+  /** Appends a chunk; a returned promise settles once the file can take more (backpressure). */
+  write(chunk: Uint8Array): void | Promise<void>;
   /** Flushes and closes; resolves with the bytes written, or rejects with a write error. Idempotent. */
   close(): Promise<number>;
 }

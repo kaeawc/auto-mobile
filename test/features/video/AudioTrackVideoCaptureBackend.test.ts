@@ -10,6 +10,7 @@ import type {
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import { ActionableError } from "../../../src/models/ActionableError";
+import type { PcmSink } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 
 const device = { name: "emu", platform: "android" as const, deviceId: "emulator-5554" };
 
@@ -53,7 +54,7 @@ function setup(options: SetupOptions = {}) {
   const files = new Map<string, number[]>();
   const removed: string[] = [];
   const muxed: AudioTrackMuxRequest[] = [];
-  let sink: ((pcm: Uint8Array) => void) | undefined;
+  let sink: PcmSink | undefined;
   const inner: VideoCaptureBackend = {
     start: async (captureConfig): Promise<RecordingHandle> => {
       events.push("video-start");
@@ -115,7 +116,9 @@ function setup(options: SetupOptions = {}) {
     openPcmFile: (path) => {
       files.set(path, []);
       return {
-        write: (chunk) => files.get(path)?.push(...chunk),
+        write: (chunk) => {
+          files.get(path)?.push(...chunk);
+        },
         close: async () => {
           events.push("pcm-close");
           if (options.pcmWriteFails) {
@@ -154,7 +157,7 @@ describe("AudioTrackVideoCaptureBackend", () => {
   test("audio is captured from before the video starts and muxed in at stop", async () => {
     const { backend, events, muxed, removed, emit } = setup();
     const handle = await backend.start(config(true));
-    emit([1, 2, 3, 4]);
+    void emit([1, 2, 3, 4]);
     const result = await backend.stop(handle);
     expect(events).toEqual([
       "audio-start:emulator-5554",

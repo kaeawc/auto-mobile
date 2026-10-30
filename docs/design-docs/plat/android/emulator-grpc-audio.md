@@ -73,7 +73,10 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
 
 - Before the video capture starts it opens an open-ended capture on the device's route (gRPC
   `streamAudio` with no deadline, or the loopback helper's `--until-stopped`) and appends the PCM to
-  `<recording>.audio.pcm`, so a long recording never sits in memory. A silent guest sends no
+  `<recording>.audio.pcm`, so a long recording never sits in memory. Writes apply backpressure:
+  when the file's buffer is full the sink returns a promise, and the gRPC route stops reading
+  packets (HTTP/2 flow control then holds the emulator) while the loopback route pauses the
+  helper's stdout, so a stalled disk bounds memory to one chunk instead of queueing audio. A silent guest sends no
   packets, so the gRPC route writes silence for the time between packets (from the packet
   timestamps, or arrival time when a timestamp disagrees with the host clock by over 10 s) to keep
   the track in step with the video.

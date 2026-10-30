@@ -1,4 +1,5 @@
 import type { Readable, Writable } from "node:stream";
+import type { PcmSink } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import {
   EmulatorAudioError,
   type EmulatorAudioErrorCode,
@@ -84,7 +85,8 @@ export async function startLoopbackHelper(options: {
   launch: () => LoopbackHelperProcess;
   operation: LoopbackOperation;
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
-  onStdout?: (chunk: Uint8Array) => void;
+  /** A returned promise pauses stdout until it settles (backpressure). */
+  onStdout?: PcmSink;
 }): Promise<RunningLoopbackHelper> {
   const child = options.launch();
   let exitCode: number | null = null;
@@ -108,8 +110,19 @@ export async function startLoopbackHelper(options: {
       }
     }
   });
-  if (options.onStdout) {
-    child.stdout.on("data", options.onStdout);
+  const { onStdout } = options;
+  if (onStdout) {
+    child.stdout.on("data", (chunk: Uint8Array) => {
+      const busy = onStdout(chunk);
+      if (busy instanceof Promise) {
+        child.stdout.pause();
+        // A rejected write is the consumer's to report; reading resumes either way.
+        void busy.then(
+          () => child.stdout.resume(),
+          () => child.stdout.resume(),
+        );
+      }
+    });
   }
   // A helper that dies mid-write closes the pipe; the exit carries the failure.
   child.stdin.on("error", (error: Error) => {

@@ -56,7 +56,10 @@ function createIosClient(): IOSCtrlProxyClient {
   const fakeTimer = new FakeTimer();
   IOSCtrlProxyClient.resetInstances();
   const factory: WebSocketFactory = (url: string) => new FakeWebSocket(url, "none", 0, fakeTimer);
-  return IOSCtrlProxyClient.createForTesting(iosDevice, 8765, factory, fakeTimer);
+  return IOSCtrlProxyClient.createForTesting(iosDevice, 8765, {
+    wsFactory: factory,
+    timer: fakeTimer,
+  });
 }
 
 describe("DelegateContext scaffolding (issue #5458)", () => {

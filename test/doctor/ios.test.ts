@@ -1828,12 +1828,14 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { name: "iPhone", deviceId: "SIM-1", platform: "ios" },
       8765,
-      (url) => {
-        socket = new ResidentSocket(url, "none", 0, timer);
-        return socket;
+      {
+        wsFactory: (url) => {
+          socket = new ResidentSocket(url, "none", 0, timer);
+          return socket;
+        },
+        timer,
+        serviceManagerFactory: () => manager,
       },
-      timer,
-      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     try {
@@ -1910,24 +1912,26 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { name: "iPhone", deviceId: "SIM-1", platform: "ios" },
       8765,
-      (url) => {
-        dials++;
-        const socket = new ProbeSocket(url, reachable ? "none" : "instant", 0, timer);
-        socket.on("open", () =>
-          queueMicrotask(() =>
-            socket.simulateMessage(
-              JSON.stringify({
-                type: "connected",
-                supportedCommands: [...IOS_RUNNER_FEATURE_COMMANDS],
-                supportedFeatures: [...IOS_RUNNER_FEATURE_FLAGS],
-              }),
+      {
+        wsFactory: (url) => {
+          dials++;
+          const socket = new ProbeSocket(url, reachable ? "none" : "instant", 0, timer);
+          socket.on("open", () =>
+            queueMicrotask(() =>
+              socket.simulateMessage(
+                JSON.stringify({
+                  type: "connected",
+                  supportedCommands: [...IOS_RUNNER_FEATURE_COMMANDS],
+                  supportedFeatures: [...IOS_RUNNER_FEATURE_FLAGS],
+                }),
+              ),
             ),
-          ),
-        );
-        return socket;
+          );
+          return socket;
+        },
+        timer,
+        serviceManagerFactory: () => manager,
       },
-      timer,
-      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     const hooks = {
@@ -1996,9 +2000,11 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { name: "iPhone", deviceId: "SIM-1", platform: "ios" },
       8765,
-      createInstantFailureWebSocketFactory(timer),
-      timer,
-      { serviceManagerFactory: () => manager },
+      {
+        wsFactory: createInstantFailureWebSocketFactory(timer),
+        timer,
+        serviceManagerFactory: () => manager,
+      },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     const runner = createIosCtrlProxyRunnerInspector(() => simctl, new FakeLogger(), {

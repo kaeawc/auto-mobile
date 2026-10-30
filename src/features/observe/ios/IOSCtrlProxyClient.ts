@@ -716,9 +716,11 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
   public static createForTesting(
     device: BootedDevice,
     port: number,
-    wsFactory: WebSocketFactory,
-    timer: Timer,
-    dependencies: IosCtrlProxyClientTestOptions = {},
+    {
+      wsFactory,
+      timer,
+      ...dependencies
+    }: IosCtrlProxyClientTestOptions & { wsFactory: WebSocketFactory; timer: Timer },
   ): IOSCtrlProxyClient {
     return new IOSCtrlProxyClient(
       device,

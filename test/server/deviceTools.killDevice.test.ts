@@ -3852,18 +3852,14 @@ describe("killDevice handler", () => {
     });
     let socketCreations = 0;
     const iosManager = new FakeIOSCtrlProxyManager(timer);
-    const client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      (url) => {
+    const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: (url) => {
         socketCreations++;
         return new FakeWebSocket(url, "none", 0, timer);
       },
       timer,
-      {
-        serviceManagerFactory: () => iosManager,
-      },
-    );
+      serviceManagerFactory: () => iosManager,
+    });
     IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       stop: async () => {},

@@ -27,12 +27,10 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       name: "iPhone 16 Simulator",
     };
     IOSCtrlProxyClient.resetInstances();
-    ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      createSuccessWebSocketFactory(fakeTimer),
-      fakeTimer,
-    );
+    ctrlProxyClient = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+      wsFactory: createSuccessWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+    });
   });
 
   afterEach(async () => {

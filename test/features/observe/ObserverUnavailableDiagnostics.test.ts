@@ -49,12 +49,10 @@ test.each(["android", "ios"] as const)(
             webSocketFactory: createInstantFailureWebSocketFactory(timer),
             timer,
           })
-        : IOSCtrlProxyClient.createForTesting(
-            device,
-            8765,
-            createInstantFailureWebSocketFactory(timer),
+        : IOSCtrlProxyClient.createForTesting(device, 8765, {
+            wsFactory: createInstantFailureWebSocketFactory(timer),
             timer,
-          );
+          });
     const clientClass = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
     const existing = spyOn(clientClass, "getExistingInstance").mockReturnValue(client);
     const transient = spyOn(clientClass, "createForObservationRead");
@@ -126,20 +124,16 @@ test.each([
       platform: "ios",
     };
     const factory = new FakeAdbClientFactory(new FakeAdbExecutor());
-    const client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      createInstantFailureWebSocketFactory(timer),
+    const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: createInstantFailureWebSocketFactory(timer),
       timer,
-      {
-        serviceManagerFactory: undefined,
-        bootedDeviceLister: undefined,
-        deviceConnectionLostNotifier: undefined,
-        sdkEventIngestor: undefined,
-        retryExecutor: undefined,
-        options: true,
-      },
-    );
+      serviceManagerFactory: undefined,
+      bootedDeviceLister: undefined,
+      deviceConnectionLostNotifier: undefined,
+      sdkEventIngestor: undefined,
+      retryExecutor: undefined,
+      options: true,
+    });
     const connect = spyOn(client, "connectForObservationRead").mockResolvedValue(false);
     const close = spyOn(client, "close");
     const transient = spyOn(IOSCtrlProxyClient, "createForObservationRead").mockReturnValue(client);

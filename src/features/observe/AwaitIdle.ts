@@ -51,8 +51,10 @@ export class AwaitIdle implements AwaitIdleInterface {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
-    hierarchyReader?: ViewHierarchyRequestReader,
-    rotationPollBackoff: BackoffPolicy = ROTATION_POLL_BACKOFF,
+    {
+      hierarchyReader,
+      rotationPollBackoff = ROTATION_POLL_BACKOFF,
+    }: { hierarchyReader?: ViewHierarchyRequestReader; rotationPollBackoff?: BackoffPolicy } = {},
   ) {
     this.rotationPollBackoff = rotationPollBackoff;
     this.adbFactory = adbFactory;

@@ -186,14 +186,12 @@ function delayedConnection() {
     },
     cancelScreenshotBackoff: () => {},
   };
-  const client = IOSCtrlProxyClient.createForTesting(
-    ios,
-    8765,
-    () => {
+  const client = IOSCtrlProxyClient.createForTesting(ios, 8765, {
+    wsFactory: () => {
       throw new Error("Unexpected socket connection");
     },
     timer,
-  );
+  });
   const instance = spyOnIosClientInstance(client);
   restores.push(
     () => instance.mockRestore(),

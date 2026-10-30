@@ -166,10 +166,12 @@ async function withClient(
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "snapshot-device", platform: "ios", name: "fixture" },
     8765,
-    () => {
-      throw new Error("snapshot must never open a socket");
+    {
+      wsFactory: () => {
+        throw new Error("snapshot must never open a socket");
+      },
+      timer: h.context.timer,
     },
-    h.context.timer,
   );
   client.getSdkCapabilityTestHooks().sdkCapabilityGate = async () => null;
   client.sendMessage = (data) => {

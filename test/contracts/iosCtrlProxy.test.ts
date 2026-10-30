@@ -47,8 +47,7 @@ async function realHarness(replies: IosCtrlProxyReplies): Promise<IosCtrlProxyHa
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "contract-device", platform: "ios", name: "contract" },
     8791,
-    replay.factory,
-    timer,
+    { wsFactory: replay.factory, timer },
   );
   return {
     proxy: client,

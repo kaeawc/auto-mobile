@@ -236,8 +236,7 @@ describe("iOS opt-in tap diagnostics", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "tap-diagnostics", platform: "ios", name: "Fake Duo" },
       8765,
-      createSuccessWebSocketFactory(timer),
-      timer,
+      { wsFactory: createSuccessWebSocketFactory(timer), timer },
     );
     const boundary = client.testHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});

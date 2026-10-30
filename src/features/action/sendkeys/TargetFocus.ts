@@ -11,7 +11,7 @@ import type { DisplayTransitionReader } from "../../observe/DisplayTransition";
 import { tapFocusFailure } from "../TapOnElement";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import type { TargetState } from "./TargetState";
-import type { IosSdkBridgeTarget } from "../../observe/ios/iosSdkObservationMerge";
+import type { IosSdkTextTarget } from "./IosSdkTextRouting";
 import type {
   SendKeysCommand,
   SendKeysFailure,
@@ -40,7 +40,7 @@ export interface TargetFocusDeps {
   ) => ReturnType<SendKeysTargetFocuser["focus"]>;
   setTargetLayer(layer: TargetState["effectiveLayer"]): void;
   setTargetPasswordField(passwordField: boolean): void;
-  setIosSdkTextTarget(target: IosSdkBridgeTarget | undefined): void;
+  setIosSdkTextTarget(target: IosSdkTextTarget | undefined): void;
 }
 
 /**

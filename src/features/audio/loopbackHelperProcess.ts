@@ -1,4 +1,5 @@
 import type { Readable, Writable } from "node:stream";
+import type { PcmSink } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import {
   EmulatorAudioError,
   type EmulatorAudioErrorCode,
@@ -35,6 +36,8 @@ export interface RunningLoopbackHelper {
    * last bytes, so output is complete only after this.
    */
   outputEnded: Promise<void>;
+  /** Whether stdout is paused on a busy consumer (backpressure), so a slow pipe is expected. */
+  sinkBusy(): boolean;
   /** The error the helper reported, as a typed tool error. */
   failure(): EmulatorAudioError;
 }
@@ -84,7 +87,8 @@ export async function startLoopbackHelper(options: {
   launch: () => LoopbackHelperProcess;
   operation: LoopbackOperation;
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
-  onStdout?: (chunk: Uint8Array) => void;
+  /** A returned promise pauses stdout until it settles (backpressure). */
+  onStdout?: PcmSink;
 }): Promise<RunningLoopbackHelper> {
   const child = options.launch();
   let exitCode: number | null = null;
@@ -108,8 +112,22 @@ export async function startLoopbackHelper(options: {
       }
     }
   });
-  if (options.onStdout) {
-    child.stdout.on("data", options.onStdout);
+  const { onStdout } = options;
+  let sinkBusy = false;
+  if (onStdout) {
+    child.stdout.on("data", (chunk: Uint8Array) => {
+      const busy = onStdout(chunk);
+      if (busy instanceof Promise) {
+        sinkBusy = true;
+        child.stdout.pause();
+        const resume = () => {
+          sinkBusy = false;
+          child.stdout.resume();
+        };
+        // A rejected write is the consumer's to report; reading resumes either way.
+        void busy.then(resume, resume);
+      }
+    });
   }
   // A helper that dies mid-write closes the pipe; the exit carries the failure.
   child.stdin.on("error", (error: Error) => {
@@ -134,6 +152,7 @@ export async function startLoopbackHelper(options: {
     process: child,
     exited,
     outputEnded,
+    sinkBusy: () => sinkBusy,
     failure: () => loopbackError(options.operation, report, exitCode),
   };
   await waitForReady(helper, ready, options, () => report);

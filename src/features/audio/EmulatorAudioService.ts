@@ -8,6 +8,7 @@ import type {
   CaptureResult,
   InjectAudioOptions,
   InjectionResult,
+  PcmSink,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import {
   EmulatorAudioError,
@@ -35,10 +36,7 @@ export interface EmulatorAudioSession {
   injectAudio(source: PcmAudio, options?: InjectAudioOptions): Promise<AudioInjection>;
   captureAudio(options: { durationMs: number; sampleRate?: number }): Promise<CaptureResult>;
   /** Streams output PCM to `sink` until stopped; for recordings of any length. */
-  streamCapture(
-    sink: (pcm: Uint8Array) => void,
-    options?: { sampleRate?: number },
-  ): Promise<AudioStream>;
+  streamCapture(sink: PcmSink, options?: { sampleRate?: number }): Promise<AudioStream>;
   close(): Promise<void>;
 }
 
@@ -313,7 +311,7 @@ export class EmulatorAudioService {
    */
   async startStream(
     deviceId: string,
-    sink: (pcm: Uint8Array) => void,
+    sink: PcmSink,
     options: { sampleRate?: number } = {},
   ): Promise<AudioStream> {
     const route = await this.routeFor(deviceId, "audio_capture_unsupported");

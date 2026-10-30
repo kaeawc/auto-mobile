@@ -90,7 +90,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -112,7 +113,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -134,7 +136,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -159,7 +162,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -459,7 +463,8 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
 
       const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+        tapElement: makeElement(),
         options: { action: "tap" },
         isTalkBackEnabled: talkBackEnabled,
         screenSize: { width: 1080, height: 1920 },

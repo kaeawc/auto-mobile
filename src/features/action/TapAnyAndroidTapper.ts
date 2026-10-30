@@ -21,6 +21,7 @@ import {
   BootedDevice,
   Element,
   ObserveResult,
+  type Point,
   TapAnyElementOptions,
   ViewHierarchyResult,
   requireAndroidOrIosPlatform,
@@ -116,8 +117,7 @@ export class TapAnyAndroidTapper {
 
   async executeAndroidTap(
     action: TapAnyElementOptions["action"],
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     target: CapturedTapTarget,
     fenceOptions: DisplayFenceOption & {
@@ -125,6 +125,7 @@ export class TapAnyAndroidTapper {
       onActivationWarnings?: (warnings?: string[]) => void;
     } = {},
   ): Promise<void> {
+    const { x, y } = point;
     const { signal } = fenceOptions;
     const fence = resolveDisplayFence(fenceOptions);
     const { element, capture } = target;
@@ -147,7 +148,7 @@ export class TapAnyAndroidTapper {
     const talkBackEnabled = element["hierarchy-source"] !== "uiautomator" && talkBackState === true;
     if (
       talkBackEnabled &&
-      (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
+      (await this.executeAndroidTalkBackTap(action, { x, y }, durationMs, element, {
         displayFence: fence,
         scoped: target.scoped,
         hierarchy: resolveViewHierarchyForSearch(capture.hierarchy),
@@ -193,8 +194,7 @@ export class TapAnyAndroidTapper {
       await dispatchAndroidCoordinateTap(
         this.deps.accessibilityService,
         this.deps.getAdb(),
-        point.x,
-        point.y,
+        point,
         10,
         { signal },
       );
@@ -291,8 +291,7 @@ export class TapAnyAndroidTapper {
 
   async executeAndroidTalkBackTap(
     action: TapAnyElementOptions["action"],
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     element: Element,
     fenceOptions: DisplayFenceOption &
@@ -301,12 +300,12 @@ export class TapAnyAndroidTapper {
         onActivationWarnings?: (warnings?: string[]) => void;
       } = {},
   ): Promise<boolean> {
+    const { x, y } = point;
     const fence = fenceOptions.displayFence;
     const driver = this.deps.talkBackDriverFactory.createDriver(this.deps.device);
     if (action === "longPress" && !fenceOptions.scoped) {
       const result = await this.deps.talkBackStrategy.executeLongPress(
-        x,
-        y,
+        { x, y },
         durationMs,
         element,
         driver,
@@ -336,8 +335,7 @@ export class TapAnyAndroidTapper {
       action === "tap"
         ? await this.deps.talkBackStrategy.executePreciseTap(x, y, driver, fence)
         : await this.deps.talkBackStrategy.executeCoordinateFallback(
-            x,
-            y,
+            { x, y },
             action,
             durationMs,
             driver,
@@ -354,8 +352,8 @@ export class TapAnyAndroidTapper {
     target: CapturedTapTarget,
     action: TapAnyElementOptions["action"],
     durationMs: number,
-    screenSize?: ObserveResult["screenSize"],
     fenceOptions: DisplayFenceOption & {
+      screenSize?: ObserveResult["screenSize"];
       signal?: AbortSignal;
       selectionOptions?: TapAnyElementOptions;
       refresh?: RefreshViewHierarchy;
@@ -364,7 +362,7 @@ export class TapAnyAndroidTapper {
     } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
-    const { signal } = fenceOptions;
+    const { signal, screenSize } = fenceOptions;
     const reportedTarget = target;
     if (action !== "tap" || !preTapHash) {
       return;
@@ -425,7 +423,7 @@ export class TapAnyAndroidTapper {
       await fenceOptions.dispatch(retryPoint);
       return;
     }
-    await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, {
+    await this.executeAndroidTap(action, retryPoint, durationMs, target, {
       signal,
       displayFence: fence,
       onActivationWarnings: fenceOptions.onActivationWarnings,

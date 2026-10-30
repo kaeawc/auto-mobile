@@ -384,14 +384,12 @@ export class TapExecution {
     };
     await this.prepareHierarchy(state, hierarchy);
     if (options.accessibilityLink) {
-      return this.host.activateAccessibilityLinkPhase(
-        options,
-        options.accessibilityLink,
+      return this.host.activateAccessibilityLinkPhase(options, options.accessibilityLink, {
         observeResult,
-        hierarchy.viewHierarchy,
-        hierarchy.activationWarnings,
+        viewHierarchy: hierarchy.viewHierarchy,
+        activationWarnings: hierarchy.activationWarnings,
         signal,
-      );
+      });
     }
     const searchOutcome = await this.searchCurrentTarget(state, hierarchy);
     const prepared = await this.prepareSelection(state, hierarchy, searchOutcome);
@@ -791,8 +789,8 @@ export class TapExecution {
         tapPoint,
         target.action,
         target.longPressDuration,
-        target.tapElement,
         {
+          tapElement: target.tapElement,
           options: {
             ...this.host.withObservationScreenSize(target.tapOptions, observeResult),
             displayFence: fence,
@@ -890,8 +888,7 @@ export class TapExecution {
         }
         await this.host.executeiOSTap(
           target.action,
-          tapPoint.x,
-          tapPoint.y,
+          tapPoint,
           target.longPressDuration,
           target.tapElement,
           {
@@ -928,14 +925,11 @@ export class TapExecution {
     result.focusVerified = await this.host.verifyFocusAfterTap(
       result,
       (observation) =>
-        this.host.verifyFocusedInputTarget(
-          options,
-          target,
-          observation,
-          focusLabelText,
-          result.selectedElement?.indexInMatches,
+        this.host.verifyFocusedInputTarget(options, target, observation, {
+          labelText: focusLabelText,
+          selectedIndex: result.selectedElement?.indexInMatches,
           preTapHierarchy,
-        ),
+        }),
       signal,
     );
     if (!result.focusVerified) {

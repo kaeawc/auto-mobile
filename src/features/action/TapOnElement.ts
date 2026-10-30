@@ -449,14 +449,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
     this.elementSelector = this.createElementSelector(options);
-    const accessibility = resolveTapAccessibilityDependencies(
-      options,
+    const accessibility = resolveTapAccessibilityDependencies(options, {
       device,
-      this.adbFactory,
-      this.adb,
-      this.timer,
-      this.accessibilityDetector,
-    );
+      adbFactory: this.adbFactory,
+      adb: this.adb,
+      timer: this.timer,
+      accessibilityDetector: this.accessibilityDetector,
+    });
     this.talkBackDriverFactory = accessibility.talkBackDriverFactory;
     this.talkBackStrategy = accessibility.talkBackStrategy;
     this.iosVoiceOverDetector = accessibility.iosVoiceOverDetector;

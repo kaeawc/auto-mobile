@@ -671,15 +671,8 @@ describe("TalkBack focus verification authority", () => {
     h.strategy.setAccessibilityServiceEnabled(true);
     h.tap.refreshViewHierarchy = async () => fresh.viewHierarchy!;
     let authority: ObserveResult["viewHierarchy"];
-    h.tap["verifyFocusedInputTarget"] = (
-      _options,
-      _target,
-      _observation,
-      _label,
-      _index,
-      before,
-    ) => {
-      authority = before;
+    h.tap["verifyFocusedInputTarget"] = (_options, _target, _observation, hints) => {
+      authority = hints?.preTapHierarchy;
       return true;
     };
     const result = await h.tap.execute({ text: "Search", action: "focus", retryIfNoChange: false });

@@ -29175,6 +29175,9 @@
                                 "type": "string",
                                 "enum": ["host", "device"]
                               },
+                              "allowSecureInRequest": {
+                                "type": "boolean"
+                              },
                               "timeoutMs": {
                                 "type": "integer",
                                 "minimum": 1,

@@ -120,6 +120,7 @@ describe("sendKeys on a web-view field (#5162)", () => {
 
 describe("the focused field's bridge identity (#5162)", () => {
   const webField = {
+    "web-role": "input",
     "web-view-id": "checkout",
     "web-snapshot-id": "s4",
     "web-element-id": "email",
@@ -154,4 +155,33 @@ describe("keys that move focus away from the web field (#5162)", () => {
       expect(result.iosBackend).toBeUndefined();
     },
   );
+});
+
+describe("DOM editors the web view cannot edit (#5162)", () => {
+  test.each(["textbox", "div", "searchbox"])(
+    "a %s DOM element stays on XCTest: setValue and clear only assign an input's value",
+    (role) => {
+      const editor = {
+        "web-role": role,
+        "web-view-id": "checkout",
+        "web-snapshot-id": "s4",
+        "web-element-id": "notes",
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      } as Element;
+      expect(sdkTargetField(ios, editor)).toEqual({});
+    },
+  );
+
+  test("a textarea routes through the web view", () => {
+    const textarea = {
+      "web-role": "textarea",
+      "web-view-id": "checkout",
+      "web-snapshot-id": "s4",
+      "web-element-id": "notes",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    } as Element;
+    expect(sdkTargetField(ios, textarea)).toEqual({
+      sdkTarget: { webViewId: "checkout", snapshotId: "s4", elementId: "notes" },
+    });
+  });
 });

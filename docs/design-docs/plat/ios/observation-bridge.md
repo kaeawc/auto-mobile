@@ -207,8 +207,9 @@ native bridge form: on a native bridge field they run through XCTest and report
 `fallbackReason: unsupported`. `sendKeys` without a selector has no resolved field, so it stays on
 XCTest.
 
-A focused DOM element merged from a web view routes the same way through the web view's bounded
-actions: a clear is `clear`, and IME `done` is `submit` (the field's form, if it has one). Text
+A focused DOM `<input>` or `<textarea>` merged from a web view (each merged element carries its DOM
+role as `web-role`) routes the same way through the web view's bounded actions; other DOM editors,
+such as `contenteditable`, ignore an assigned `value` and stay on XCTest: a clear is `clear`, and IME `done` is `submit` (the field's form, if it has one). Text
 entry is `setValue`, which replaces the value, so it is used only after the command cleared the
 field through the web view (a replace); typing that appends at the caret stays on XCTest and
 reports `fallbackReason: unsupported`, as do the other IME actions. The field keeps its web view

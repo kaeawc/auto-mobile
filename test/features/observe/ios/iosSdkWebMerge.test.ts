@@ -537,3 +537,34 @@ describe("input types (#5162)", () => {
     ]);
   });
 });
+
+describe("the DOM role (#5162)", () => {
+  test("each merged element carries its DOM role, even where a native class wins", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "UITextField",
+        "content-desc": "Email",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "email", role: "input", label: "Email" },
+          { ...submit, id: "notes", role: "textbox", label: "Notes", bounds: [0, 300, 200, 40] },
+        ]),
+      },
+    ]);
+    const roles = webElements(findWebViewNodes(hierarchy)[0]).map((element) => [
+      element["web-element-id"],
+      element.class,
+      element["web-role"],
+    ]);
+    expect(roles).toEqual([
+      ["email", "UITextField", "input"],
+      ["notes", "textbox", "textbox"],
+    ]);
+  });
+});

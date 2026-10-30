@@ -20,6 +20,22 @@ export const WEB_VIEW_ID_ATTRIBUTE = "web-view-id";
 export { WEB_SNAPSHOT_ID_ATTRIBUTE };
 export const WEB_ELEMENT_ID_ATTRIBUTE = "web-element-id";
 export const WEB_ORIGIN_ATTRIBUTE = "web-origin";
+/** The element's DOM role (its ARIA role, else its tag), kept where a replaced leaf's class wins. */
+export const WEB_ROLE_ATTRIBUTE = "web-role";
+
+/** DOM roles whose text is their `value`: the only fields the web view's setValue and clear edit. */
+const VALUE_FIELD_ROLES: ReadonlySet<string> = new Set(["input", "textarea"]);
+
+/**
+ * The web identity of a merged element whose text the web view can set and clear, or null. Other
+ * editors (`contenteditable`, ARIA textboxes) ignore an assigned `value`, so they stay on XCTest.
+ */
+export function iosSdkWebValueTarget(attributes: Record<string, unknown>): IosSdkWebTarget | null {
+  const role = attributes[WEB_ROLE_ATTRIBUTE];
+  return typeof role === "string" && VALUE_FIELD_ROLES.has(role)
+    ? iosSdkWebTarget(attributes)
+    : null;
+}
 
 /**
  * DOM roles of text entry fields. They are reported as an XCTest text field would be (`role:
@@ -280,6 +296,7 @@ function convertElement(
       [WEB_VIEW_ID_ATTRIBUTE]: webViewId,
       [WEB_SNAPSHOT_ID_ATTRIBUTE]: snapshotId,
       [WEB_ELEMENT_ID_ATTRIBUTE]: element.id,
+      [WEB_ROLE_ATTRIBUTE]: role,
       ...(origin ? { [WEB_ORIGIN_ATTRIBUTE]: origin } : {}),
     },
     extras: { "sdk.source": IOS_SDK_WEB_SOURCE },

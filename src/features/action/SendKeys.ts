@@ -54,7 +54,7 @@ import { Keyboard } from "./Keyboard";
 import type { RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
-import { iosSdkWebTarget } from "../observe/ios/iosSdkWebMerge";
+import { iosSdkWebValueTarget } from "../observe/ios/iosSdkWebMerge";
 import { type KeyboardIdentity } from "./AndroidImeCatalog";
 
 export { DefaultSendKeysCommandExecutor };
@@ -401,8 +401,8 @@ export function sdkTargetField(
   if (device.platform !== "ios" || !element) {
     return {};
   }
-  // A native bridge node, else a DOM element merged from an opted-in web view (#5162).
-  const sdkTarget = iosSdkBridgeTarget(element) ?? iosSdkWebTarget(element);
+  // A native bridge node, else a DOM input or textarea merged from an opted-in web view (#5162).
+  const sdkTarget = iosSdkBridgeTarget(element) ?? iosSdkWebValueTarget(element);
   return sdkTarget ? { sdkTarget } : {};
 }
 

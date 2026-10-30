@@ -170,7 +170,8 @@ public final class AutoMobileWebViewPolicy: Sendable {
                     inputType: element.inputType
                 )
             },
-            viewport: snapshot.viewport
+            viewport: snapshot.viewport,
+            documentId: snapshot.documentId
         )
         lock.withLock { latestSnapshots in
             latestSnapshots[bounded.snapshotId] = bounded
@@ -439,7 +440,8 @@ extension AutoMobileWebAction {
                     snapshotId: body["snapshotId"] as? String ?? UUID().uuidString,
                     url: url?.absoluteString,
                     elements: decoded,
-                    viewport: Self.viewport(body["viewport"])
+                    viewport: Self.viewport(body["viewport"]),
+                    documentId: body["documentId"] as? String
                 ))
             }
             emit(name: name, url: url, frameId: body["frameId"] as? String, requestId: requestId, metadata: metadata)
@@ -631,6 +633,7 @@ extension AutoMobileWebAction {
         (() => {
           const post = (name, extra = {}) => window.webkit?.messageHandlers?.automobile?.postMessage({name, frameId: location.href, ...extra});
           let nextElementId = 0;
+          const documentId = `${Date.now()}-${Math.random()}`;
           const rendered = e => e.checkVisibility ? e.checkVisibility({visibilityProperty: true, opacityProperty: true}) : getComputedStyle(e).visibility !== 'hidden';
           const snapshot = () => {
             if (window.top !== window) return;
@@ -641,7 +644,7 @@ extension AutoMobileWebAction {
             });
             const v = window.visualViewport;
             const viewport = v ? {offsetLeft: v.offsetLeft, offsetTop: v.offsetTop, width: v.width, height: v.height, scale: v.scale} : {offsetLeft: 0, offsetTop: 0, width: window.innerWidth, height: window.innerHeight, scale: 1};
-            post('snapshot', {snapshotId: `${Date.now()}-${Math.random()}`, elements, viewport});
+            post('snapshot', {snapshotId: `${Date.now()}-${Math.random()}`, elements, viewport, documentId});
           };
           let snapshotPending = false;
           const scheduleSnapshot = () => { if (snapshotPending) return; snapshotPending = true; setTimeout(() => { snapshotPending = false; snapshot(); }, 100); };

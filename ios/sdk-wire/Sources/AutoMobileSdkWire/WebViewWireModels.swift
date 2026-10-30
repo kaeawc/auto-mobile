@@ -98,19 +98,24 @@ public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable {
     public let title: String?
     public let elements: [AutoMobileWebElement]
     public let viewport: AutoMobileWebViewport?
+    /// The page document that posted the snapshot. Element ids restart for each document, so the
+    /// same id in another document names an unrelated element.
+    public let documentId: String?
 
     public init(
         snapshotId: String = UUID().uuidString,
         url: String? = nil,
         title: String? = nil,
         elements: [AutoMobileWebElement] = [],
-        viewport: AutoMobileWebViewport? = nil
+        viewport: AutoMobileWebViewport? = nil,
+        documentId: String? = nil
     ) {
         self.snapshotId = snapshotId
         self.url = url
         self.title = title
         self.elements = elements
         self.viewport = viewport
+        self.documentId = documentId
     }
 }
 

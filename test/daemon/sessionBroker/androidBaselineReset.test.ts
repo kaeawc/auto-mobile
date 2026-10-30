@@ -293,6 +293,42 @@ describe("AndroidBaselineReset", () => {
     expect(host.closed).toBe(1);
   });
 
+  test("the caller's reset signal cancels in-flight strategy work before its ownership fence", async () => {
+    const host = new FakeAndroidResetHost();
+    const reached = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let signal: AbortSignal | undefined;
+    let fencesAfterResume = 0;
+    host.strategy = {
+      reset: async (_device, _packages, owned, context) => {
+        signal = context.signal;
+        reached.resolve();
+        await resume.promise;
+        await owned();
+        fencesAfterResume++;
+      },
+    };
+    const baseline = new AndroidBaselineReset(host);
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+      stableDeviceId: "stable-avd",
+    });
+    const controller = new AbortController();
+    const result = baseline.reset(
+      "resource-a",
+      ANDROID_RESET_DEVICE,
+      ANDROID_RESET_PROFILE,
+      async () => {},
+      controller.signal,
+    );
+    await reached.promise;
+    controller.abort(new Error("reset cancelled"));
+    expect(signal?.aborted).toBe(true);
+    resume.resolve();
+    await expect(result).rejects.toThrow("reset cancelled");
+    expect(fencesAfterResume).toBe(0);
+    expect(host.closed).toBe(1);
+  });
+
   test.each(["deviceSnapshot", "network", "setDeviceResources"])(
     "admitted %s activity vetoes even a full snapshot baseline",
     async (toolName) => {

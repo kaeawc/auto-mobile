@@ -31,6 +31,13 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   and binds a pooled session at readiness `booted`; no automation runner step runs. `killDevice`
   takes a watch through the same holder checks and stops it with `simctl shutdown`. Both resolve
   the target from the watch listing, so a non-watch UDID is refused before any simctl command.
+  `provisionDevice` with `device.platform: "watchos"` (its own branch of the request union, so
+  Android and iOS validation is unchanged) takes exact runtime and device-type identifiers from the
+  watch catalog. Under a lifecycle lease on the name, rebound to the UDID once known, it adopts a
+  watch whose name, UDID, device type and runtime all match, or creates one fresh with
+  `simctl create` (never cloned; a named UDID is never created). With `boot` it boots and binds
+  like `startDevice`, and a watch it created is deleted again if boot or bind fails. `resources`,
+  `enableTools` and `readiness: "automation"` are refused; readiness defaults to `"none"`.
 - **`"either"` keeps meaning Android or iOS.** Listing `scanned` flags carry a `watchos` entry;
   until watch inventory exists it is `false`, so a watch is never treated as a freshly listed
   device.

@@ -26,7 +26,7 @@ import {
   selectTransitionalDeviceIds,
 } from "./disconnectMonitor";
 import type { DevicePool, PooledDevice } from "./devicePool";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD, type DeviceLossMisses } from "./deviceLossMisses";
 
 /**
  * The stateless half of the device-disconnect monitor, split out of daemon.ts (#11808): discovery
@@ -405,7 +405,7 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 }
 
 export function logDisconnectMisses(
-  deviceDisconnectMisses: Map<string, number>,
+  deviceDisconnectMisses: DeviceLossMisses,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
   planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,

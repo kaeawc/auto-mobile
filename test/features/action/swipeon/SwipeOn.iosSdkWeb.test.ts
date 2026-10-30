@@ -129,4 +129,14 @@ describe("swipeOn lookFor a web-view DOM element (#5162)", () => {
     expect(result).toMatchObject({ success: true, found: true, scrollIterations: 0 });
     expect(h.web.requests).toEqual([]);
   });
+
+  test("a search scoped to a container or a layer never asks the page", async () => {
+    for (const scope of [{ container: { elementId: "page" } }, { layer: "app" as const }]) {
+      const h = harness({ backend: "sdk" });
+      await h.action
+        .execute({ direction: "up", lookFor: { text: "Pay" }, ...scope })
+        .catch(() => {});
+      expect(h.web.requests).toEqual([]);
+    }
+  });
 });

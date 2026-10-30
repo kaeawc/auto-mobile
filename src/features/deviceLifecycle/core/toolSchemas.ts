@@ -102,7 +102,8 @@ export const listDevicesOutputSchema = z.object({
 
 export const provisionDeviceOutputSchema = z
   .object({
-    device: provisionedDeviceSchema,
+    // Its own platform enum: provisionDevice provisions Apple Watch simulators too (#15882).
+    device: provisionedDeviceSchema.extend({ platform: z.enum(["android", "ios", "watchos"]) }),
     disabledResources: disabledResourcesSchema.optional(),
     requestedSpec: z.unknown(),
     resolvedSpec: z.unknown(),

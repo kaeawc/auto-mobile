@@ -395,80 +395,189 @@ export const getAppleSchema = devicePreparationTimeoutSchema
     }
   });
 
-export const provisionDeviceSchema = z
+const androidProvisionDevice = z
   .object({
-    resources: deviceResourceConfigurationSchema
-      .optional()
-      .describe(
-        "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
-      ),
-    device: withCanonicalDiscriminatedUnionJsonSchema(
-      z.discriminatedUnion("platform", [
-        z
-          .object({
-            platform: z.literal("android"),
-            name: z.string().min(1).describe("Exact AVD name"),
-            spec: androidProvisionDeviceRequestSpecSchema,
-          })
-          .strict(),
-        z
-          .object({
-            platform: z.literal("ios"),
-            name: z.string().min(1).describe("Exact simulator name"),
-            deviceId: z
-              .string()
-              .min(1)
-              .optional()
-              .describe("Exact simulator UDID; prevents same-named simulator selection"),
-            spec: iosProvisionDeviceSpecSchema,
-          })
-          .strict(),
-      ]),
-    ),
-    boot: z
-      .boolean()
-      .default(true)
-      .optional()
-      .describe("Boot the resolved device after creation or adoption"),
-    readiness: z
-      .enum(["automation", "none"])
-      .default("automation")
-      .optional()
-      .describe("Whether to wait for the AutoMobile automation runner after device boot"),
-    timeoutMs: z
-      .number()
-      .int()
-      .positive()
-      .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
-      .optional()
-      .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
-    // See getAndroidSchema.enableTools (#6869). Requires boot=true: the
-    // no-boot branch returns before a session exists (#6886 review).
-    enableTools: enableToolsSchemaField.describe(
-      `${enableToolsSchemaField.description} Requires boot=true.`,
-    ),
+    platform: z.literal("android"),
+    name: z.string().min(1).describe("Exact AVD name"),
+    spec: androidProvisionDeviceRequestSpecSchema,
   })
-  .strict()
-  .refine((args) => !args.resources || args.boot !== false, {
-    path: ["resources"],
-    message: "Resource configuration requires boot=true.",
+  .strict();
+
+const iosProvisionDevice = z
+  .object({
+    platform: z.literal("ios"),
+    name: z.string().min(1).describe("Exact simulator name"),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Exact simulator UDID; prevents same-named simulator selection"),
+    spec: iosProvisionDeviceSpecSchema,
   })
+  .strict();
+
+/** An exact Apple Watch simulator (#15882): adopted when it matches, else created with simctl. */
+const watchProvisionDevice = z
+  .object({
+    platform: z.literal("watchos"),
+    name: z.string().min(1).describe("Exact watch simulator name"),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Exact watch simulator UDID; a UDID that names no watch is refused, not created"),
+    spec: z
+      .object({
+        runtime: z.string().min(1).describe("watchOS CoreSimulator runtime identifier"),
+        deviceType: z.string().min(1).describe("Apple Watch CoreSimulator device-type identifier"),
+      })
+      .strict(),
+  })
+  .strict();
+
+const provisionDeviceResourcesField = deviceResourceConfigurationSchema
+  .optional()
+  .describe(
+    "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
+  );
+
+/** provisionDevice's options after `device`, in their advertised order. */
+const provisionDeviceOptionFields = {
+  boot: z
+    .boolean()
+    .default(true)
+    .optional()
+    .describe("Boot the resolved device after creation or adoption"),
+  readiness: z
+    .enum(["automation", "none"])
+    .default("automation")
+    .optional()
+    .describe("Whether to wait for the AutoMobile automation runner after device boot"),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
+    .optional()
+    .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
+  // See getAndroidSchema.enableTools (#6869). Requires boot=true: the
+  // no-boot branch returns before a session exists (#6886 review).
+  enableTools: enableToolsSchemaField.describe(
+    `${enableToolsSchemaField.description} Requires boot=true.`,
+  ),
+};
+
+interface ProvisionDeviceRefinable {
+  resources?: unknown;
+  enableTools?: unknown;
+  boot?: boolean;
+  readiness?: "automation" | "none";
+  device: { platform: string; spec: object };
+}
+
+/** The cross-field rules every provisionDevice request obeys, whatever its platform. */
+function refineProvisionDeviceOptions(
+  args: ProvisionDeviceRefinable,
+  context: z.RefinementCtx,
+): void {
+  if (args.resources && args.boot === false) {
+    context.addIssue({
+      code: "custom",
+      path: ["resources"],
+      message: "Resource configuration requires boot=true.",
+    });
+  }
   // A boot=false provision returns before any session is minted, so there is
   // nothing to grant the declared capabilities against — accepting the
   // request would discard it silently (#6886 review). Reject it up front,
   // like the resources constraint above.
-  .refine((args) => !args.enableTools || args.boot !== false, {
-    path: ["enableTools"],
-    message: "Capability declaration requires boot=true; boot=false mints no session.",
-  })
+  if (args.enableTools && args.boot === false) {
+    context.addIssue({
+      code: "custom",
+      path: ["enableTools"],
+      message: "Capability declaration requires boot=true; boot=false mints no session.",
+    });
+  }
   // A manufacturer profile is applied to the bound session's ready device (#14058).
-  .refine(
-    (args) =>
-      args.device.platform !== "android" ||
-      !args.device.spec.deviceProfile ||
-      (args.boot !== false && args.readiness !== "none"),
-    {
+  if (
+    args.device.platform === "android" &&
+    Reflect.get(args.device.spec, "deviceProfile") &&
+    (args.boot === false || args.readiness === "none")
+  ) {
+    context.addIssue({
+      code: "custom",
       path: ["device", "spec", "deviceProfile"],
       message: "A manufacturer profile requires boot=true and readiness=automation.",
-    },
-  );
+    });
+  }
+}
+
+export const provisionDeviceSchema = z
+  .object({
+    resources: provisionDeviceResourcesField,
+    device: withCanonicalDiscriminatedUnionJsonSchema(
+      z.discriminatedUnion("platform", [androidProvisionDevice, iosProvisionDevice]),
+    ),
+    ...provisionDeviceOptionFields,
+  })
+  .strict()
+  .superRefine(refineProvisionDeviceOptions);
+
+/** The options a watch cannot honour: resources and tool grants need the automation runner. */
+function refineWatchProvisionOptions(
+  args: ProvisionDeviceRefinable,
+  context: z.RefinementCtx,
+): void {
+  if (args.device.platform !== "watchos") {
+    return;
+  }
+  for (const field of ["resources", "enableTools"] as const) {
+    if (args[field] !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: `${field} is not supported on watchOS.`,
+      });
+    }
+  }
+  if (args.readiness === "automation") {
+    context.addIssue({
+      code: "custom",
+      path: ["readiness"],
+      message: 'watchOS has no automation runner; pass readiness "none" or omit it.',
+    });
+  }
+}
+
+/**
+ * provisionDevice as registered: the Android and iOS request, or an exact Apple Watch simulator
+ * (#15882). It stays a plain object so the ingress can see which keys it declares. Its
+ * `readiness` has no default, so a watch request that omits it means "none"; the Android and iOS
+ * handler re-parses its request with {@link provisionDeviceSchema}, which applies "automation".
+ */
+export const provisionDeviceRegistrationSchema = z
+  .object({
+    resources: provisionDeviceResourcesField,
+    device: withCanonicalDiscriminatedUnionJsonSchema(
+      z.discriminatedUnion("platform", [
+        androidProvisionDevice,
+        iosProvisionDevice,
+        watchProvisionDevice,
+      ]),
+    ),
+    ...provisionDeviceOptionFields,
+    readiness: z
+      .enum(["automation", "none"])
+      .optional()
+      .describe(
+        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS has no runner and takes only "none" (its default)',
+      ),
+  })
+  .strict()
+  .superRefine(refineProvisionDeviceOptions)
+  .superRefine(refineWatchProvisionOptions);
+
+/** A registered provisionDevice request that names an Apple Watch simulator. */
+export type WatchProvisionDeviceRequest = z.output<typeof provisionDeviceRegistrationSchema> & {
+  device: z.output<typeof watchProvisionDevice>;
+};

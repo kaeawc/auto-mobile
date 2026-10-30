@@ -400,7 +400,7 @@ export class DevicePoolMembership {
       this.notifyDeviceIncarnationAssigned(device.deviceId);
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
       this.state.deviceSessionStarts.set(device.deviceId, now);
-      this.state.refreshMissingDeviceMisses.delete(device.deviceId);
+      this.state.refreshMissingDeviceMisses.reset(device.deviceId);
       const sessionTracking = this.callbacks.setDeviceSessionTracking(device.deviceId, now);
       if (awaitSessionTracking) {
         await sessionTracking;
@@ -545,7 +545,7 @@ export class DevicePoolMembership {
     this.state.deferredDeviceReleases.delete(deviceId);
     this.notifyDeviceRemoved(deviceId, device.platform);
     this.state.deviceSessionStarts.delete(deviceId);
-    this.state.refreshMissingDeviceMisses.delete(deviceId);
+    this.state.refreshMissingDeviceMisses.reset(deviceId);
     this.dropTrackedProcessOnRemoval(deviceId, options);
     for (const [capturedSessionId, capture] of this.state.releasedDeviceCaptures) {
       if (capture.deviceId === deviceId) {

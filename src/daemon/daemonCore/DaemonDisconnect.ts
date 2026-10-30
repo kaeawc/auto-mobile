@@ -527,7 +527,7 @@ export class DaemonDisconnect {
     forceGenerationAtDisconnect: number | undefined,
   ): void {
     this.host.confirmedDisconnectedDeviceIds().add(deviceId);
-    this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+    this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
     this.host.deviceDisconnectMissIncarnations().delete(deviceId);
     this.host.offlineRecoveryAttemptedDeviceIds().delete(deviceId);
     this.host.offlineRecoveryAttemptedIncarnations().delete(deviceId);
@@ -726,7 +726,7 @@ export class DaemonDisconnect {
     forceGenerationAtDisconnect: number | undefined,
   ): void {
     this.host.lifecycle.socketServer()?.evictDeviceInputCache(deviceId);
-    this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+    this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
     this.host.deviceDisconnectMissIncarnations().delete(deviceId);
     this.host.confirmedDisconnectedDeviceIds().delete(deviceId);
     if (
@@ -756,7 +756,7 @@ export class DaemonDisconnect {
       if (!this.host.services.devicePool().getDevice(deviceId)) {
         return false;
       }
-      this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+      this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
       this.host.deviceDisconnectMissIncarnations().delete(deviceId);
       this.host.confirmedDisconnectedDeviceIds().delete(deviceId);
       if (
@@ -782,7 +782,7 @@ export class DaemonDisconnect {
       );
       return true;
     }
-    this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+    this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
     this.host.deviceDisconnectMissIncarnations().delete(deviceId);
     this.host.confirmedDisconnectedDeviceIds().delete(deviceId);
     if (

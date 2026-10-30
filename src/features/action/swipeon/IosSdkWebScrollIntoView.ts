@@ -51,6 +51,9 @@ function elementNamed(
     (element) =>
       element.id !== "" &&
       counts.get(element.id) === 1 &&
+      // The page scrolls only an enabled, visible element; another is left to the swipe search.
+      element.enabled &&
+      element.visible &&
       [element.label, element.value === REDACTED_WEB_VALUE ? undefined : element.value].some(
         (name) => name !== undefined && normalized(name) === wanted,
       ),

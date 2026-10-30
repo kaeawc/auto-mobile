@@ -325,7 +325,7 @@ test("alternating successful and failed offline probes do not repeat global reco
   await failedSweep;
   expect(daemon.testHooks.deviceLoss.offlineRecoveryAttemptedIds.has(device.id)).toBe(true);
   fail = false;
-  daemon.testHooks.deviceLoss.misses.clear();
+  daemon.testHooks.deviceLoss.misses.reset(device.id);
   await monitor.run();
   expect(reconnects).toBe(1);
   device.incarnation++;

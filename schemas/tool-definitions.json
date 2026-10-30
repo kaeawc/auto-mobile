@@ -37668,6 +37668,69 @@
               "additionalProperties": false,
               "description": "Fake sign-in accounts for auth.signIn (prototype_platform_auth_v1); unique ids, no passwords or tokens"
             },
+            "commerce": {
+              "type": "object",
+              "properties": {
+                "backend": {
+                  "type": "string",
+                  "const": "fake"
+                },
+                "products": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "\\S"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": ["consumable", "nonConsumable", "subscription"]
+                      },
+                      "price": {
+                        "type": "object",
+                        "properties": {
+                          "amount": {
+                            "type": "string",
+                            "maxLength": 12,
+                            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,2})?$(?![\\s\\S])"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "maxLength": 3,
+                            "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                          }
+                        },
+                        "required": ["amount", "currency"],
+                        "additionalProperties": false
+                      },
+                      "period": {
+                        "type": "string",
+                        "maxLength": 8,
+                        "pattern": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])"
+                      },
+                      "trialPeriod": {
+                        "$ref": "#/properties/spec/properties/commerce/properties/products/items/properties/period"
+                      }
+                    },
+                    "required": ["id", "title", "kind", "price"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                }
+              },
+              "required": ["backend", "products"],
+              "additionalProperties": false,
+              "description": "Fake store catalog for commerce.purchase (prototype_platform_commerce_v1); unique product ids, no real payment fields"
+            },
             "location": {
               "type": "object",
               "properties": {
@@ -40179,6 +40242,44 @@
               },
               "required": ["platform", "name", "spec"],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "const": "watchos"
+                },
+                "name": {
+                  "description": "Exact watch simulator name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "deviceId": {
+                  "description": "Exact watch simulator UDID; a UDID that names no watch is refused, not created",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "description": "watchOS CoreSimulator runtime identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deviceType": {
+                      "description": "Apple Watch CoreSimulator device-type identifier",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["runtime", "deviceType"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["platform", "name", "spec"],
+              "additionalProperties": false
             }
           ]
         },
@@ -40188,8 +40289,7 @@
           "type": "boolean"
         },
         "readiness": {
-          "description": "Whether to wait for the AutoMobile automation runner after device boot",
-          "default": "automation",
+          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS has no runner and takes only \"none\" (its default)",
           "type": "string",
           "enum": ["automation", "none"]
         },
@@ -40370,7 +40470,7 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": ["android", "ios", "watchos"]
             },
             "isVirtual": {
               "type": "boolean"

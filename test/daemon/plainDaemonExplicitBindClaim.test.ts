@@ -64,7 +64,9 @@ test("plain explicit bind keeps its host-wide claim foreign throughout a three-m
   }
   await assertHeld();
   owner.manager.recordToolCallEnded(sessionId, { admitted: true });
-  await releaseSessionAndDevice(owner.manager, owner.pool, serial, sessionId, "explicit-release");
+  await releaseSessionAndDevice(owner.manager, owner.pool, serial, sessionId, {
+    reason: "explicit-release",
+  });
   await world.settle();
   expect(world.claims.files.has(world.claims.claimPath(serial))).toBe(false);
   await world.advance(8_000);

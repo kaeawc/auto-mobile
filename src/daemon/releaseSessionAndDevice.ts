@@ -130,7 +130,9 @@ export async function releasePlanSessionAndDevice(
       error,
     );
   });
-  await releaseSessionAndDevice(manager, pool, cut.deviceId, cut.sessionId, PLAN_AUTO_RELEASE);
+  await releaseSessionAndDevice(manager, pool, cut.deviceId, cut.sessionId, {
+    reason: PLAN_AUTO_RELEASE,
+  });
 }
 
 export interface SessionReleaseManager {
@@ -140,6 +142,15 @@ export interface SessionReleaseManager {
 
 export interface SessionReleasePool {
   releaseDevice(deviceId: string, sessionId: string): Promise<void>;
+}
+
+/** Everything {@link releaseSessionAndDevice} takes after its device and session ids. */
+export interface SessionAndDeviceReleaseOptions {
+  /** Passed to `releaseSession`; omitted, the manager's default reason applies. */
+  reason?: SessionReleaseReason;
+  /** A custom release; its returned device (if any) is freed on success. */
+  release?: () => Promise<string | null>;
+  deferFailureFallback?: boolean;
 }
 
 /**
@@ -173,9 +184,9 @@ export async function releaseSessionAndDevice(
   pool: SessionReleasePool,
   deviceId: string | null,
   sessionId: string,
-  reason?: SessionReleaseReason,
-  options: { release?: () => Promise<string | null>; deferFailureFallback?: boolean } = {},
+  options: SessionAndDeviceReleaseOptions = {},
 ): Promise<void> {
+  const { reason } = options;
   let releasedDeviceId = deviceId;
   try {
     if (options.release) {

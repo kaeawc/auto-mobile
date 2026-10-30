@@ -185,7 +185,7 @@ describe("ObserverSessionRegistry", () => {
     };
     const errorFor = async (id: string): Promise<string> => {
       try {
-        await manager.getOrCreateSession(id, pool, "android", undefined, true);
+        await manager.getOrCreateSession(id, pool, "android", { requireIssuedSession: true });
         throw new Error("unexpected admission");
       } catch (error) {
         expect(error).toBeInstanceOf(Error);

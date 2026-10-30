@@ -34,7 +34,8 @@ afterEach(() => {
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 
 function createClient() {
-  return new DaemonClient("/fake/socket", 1_000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, null, {
+  return new DaemonClient("/fake/socket", 1_000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, {
+    clientIdentity: null,
     platformOverride: "win32",
   });
 }
@@ -75,7 +76,8 @@ describe("DaemonClient request delivery phase", () => {
 describe("DaemonClient request that fails before the frame is written", () => {
   function createTimedClient() {
     const timer = new FakeTimer();
-    const client = new DaemonClient("/fake/socket", 1_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    const client = new DaemonClient("/fake/socket", 1_000, timer, ISOLATED_DAEMON_RECOVERY, {
+      clientIdentity: null,
       platformOverride: "win32",
     });
     return { client, timer };

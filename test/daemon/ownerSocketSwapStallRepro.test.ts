@@ -53,7 +53,8 @@ async function setUp(activeControl = false) {
     releases.push({ at: manager.sessionNow(), reason }),
   );
   const release = async (session: Session, reason: SessionReleaseReason) => {
-    await releaseSessionAndDevice(manager, pool, session.assignedDevice, ID, reason, {
+    await releaseSessionAndDevice(manager, pool, session.assignedDevice, ID, {
+      reason,
       release: () =>
         manager.releaseSession(ID, reason, {
           expectedOwner: { session: session, deviceId: session.assignedDevice },

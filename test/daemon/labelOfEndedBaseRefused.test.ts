@@ -183,14 +183,10 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     const w = await expiredUnscannedBase();
     const before = { ...w.label };
     const error = await refusal(
-      w.manager.getOrCreateSession(
-        LABEL,
-        undefined,
-        undefined,
-        undefined,
-        true,
-        "non-owner-control",
-      ),
+      w.manager.getOrCreateSession(LABEL, undefined, undefined, {
+        requireIssuedSession: true,
+        access: "non-owner-control",
+      }),
     );
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
     expect(error.sessionUuid).toBe(LABEL);

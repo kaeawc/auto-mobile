@@ -250,8 +250,10 @@ class IdleWorld {
     const reported = this.reported();
     const outcome = await this.manager
       .getOrCreateSession(SESSION, undefined, undefined, {
-        executionId: `call-${this.calls++}`,
-        startTime: this.timer.now(),
+        execution: {
+          executionId: `call-${this.calls++}`,
+          startTime: this.timer.now(),
+        },
       })
       .then(
         () => "admitted",
@@ -398,8 +400,10 @@ describe("the scan, a late call's admission and idleReleaseAt give one idle dead
             expect(manager.getSession(SESSION)).toBe(session);
           } else if (seam === "late call") {
             const call = manager.getOrCreateSession(SESSION, undefined, undefined, {
-              executionId: "late-call",
-              startTime: timer.now(),
+              execution: {
+                executionId: "late-call",
+                startTime: timer.now(),
+              },
             });
             if (phase === "suspect") {
               await expect(call).rejects.toBeInstanceOf(SessionSuspectError);

@@ -129,14 +129,11 @@ describe("InputText", () => {
     timer.enableAutoAdvance();
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
-    const inputText = new InputText(
-      androidDevice,
-      new FakeAdbClientFactory(),
-      undefined,
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), {
       timer,
-      undefined,
-      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
-    );
+      observeScreen: observe,
+      awaitIdle: new FakeAwaitIdle(),
+    });
 
     await expect(inputText.execute("hello", {}, { signal: controller.signal })).rejects.toBe(
       deviceLoss,
@@ -150,14 +147,11 @@ describe("InputText", () => {
     timer.enableAutoAdvance();
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
-    const inputText = new InputText(
-      androidDevice,
-      new FakeAdbClientFactory(),
-      undefined,
+    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), {
       timer,
-      undefined,
-      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
-    );
+      observeScreen: observe,
+      awaitIdle: new FakeAwaitIdle(),
+    });
     observe.enableAutoVaryHierarchy();
 
     await inputText.execute("hello", {}, { signal: controller.signal });
@@ -384,17 +378,15 @@ describe("InputText", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const calls: string[] = [];
-    const inputText = new InputText(
-      androidDevice,
-      factory,
-      () => ({
+    const inputText = new InputText(androidDevice, factory, {
+      keyboardCloserFactory: () => ({
         close: async () => {
           calls.push("close");
           return { success: true, open: false };
         },
       }),
       timer,
-    );
+    });
     const execute = spyOn(factory.getFakeClient(), "executeCommand");
     stubAndroidSetText(async (text) => {
       calls.push(`set:${text}`);
@@ -463,17 +455,15 @@ describe("InputText", () => {
       const closeCalls: string[] = [];
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const inputText = new InputText(
-        androidDevice,
-        factory as AdbClientFactory,
-        () => ({
+      const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+        keyboardCloserFactory: () => ({
           close: async () => {
             closeCalls.push("close");
             return { success: true, open: false, message: "Keyboard closed" };
           },
         }),
         timer,
-      );
+      });
       stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
       const result = await inputText.testHooks.executeAndroidTextInput(text, "done", true, mode);
@@ -521,9 +511,11 @@ describe("InputText", () => {
   test("eventAll names the failing final setText phase when dismissing the keyboard", async () => {
     const factory = new FakeAdbClientFactory();
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({ success: true, open: false }),
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({ success: true, open: false }),
+      }),
+    });
     const outcomes = [true, false];
     let call = 0;
     stubAndroidSetText(async () =>
@@ -625,12 +617,14 @@ describe("InputText", () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async (text, options) => {
       setTextCalls.push({ text, dismissKeyboard: options?.dismissKeyboard });
@@ -653,12 +647,14 @@ describe("InputText", () => {
   test("a11y does not invoke the keyboard closer when dismissKeyboard is false", async () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -675,10 +671,8 @@ describe("InputText", () => {
     const factory = new FakeAdbClientFactory();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const inputText = new InputText(
-      androidDevice,
-      factory as AdbClientFactory,
-      () => ({
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
         close: async () => ({
           success: false,
           open: true,
@@ -686,7 +680,7 @@ describe("InputText", () => {
         }),
       }),
       timer,
-    );
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -707,13 +701,15 @@ describe("InputText", () => {
 
   test("a11y warns about a keyboard dismissal failure instead of failing the write", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -730,12 +726,14 @@ describe("InputText", () => {
   test("eventAll dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -754,12 +752,14 @@ describe("InputText", () => {
   test("eventLast dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
     const factory = new FakeAdbClientFactory();
     const closeCalls: string[] = [];
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        closeCalls.push("close");
-        return { success: true, open: false, message: "Keyboard closed" };
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          closeCalls.push("close");
+          return { success: true, open: false, message: "Keyboard closed" };
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -782,13 +782,15 @@ describe("InputText", () => {
   test("append warns about a keyboard dismissal failure instead of failing the typed text", async () => {
     const factory = new FakeAdbClientFactory();
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
     const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
@@ -808,13 +810,15 @@ describe("InputText", () => {
 
   test("eventAll warns about a keyboard dismissal failure instead of failing the write", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -833,13 +837,15 @@ describe("InputText", () => {
 
   test("eventLast warns about a keyboard dismissal failure instead of failing the write", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({
-        success: false,
-        open: true,
-        error: "Keyboard state unavailable",
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
       }),
-    }));
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -863,11 +869,13 @@ describe("InputText", () => {
   // `success:false` they might answer by re-typing text that is already there.
   test("a11y warns instead of failing when the keyboard closer rejects", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        throw new Error("KEYCODE_BACK failed");
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          throw new Error("KEYCODE_BACK failed");
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -888,12 +896,14 @@ describe("InputText", () => {
       `device-disconnected:${androidDevice.deviceId}`,
     );
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => {
-        controller.abort(deviceLoss);
-        throw new Error("closer aborted");
-      },
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => {
+          controller.abort(deviceLoss);
+          throw new Error("closer aborted");
+        },
+      }),
+    });
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -911,9 +921,11 @@ describe("InputText", () => {
   // A failed TEXT WRITE is still a real error — `isError` stays reserved for it.
   test("a failed setText stays a failure even with dismissKeyboard requested", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
-      close: async () => ({ success: true, open: false, message: "Keyboard closed" }),
-    }));
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, {
+      keyboardCloserFactory: () => ({
+        close: async () => ({ success: true, open: false, message: "Keyboard closed" }),
+      }),
+    });
 
     stubAndroidSetText(async () => ({
       success: false,
@@ -981,7 +993,7 @@ describe("InputText", () => {
     async (outcome) => {
       const factory = new FakeAdbClientFactory();
       const timer = new FakeTimer();
-      const input = new InputText(androidDevice, factory, undefined, timer);
+      const input = new InputText(androidDevice, factory, { timer });
       const controller = new AbortController();
       let marks = 0;
       const validate = async () => {
@@ -1233,7 +1245,7 @@ describe("InputText", () => {
     // wall clock here would race the 5ms budget against the char-unmappable path
     // (repo rule: no real timers in unit tests). Never advanced, so the budget
     // stays positive and the "cannot type" path is exercised deterministically.
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
     const whileTimedOut = await inputText.appendText("A", 5);
     expect(whileTimedOut.success).toBe(false);
@@ -1274,7 +1286,7 @@ describe("InputText", () => {
     // FakeTimer into InputText as well, so createBudget never reads the wall clock
     // (repo rule: no real timers). Never advanced, so the budget cannot expire and
     // the assertion is purely about the retry count, not timing.
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
     const result = await inputText.appendText("a", 5000);
 
@@ -1290,7 +1302,7 @@ describe("InputText", () => {
       Promise.resolve(execResult(command.includes("getprop ro.build.version.sdk") ? "31\n" : ""));
     const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     const execute = spyOn(adb, "execute");
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
     const result = await inputText.appendText("ab", 5000);
 
@@ -1313,7 +1325,7 @@ describe("InputText", () => {
       return Promise.resolve(execResult(""));
     };
     const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
-    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, { timer: new FakeTimer() });
 
     const result = await inputText.appendText("ab", 5000);
 
@@ -1329,7 +1341,7 @@ describe("InputText", () => {
     // the socket race only REPORTS the timeout, it still waits for the operation.
     const factory = new FakeAdbClientFactory();
     const timer = new FakeTimer();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, { timer });
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -1347,7 +1359,7 @@ describe("InputText", () => {
   test("append gives up once the budget is spent instead of issuing more key events", async () => {
     const factory = new FakeAdbClientFactory();
     const timer = new FakeTimer();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, { timer });
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 

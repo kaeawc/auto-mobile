@@ -27,6 +27,7 @@ import {
 } from "../../../src/features/observe/androidLauncherPackages";
 import { setDeviceIncarnationResolver } from "../../../src/utils/deviceIncarnation";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import type { AndroidGlobalActionOptions } from "../../../src/features/observe/android/AndroidClientRequests";
 import type { BootedDevice } from "../../../src/models";
 import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
 import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
@@ -168,7 +169,7 @@ describe("PressButton Android keycode dispatch", () => {
       requestGlobalAction: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
       ) => {
-        args[5]?.();
+        args[3]?.onDispatch?.();
         expect(marks).toBe(1);
         return {
           success: false,
@@ -298,7 +299,7 @@ describe("PressButton Android keycode dispatch", () => {
             requestGlobalAction: async (
               ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
             ) => {
-              args[5]?.();
+              args[3]?.onDispatch?.();
               if (reason === "thrown after send") {
                 throw new Error(reason);
               }
@@ -327,7 +328,7 @@ describe("PressButton Android keycode dispatch", () => {
             ) => {
               const acknowledged = reason === "device refused" || reason === "unsupported";
               if (acknowledged) {
-                args[5]?.();
+                args[3]?.onDispatch?.();
               }
               return {
                 success: false,
@@ -347,7 +348,7 @@ describe("PressButton Android keycode dispatch", () => {
           requestGlobalAction: async (
             ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
           ) => {
-            args[5]?.();
+            args[3]?.onDispatch?.();
             return { success: true, action: button, totalTimeMs: 1, acknowledged: true };
           },
         };
@@ -360,7 +361,7 @@ describe("PressButton Android keycode dispatch", () => {
         requestGlobalAction: async (
           ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
         ) => {
-          args[5]?.();
+          args[3]?.onDispatch?.();
           return {
             success: false,
             action: "home",
@@ -699,10 +700,9 @@ describe("PressButton Android keycode dispatch", () => {
           _action: string,
           _timeoutMs?: number,
           _perf?: unknown,
-          _frameContext?: string,
-          signal?: AbortSignal,
+          options?: AndroidGlobalActionOptions,
         ) => {
-          capturedSignal = signal;
+          capturedSignal = options?.signal;
           // Report failure so the flow falls back to the ADB keyevent path.
           return { success: false, action: "home", totalTimeMs: 0, error: "not now" };
         },
@@ -726,9 +726,9 @@ describe("PressButton Android keycode dispatch", () => {
           _action: string,
           _timeoutMs?: number,
           _perf?: unknown,
-          frameContext?: string,
+          options?: AndroidGlobalActionOptions,
         ) => {
-          frameContexts.push(frameContext);
+          frameContexts.push(options?.frameContext);
           return { success: true, action: "back", totalTimeMs: 0 };
         },
       };

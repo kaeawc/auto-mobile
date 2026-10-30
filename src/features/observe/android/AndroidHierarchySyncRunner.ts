@@ -37,16 +37,17 @@ export class AndroidHierarchySyncRunner {
     disableAllFiltering: boolean,
     signal: AbortSignal,
     effectiveTimeoutMs: number,
-    diagnostics: HierarchySyncDiagnostics,
     request: {
       startTime: number;
       displayId?: number;
       observerMode: boolean;
       onRequestId?: (requestId: string) => void;
       preserveDisplayState: boolean;
+      /** Caller-owned out-parameter for the failure detail. */
+      diagnostics: HierarchySyncDiagnostics;
     },
   ): Promise<HierarchySyncResult> {
-    const { startTime, displayId, observerMode, preserveDisplayState } = request;
+    const { startTime, displayId, observerMode, preserveDisplayState, diagnostics } = request;
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
@@ -116,26 +117,20 @@ export class AndroidHierarchySyncRunner {
       const freshData = await this.hooks.awaitSyncReply(
         () =>
           perf.track("waitForPush", () =>
-            this.hooks.waitForFreshData(
-              effectiveTimeoutMs,
-              startTime,
-              false,
-              signal,
-              correlationRequestId,
-              {
-                dispatchSocket,
-                // A stale nudge has a separate id and stream push; it cannot finish a suppressed
-                // caller and release the primary response's token before that response arrives.
-                allowStaleResponse:
-                  !request.onRequestId &&
-                  !observerMode &&
-                  !disableAllFiltering &&
-                  displayId === undefined,
-                observerMode,
-                displayId,
-                diagnostics,
-              },
-            ),
+            this.hooks.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, {
+              requestId: correlationRequestId,
+              dispatchSocket,
+              // A stale nudge has a separate id and stream push; it cannot finish a suppressed
+              // caller and release the primary response's token before that response arrives.
+              allowStaleResponse:
+                !request.onRequestId &&
+                !observerMode &&
+                !disableAllFiltering &&
+                displayId === undefined,
+              observerMode,
+              displayId,
+              diagnostics,
+            }),
           ),
         correlationRequestId,
         observerMode,

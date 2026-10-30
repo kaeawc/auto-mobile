@@ -80,7 +80,6 @@ import {
   PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   UNKNOWN_PROTOTYPE_EVENT_KIND,
-  type PrototypeAppearanceOverride,
   type InspectPrototypesMessage,
   type ShowPrototypeMessage,
   type DismissPrototypeMessage,
@@ -342,24 +341,23 @@ export class CtrlProxyPrototypes {
   ) {}
 
   /**
-   * [displayId] is the Android logical display; undefined and 0 both mean the default display and
-   * keep the wire byte-identical to a request from before display targeting existed. [reset] true
-   * starts a same-id show fresh instead of replacing it in place; false/undefined send nothing.
-   * [appearance] pins the system setting for this show; the caller passes it only for a device
-   * advertising `prototype_appearance_v1`, and undefined (follow the device) sends nothing.
-   * An options object also carries replaceOthers; only false is sent, capability-gated before dispatch.
+   * [overrides.displayId] is the Android logical display; undefined and 0 both mean the default
+   * display and keep the wire byte-identical to a request from before display targeting existed.
+   * [overrides.reset] true starts a same-id show fresh instead of replacing it in place;
+   * false/undefined send nothing. [overrides.appearance] pins the system setting for this show; the
+   * caller passes it only for a device advertising `prototype_appearance_v1`, and undefined (follow
+   * the device) sends nothing. [overrides.replaceOthers]: only false is sent, capability-gated
+   * before dispatch.
    */
   async requestShowPrototype(
     spec: PrototypeSpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides: PrototypeShowOverrides = {},
   ): Promise<PrototypeResult> {
     this.validateSpec(spec);
     await this.validateShaderAssets(spec);
-    const overrides = typeof appearance === "string" ? { appearance } : appearance;
+    const { displayId, reset } = overrides;
     const target = displayId === undefined || displayId === 0 ? undefined : displayId;
     return this.request(
       ctrlProxyRequests.showPrototype({
@@ -367,9 +365,9 @@ export class CtrlProxyPrototypes {
         spec,
         displayId: target,
         reset,
-        appearance: overrides?.appearance,
-        locale: spec.strings ? overrides?.locale : undefined,
-        replaceOthers: overrides?.replaceOthers,
+        appearance: overrides.appearance,
+        locale: spec.strings ? overrides.locale : undefined,
+        replaceOthers: overrides.replaceOthers,
       }),
       timeoutMs,
       perf,

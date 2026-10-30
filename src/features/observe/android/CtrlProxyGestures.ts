@@ -29,6 +29,12 @@ export interface GestureStartRequest {
   beforeSend?: () => void;
 }
 
+/** Transport controls for {@link CtrlProxyGestures.requestGestureEnd}. */
+export interface GestureEndOptions {
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+}
+
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
     // `roundCoordinates: true` centralizes coordinate rounding for Android at the delegate layer
@@ -260,9 +266,9 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     x: number,
     y: number,
     cancel: boolean = false,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    options: GestureEndOptions = {},
   ): Promise<A11ySwipeResult> {
+    const { timeoutMs = 5000, perf = new NoOpPerformanceTracker() } = options;
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_end",
       responseType: "swipe",

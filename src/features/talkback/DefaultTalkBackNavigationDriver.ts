@@ -55,14 +55,9 @@ export class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver
     resourceId?: string,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestAction(
-      action,
-      resourceId,
-      undefined,
-      undefined,
-      undefined,
+    return this.accessibilityService.requestAction(action, resourceId, undefined, undefined, {
       signal,
-    );
+    });
   }
 
   async requestNodeAction(

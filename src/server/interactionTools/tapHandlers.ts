@@ -18,9 +18,12 @@ import { StructuredToolResponse, createStructuredToolResponse } from "../../util
 import { resolveTransportDeadlineMs } from "../formTools";
 import { defaultTapOnElementFactory, isIosAppOpenAlertHierarchy } from "../interactionToolHandlers";
 import type { TapAnyArgs, TapAtArgs, TapOnArgs } from "../interactionToolTypes";
-import { ProgressCallback } from "../toolRegistry";
 import { internalTapAtContext } from "../internalToolParams";
-import type { InteractionToolDependencies, TapAtElementLike } from "./dependencies";
+import type {
+  InteractionHandlerOptions,
+  InteractionToolDependencies,
+  TapAtElementLike,
+} from "./dependencies";
 import { hitTestSchema } from "./tapSchemas";
 
 /**
@@ -35,9 +38,15 @@ import { hitTestSchema } from "./tapSchemas";
 export function buildTapOnResultMessage(
   selectedElement: TapOnSelectedElement | undefined,
   searchSummary: string | undefined,
-  activatedSubtext?: { text: string; occurrence: number },
-  selectorLabel?: string,
-  longPress?: Pick<TapOnElementResult, "action" | "longClickAdvertised">,
+  {
+    activatedSubtext,
+    selectorLabel,
+    longPress,
+  }: {
+    activatedSubtext?: { text: string; occurrence: number };
+    selectorLabel?: string;
+    longPress?: Pick<TapOnElementResult, "action" | "longClickAdvertised">;
+  } = {},
 ): string {
   const details = buildTapOnResultDetails(
     selectedElement,
@@ -212,13 +221,11 @@ function buildTapOnSuccessMessage(
     );
     return `${label} was ${beforeState}, tapped, now ${afterState} (verified)${details.length > 0 ? `; ${details.join("; ")}` : ""}`;
   }
-  return buildTapOnResultMessage(
-    result.selectedElement,
-    searchSummary,
-    result.activatedSubtext,
+  return buildTapOnResultMessage(result.selectedElement, searchSummary, {
+    activatedSubtext: result.activatedSubtext,
     selectorLabel,
-    result,
-  );
+    longPress: result,
+  });
 }
 
 function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | undefined): string {
@@ -236,9 +243,7 @@ function tapOnElementLabel(result: TapOnElementResult, selectorLabel: string | u
 export async function tapOnHandler(
   device: BootedDevice,
   args: TapOnArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const tapOnTextCommand = (deps.tapOnElementFactory ?? defaultTapOnElementFactory)(device);
@@ -291,9 +296,7 @@ export async function tapOnHandler(
 export async function tapAtHandler(
   device: BootedDevice,
   args: TapAtArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const result = await (deps.tapAtElementFactory ?? defaultTapAtElementFactory)(device).execute(
@@ -328,9 +331,7 @@ export async function tapAtHandler(
 export async function hitTestHandler(
   device: BootedDevice,
   args: z.infer<typeof hitTestSchema>,
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   const observation = await readHitTestObservation(device, args.display, signal, deps);
   if (args.snapshotId) {
@@ -365,9 +366,7 @@ function buildTapAnySearchSummary(
 export async function tapAnyHandler(
   device: BootedDevice,
   args: TapAnyArgs,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  deps: InteractionToolDependencies = {},
+  { progress, signal, deps = {} }: InteractionHandlerOptions = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   const tapAnyCommand = (deps.tapAnyElementFactory ?? defaultTapAnyElementFactory)(device);

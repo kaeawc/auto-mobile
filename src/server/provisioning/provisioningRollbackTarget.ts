@@ -73,8 +73,10 @@ async function resolveCreatedIosProvisionDeviceRollbackTarget(
   identity: ExactIosDeviceIdentity,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  pendingMutationSettlement: Promise<unknown> | undefined,
-  rollbackDeadlineMs: number,
+  {
+    pendingMutationSettlement,
+    rollbackDeadlineMs,
+  }: { pendingMutationSettlement?: Promise<unknown>; rollbackDeadlineMs: number },
 ): Promise<ProvisionRollbackTarget> {
   if (
     pendingMutationSettlement &&
@@ -147,8 +149,7 @@ export async function resolveProvisionDeviceRollbackTarget(
           exactIosProvisionDeviceIdentity(args),
           deps,
           deviceManager,
-          pendingMutationSettlement,
-          rollbackDeadlineMs,
+          { pendingMutationSettlement, rollbackDeadlineMs },
         );
   if (target.kind !== "device" || !observedRuntimeDevice?.deviceId) {
     return target;
@@ -253,7 +254,6 @@ export async function resolveCreatedIosRollbackTargetForAcquisition(
     },
     deps,
     deps.deviceManagerFactory(),
-    pendingMutationSettlement,
-    rollbackDeadlineMs,
+    { pendingMutationSettlement, rollbackDeadlineMs },
   );
 }

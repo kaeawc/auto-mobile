@@ -494,21 +494,9 @@ describe("device lifecycle ordinary-client structured output", () => {
       const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
         const response =
           name === "rotate"
-            ? await rotateHandler(
-                device,
-                { orientation: "portrait" },
-                undefined,
-                undefined,
-                interactionDeps,
-              )
+            ? await rotateHandler(device, { orientation: "portrait" }, { deps: interactionDeps })
             : name === "setPosture"
-              ? await setPostureHandler(
-                  device,
-                  { posture: "opened" },
-                  undefined,
-                  undefined,
-                  interactionDeps,
-                )
+              ? await setPostureHandler(device, { posture: "opened" }, { deps: interactionDeps })
               : await tool.deviceAwareHandler!(device, args);
         return finalizeToolResponse(response, {
           name,

@@ -254,9 +254,14 @@ export const resolveUniqueTrayAppLabel = async (
   device: BootedDevice,
   appId: string,
   appIds: string[],
-  signal?: AbortSignal,
-  // The label the caller already resolved for `appId` through the same resolver.
-  resolvedLabel?: string | null,
+  {
+    signal,
+    resolvedLabel,
+  }: {
+    signal?: AbortSignal;
+    /** The label the caller already resolved for `appId` through the same resolver. */
+    resolvedLabel?: string | null;
+  } = {},
 ): Promise<string> => {
   signal?.throwIfAborted();
   const { appLabelResolver } = getSystemTrayDependencies();

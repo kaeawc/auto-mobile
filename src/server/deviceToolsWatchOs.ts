@@ -116,7 +116,8 @@ export async function bindWatchSession(
   return await runOperationWithinDeadline(timer, deadlineMs, signal, {
     operation: bindUndoneIfUndelivered(
       async (receipt, bindSignal) =>
-        await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
+        await bindSession(boot.device, sessionArgs(rawArgs), undefined, {
+          childProcess: null,
           achievedReadiness: "booted",
           receipt,
           signal: bindSignal,

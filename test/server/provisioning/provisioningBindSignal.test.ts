@@ -20,14 +20,15 @@ const boot: DeviceBootResult = {
 };
 const sourceImage: DeviceInfo = { platform: "android", name: "Pixel_9", isRunning: true };
 
-type BindOptions = Parameters<ProvisioningContext["bindBootedDeviceSession"]>[4];
+type BindOptions = Parameters<ProvisioningContext["bindBootedDeviceSession"]>[3];
 
 function contextRecording(bind: (options: BindOptions) => Promise<string>): ProvisioningContext {
   const unused = async (): Promise<never> => {
     throw new Error("not used by the session bind");
   };
   return {
-    bindBootedDeviceSession: async (_d, _a, _s, _c, options) => await bind(options),
+    bindBootedDeviceSession: async (_d, _a, _s, { childProcess: _c, ...options }) =>
+      await bind(options),
     ensureCtrlProxyReady: unused,
     executeDeleteDevice: unused,
   };
@@ -35,12 +36,15 @@ function contextRecording(bind: (options: BindOptions) => Promise<string>): Prov
 
 function bindWith(ctx: ProvisioningContext, signal: AbortSignal) {
   const timer = new FakeTimer();
-  return bindProvisionedDeviceSession(ctx, args, boot, sourceImage, {
-    timer,
-    totalDeadlineMs: timer.now() + 1000,
-    signal,
-    readinessReservation: undefined,
-    settlementState: { bindingSettlements: [] },
+  return bindProvisionedDeviceSession(ctx, args, boot, {
+    sourceImage,
+    binding: {
+      timer,
+      totalDeadlineMs: timer.now() + 1000,
+      signal,
+      readinessReservation: undefined,
+      settlementState: { bindingSettlements: [] },
+    },
   });
 }
 

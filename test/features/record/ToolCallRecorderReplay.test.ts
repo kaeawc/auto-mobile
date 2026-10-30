@@ -274,7 +274,11 @@ test("executor passes step geometry through the real tapAt handler", async () =>
       "fake native tap",
       tapAtSchema,
       (args, progress, signal) =>
-        tapAtHandler(SIMULATOR, args, progress, signal, { tapAtElementFactory: () => fake.tapAt }),
+        tapAtHandler(SIMULATOR, args, {
+          progress,
+          signal,
+          deps: { tapAtElementFactory: () => fake.tapAt },
+        }),
       { defaultEnabled: true },
     );
     const geometry = {

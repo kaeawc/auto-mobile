@@ -36,8 +36,7 @@ export const listSystemTrayNotifications = (
   device: BootedDevice,
   appId: string,
   appLabel: string | null,
-  awaitTimeoutMs: number,
-  { signal }: SystemTrayCall = {},
+  { awaitTimeoutMs, signal }: SystemTrayCall & { awaitTimeoutMs: number },
 ) => listNotifications({ device, appId, appLabel, awaitTimeoutMs, signal }, trayListingContext);
 
 /**
@@ -48,8 +47,7 @@ export const listSystemTrayNotificationsForClear = (
   device: BootedDevice,
   appId: string,
   appLabel: string | null,
-  awaitTimeoutMs: number,
-  signal?: AbortSignal,
+  { awaitTimeoutMs, signal }: { awaitTimeoutMs: number; signal?: AbortSignal },
 ) =>
   listNotifications(
     { device, appId, appLabel, awaitTimeoutMs, signal, skipTerminalObservation: true },

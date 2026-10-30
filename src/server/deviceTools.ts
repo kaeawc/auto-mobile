@@ -53,7 +53,9 @@ export function registerDeviceTools() {
   // no caller: the broker binding and session-holder refusals guard callers, not the daemon itself.
   registerDaemonDeviceDeletion((args, signal) => {
     const deps = getDeviceToolsDependencies();
-    return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));
+    return executeDeleteDevice(args, deps, signal, {
+      teardownService: getDeviceTeardownService(deps),
+    });
   });
 
   const provisionHandlers = createProvisionDeviceHandlers({

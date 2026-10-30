@@ -58,8 +58,8 @@ export async function provisionExactDevice(
   args: ProvisionDeviceArgs,
   provisioner: ExactDeviceProvisioner,
   perf: ReturnType<typeof createPerformanceTracker>,
-  timer: Timer,
   {
+    timer,
     totalDeadlineMs,
     markDeviceCreationStarted,
     lifecycleLease,
@@ -67,6 +67,7 @@ export async function provisionExactDevice(
     signal,
     checkBootCapacity,
   }: {
+    timer: Timer;
     totalDeadlineMs: number;
     checkBootCapacity: (platform: Platform, signal?: AbortSignal) => Promise<void>;
     markDeviceCreationStarted: () => void;
@@ -273,8 +274,15 @@ async function reserveReadinessWithinDeadline(
   ctx: ProvisioningContext,
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
-  boot: DeviceBootResult,
-  { totalDeadlineMs, signal }: { totalDeadlineMs: number; signal: AbortSignal },
+  {
+    boot,
+    totalDeadlineMs,
+    signal,
+  }: {
+    boot: DeviceBootResult;
+    totalDeadlineMs: number;
+    signal: AbortSignal;
+  },
 ): Promise<DeviceReadinessReservation | undefined> {
   return runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
     operation: async (reservationSignal) => {
@@ -295,8 +303,8 @@ export async function bootExactProvisionedDevice(
   ctx: ProvisioningContext,
   args: InternalProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
-  deviceManager: PlatformDeviceManager,
   {
+    deviceManager,
     deviceCreationGate,
     provisioned,
     perf,
@@ -307,7 +315,7 @@ export async function bootExactProvisionedDevice(
     onBooted,
     deleteCreatedIfUndelivered,
     recordUndeliveredAdoption,
-  }: ProvisionBootOptions,
+  }: ProvisionBootOptions & { deviceManager: PlatformDeviceManager },
 ): Promise<ProvisionBootResult> {
   const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
   const operationSignal = combineAbortSignals(signal, lifecycleLease.signal)!;
@@ -369,7 +377,8 @@ export async function bootExactProvisionedDevice(
     assertProvisionIosBootIdentity(args, provisioned, boot);
     await validatePooledDeviceMapping(boot.device, requestedIdentity, mappingOptions);
     onBooted(boot.device);
-    readinessReservation = await reserveReadinessWithinDeadline(ctx, args, deps, boot, {
+    readinessReservation = await reserveReadinessWithinDeadline(ctx, args, deps, {
+      boot,
       totalDeadlineMs,
       signal: operationSignal,
     });
@@ -378,16 +387,14 @@ export async function bootExactProvisionedDevice(
       deviceReadinessLockKey(boot.device.platform, boot.device.deviceId),
       async () => {
         operationSignal.throwIfAborted();
-        resources = await applyProvisionDeviceResources(
-          args,
-          deps,
-          boot!.device,
-          totalDeadlineMs,
-          operationSignal,
-        );
+        resources = await applyProvisionDeviceResources(args, deps, boot!.device, {
+          deadlineMs: totalDeadlineMs,
+          signal: operationSignal,
+        });
         operationSignal.throwIfAborted();
         awaitingReadiness = true;
-        await ensureProvisionDeviceReadiness(ctx, args, deps, boot!.device, {
+        await ensureProvisionDeviceReadiness(ctx, args, deps, {
+          device: boot!.device,
           requestedIdentity,
           totalDeadlineMs: totalDeadlineMs,
           perf: perf,
@@ -397,21 +404,21 @@ export async function bootExactProvisionedDevice(
         operationSignal.throwIfAborted();
         await validatePooledDeviceMapping(boot!.device, requestedIdentity, mappingOptions);
         publishWarmDeviceReady(boot!.source, boot!.device.deviceId);
-        const bound = await bindProvisionedDeviceSession(ctx, args, boot!, provisioned.device, {
-          timer: deps.timer,
-          totalDeadlineMs,
-          signal: operationSignal,
-          readinessReservation,
-          settlementState,
+        const bound = await bindProvisionedDeviceSession(ctx, args, boot!, {
+          sourceImage: provisioned.device,
+          binding: {
+            timer: deps.timer,
+            totalDeadlineMs,
+            signal: operationSignal,
+            readinessReservation,
+            settlementState,
+          },
         });
         // Applied to the bound session's ready device, so its release restores it (#14058).
-        manufacturerProfile = await applyProvisionDeviceProfile(
-          args,
-          deps,
-          boot!.device,
-          bound,
-          operationSignal,
-        );
+        manufacturerProfile = await applyProvisionDeviceProfile(args, deps, boot!.device, {
+          boundSessionId: bound,
+          signal: operationSignal,
+        });
         return bound;
       },
     );
@@ -433,8 +440,7 @@ export async function bootExactProvisionedDevice(
       args,
       provisioned.created,
       awaitingReadiness,
-      error,
-      operationSignal,
+      { error, signal: operationSignal },
     );
     if (!ownershipTransferred && !settlementState.retainCreatedForRetry) {
       settlementState.unownedColdBootSettlement = cancelUnownedColdBootUnlessRetryable(
@@ -454,8 +460,7 @@ function retainCreatedForReadinessRetry(
   args: InternalProvisionDeviceArgs,
   created: boolean,
   awaitingReadiness: boolean,
-  error: unknown,
-  signal: AbortSignal,
+  { error, signal }: { error: unknown; signal: AbortSignal },
 ): boolean {
   if (
     currentBindingReconciler() === undefined ||

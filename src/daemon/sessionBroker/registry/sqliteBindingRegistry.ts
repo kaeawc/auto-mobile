@@ -12,7 +12,10 @@ import type { IdGenerator } from "../../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../../utils/tempDir";
 import { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
-import { BindingDiscoveryIncompleteError } from "../provisioning/refusal";
+import {
+  BindingDiscoveryIncompleteError,
+  BindingRegistrySchemaUnsupportedError,
+} from "../provisioning/refusal";
 import { SqliteSessionBrokerStore } from "../sqliteStore";
 import { SqliteDeviceMutationJournal } from "../mutations/sqliteJournal";
 import {
@@ -68,6 +71,7 @@ import {
 import {
   assertBindingRegistryCurrent,
   assertSupportedRegistrySchema,
+  BINDING_REGISTRY_MIGRATIONS,
   migrateBindingRegistry,
 } from "./bindingRegistryMigrations";
 import {
@@ -195,9 +199,10 @@ export async function openSqliteBindingRegistry(
   if (!isInMemoryDatabasePath(dbPath)) {
     ensureSecureDirectorySync(dirname(dbPath));
   }
+  let sqlite: RegistrySqliteHandle | undefined;
   const db = new Kysely<BindingRegistryDatabase>({
     dialect: new RegistrySqliteDialect({
-      database: () => openRegistrySqlite(dbPath),
+      database: () => (sqlite = openRegistrySqlite(dbPath)),
       // Applies to BEGIN and autocommit statements: fail fast so the owning operation can retry
       // the whole unit. Migration DDL is atomic and opens are serialized by a file lock;
       // a busy open is forgotten by factories and refused retryably. Transaction bodies already
@@ -225,26 +230,59 @@ export async function openSqliteBindingRegistry(
     }
     throw error;
   }
-  return new SqliteBindingRegistry(db, options, dbPath);
+  return new SqliteBindingRegistry(db, options, dbPath, sqlite);
 }
 
 export class SqliteBindingRegistry implements BindingRegistry {
   private readonly timer: Timer;
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
+  private readonly claims: SqliteDeviceClaims;
 
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     options: SqliteBindingRegistryOptions = {},
     private readonly dbPath: string = ":memory:",
+    private readonly sqlite?: RegistrySqliteHandle,
   ) {
     this.timer = options.timer ?? defaultTimer;
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
+    this.claims = new SqliteDeviceClaims(this.db, (write) => this.writeTransaction(write));
   }
 
   /** Recheck after BEGIN IMMEDIATE: a peer may have migrated since this handle opened. */
   private writeTransaction<T>(
     write: (trx: Kysely<BindingRegistryDatabase>) => Promise<T>,
   ): Promise<T> {
+    if (this.sqlite) {
+      const sqlite = this.sqlite;
+      return this.db.transaction().execute((trx) => {
+        // The factory owns this same physical connection. Probe synchronously after BEGIN
+        // so the guard adds no promise hops to ownership release or other write paths.
+        const statement = sqlite.prepare("SELECT name FROM kysely_migration ORDER BY name");
+        try {
+          const unknownMigrations = statement
+            .all()
+            .map((row) => {
+              if (
+                typeof row !== "object" ||
+                row === null ||
+                !("name" in row) ||
+                typeof row.name !== "string"
+              ) {
+                throw new Error("Invalid binding registry migration name");
+              }
+              return row.name;
+            })
+            .filter((name) => !Object.hasOwn(BINDING_REGISTRY_MIGRATIONS, name));
+          if (unknownMigrations.length > 0) {
+            throw new BindingRegistrySchemaUnsupportedError(this.dbPath, unknownMigrations);
+          }
+        } finally {
+          statement.finalize();
+        }
+        return write(trx);
+      });
+    }
     return this.db.transaction().execute(async (trx) => {
       await assertSupportedRegistrySchema(trx, this.dbPath);
       return write(trx);
@@ -266,16 +304,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   /** The host-wide device claims table (#11811), on this connection and transaction lock. */
   deviceClaims(): SqliteDeviceClaims {
-    const claims = new SqliteDeviceClaims(this.db);
-    claims.upsert = (claim) =>
-      this.writeTransaction((trx) => new SqliteDeviceClaims(trx).upsert(claim));
-    claims.release = (platform, deviceId, owner) =>
-      this.writeTransaction((trx) =>
-        new SqliteDeviceClaims(trx).release(platform, deviceId, owner),
-      );
-    claims.releaseOwnedBy = (owner) =>
-      this.writeTransaction((trx) => new SqliteDeviceClaims(trx).releaseOwnedBy(owner));
-    return claims;
+    return this.claims;
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {

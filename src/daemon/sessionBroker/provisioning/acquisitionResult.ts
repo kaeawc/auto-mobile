@@ -1,3 +1,5 @@
+import type { BindingPlatform } from "../registry/bindingRegistry";
+
 export type BindingsOutcome = "ready" | "failed";
 
 export type BindingDispositionName = "created" | "reused" | "adopted" | "replaced";
@@ -42,7 +44,7 @@ export interface BindingBudgetEvidence {
     orphaned: number;
   };
   charged: Array<{
-    platform: "android" | "ios";
+    platform: BindingPlatform;
     stableDeviceId: string;
     kind:
       | "assigned_active"
@@ -61,7 +63,7 @@ export interface BindingBudgetEvidence {
   /** Charged devices beyond the bounded `charged` list; `usage.total` is always the full count. */
   chargedOmitted?: number;
   retained: Array<{
-    platform: "android" | "ios";
+    platform: BindingPlatform;
     stableDeviceId: string;
     reason: string;
     attempts?: number;
@@ -69,7 +71,7 @@ export interface BindingBudgetEvidence {
     uncounted?: true;
     lastError?: string | null;
   }>;
-  evictionFailures: Array<{ platform: "android" | "ios"; stableDeviceId: string; message: string }>;
+  evictionFailures: Array<{ platform: BindingPlatform; stableDeviceId: string; message: string }>;
 }
 
 export interface BindingsFailure {

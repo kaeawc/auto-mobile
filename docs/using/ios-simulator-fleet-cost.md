@@ -50,6 +50,11 @@ The count limit is the smaller of two budgets, at least 1:
 Set `AUTOMOBILE_IOS_SIM_MAX_BOOTED` to override the count limit. Only count-limit
 overflow fails immediately with the retryable `capacity_exhausted` error.
 
+The count covers every booted simulator, whatever its runtime. Apple Watch
+simulators share it with iPhones and iPads: a `startDevice` or `provisionDevice`
+that cold-boots a watch takes a slot and is refused with `capacity_exhausted`
+at the limit.
+
 First boot has a separate concurrency limit: `ceil(host cores / 13)`, at least 2
 (or 1 when host resources cannot be read). The floor of 2 matches the runner launch
 limit: boots share the host's CPU-seconds, so serializing them gains little, while

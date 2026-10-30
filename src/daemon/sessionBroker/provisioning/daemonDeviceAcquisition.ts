@@ -23,11 +23,15 @@ import {
   listInstalledSystemImages,
 } from "../../../utils/android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import { WatchSimulatorInventory } from "../../../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type { Timer } from "../../../utils/SystemTimer";
 import { runAsBindingReconciler } from "./exclusion";
 import { WorkflowBindingDeviceDeleter } from "./deviceDeleter";
 import { BrokerDeviceAcquisition, type BrokerDeviceAcquisitionSessions } from "./deviceAcquisition";
-import { DeviceManagerBindingInventory } from "./DeviceManagerBindingInventory";
+import {
+  DeviceManagerBindingInventory,
+  type WatchBindingInventorySource,
+} from "./DeviceManagerBindingInventory";
 import {
   GateBindingBootCapacity,
   type BindingBootCapacityAssertion,
@@ -83,6 +87,8 @@ export interface DaemonBindingTooling {
   androidImageCatalog?: ManagedAndroidImageCatalog;
   androidProfileCatalog?: ManagedAndroidProfileCatalog;
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
+  /** Apple Watch simulators, charged against the shared total-resource limit (#15882). */
+  watchInventory?: WatchBindingInventorySource;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: BindingBootCapacityAssertion;
   reserveBootCapacity?: typeof reserveBootCapacity;
@@ -119,6 +125,11 @@ function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroid
     iosRuntimeCatalog:
       tooling.iosRuntimeCatalog ??
       (process.platform === "darwin" ? new SimCtlClient(null) : undefined),
+    watchInventory:
+      tooling.watchInventory ??
+      (process.platform === "darwin"
+        ? new WatchSimulatorInventory(new SimCtlClient(null))
+        : undefined),
     checkBootCapacity: tooling.checkBootCapacity,
     reserveBootCapacity: tooling.reserveBootCapacity,
   };
@@ -163,7 +174,7 @@ export function createDaemonBrokerDeviceAcquisition(
           : undefined,
       );
       const { deviceManager, androidConfigReader } = tooling;
-      const inventory = new DeviceManagerBindingInventory(deviceManager);
+      const inventory = new DeviceManagerBindingInventory(deviceManager, tooling.watchInventory);
       const claims = new PoolBindingDeviceClaims(options.pool, options.executions);
       const resourceBudget = options.resourceBudgetPolicy
         ? new RegistryBindingResourceBudget({

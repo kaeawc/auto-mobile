@@ -1,10 +1,19 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../models";
+import type { IosBootInstrumentation } from "../../models/IosBootInstrumentation";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { logger } from "../logger";
 import type { SimCtl } from "./SimCtlClient";
 import type { WatchSimulatorInventory } from "./WatchSimulatorInventory";
 
 /** The simctl boot and shutdown primitives the watch lifecycle drives; `SimCtlClient` implements them. */
 export type WatchLifecycleSimctl = Pick<SimCtl, "waitForSimulatorReady" | "killSimulator">;
+
+/**
+ * The host's simulator boot admission. A watch is a simulator: it occupies the same host
+ * capacity the iOS gate counts (every Booted simulator, whatever its runtime), so a cold watch
+ * boot is admitted against that one limit like an iPhone boot.
+ */
+export type WatchBootAdmission = Pick<IosBootInstrumentation, "run">;
 
 /** The watch listing the lifecycle resolves targets from. */
 export type WatchLifecycleInventory = Pick<WatchSimulatorInventory, "listWatchSimulators">;
@@ -33,6 +42,7 @@ export class WatchSimulatorLifecycle {
   constructor(
     private readonly simctl: WatchLifecycleSimctl,
     private readonly inventory: WatchLifecycleInventory,
+    private readonly admission?: WatchBootAdmission,
   ) {}
 
   async findWatch(selector: WatchSelector, signal?: AbortSignal): Promise<ListedWatch> {
@@ -77,7 +87,19 @@ export class WatchSimulatorLifecycle {
         acquisition: "already-booted",
       };
     }
-    const booted = await this.simctl.waitForSimulatorReady(udid, options.timeoutMs);
+    const bootWatch = () => this.simctl.waitForSimulatorReady(udid, options.timeoutMs);
+    // At the simulator limit the admission refuses with the typed retryable capacity error.
+    const booted = this.admission
+      ? await this.admission.run(
+          {
+            udid,
+            reason: "restart",
+            runtime: watch.runtimeId,
+            timeoutMs: options.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS,
+          },
+          bootWatch,
+        )
+      : await bootWatch();
     // The shared boot path labels what it booted "ios"; this UDID came from the watch listing.
     return { device: { ...booted, platform: "watchos" }, acquisition: "cold-boot" };
   }

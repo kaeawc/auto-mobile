@@ -1,11 +1,7 @@
 import type { BindingInventory } from "./reconciler";
 import { isProductBrokerDevice, LEGACY_DEVICE_NAME_PREFIX } from "../persistedIdentity";
 import { deviceStableId } from "../registry/deviceIdentity";
-import {
-  type AndroidOrIosPlatform,
-  type DeviceInfo,
-  isAndroidOrIosPlatform,
-} from "../../../models/index";
+import type { DeviceInfo } from "../../../models/index";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -21,10 +17,17 @@ import {
   type BindingPlatform,
   type BindingRegistry,
 } from "../registry/bindingRegistry";
+import { isBindingPlatform } from "../registry/bindingRegistryRows";
+
+/**
+ * Every platform whose devices the shared limit charges: Android (any form factor), iOS and
+ * Apple Watch simulators count against one total (owner decision, #15882).
+ */
+const CHARGED_PLATFORMS: readonly BindingPlatform[] = ["android", "ios", "watchos"];
 
 /** Operator limits supplied by the broker host configuration. */
 export interface BindingResourceBudgetPolicy {
-  /** Max distinct managed devices across platforms; zero refuses creation, null = not enforced. */
+  /** Max distinct managed devices across platforms (watches included); zero refuses creation, null = not enforced. */
   limit(): number | null;
 }
 
@@ -40,7 +43,7 @@ export interface BindingResourceUsage {
   preparing: number;
   /** Bound old devices named by an open replace in intent or deleting phase. */
   deleting: number;
-  /** Running (or iOS booting/shutting-down) daemon-named inventory devices without a registry commitment. */
+  /** Running (or simulator booting/shutting-down) daemon-named inventory devices without a registry commitment. */
   orphaned: number;
 }
 
@@ -310,9 +313,9 @@ function commitmentCharges(input: LedgerInput): {
  * running counts (#13017); a known powered-off image never blocks creation and is never deleted by
  * the budget. An image whose running state the listing could not read (`isRunningStateKnown:
  * false`) holds nothing until a probe proves it running (#15016): it has no registry commitment,
- * so charging it on suspicion would exhaust the cap forever on stale shut-down AVDs. An iOS
- * simulator in a transitional simctl state (`Booting` / `Shutting Down`) reports `isRunning:
- * false` but still holds host resources (#13060).
+ * so charging it on suspicion would exhaust the cap forever on stale shut-down AVDs. An iOS or
+ * watchOS simulator in a transitional simctl state (`Booting` / `Shutting Down`) reports
+ * `isRunning: false` but still holds host resources (#13060).
  */
 function orphanHolding(device: DeviceInfo): ResourceCharge["orphanState"] | null {
   if (device.isRunning === true) {
@@ -321,16 +324,16 @@ function orphanHolding(device: DeviceInfo): ResourceCharge["orphanState"] | null
   if (device.isRunningStateKnown === false) {
     return null;
   }
-  return device.platform === "ios" && device.state !== undefined && device.state !== "Shutdown"
+  return device.platform !== "android" && device.state !== undefined && device.state !== "Shutdown"
     ? "transitioning"
     : null;
 }
 
-/** An inventory device on a platform bindings can manage. */
-type BindingInventoryDevice = DeviceInfo & { platform: AndroidOrIosPlatform };
+/** An inventory device on a platform the shared limit charges. */
+type BindingInventoryDevice = DeviceInfo & { platform: BindingPlatform };
 
 function isBindingInventoryDevice(device: DeviceInfo): device is BindingInventoryDevice {
-  return isAndroidOrIosPlatform(device.platform);
+  return isBindingPlatform(device.platform);
 }
 
 /** Unbound broker-named images with no registry or journal commitment, in inventory order. */
@@ -342,7 +345,6 @@ function orphanCandidates(
   const candidates: BindingInventoryDevice[] = [];
   for (const device of input.inventory ?? []) {
     const stableId = deviceStableId(device);
-    // The broker creates only Android and iOS devices, so a watch is never its orphan.
     if (!isBindingInventoryDevice(device) || !stableId || !isProductBrokerDevice(device.name)) {
       continue;
     }
@@ -483,7 +485,7 @@ async function readResourceCharges(
   checkAdmissionBudget(request, timer);
   const snapshot = await registry.snapshotBindingResources();
   const devices: DeviceInfo[] = [];
-  for (const platform of ["android", "ios"] as const) {
+  for (const platform of CHARGED_PLATFORMS) {
     checkAdmissionBudget(request, timer);
     const listing = await inventory.list(platform, { signal: request.signal });
     if (!listing.complete && listing.toolchain === "not_installed") {

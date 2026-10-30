@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
+import { type AndroidOrIosPlatform, isAndroidOrIosPlatform } from "../../../models/Platform";
 import type { BindingRegistrySchemaProbe } from "./bindingRegistryMigrations";
 
 /**
@@ -15,7 +16,26 @@ import type { BindingRegistrySchemaProbe } from "./bindingRegistryMigrations";
  * Idempotency comes from that scoped identity plus the generation; there is no caller operation id.
  */
 
-export type BindingPlatform = "android" | "ios";
+/**
+ * A binding's platform as persisted. `"watchos"` rows round-trip and their devices count against
+ * the shared total-resource limit (#15882), but the broker cannot create, boot or reuse a watch
+ * binding yet: those paths narrow with {@link requireManagedBindingPlatform}.
+ */
+export type BindingPlatform = "android" | "ios" | "watchos";
+
+/** The platforms whose bindings the broker can create, boot and reuse. */
+export type ManagedBindingPlatform = AndroidOrIosPlatform;
+
+export const WATCH_BINDING_UNSUPPORTED_MESSAGE =
+  "Broker-managed watch bindings are not supported yet; request an Android or iOS device, or start the Apple Watch simulator with startDevice.";
+
+/** Narrow a binding platform for creation, boot or reuse; refuses a watch binding by name. */
+export function requireManagedBindingPlatform(platform: BindingPlatform): ManagedBindingPlatform {
+  if (isAndroidOrIosPlatform(platform)) {
+    return platform;
+  }
+  throw new ActionableError(WATCH_BINDING_UNSUPPORTED_MESSAGE);
+}
 
 /** The three caller-declared parts of a scope; the scope key is derived from them. */
 export interface BindingScopeIdentity {

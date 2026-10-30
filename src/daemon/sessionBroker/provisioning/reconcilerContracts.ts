@@ -24,6 +24,7 @@ import type {
   BindingJournalOwner,
   BindingKey,
   BindingPlatform,
+  ManagedBindingPlatform,
   BindingRegistry,
 } from "../registry/bindingRegistry";
 import { type InFlightBindingReservations } from "../registry/ownerLiveness";
@@ -86,7 +87,8 @@ export interface BindingInventory {
 }
 
 export interface BindingProvisionRequest {
-  platform: BindingPlatform;
+  /** Watch bindings are refused before provisioning (#15882 part 1). */
+  platform: ManagedBindingPlatform;
   /** Android: the AVD name (stable id). iOS: the simulator name. */
   name: string;
   /** iOS UDID of an assigned simulator to reuse. */

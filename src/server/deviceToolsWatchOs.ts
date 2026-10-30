@@ -13,14 +13,19 @@ import {
   type WatchStartDeviceRequest,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
+import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { ActionableError } from "../models";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import {
+  WatchSimulatorInventory,
+  type WatchSimulatorSimctl,
+} from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import {
   WatchSimulatorLifecycle,
   type ListedWatch,
+  type WatchLifecycleSimctl,
   type WatchBootResult,
 } from "../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { createStructuredToolResponse } from "../utils/toolUtils";
@@ -201,6 +206,14 @@ function parseWatchStartArgs(rawArgs: object): WatchStartDeviceArgs {
 }
 
 export function defaultWatchLifecycle(): WatchSimulatorLifecycle {
-  const simctl = new SimCtlClient();
-  return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl));
+  return watchLifecycleOver(new SimCtlClient());
+}
+
+/** The watch lifecycle over `simctl`; a cold watch boot is admitted like an iPhone boot. */
+export function watchLifecycleOver(
+  simctl: WatchLifecycleSimctl & WatchSimulatorSimctl,
+): WatchSimulatorLifecycle {
+  return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl), {
+    run: (request, boot) => bootAdmissionServices.iosBootInstrumentation().run(request, boot),
+  });
 }

@@ -991,3 +991,31 @@ wiring_requires_yq() {
   ! grep -Fq -- "--allow-snapshot" "$gate"
   grep -Fq "check-protoviewer-artifact-policy.ts android" ".github/workflows/pull_request.yml"
 }
+
+@test "ProtoViewer APK build feeds the PROTOVIEWER_* signing and version inputs the convention reads (#15301)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/build-protoviewer-apk.yml"
+  [ "$(yq -r '.jobs.build.env.PROTOVIEWER_RELEASE_VERSION' "$workflow")" = '${{ inputs.release-version }}' ]
+  [ "$(yq -r '.jobs.build.env.PROTOVIEWER_KEYSTORE_PATH' "$workflow")" = '${{ github.workspace }}/android/keystore/release.keystore' ]
+  [ "$(yq -r '.jobs.build.env.PROTOVIEWER_KEYSTORE_PASSWORD' "$workflow")" = '${{ secrets.RELEASE_KEYSTORE_PASSWORD }}' ]
+  [ "$(yq -r '.jobs.build.env.PROTOVIEWER_KEY_ALIAS' "$workflow")" = '${{ secrets.RELEASE_KEY_ALIAS }}' ]
+  [ "$(yq -r '.jobs.build.env.PROTOVIEWER_KEY_PASSWORD' "$workflow")" = '${{ secrets.RELEASE_KEY_PASSWORD }}' ]
+  [ "$(yq -r '.on.workflow_call.inputs."release-version".required' "$workflow")" = "true" ]
+  [ "$(yq -r '.jobs."build-candidate-protoviewer-apk".with."release-version"' .github/workflows/prepare-release.yml)" = '${{ inputs.version }}' ]
+}
+
+@test "ProtoViewer release smoke selects the published automobile-protoviewer asset (#15301)" {
+  local workflow=".github/workflows/protoviewer-release-smoke.yml"
+  grep -Fq -- "--pattern 'automobile-protoviewer*.apk'" "$workflow"
+  grep -Fq 'ls "$RUNNER_TEMP"/previous/automobile-protoviewer*.apk' "$workflow"
+  run grep -Fc -- "--pattern 'protoviewer*.apk'" "$workflow"
+  [ "$status" -eq 1 ]
+  [ "$output" = "0" ]
+}
+
+@test "ProtoViewer module no longer uses the shared-name guard (#15301)" {
+  run grep -Fc 'ReleaseSigningGuard' android/protoviewer/build.gradle.kts
+  [ "$status" -eq 1 ]
+  [ "$output" = "0" ]
+  grep -Fq 'dependsOn(verifyInputs)' android/build-logic/src/main/kotlin/automobile.protoviewer-play-release.gradle.kts
+}

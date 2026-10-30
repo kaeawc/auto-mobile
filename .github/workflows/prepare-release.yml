@@ -170,6 +170,7 @@ jobs:
     needs: prepare-version
     uses: ./.github/workflows/build-protoviewer-apk.yml
     with:
+      release-version: ${{ inputs.version }}
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
       upload-artifact: true
       artifact-retention-days: 90

@@ -43,7 +43,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/previous"
           gh release download "$PREVIOUS_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'protoviewer*.apk' --dir "$RUNNER_TEMP/previous"
+            --pattern 'automobile-protoviewer*.apk' --dir "$RUNNER_TEMP/previous"
           ls -l "$RUNNER_TEMP/previous"
 
       - uses: ./.github/actions/android-emulator
@@ -54,7 +54,7 @@ jobs:
           script: >-
             bash ../scripts/release/protoviewer-release-smoke.sh android
             --device emulator-5554 --build --mode all
-            --previous "$(ls "$RUNNER_TEMP"/previous/protoviewer*.apk | head -n 1)"
+            --previous "$(ls "$RUNNER_TEMP"/previous/automobile-protoviewer*.apk | head -n 1)"
           working-directory: "./android/"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}

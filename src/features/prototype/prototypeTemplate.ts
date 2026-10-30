@@ -540,6 +540,9 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapField(node, "text", path, "text", visit);
     mapObject(node, "action", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
+  // Marker taps run actions like onTap; the marker templates bind only the marker's own item (#14309).
+  map: (node, path, visit) =>
+    mapList(node, "onMarkerTap", path, (entry, entryPath) => mapAction(entry, entryPath, visit)),
 };
 
 /** State-key fields a node binds besides its condition and action keys. */

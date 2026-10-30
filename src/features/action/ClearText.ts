@@ -480,7 +480,7 @@ export class ClearText extends BaseVisualChange {
     parser: ElementParser = new DefaultElementParser(),
     timer: Timer = defaultTimer,
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.parser = parser;
   }
 

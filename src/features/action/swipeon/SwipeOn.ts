@@ -166,7 +166,11 @@ export class SwipeOn extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SwipeOnDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.skipCallerDisplayFence = dependencies.skipCallerDisplayFence ?? false;
     this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
     this.iosLockScreenSwipe = dependencies.iosLockScreenSwipe;

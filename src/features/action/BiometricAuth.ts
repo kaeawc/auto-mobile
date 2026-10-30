@@ -109,7 +109,7 @@ export class BiometricAuth extends BaseVisualChange {
     timer: Timer = defaultTimer,
     collaborators: BiometricAuthCollaborators = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.device = device;
     this.simctl = collaborators.simctl ?? null;
     this.iosSdkTriggers = collaborators.iosSdkTriggers ?? defaultIosSdkTriggerSenderFactory;

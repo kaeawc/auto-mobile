@@ -148,7 +148,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: SwipeAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;

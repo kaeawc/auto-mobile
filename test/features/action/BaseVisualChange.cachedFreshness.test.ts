@@ -33,10 +33,12 @@ describe("BaseVisualChange cached freshness", () => {
     observe = new FakeObserveScreen();
     instance = new BaseVisualChange(
       { name: "cached-freshness", platform: "ios", deviceId: "cached-freshness" },
-      new FakeAdbExecutor(),
-      timer,
-      () => undefined,
-      { renderedDisplayGeneration: () => undefined },
+      {
+        adb: new FakeAdbExecutor(),
+        timer,
+        renderedDisplayRevision: () => undefined,
+        displayFence: { renderedDisplayGeneration: () => undefined },
+      },
     );
     instance.observeScreen = observe;
     instance.awaitIdle = new FakeAwaitIdle();

@@ -4641,7 +4641,7 @@ describe("SendKeys post-action capture boundary", () => {
     const after: ObserveResult = { ...before, observationId: "after-command" };
     const observe = new FakeObserveScreen();
     observe.setObserveResult(before);
-    const focus = new CapturingFocus(device, h.adb, timer);
+    const focus = new CapturingFocus(device, { adb: h.adb, timer });
     focus.observeScreen = observe;
     focus.window = new FakeWindow();
     const capture = mock<typeof observe.captureScreenshot>(async (_perf, _signal, chosen) => {

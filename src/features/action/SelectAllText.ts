@@ -29,7 +29,7 @@ export class SelectAllText extends BaseVisualChange {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
     ctrlProxyFactory?: SelectAllTextCtrlProxyFactory,
   ) {
-    super(device, adbFactoryOrExecutor);
+    super(device, { adb: adbFactoryOrExecutor });
     this.ctrlProxyFactory = ctrlProxyFactory;
   }
 

@@ -76,7 +76,11 @@ export class MultiTouchGesture extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: MultiTouchGestureDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.clients = {
       android: dependencies.clients?.android ?? ((request) => this.dispatchAndroid(request)),
       ios: dependencies.clients?.ios ?? ((request) => this.dispatchIos(request)),

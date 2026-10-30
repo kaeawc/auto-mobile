@@ -185,8 +185,12 @@ describe("last rendered generation persistence", () => {
         transitions.fullRevision = 44;
         transitions.generation = 8;
         transitions.panel = { key: "cover", role: "cover" };
-        const action = new BaseVisualChange(device, new FakeAdbExecutor(), timer, undefined, {
-          displayTransitions: transitions,
+        const action = new BaseVisualChange(device, {
+          adb: new FakeAdbExecutor(),
+          timer,
+          displayFence: {
+            displayTransitions: transitions,
+          },
         });
         // Caller coordinates (tapAt) are refused; a selector tapOn would re-read instead (#9847).
         await expect(

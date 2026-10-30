@@ -120,7 +120,7 @@ export class LaunchApp extends BaseVisualChange {
       dependencies?: LaunchAppDependencies;
     } = {},
   ) {
-    super(device, adb, timer);
+    super(device, { adb, timer });
     this.device = device;
     this.simctl = simctl || new SimCtlClient(this.device);
     this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppManager();

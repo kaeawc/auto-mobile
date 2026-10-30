@@ -71,7 +71,11 @@ export class HoverAt extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: HoverAtDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
+    super(device, {
+      adb,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.injectors =
       dependencies.pointerInjectors ??
       defaultPointerRoutes({

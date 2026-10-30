@@ -184,7 +184,11 @@ export class TapAnyElement extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     options: TapAnyElementDependencies = {},
   ) {
-    super(device, adb, options.timer, options.renderedDisplayRevision, options);
+    super(device, {
+      adb,
+      timer: options.timer,
+      displayFence: options,
+    });
     this.lastRenderedObservation = options.lastRenderedObservation ?? sessionRenderedObservation;
     this.geometry = new DefaultElementGeometry();
     this.elementSelector =

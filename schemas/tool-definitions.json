@@ -40226,8 +40226,7 @@
           "type": "boolean"
         },
         "readiness": {
-          "description": "Whether to wait for the AutoMobile automation runner after device boot; watchOS has no runner and takes only \"none\" (its default)",
-          "default": "automation",
+          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS has no runner and takes only \"none\" (its default)",
           "type": "string",
           "enum": ["automation", "none"]
         },

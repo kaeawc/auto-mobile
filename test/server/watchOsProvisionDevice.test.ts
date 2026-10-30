@@ -5,6 +5,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   provisionDeviceRegistrationSchema,
+  provisionDeviceSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
@@ -20,6 +21,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { WatchSimulatorInventory } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
 import { WatchSimulatorLifecycle } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { WatchSimulatorProvisioner } from "../../src/utils/ios-cmdline-tools/WatchSimulatorProvisioner";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -47,6 +49,7 @@ describe("provisionDevice on an Apple Watch simulator", () => {
   let sessionManager: SessionManager | undefined;
 
   const cleanup = () => {
+    env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
     restoreEnv?.();
     restoreEnv = undefined;
     resetDeviceToolsDependencies();
@@ -59,7 +62,11 @@ describe("provisionDevice on an Apple Watch simulator", () => {
   afterEach(cleanup);
   afterAll(cleanup);
 
-  async function arrange(devices: AppleDevice[] = []) {
+  async function arrange(
+    devices: AppleDevice[] = [],
+    { autolock = "0" }: { autolock?: "0" | "1" } = {},
+  ) {
+    env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
     restoreEnv = ToolRegistry.setPipelineOverridesForTesting({ env });
     const simctl = new FakeWatchProvisionSimctl(devices);
     const inventory = new WatchSimulatorInventory(simctl, "arm64");
@@ -90,7 +97,9 @@ describe("provisionDevice on an Apple Watch simulator", () => {
     await pool.initializeWithDevices(await deviceUtils.getBootedDevices("watchos"));
     DaemonState.getInstance().initialize(sessionManager, pool);
     const runnerCalls: string[] = [];
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     setDeviceToolsDependencies({
+      lifecycleCoordinator,
       env,
       timer,
       deviceManagerFactory: () => deviceUtils,
@@ -106,7 +115,7 @@ describe("provisionDevice on an Apple Watch simulator", () => {
       watchSimulatorProvisionerFactory: () => new WatchSimulatorProvisioner(inventory, simctl),
     });
     registerDeviceTools();
-    return { simctl, pool, sessions: sessionManager, runnerCalls };
+    return { simctl, pool, sessions: sessionManager, runnerCalls, timer, lifecycleCoordinator };
   }
 
   const provision = (args: Record<string, unknown>) =>
@@ -144,6 +153,34 @@ describe("provisionDevice on an Apple Watch simulator", () => {
       acquisition: "cold-boot",
     });
     expect(provisionDeviceOutputSchema.safeParse(result).success).toBe(true);
+  });
+
+  test("with autolock, the bound watch session belongs to the calling connection", async () => {
+    const { pool } = await arrange([], { autolock: "1" });
+
+    const { sessionId } = sessionSchema.parse(toolJson(await provision({ device: WATCH })));
+
+    expect(pool.resolveAutolockSessionForMcpSession("client-a", "watchos")).toBe(sessionId);
+  });
+
+  test("a watch shut down while provisioning waited for its lease is booted, not adopted as booted", async () => {
+    const existing = watchDevice({ name: NAME, state: "Booted" });
+    const { simctl, timer, lifecycleCoordinator } = await arrange([existing]);
+    const shutdown = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "watchos", stableId: existing.udid },
+      { operation: "shutdown", deadlineMs: timer.now() + 60_000 },
+    );
+
+    const pending = provision({ device: WATCH });
+    for (let turn = 0; turn < 2_000; turn++) {
+      await Promise.resolve();
+    }
+    await simctl.killSimulator({ name: NAME, platform: "watchos", deviceId: existing.udid });
+    shutdown.release();
+    const result = toolJson(await pending);
+
+    expect(simctl.commands).toEqual([`shutdown ${existing.udid}`, `boot ${existing.udid} 480000`]);
+    expect(result).toMatchObject({ lifecycleState: "ready", acquisition: "cold-boot" });
   });
 
   test("boot false adopts the existing watch and binds nothing", async () => {
@@ -214,8 +251,8 @@ describe("provisionDevice on an Apple Watch simulator", () => {
     expect(simctl.commands.some((command) => command.startsWith("delete"))).toBe(false);
   });
 
-  test("the registered schema keeps Android and iOS defaults and defaults a watch to none", () => {
-    const ios = provisionDeviceRegistrationSchema.parse({
+  test("Android and iOS keep their readiness default; the registered schema gives a watch none", () => {
+    const ios = provisionDeviceSchema.parse({
       device: {
         platform: "ios",
         name: "iPhone",
@@ -228,6 +265,7 @@ describe("provisionDevice on an Apple Watch simulator", () => {
     const watch = provisionDeviceRegistrationSchema.parse({ device: WATCH });
 
     expect(ios).toMatchObject({ readiness: "automation", boot: true });
-    expect(watch).toMatchObject({ readiness: "none", boot: true });
+    expect(watch).toMatchObject({ boot: true });
+    expect(watch.readiness).toBeUndefined();
   });
 });

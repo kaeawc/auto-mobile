@@ -452,9 +452,7 @@ const provisionDeviceOptionFields = {
     .enum(["automation", "none"])
     .default("automation")
     .optional()
-    .describe(
-      'Whether to wait for the AutoMobile automation runner after device boot; watchOS has no runner and takes only "none" (its default)',
-    ),
+    .describe("Whether to wait for the AutoMobile automation runner after device boot"),
   timeoutMs: z
     .number()
     .int()
@@ -551,42 +549,33 @@ function refineWatchProvisionOptions(
   }
 }
 
-/** A watch request's omitted readiness means "none"; every other request keeps its default. */
-function defaultWatchProvisionReadiness(input: unknown): unknown {
-  if (
-    !input ||
-    typeof input !== "object" ||
-    Reflect.get(input, "readiness") !== undefined ||
-    Reflect.get(Reflect.get(input, "device") ?? {}, "platform") !== "watchos"
-  ) {
-    return input;
-  }
-  return { ...input, readiness: "none" };
-}
-
 /**
  * provisionDevice as registered: the Android and iOS request, or an exact Apple Watch simulator
- * (#15882). The platform handler re-parses its own request; a watch never reaches the Android or
- * iOS path, whose arguments keep {@link provisionDeviceSchema}'s type.
+ * (#15882). It stays a plain object so the ingress can see which keys it declares. Its
+ * `readiness` has no default, so a watch request that omits it means "none"; the Android and iOS
+ * handler re-parses its request with {@link provisionDeviceSchema}, which applies "automation".
  */
-export const provisionDeviceRegistrationSchema = z.preprocess(
-  defaultWatchProvisionReadiness,
-  z
-    .object({
-      resources: provisionDeviceResourcesField,
-      device: withCanonicalDiscriminatedUnionJsonSchema(
-        z.discriminatedUnion("platform", [
-          androidProvisionDevice,
-          iosProvisionDevice,
-          watchProvisionDevice,
-        ]),
+export const provisionDeviceRegistrationSchema = z
+  .object({
+    resources: provisionDeviceResourcesField,
+    device: withCanonicalDiscriminatedUnionJsonSchema(
+      z.discriminatedUnion("platform", [
+        androidProvisionDevice,
+        iosProvisionDevice,
+        watchProvisionDevice,
+      ]),
+    ),
+    ...provisionDeviceOptionFields,
+    readiness: z
+      .enum(["automation", "none"])
+      .optional()
+      .describe(
+        'Whether to wait for the AutoMobile automation runner after device boot (default "automation"); watchOS has no runner and takes only "none" (its default)',
       ),
-      ...provisionDeviceOptionFields,
-    })
-    .strict()
-    .superRefine(refineProvisionDeviceOptions)
-    .superRefine(refineWatchProvisionOptions),
-);
+  })
+  .strict()
+  .superRefine(refineProvisionDeviceOptions)
+  .superRefine(refineWatchProvisionOptions);
 
 /** A registered provisionDevice request that names an Apple Watch simulator. */
 export type WatchProvisionDeviceRequest = z.output<typeof provisionDeviceRegistrationSchema> & {

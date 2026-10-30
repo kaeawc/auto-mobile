@@ -73,25 +73,30 @@ export async function provisionWatchDevice(
         try {
           stage.current = "resolving or creating the Apple Watch simulator";
           const provisioner = (deps.watchSimulatorProvisionerFactory ?? defaultWatchProvisioner)();
-          const { watch, created } = await provisioner.provision(request, {
+          let resolved = await provisioner.provision(request, {
             // provisionDevice is an explicit creation request, as on Android and iOS.
             allowCreate: deps.deviceCreationGateFactory().isCreationAllowed(true),
             signal: requestSignal,
           });
           await lease.bindCanonicalIdentity(
-            { platform: "watchos", stableId: watch.deviceId },
-            async () => ({
-              platform: "watchos",
-              stableId: (
-                await provisioner.provision(request, { allowCreate: false, signal: requestSignal })
-              ).watch.deviceId,
-            }),
+            { platform: "watchos", stableId: resolved.watch.deviceId },
+            // After waiting on another lifecycle (a shutdown, say) the watch is read again, and
+            // that fresh snapshot is the one booted below.
+            async () => {
+              const again = await provisioner.provision(request, {
+                allowCreate: false,
+                signal: requestSignal,
+              });
+              resolved = { watch: again.watch, created: resolved.created };
+              return { platform: "watchos", stableId: again.watch.deviceId };
+            },
           );
+          const { watch, created } = resolved;
           if (args.boot === false) {
             return watchProvisionResponse(args, watch, created, undefined);
           }
           const booted = await bootAndBind(
-            { args, watch, created, provisioner, bindSession },
+            { rawArgs, watch, created, provisioner, bindSession },
             deps,
             deadlineMs,
             requestSignal,
@@ -107,13 +112,14 @@ export async function provisionWatchDevice(
 
 async function bootAndBind(
   {
-    args,
+    rawArgs,
     watch,
     created,
     provisioner,
     bindSession,
   }: {
-    args: WatchProvisionDeviceRequest;
+    /** The request as received: the binder reads the caller's connection from its internal params. */
+    rawArgs: object;
     watch: ListedWatch;
     created: boolean;
     provisioner: WatchProvisioner;
@@ -132,7 +138,7 @@ async function bootAndBind(
     });
     stage.current = "binding the device session";
     const sessionId = await bindWatchSession(
-      { watch, boot, rawArgs: args, operation: "provisionDevice" },
+      { watch, boot, rawArgs, operation: "provisionDevice" },
       bindSession,
       deps.timer,
       deadlineMs,

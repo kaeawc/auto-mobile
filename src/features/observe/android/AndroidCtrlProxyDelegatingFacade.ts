@@ -195,20 +195,18 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     gestureId: string,
     x: number,
     y: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
+    { timeoutMs, perf }: { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureMove(gestureId, x, y, timeoutMs, perf);
+    return this.gestures.requestGestureMove(gestureId, x, y, { timeoutMs, perf });
   }
 
   async requestGestureEnd(
     gestureId: string,
     x: number,
     y: number,
-    cancel?: boolean,
-    options?: GestureEndOptions,
+    { cancel, ...options }: GestureEndOptions & { cancel?: boolean } = {},
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureEnd(gestureId, x, y, cancel, options);
+    return this.gestures.requestGestureEnd(gestureId, x, y, { cancel, ...options });
   }
 
   // ===========================================================================
@@ -221,26 +219,32 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
 
   async requestInsertText(
     text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
-    },
-    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
+    {
+      timeoutMs,
+      perf,
+      options,
+      transport = {},
+    }: {
+      timeoutMs?: number;
+      perf?: PerformanceTracker;
+      options?: {
+        expectedSuffix?: string;
+        acceptsCaretNotPlaced?: boolean;
+        precedingState?: InsertTextState;
+      };
+      transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">;
+    } = {},
   ): Promise<A11ySetTextResult> {
-    return this.text.requestInsertText(text, timeoutMs, perf, options, transport);
+    return this.text.requestInsertText(text, { timeoutMs, perf, options, transport });
   }
 
   async commitViaIme(
     text: string,
     priorImeId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: ImeCommitOptions,
+    { perf, ...options }: ImeCommitOptions & { perf?: PerformanceTracker } = {},
   ): Promise<ImeCommitActionResult> {
-    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, options);
+    return this.text.commitViaIme(text, priorImeId, timeoutMs, { perf, ...options });
   }
 
   async setKeyboardProfile(
@@ -616,13 +620,10 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     timeoutMs?: number,
     options?: HierarchySyncRequestOptions,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
-    return this.hierarchy.requestHierarchySync(
-      perf,
-      disableAllFiltering,
-      signal,
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, {
       timeoutMs,
-      options,
-    );
+      ...options,
+    });
   }
 
   hasCachedHierarchy(): boolean {
@@ -649,10 +650,12 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: AndroidActionRequestOptions,
+    { perf, ...options }: AndroidActionRequestOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestAction(action, resourceId, timeoutMs, perf, options);
+    return this.getActionDispatcher().requestAction(action, resourceId, timeoutMs, {
+      perf,
+      ...options,
+    });
   }
 
   async requestClickFocusedInput(
@@ -666,11 +669,17 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    {
+      timeoutMs,
+      perf,
+      signal,
+    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestNodeAction(action, selector, timeoutMs, perf, signal);
+    return this.getActionDispatcher().requestNodeAction(action, selector, {
+      timeoutMs,
+      perf,
+      signal,
+    });
   }
 
   async supportsNodeActionSelectors(
@@ -883,16 +892,18 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       SendCommandOptions<T>,
       "responseType" | "messageType" | "timeoutMs" | "responseError" | "beforeSend" | "onDispatch"
     > & { timeoutError: (timeoutMs: number) => T },
-    cancellation?: { signal: AbortSignal | undefined; startTime: number },
-    perf?: PerformanceTracker,
-  ): Promise<T> {
-    return this.getActionDispatcher().sendClientCommand<T>(
-      requestId,
-      serializeRequest,
-      options,
+    {
       cancellation,
       perf,
-    );
+    }: {
+      cancellation?: { signal: AbortSignal | undefined; startTime: number };
+      perf?: PerformanceTracker;
+    } = {},
+  ): Promise<T> {
+    return this.getActionDispatcher().sendClientCommand<T>(requestId, serializeRequest, options, {
+      cancellation,
+      perf,
+    });
   }
   protected abstract createHierarchyDelegateContext(): HierarchyDelegateContext;
   protected abstract createCertificatesDelegateContext(): CertificatesDelegateContext;

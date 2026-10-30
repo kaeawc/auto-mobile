@@ -155,7 +155,8 @@ describe("an open input stroke vs. a release of its holder session", () => {
       getScreenScaleMetadata: () => null,
       requestGestureStart: () => stroke("start"),
       requestGestureMove: () => stroke("move"),
-      requestGestureEnd: (_id, _x, _y, cancel) => stroke(cancel === true ? "cancel" : "end"),
+      requestGestureEnd: (_id, _x, _y, { cancel } = {}) =>
+        stroke(cancel === true ? "cancel" : "end"),
     });
     const serverState: DaemonStateAccess = {
       ...createFakeDaemonState(),

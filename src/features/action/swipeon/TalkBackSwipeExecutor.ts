@@ -323,7 +323,9 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     }
 
     throwIfAborted(signal);
-    const result = await this.accessibilityService.requestAction("focus", resourceId, 5000, perf);
+    const result = await this.accessibilityService.requestAction("focus", resourceId, 5000, {
+      perf,
+    });
     throwIfAborted(signal);
 
     if (!result.success) {
@@ -471,13 +473,13 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     try {
       throwIfAborted(signal);
       const result = needsNodeSelector
-        ? await this.accessibilityService.requestNodeAction(scrollAction, selector, 5000, perf)
-        : await this.accessibilityService.requestAction(
-            scrollAction,
-            selector.resourceId,
-            5000,
-            perf || new NoOpPerformanceTracker(),
-          );
+        ? await this.accessibilityService.requestNodeAction(scrollAction, selector, {
+            timeoutMs: 5000,
+            perf,
+          })
+        : await this.accessibilityService.requestAction(scrollAction, selector.resourceId, 5000, {
+            perf: perf || new NoOpPerformanceTracker(),
+          });
 
       if (result.success) {
         logger.info("[SwipeOn] ACTION_SCROLL succeeded");

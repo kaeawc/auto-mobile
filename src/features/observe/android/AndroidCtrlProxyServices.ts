@@ -812,10 +812,12 @@ export abstract class AndroidCtrlProxyServices extends AndroidCtrlProxyDelegatin
   ): void;
   protected abstract pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata?: ScreenshotMetadata,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
+    options?: {
+      metadata?: ScreenshotMetadata;
+      binding?: ScreenGeometryBinding;
+      frameContext?: string;
+      rotation?: number;
+    },
   ): void;
   protected abstract updateCachedScreenDimensions(
     hierarchy: Pick<

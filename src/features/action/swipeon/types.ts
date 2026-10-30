@@ -115,7 +115,7 @@ export interface ScrollAccessibilityService {
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
+    options?: { perf?: PerformanceTracker },
   ): Promise<{ success: boolean; error?: string }>;
 
   getAccessibilityHierarchy(

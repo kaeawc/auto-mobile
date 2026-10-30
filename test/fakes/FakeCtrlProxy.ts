@@ -831,8 +831,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     waitForFresh: boolean = false,
     timeout: number = 100,
     perf?: PerformanceTracker,
-    skipWaitForFresh: boolean = false,
-    _options?: LatestHierarchyOptions,
+    {
+      skipWaitForFresh = false,
+      ..._options
+    }: LatestHierarchyOptions & { skipWaitForFresh?: boolean } = {},
   ): Promise<AccessibilityHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -1040,10 +1042,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async requestInsertText(
     text: string,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    _options?: Parameters<AndroidCtrlProxy["requestInsertText"]>[3],
-    _transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
+    _options?: Parameters<AndroidCtrlProxy["requestInsertText"]>[1],
   ): Promise<A11ySetTextResult> {
     return this.requestSetText(text);
   }
@@ -1156,7 +1155,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: string,
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
+    _options?: Parameters<AndroidCtrlProxy["requestAction"]>[3],
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestAction");
     this.checkFailure("requestAction");
@@ -1188,9 +1187,11 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    {
+      timeoutMs = 5000,
+      perf,
+      signal,
+    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestNodeAction");
     this.checkFailure("requestNodeAction");

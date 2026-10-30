@@ -45,8 +45,16 @@ async function harness(
         viewHierarchy: h.viewHierarchy,
         timer: h.timer,
         syncClientFactory: () => ({
-          requestHierarchySync: async (...args) => {
-            const synced = await h.hierarchy.requestHierarchySync(...args);
+          requestHierarchySync: async (perf, disableAllFiltering, signal, timeoutMs, options) => {
+            const synced = await h.hierarchy.requestHierarchySync(
+              perf,
+              disableAllFiltering,
+              signal,
+              {
+                timeoutMs,
+                ...options,
+              },
+            );
             if (synced) {
               h.reads.push({ floor: 0, fresh: true, updatedAt: synced.hierarchy.updatedAt });
             }

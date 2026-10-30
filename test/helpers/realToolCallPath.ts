@@ -137,7 +137,12 @@ export class RealToolCallPath {
       this.gestureFrames.push(`move:${gestureId}`);
       return { success: true, totalTimeMs: 0 };
     };
-    proxy.requestGestureEnd = async (gestureId: string, _x: number, _y: number, cancel = false) => {
+    proxy.requestGestureEnd = async (
+      gestureId: string,
+      _x: number,
+      _y: number,
+      { cancel = false } = {},
+    ) => {
       this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
       return { success: true, totalTimeMs: 0 };
     };

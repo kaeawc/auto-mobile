@@ -141,18 +141,24 @@ export abstract class AndroidCtrlProxyObservationClient extends AndroidCtrlProxy
 
   pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
+    {
+      metadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
+      binding,
+      frameContext,
+      rotation,
+    }: {
+      metadata?: ScreenshotMetadata;
+      binding?: ScreenGeometryBinding;
+      frameContext?: string;
+      rotation?: number;
+    } = {},
   ): void {
-    return this.getObservationStream().pushScreenshotToObservationStream(
-      screenshotBase64,
+    return this.getObservationStream().pushScreenshotToObservationStream(screenshotBase64, {
       metadata,
       binding,
       frameContext,
       rotation,
-    );
+    });
   }
 
   protected updateCachedScreenDimensions(

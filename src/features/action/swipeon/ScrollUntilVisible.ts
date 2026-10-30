@@ -852,7 +852,7 @@ export class ScrollUntilVisible {
           return;
         }
 
-        await this.deps.accessibilityService.requestAction("focus", resourceId, 5000, perf);
+        await this.deps.accessibilityService.requestAction("focus", resourceId, 5000, { perf });
         logger.info(`[SwipeOn] Set accessibility focus on element: ${resourceId}`);
       });
     } catch (error) {

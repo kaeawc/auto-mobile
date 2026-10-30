@@ -353,7 +353,7 @@ export class TapGestureDispatcher {
       throwIfAborted(signal);
       const result = await this.host
         .accessibilityService()
-        .requestNodeAction("click", selector, undefined, undefined, signal);
+        .requestNodeAction("click", selector, { signal });
       throwIfAborted(signal);
       return result.success;
     } catch (error) {

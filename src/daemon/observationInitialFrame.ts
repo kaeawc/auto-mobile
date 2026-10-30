@@ -62,8 +62,7 @@ export interface ObservationStreamAndroidClient {
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    options?: LatestHierarchyOptions,
+    options?: LatestHierarchyOptions & { skipWaitForFresh?: boolean },
   ): Promise<AccessibilityHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
@@ -510,7 +509,7 @@ async function getAndroidInitialHierarchy(
     false,
     INITIAL_FRAME_HIERARCHY_TIMEOUT_MS,
     undefined,
-    true,
+    { skipWaitForFresh: true },
   );
   if (hierarchyResponse.hierarchy && hierarchyResponse.fresh) {
     return {

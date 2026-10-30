@@ -517,7 +517,7 @@ describe("MultiPlatformDeviceManager", () => {
       });
     });
 
-    test("killDevice refuses a watch instead of shutting it down as an iPhone (#14908)", async () => {
+    test("killDevice never shuts a watch down through the iOS backend (#14908)", async () => {
       const fakeSimctl = fakeDeviceManagerSimctl({
         killSimulator: async () => {
           throw new Error("simctl shutdown must not run through the iOS backend for a watch");
@@ -531,7 +531,7 @@ describe("MultiPlatformDeviceManager", () => {
 
       await expect(
         manager.killDevice({ name: "Watch", deviceId: "WATCH-UDID", platform: "watchos" }),
-      ).rejects.toThrow("killDevice is not supported on watchOS yet");
+      ).rejects.toThrow("Apple Watch simulator inventory is not available");
     });
 
     test("physical discovery is not attempted when iOS tooling is unavailable", async () => {

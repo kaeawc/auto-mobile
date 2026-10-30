@@ -123,6 +123,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "liveHolderOtherThanThisRequest",
     "matchesIosTeardownIdentity",
     "matchesTeardownStableId",
+    "mergeLegacyStartDevicePayload",
     "moduleDependencies",
     "noteSettledRejectedKillCommand",
     "notifyResourcesAfterShutdown",
@@ -190,6 +191,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "shutdownTimeoutError",
     "sleepUnlessAborted",
     "startDeviceParametersSchema",
+    "startDeviceRegistrationSchema",
     "startDeviceSchema",
     "startRequester",
     "stopSegmentedVideoRecordingsBeforeDestroy",
@@ -211,5 +213,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "waitForProvisionDeviceRequest",
     "waitForProvisionDeviceSettlement",
     "wasRunningBeforeCall",
+    "watchStartDeviceParametersSchema",
+    "watchStartDeviceSchema",
   ]);
 });

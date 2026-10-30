@@ -72,6 +72,20 @@ import type { DaemonDisconnect } from "./DaemonDisconnect";
 import type { DaemonShutdown } from "./DaemonShutdown";
 import type { DaemonRecordingHost, DaemonStartHost } from "../daemonStartHost";
 import { findAvailableDaemonPort } from "../daemonPort";
+import {
+  DAEMON_STARTUP_STAGES,
+  runStartupStages,
+  type DaemonStartupStage,
+  type DaemonStartupStageName,
+} from "./daemonStartupStages";
+
+/** A `Daemon.start()` stage named by its `DAEMON_STARTUP_STAGES` row. */
+function startupStage(
+  name: DaemonStartupStageName,
+  run: () => unknown,
+): DaemonStartupStage<DaemonStartupStageName> {
+  return { name, run };
+}
 
 export interface DaemonStartupHost extends Pick<
   DaemonRecordingHost,
@@ -405,120 +419,125 @@ export class DaemonStartup {
   }
 
   async startThroughSocketBind(): Promise<void> {
-    this.host.startHost().enterProcess();
-    this.host.setEnteredDaemonProcess(true);
-    // Subscribe here, not in the constructor: only a started daemon is ever stopped, so a
-    // constructed-but-never-started daemon must not leave a listener on the global tracker (#10712).
-    this.host.subscribeToolCallEndActivity();
-    this.host.startHost().publishForwardLeaseOwner();
-
-    // Publish the owned DB path in the PID file BEFORE opening the DB so the
-    // direct-mode DB-ownership guard can tell a same-file collision from an
-    // isolated-path launch during our own multi-second startup window, instead
-    // of failing closed on an unknown path. The ordering lives behind
-    // runStartupPrologue() so it can be asserted with fakes (issue #2871).
-    // The early-owner overwrite (issue #2871) inside runStartupPrologue() clobbers
-    // any live incumbent's PID record BEFORE we own anything, and cannot be
-    // deferred (the DB-ownership guard needs the owned path published first). So
-    // every step from that overwrite until a committed socket bind runs under a
-    // single restoration path: any failure in the interval — DB init, HTTP bind,
-    // device discovery, iOS services, OR the socket bind itself — leaves the
-    // shared PID file naming this about-to-exit contender, and because
-    // `socketBindCommitted` stays false exit cleanup is (correctly) suppressed and
-    // will not repair it. Restoring the captured live incumbent here keeps
-    // status()/`--daemon stop` pointed at the real winner (issue #6232; the
-    // socket-bind step was only one point in this interval).
-    try {
-      await startupBenchmark.runPhase("daemonDatabaseInitialization", () =>
-        runStartupPrologue({
-          writeEarlyOwnerRecord: () => this.host.startHost().writeEarlyOwnerRecord(),
-          initializeDatabase: () => this.host.initializeDatabase(),
-        }),
-      );
-
-      // Adopt terminal releases a crashed predecessor never persisted (#10959) before any
-      // listener can admit a session; startup rehydration writes their rows.
-      this.host.services.sessionManager().attachTerminalReleaseJournal(
-        this.host.startHost().openTerminalReleaseJournal({
-          daemonSessionId: this.host.identity.daemonSessionId(),
-          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
-        }),
-      );
-
-      // Broker recovery needs the upgraded schema before admitting any sessions.
-      if (this.host.lifecycle.sessionBrokerConfigPath() !== undefined) {
-        await prepareBindingRegistryForStartup({
-          brokerConfigured: true,
-          registryExists: bindingRegistryFileExists(),
-          open: () => this.host.openBindingRegistry(),
-        });
-      } else if (bindingRegistryFileExists()) {
-        void this.host.openBindingRegistry(undefined, { quiet: true }).catch((error: unknown) => {
-          // Pending schemas retry after bind; claim files decide until the registry can be read.
-          logger.warn(
-            `[Daemon] Recovery registry open deferred; will retry after socket bind: ${errorMessage(error)}`,
-            error,
-          );
-        });
-      }
-
-      this.host.services.sessionManager().assertDaemonCollaboratorsAttached();
-      this.host.startHost().prepareHttpToken();
-      await this.host.startHost().startHttpIngress();
-
-      // Initialize the device pool BEFORE the socket server so connecting clients see it.
-      // Wait up to 5 seconds - emulators should already be running
-      logger.info("Initializing device pool...");
-      startupBenchmark.startPhase("deviceDiscovery");
-      await this.host.initializeDevicePoolWithTimeout(5000);
-      startupBenchmark.endPhase("deviceDiscovery");
-
-      try {
-        const rehydration = await startupBenchmark.runPhase("sessionRehydration", () =>
-          this.host.services
-            .sessionManager()
-            .rehydratePersistedSessions(this.host.services.devicePool()),
-        );
-        await this.host.reownRehydratedManagedExecutions(rehydration.rehydrated);
-        await this.host.startHost().sweepStaleAppearanceConfigs(rehydration);
-      } catch (error) {
-        logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
-      }
-
-      // A session-only provider resolves prior ownership before exposing its socket or warming
-      // runners for sessions that recovery will abandon.
-      this.sessionBrokerRecovery = await this.host.installSessionBroker();
-
-      // Rehydrated sessions are now owned here and can safely warm their runners.
-      await startupBenchmark.runPhase("iosServices", () => this.host.initializeIosServices());
-
-      await this.host.startHost().redriveRecorderTeardowns();
-
-      // Start Unix socket server AFTER device pool is ready
-      this.host.lifecycle.setSocketServer(await this.host.startHost().bindControlSocket());
-      // We now hold the socket bind. Only past this point may this process's exit /
-      // shutdown cleanup delete the shared socket/PID files: before it, the early
-      // owner record (issue #2871) makes the `expectedPid` self-check pass even
-      // though we do not own the socket, so a lock-less contender refused over a
-      // live sibling (issue #6232) must NOT clean up on exit and brick the winner
-      // (the #6140 failure mode via a bypassed launch). This authorizes cleanup
-      // of the control socket and PID file; each aux bind is tracked separately.
-      this.host.identity.setSocketBindCommitted(true);
-      // Discovery publishes credentials only after authoritative control-socket ownership.
-      this.host.startHost().publishHttpToken();
-      startupBenchmark.endPhase("socketServerStart");
-    } catch (error) {
-      // Restore the live incumbent's record on any pre-bind failure in the
-      // interval above (issue #6232). Guarded on the committed flag so a throw
-      // after the bind is committed never rewrites the file this process now owns.
-      if (!this.host.identity.socketBindCommitted()) {
+    await runStartupStages(this.startThroughSocketBindStages(), (name) => {
+      // Restore the live incumbent's record on any failure in the incumbent window (issue
+      // #6232). Guarded on the committed flag so a throw after the bind is committed never
+      // rewrites the file this process now owns.
+      if (
+        DAEMON_STARTUP_STAGES[name] === "incumbent window" &&
+        !this.host.identity.socketBindCommitted()
+      ) {
         this.host.restoreIncumbentOwnerRecord();
       }
-      throw error;
+    });
+  }
+
+  /** The `DAEMON_STARTUP_STAGES` rows through the socket bind, in table order. */
+  private startThroughSocketBindStages(): DaemonStartupStage<DaemonStartupStageName>[] {
+    const startHost = () => this.host.startHost();
+    return [
+      startupStage("enter process", () => {
+        startHost().enterProcess();
+      }),
+      startupStage("entered daemon process", () => {
+        this.host.setEnteredDaemonProcess(true);
+      }),
+      startupStage("tool-call-end activity subscription", () => {
+        this.host.subscribeToolCallEndActivity();
+      }),
+      startupStage("forward lease owner", () => {
+        startHost().publishForwardLeaseOwner();
+      }),
+      startupStage("database prologue", () =>
+        startupBenchmark.runPhase("daemonDatabaseInitialization", () =>
+          runStartupPrologue({
+            writeEarlyOwnerRecord: () => startHost().writeEarlyOwnerRecord(),
+            initializeDatabase: () => this.host.initializeDatabase(),
+          }),
+        ),
+      ),
+      startupStage("terminal release journal", () => {
+        this.host.services.sessionManager().attachTerminalReleaseJournal(
+          startHost().openTerminalReleaseJournal({
+            daemonSessionId: this.host.identity.daemonSessionId(),
+            liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
+          }),
+        );
+      }),
+      startupStage("binding registry", () => this.prepareStartupBindingRegistry()),
+      startupStage("daemon collaborators", () => {
+        this.host.services.sessionManager().assertDaemonCollaboratorsAttached();
+      }),
+      startupStage("http token prepare", () => {
+        startHost().prepareHttpToken();
+      }),
+      startupStage("http ingress", () => startHost().startHttpIngress()),
+      startupStage("device discovery", async () => {
+        // Wait up to 5 seconds - emulators should already be running
+        logger.info("Initializing device pool...");
+        startupBenchmark.startPhase("deviceDiscovery");
+        await this.host.initializeDevicePoolWithTimeout(5000);
+        startupBenchmark.endPhase("deviceDiscovery");
+      }),
+      startupStage("session rehydration", () => this.rehydrateStartupSessions()),
+      startupStage("session broker", async () => {
+        this.sessionBrokerRecovery = await this.host.installSessionBroker();
+      }),
+      startupStage("iOS services", () =>
+        startupBenchmark.runPhase("iosServices", () => this.host.initializeIosServices()),
+      ),
+      startupStage("recorder teardown redrive", () => startHost().redriveRecorderTeardowns()),
+      startupStage("control socket bind", async () => {
+        this.host.lifecycle.setSocketServer(await startHost().bindControlSocket());
+      }),
+      startupStage("socket bind commit", () => {
+        this.host.identity.setSocketBindCommitted(true);
+      }),
+      startupStage("http token publish", () => {
+        startHost().publishHttpToken();
+        startupBenchmark.endPhase("socketServerStart");
+      }),
+      startupStage("background registry upgrade", () => {
+        logger.info("Unix socket server started");
+        if (!this.host.lifecycle.sessionBrokerConfigPath() && bindingRegistryFileExists()) {
+          this.host.startBackgroundRegistryUpgrade();
+        }
+      }),
+    ];
+  }
+
+  /** Awaited only when a broker is configured; otherwise the open is a background retry. */
+  private prepareStartupBindingRegistry(): Promise<void> | undefined {
+    if (this.host.lifecycle.sessionBrokerConfigPath() !== undefined) {
+      return prepareBindingRegistryForStartup({
+        brokerConfigured: true,
+        registryExists: bindingRegistryFileExists(),
+        open: () => this.host.openBindingRegistry(),
+      });
     }
-    logger.info("Unix socket server started");
-    if (!this.host.lifecycle.sessionBrokerConfigPath() && bindingRegistryFileExists()) {
-      this.host.startBackgroundRegistryUpgrade();
+    if (bindingRegistryFileExists()) {
+      void this.host.openBindingRegistry(undefined, { quiet: true }).catch((error: unknown) => {
+        // Pending schemas retry after bind; claim files decide until the registry can be read.
+        logger.warn(
+          `[Daemon] Recovery registry open deferred; will retry after socket bind: ${errorMessage(error)}`,
+          error,
+        );
+      });
+    }
+    return undefined;
+  }
+
+  private async rehydrateStartupSessions(): Promise<void> {
+    try {
+      const rehydration = await startupBenchmark.runPhase("sessionRehydration", () =>
+        this.host.services
+          .sessionManager()
+          .rehydratePersistedSessions(this.host.services.devicePool()),
+      );
+      await this.host.reownRehydratedManagedExecutions(rehydration.rehydrated);
+      await this.host.startHost().sweepStaleAppearanceConfigs(rehydration);
+    } catch (error) {
+      logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
     }
   }
 
@@ -649,30 +668,41 @@ export class DaemonStartup {
   }
 
   async startAfterSocketBind(): Promise<void> {
-    // Native broker cleanup must never hold up the control socket becoming reachable.
-    this.sessionBrokerRecovery?.start();
-    await this.host.startHost().startServicesAfterSocketBind();
-    this.host.startHeartbeatMonitor();
-    this.host.startHost().startMaintenanceMonitors();
+    await runStartupStages(this.startAfterSocketBindStages());
+  }
 
-    startupBenchmark.emit("daemon", {
-      host: this.host.host(),
-      port: this.host.identity.port(),
-      socketPath: SOCKET_PATH,
-      deviceCount: this.host.services.devicePool().getTotalDeviceCount(),
-      mcpHttpListenerBound: this.host.services.httpIngress().server?.listening ?? false,
-      daemonSocketListenerBound: this.host.lifecycle.socketServer()?.isListening() ?? false,
-    });
-
-    logger.info(
-      `Daemon started: PID ${process.pid}, socket ${SOCKET_PATH}, HTTP port ${this.host.identity.port()}`,
-    );
-
-    // Startup fully succeeded — DB brought up AND every startup DB-backed step
-    // completed. Only now clear the crash-loop circuit breaker, so a permanent
-    // failure in any later startup step (recorded before its fatal exit) isn't
-    // erased by a preflight that merely got past migrations (issue #2784).
-    this.host.startupFailureTracker().reset();
+  /** The `DAEMON_STARTUP_STAGES` rows after the socket bind, in table order. */
+  private startAfterSocketBindStages(): DaemonStartupStage<DaemonStartupStageName>[] {
+    return [
+      startupStage("session broker recovery", () => {
+        this.sessionBrokerRecovery?.start();
+      }),
+      startupStage("services after socket bind", () =>
+        this.host.startHost().startServicesAfterSocketBind(),
+      ),
+      startupStage("heartbeat monitor", () => {
+        this.host.startHeartbeatMonitor();
+      }),
+      startupStage("maintenance monitors", () => {
+        this.host.startHost().startMaintenanceMonitors();
+      }),
+      startupStage("startup report", () => {
+        startupBenchmark.emit("daemon", {
+          host: this.host.host(),
+          port: this.host.identity.port(),
+          socketPath: SOCKET_PATH,
+          deviceCount: this.host.services.devicePool().getTotalDeviceCount(),
+          mcpHttpListenerBound: this.host.services.httpIngress().server?.listening ?? false,
+          daemonSocketListenerBound: this.host.lifecycle.socketServer()?.isListening() ?? false,
+        });
+        logger.info(
+          `Daemon started: PID ${process.pid}, socket ${SOCKET_PATH}, HTTP port ${this.host.identity.port()}`,
+        );
+      }),
+      startupStage("startup failure tracker reset", () => {
+        this.host.startupFailureTracker().reset();
+      }),
+    ];
   }
 
   /**
@@ -951,6 +981,11 @@ export class DaemonStartup {
       androidAvdProvenanceWarmPromise: (): Promise<unknown> | undefined =>
         this.androidAvdProvenanceWarmPromise,
       startThroughSocketBind: (): Promise<void> => this.host.startThroughSocketBind(),
+      /** The stage names `start()` runs, in order, for checking against `DAEMON_STARTUP_STAGES`. */
+      startupStageNames: (): DaemonStartupStageName[] =>
+        [...this.startThroughSocketBindStages(), ...this.startAfterSocketBindStages()].map(
+          (stage) => stage.name,
+        ),
     } as const;
   }
 }

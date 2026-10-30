@@ -12,6 +12,8 @@ import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 export interface ForeignClaimsPort {
   readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
   readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  /** Apple Watch simulators, claimed by UDID in their own namespace (#14908). */
+  readonly watchForeignDeviceOwnership?: ForeignDeviceOwnership;
   readonly timer: Pick<Timer, "now">;
   readonly inventoryProbeBackoff?: BackoffPolicy;
   getDevice(deviceId: string): Pick<PooledDevice, "sessionId"> | undefined;
@@ -102,19 +104,26 @@ export class ForeignClaims {
     }
   }
 
-  /** Who else drives devices of `platform`: Android by adb server, iOS by UDID (#10980). */
+  /** Who else drives devices of `platform`: Android by adb server, iOS and watchOS by UDID. */
   foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined {
-    if (platform === "android") {
-      return this.port.foreignDeviceOwnership;
+    switch (platform) {
+      case "android":
+        return this.port.foreignDeviceOwnership;
+      case "ios":
+        return this.port.iosForeignDeviceOwnership;
+      case "watchos":
+        return this.port.watchForeignDeviceOwnership;
+      default:
+        return undefined;
     }
-    return platform === "ios" ? this.port.iosForeignDeviceOwnership : undefined;
   }
 
   /** Whether allocation for `platform` (either, when unset) must honour other daemons' claims. */
   tracksForeignOwnership(platform?: Platform): boolean {
     return platform === undefined
       ? this.port.foreignDeviceOwnership !== undefined ||
-          this.port.iosForeignDeviceOwnership !== undefined
+          this.port.iosForeignDeviceOwnership !== undefined ||
+          this.port.watchForeignDeviceOwnership !== undefined
       : this.foreignOwnershipFor(platform) !== undefined;
   }
 

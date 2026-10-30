@@ -1308,6 +1308,60 @@ describe("keep-booted derived budgets", () => {
   });
 });
 
+const systemPropertyRow = (key: string): DeviceMutationInput => ({
+  kind: "preference",
+  key: JSON.stringify({
+    store: "preference",
+    scope: "systemProperty",
+    appId: null,
+    suite: null,
+    userId: null,
+    key,
+  }),
+  priorValue: { state: "absent" },
+  toolName: "setPreference",
+});
+
+test("a session that set a system property reverts it in place and releases clean (#15792)", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: {
+      reset: async () => {
+        throw new Error("fallback must not run");
+      },
+    },
+  });
+  const row = systemPropertyRow("debug.app.api_url");
+  await journal.record(SCOPE, row);
+  expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+  expect(port.reverted).toMatchObject([row]);
+});
+
+test("a read-only system property row still escalates (#15792)", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, systemPropertyRow("ro.debuggable"));
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("cannot be baseline-cleaned"),
+  });
+  expect(port.reverted).toEqual([]);
+});
+
+test("a failed system property read-back escalates (#15792)", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, systemPropertyRow("debug.app.api_url"));
+  port.beforeWrite = async () => {
+    throw new Error("property did not read back");
+  };
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("property did not read back"),
+  });
+});
+
 test("failed uncovered fontScale journal revert requires fallback", async () => {
   const { journal, port, reset } = await rig({
     fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },

@@ -1,3 +1,4 @@
+import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
 import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
 import { SwipeOnAndroidDisplay, containerFailureOf } from "./SwipeOnAndroidDisplay";
@@ -253,6 +254,7 @@ export class SwipeOn extends BaseVisualChange {
       overlayDetector: this.overlayDetector,
       talkBackExecutor: this.talkBackExecutor,
       voiceOverExecutor: this.voiceOverExecutor,
+      webScrollIntoView: iosWebScrollIntoView(device, dependencies.webScrollIntoView),
       timer: this.timer,
       getDuration: this.getDuration.bind(this),
       resolveBoomerangConfig: this.resolveBoomerangConfig.bind(this),

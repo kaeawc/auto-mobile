@@ -79,7 +79,13 @@ unless a single post-loop re-read of its namespace confirms the baseline value; 
 differing key forces fallback. Critical settings restore failures force fallback immediately.
 Preferences are skipped by replay and require fallback unless their JSON key
 identifies an app absent from the readable baseline inventory, which cleaning
-uninstalls with its data.
+uninstalls with its data. The exception is a `setPreference` `systemProperty` row
+(no appId): replay runs `setprop` with the journaled prior and succeeds only when
+`getprop` reads it back. `setprop` cannot delete a property, so an absent prior is
+restored as `""`, which `getprop` reads the same as absent (a `persist.*` name also
+writes that empty value to disk). An unreadable prior, a name outside
+`[A-Za-z0-9_][A-Za-z0-9_.:-]*`, `ro.*` (unchangeable once set), `ctl.*` and
+`sys.powerctl` have no revert and force fallback, as does a failed read-back.
 
 Android cleaning ends by comparing three baseline observations the session may change
 outside the journal. The time zone (`persist.sys.timezone`) is restored in place with the

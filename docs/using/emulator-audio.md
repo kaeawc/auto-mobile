@@ -47,9 +47,9 @@ pass in `AUTOMOBILE_EMULATOR_ARGS` or in the launch's extra arguments is used as
 
 Plays audio into the microphone and returns as soon as streaming starts. On Android, it first
 opens a guest microphone capture and verifies it is running for three seconds, so the app need
-not already be recording. The emulator image must provide `tinycap` to the ADB shell user and
-readable capture status under `/proc/asound`; AutoMobile does not enable `adb root`. If the capture cannot be
-verified within eight seconds, injection is refused. A competing app recording may prevent the
+not already be recording. The emulator image must provide `tinycap` to the ADB shell user;
+AutoMobile does not enable `adb root`. If the recorder cannot be verified to stay running for
+three seconds within an eight-second deadline, injection is refused. A competing app recording may prevent the
 recorder from opening; stop that recording and retry.
 
 Only one injection may start or run per device. On Android, AutoMobile closes only its own recorder when
@@ -119,5 +119,5 @@ Errors start with a code in brackets:
 | `audio_capture_unsupported`       | The same, for capture; a simulator needs a loopback default output.                                                                                                                                         |
 | `audio_grpc_failed`               | Any other emulator error; the message carries its detail.                                                                                                                                                   |
 | `audio_loopback_failed`           | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                              |
-| `audio_guest_capture_unavailable` | A running guest capture could not be verified. Use an image with shell-accessible `tinycap` and readable `/proc/asound`, stop competing recordings, and retry.                                              |
+| `audio_guest_capture_unavailable` | The guest recorder could not be verified to stay running for three seconds. Use an image with shell-accessible `tinycap`, stop competing recordings, and retry. AutoMobile does not enable `adb root`.      |
 | `audio_emulator_exited`           | The emulator exited during injection. Restart the named emulator and start a new injection.                                                                                                                 |

@@ -109,8 +109,9 @@ export function resolveKillDeviceStableTarget(
   device: BootedDevice,
   devicePool: DevicePoolReads | undefined,
 ): StableDeviceTarget | undefined {
-  if (device.platform === "ios") {
-    return { platform: "ios", stableId: device.deviceId };
+  // A simulator UDID, iPhone or Apple Watch, is its own stable identity (#14908).
+  if (device.platform === "ios" || device.platform === "watchos") {
+    return { platform: device.platform, stableId: device.deviceId };
   }
   if (!isVirtualAndroidDevice(device)) {
     return undefined;

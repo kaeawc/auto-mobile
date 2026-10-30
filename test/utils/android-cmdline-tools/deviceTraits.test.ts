@@ -196,6 +196,7 @@ describe("AndroidDeviceTraitsReader", () => {
   test.each([
     ["emulator,automotive\n", "automotive"],
     ["watch\n", "watch"],
+    ["tv,nosdcard\n", "tv"],
     ["nosdcard\n", null],
     ["\n", null],
   ] as const)("ro.build.characteristics %j reads as form factor %p", async (raw, expected) => {
@@ -228,8 +229,9 @@ describe("parseTraitFormFactor", () => {
     ["automotive", "automotive"],
     [" Watch ", "watch"],
     ["emulator, watch", "watch"],
+    ["tv", "tv"],
+    ["emulator, TV ,nosdcard", "tv"],
     ["tablet,nosdcard", null],
-    ["tv", null],
     ["", null],
     [null, null],
   ] as const)("%j -> %p", (raw, expected) => {
@@ -238,14 +240,17 @@ describe("parseTraitFormFactor", () => {
 
   test("matches whole characteristics, not substrings", () => {
     expect(parseTraitFormFactor("watchface,automotiveish")).toBeNull();
+    expect(parseTraitFormFactor("tvout,smarttv")).toBeNull();
   });
 
   test("the gates are positive-match only", () => {
     expect(isAutomotive({ formFactor: "automotive" })).toBe(true);
     expect(isAutomotive({ formFactor: "watch" })).toBe(false);
+    expect(isAutomotive({ formFactor: "tv" })).toBe(false);
     expect(isAutomotive({ formFactor: null })).toBe(false);
     expect(isAutomotive(undefined)).toBe(false);
     expect(isWatch({ formFactor: "watch" })).toBe(true);
+    expect(isWatch({ formFactor: "tv" })).toBe(false);
     expect(isWatch({})).toBe(false);
     expect(isWatch(undefined)).toBe(false);
   });

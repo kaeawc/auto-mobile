@@ -16058,6 +16058,13 @@
           },
           "optional": true
         },
+        "sensors": {
+          "rule": {
+            "kind": "ref",
+            "name": "sensorsBlock"
+          },
+          "optional": true
+        },
         "notifications": {
           "rule": {
             "kind": "ref",
@@ -22441,6 +22448,66 @@
           "rule": {
             "kind": "ref",
             "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "sensorsBlock": {
+      "kind": "object",
+      "fields": {
+        "shake": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "orientation": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "rateHz": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 1,
+                  "max": 30
+                },
+                "optional": true
+              }
+            }
+          },
+          "optional": true
+        },
+        "steps": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "proximity": {
+          "rule": {
+            "kind": "object",
+            "fields": {}
+          },
+          "optional": true
+        },
+        "light": {
+          "rule": {
+            "kind": "object",
+            "fields": {
+              "rateHz": {
+                "rule": {
+                  "kind": "number",
+                  "integer": true,
+                  "min": 1,
+                  "max": 30
+                },
+                "optional": true
+              }
+            }
           },
           "optional": true
         }

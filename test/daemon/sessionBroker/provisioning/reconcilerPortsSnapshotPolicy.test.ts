@@ -57,13 +57,27 @@ describe("broker provisioning and the exit snapshot (#15477)", () => {
 });
 
 describe("discardsAndroidSnapshotOnExit", () => {
-  const config = (androidResetMode?: "snapshot" | "keep-booted") =>
-    ({ androidResetMode }) as Parameters<typeof discardsAndroidSnapshotOnExit>[0];
+  type Config = NonNullable<Parameters<typeof discardsAndroidSnapshotOnExit>[0]>;
+  const config = (
+    androidResetMode?: Config["androidResetMode"],
+    androidKeepBootedFallback?: Config["androidKeepBootedFallback"],
+  ): Config => ({ androidResetMode, androidKeepBootedFallback });
 
-  test("only a read config without warm Android reuse discards", () => {
+  test("an unread config keeps the exit snapshot", () => {
     expect(discardsAndroidSnapshotOnExit(undefined)).toBe(false);
+  });
+
+  test("no reset mode discards: released emulators are destroyed", () => {
     expect(discardsAndroidSnapshotOnExit(config())).toBe(true);
+  });
+
+  test("keep-booted without the snapshot fallback discards (#15793)", () => {
+    expect(discardsAndroidSnapshotOnExit(config("keep-booted", "destroy"))).toBe(true);
+    expect(discardsAndroidSnapshotOnExit(config("keep-booted"))).toBe(true);
+  });
+
+  test("modes that can reset from a snapshot keep the default", () => {
     expect(discardsAndroidSnapshotOnExit(config("snapshot"))).toBe(false);
-    expect(discardsAndroidSnapshotOnExit(config("keep-booted"))).toBe(false);
+    expect(discardsAndroidSnapshotOnExit(config("keep-booted", "snapshot"))).toBe(false);
   });
 });

@@ -137,12 +137,15 @@ enum PrototypePlatformValidator {
         /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
         var secureKeys: [String] = []
         var players: Set<String> = []
+        /// The root `sensors` block: the sensors the device listens to (#14327).
+        var sensors: JSONValue?
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
         requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
-        storage: JSONValue? = nil, location: JSONValue? = nil, notifications: JSONValue? = nil,
+        storage: JSONValue? = nil, location: JSONValue? = nil, sensors: JSONValue? = nil,
+        notifications: JSONValue? = nil,
         media: JSONValue? = nil, root: JSONValue,
         state: [String: JSONValue]
     )
@@ -152,6 +155,7 @@ enum PrototypePlatformValidator {
         try PrototypeAuthRules.validateBlock(auth, requires: requires)
         try PrototypeSecureStorageRules.validateBlock(storage, requires: requires, state: state)
         try PrototypeLocationRules.validateBlock(location, requires: requires)
+        try PrototypeSensorRules.validateBlock(sensors, requires: requires)
         try PrototypeNotificationRules.validateBlock(notifications, requires: requires)
         try PrototypeMedia.validate(media, requires: requires)
         var declared = try validateRequires(requires)
@@ -159,6 +163,7 @@ enum PrototypePlatformValidator {
         declared.hasAuth = auth?.objectFields != nil
         declared.notificationChannels = PrototypeNotificationRules.channels(notifications)
         declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
+        declared.sensors = sensors
         declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
@@ -288,6 +293,7 @@ enum PrototypePlatformValidator {
             }
             guard let owner = eventModule(event) else { throw fail(path, "Unknown platform event") }
             guard declared.modules.contains(owner) else { throw notDeclared(path, owner) }
+            try PrototypeSensorRules.validateEvent(event, path: path, sensors: declared.sensors)
             try PrototypeRequestValidator.validateList(actions, path: path, depth: 1, state: state)
             try scan(.array(actions), path: path, inHandler: true, declared: declared, state: state)
         }
@@ -381,6 +387,7 @@ enum PrototypePlatformValidator {
             guard valid else {
                 throw fail(path, "Unknown platform state \(pointer)")
             }
+            try PrototypeSensorRules.validateRead(tokens, path: path, sensors: declared.sensors)
         }
     }
 

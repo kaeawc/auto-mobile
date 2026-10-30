@@ -36,6 +36,10 @@ import {
   SCREEN_STATE_MUTATION_KEY,
   isRestorableScreenState,
 } from "./mutations/screenStateMutation";
+import {
+  systemPropertyJournalName,
+  systemPropertyRevertValue,
+} from "./mutations/systemPropertyMutation";
 import { VOLUME_RESTORED_MARKER, volumeRevertScript } from "./mutations/volumeMutation";
 
 interface AndroidRevertCommand {
@@ -77,7 +81,8 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     keyboard: (mutation) => this.settingCommands(mutation),
     clipboard: (mutation) => this.clipboardCommands(mutation),
     location: (mutation) => this.locationCommands(mutation),
-    preference: (mutation) => this.appDataCommands(mutation),
+    preference: (mutation) =>
+      this.appDataCommands(mutation) ?? this.systemPropertyCommands(mutation),
     "shared-file": (mutation) => this.fileCommands(mutation),
     "status-bar": (mutation) => this.statusBarCommands(mutation),
   };
@@ -609,6 +614,26 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           },
         ]
       : null;
+  }
+
+  /**
+   * Puts back a property `setPreference` wrote: `setprop` prints nothing on success, and only a
+   * read-back equal to the prior proves the restore. An absent prior is restored as `""`, which
+   * `getprop` reads the same as absent (`setprop` cannot delete a property); a `persist.*` name
+   * also writes that empty value to disk. Read-only and control properties have no revert.
+   */
+  private systemPropertyCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const name = systemPropertyJournalName(key);
+    const prior = systemPropertyRevertValue(priorValue);
+    return name === null || prior === null
+      ? null
+      : [
+          { command: `shell setprop ${name} ${shellQuote(prior)}`, success: "" },
+          { command: `shell getprop ${name}`, success: prior },
+        ];
   }
 
   /** Leaves SystemUI demo mode, then puts `sysui_demo_allowed` back to its journaled value. */

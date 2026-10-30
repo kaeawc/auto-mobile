@@ -23,7 +23,7 @@ From `EmulatorLauncher.startClaimedEmulatorProcess` and the AVD hardware fields 
 | Audio          | on; `-no-audio` only when `AUTOMOBILE_EMULATOR_AUDIO=false`                                                | `emulatorAudioArguments`, `envMedia.ts` |
 | GPU            | `hw.gpu.mode` left at the AVD value (`auto`); no `-gpu` flag                                               | no `-gpu` in the launcher               |
 | Boot animation | not disabled                                                                                               | no `-no-boot-anim`                      |
-| Snapshots      | quick-boot load and save; `-no-snapshot-save` only on the wipe-data relaunch of the Android snapshot reset | `androidSnapshotResetNativePort.ts`     |
+| Snapshots      | quick-boot load and save; `-no-snapshot-save` on snapshot-reset wipe-data relaunches, broker launches (§5) | `androidSnapshotResetNativePort.ts`     |
 | Cameras        | AVD value (back `emulated`, front `none` on every sampled AVD)                                             | `config.ini`                            |
 | CPU, RAM       | AVD value; `provisionDevice` accepts `cpuCores` (1-16) and `memoryMb` (at least 2048)                      | `provisionDeviceSpecSchemas.ts`         |
 
@@ -105,8 +105,11 @@ Hypotheses to test, each with a basis and an expected direction, none measured h
    `AUTOMOBILE_ANDROID_BOOT_BUDGET_VCPUS=configured`; the default stays two cores. A device run has to
    choose between that and creating AVDs with two vCPUs, which changes guest speed.
 3. **Quick-boot snapshots accumulate and are written at every exit** (#15477). Broker-provisioned emulators now launch with
-   `-no-snapshot-save` when the host config sets no `androidResetMode` (released emulators are destroyed);
-   `snapshot` and `keep-booted` hosts, user AVDs and `startDevice` keep the default. 74.6 GiB of
+   `-no-snapshot-save` when no snapshot reset can use the exit state: no `androidResetMode` (released
+   emulators are destroyed), or `keep-booted` without `androidKeepBootedFallback: "snapshot"` (a
+   non-clean release deletes the AVD; a clean one stays booted). `snapshot` hosts, `keep-booted` with
+   the snapshot fallback, user AVDs and `startDevice` keep the default. The broker baseline is saved
+   and loaded explicitly with `avd snapshot save|load`, which the flag does not disable. 74.6 GiB of
    snapshots on this host, including for AVD kinds the broker destroys. Needs a device run for the
    saving and a check against `deviceSnapshot` and the keep-booted baseline (#14363).
 

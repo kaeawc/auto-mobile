@@ -2,6 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../models/describeUnknownError";
 import type { AudioStream } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { logger } from "../../utils/logger";
+import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 import type {
   ForceStopOptions,
   RecordingHandle,
@@ -59,6 +60,35 @@ interface AudioTrack {
   discarded?: Promise<void>;
 }
 
+/** Where a recording's audio is captured while it runs, beside its output file. */
+export function audioTrackPcmPath(outputPath: string): string {
+  return `${outputPath}.audio.pcm`;
+}
+
+/**
+ * An Android recording longer than one screenrecord segment is stitched from several, and the
+ * audio track is not, so audio is refused there rather than silently cut short.
+ */
+export function assertAudioFitsOneSegment(
+  platform: string | undefined,
+  maxDurationSeconds: number | undefined,
+  audio: boolean | undefined,
+): void {
+  if (
+    audio &&
+    platform === "android" &&
+    (maxDurationSeconds ?? 0) > ANDROID_SCREENRECORD_MAX_SECONDS
+  ) {
+    throw new ActionableError(
+      `audio is supported for Android recordings up to ${ANDROID_SCREENRECORD_MAX_SECONDS} s; ` +
+        "set maxDuration to that or less, or record without audio.",
+    );
+  }
+}
+
+const LOST_ON_FAILED_STOP =
+  "The recording has no audio track: an earlier stop failed and its audio was discarded.";
+
 /**
  * Records the device's audio beside the video when a recording asks for `audio`, and muxes it in
  * at stop (#13629). The video capture itself is the wrapped backend's; a failed audio capture or
@@ -66,6 +96,8 @@ interface AudioTrack {
  */
 export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
   private readonly tracks = new Map<string, AudioTrack>();
+  /** Recordings whose track was discarded by a failed stop, so a retried stop still says so. */
+  private readonly lostTracks = new Set<string>();
 
   constructor(
     private readonly inner: VideoCaptureBackend,
@@ -90,8 +122,9 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     if (!deviceId) {
       throw new ActionableError("A recording with audio needs a target device.");
     }
+    assertAudioFitsOneSegment(config.device?.platform, config.maxDurationSeconds, config.audio);
     await this.deps.muxer.ensureAvailable();
-    const pcmPath = `${config.outputPath}.audio.pcm`;
+    const pcmPath = audioTrackPcmPath(config.outputPath);
     const file = this.deps.openPcmFile(pcmPath);
     let stream: AudioStream;
     try {
@@ -113,13 +146,22 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     }
     const leadMs = Math.max(0, videoStartedAt - audioStartedAt);
     this.tracks.set(handle.recordingId, { stream, file, pcmPath, leadMs });
-    return handle;
+    // The PCM grows beside the video, so the in-progress size cap counts it too.
+    return {
+      ...handle,
+      inProgressSidecarPaths: [...(handle.inProgressSidecarPaths ?? []), pcmPath],
+    };
   }
 
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
     const track = this.tracks.get(handle.recordingId);
     if (!track) {
-      return this.inner.stop(handle);
+      if (!this.lostTracks.has(handle.recordingId)) {
+        return this.inner.stop(handle);
+      }
+      const result = await this.inner.stop(handle);
+      this.lostTracks.delete(handle.recordingId);
+      return withAudioOutcome(result, LOST_ON_FAILED_STOP);
     }
     // The track stays registered until its teardown ends, so a force stop that arrives while the
     // video is still finalizing can still stop the audio (#15859).
@@ -131,6 +173,7 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
+    this.lostTracks.delete(handle.recordingId);
     const track = this.tracks.get(handle.recordingId);
     if (track) {
       this.tracks.delete(handle.recordingId);
@@ -148,19 +191,17 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
       result = await this.inner.stop(handle);
     } catch (error) {
       await this.discardOnce(track);
+      // The inner backend may keep the recording active for a retry (Android finalization); a
+      // force stop that already took the track ends the recording instead.
+      if (this.tracks.has(handle.recordingId)) {
+        this.lostTracks.add(handle.recordingId);
+      }
       throw error;
     }
     const warning = track.discarded
       ? "The recording has no audio track: it was force-stopped while stopping."
       : await this.addTrack(track, result.outputPath);
-    const warnings = [...(result.warnings ?? []), ...(warning ? [warning] : [])];
-    return {
-      ...result,
-      // Muxing rewrote the file, so its size is re-read from disk.
-      ...(warning ? {} : { sizeBytes: undefined }),
-      hasAudioTrack: warning === undefined,
-      warnings: warnings.length > 0 ? warnings : undefined,
-    };
+    return withAudioOutcome(result, warning);
   }
 
   /** Ends the audio capture and muxes it into `videoPath`; returns a warning when it could not. */
@@ -217,4 +258,16 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
       logger.warn(`Failed to remove temporary audio ${pcmPath}: ${errorMessage(error)}`);
     });
   }
+}
+
+/** `result` with the audio track's outcome: a warning means the video has no audio track. */
+function withAudioOutcome(result: RecordingResult, warning: string | undefined): RecordingResult {
+  const warnings = [...(result.warnings ?? []), ...(warning ? [warning] : [])];
+  return {
+    ...result,
+    // Muxing rewrote the file, so its size is re-read from disk.
+    ...(warning ? {} : { sizeBytes: undefined }),
+    hasAudioTrack: warning === undefined,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
 }

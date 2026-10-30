@@ -1,4 +1,6 @@
 import type { WatchSimulatorSimctl } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
+import type { BootedDevice } from "../../src/models";
+import type { WatchLifecycleSimctl } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import type {
   AppleDevice,
   AppleDeviceRuntime,
@@ -76,5 +78,60 @@ export class FakeWatchSimctl implements WatchSimulatorSimctl {
       throw this.catalogError;
     }
     return this.deviceTypes;
+  }
+}
+
+export const IPHONE_UDID = "1B2C3D4E-5F60-4718-8293-A1B2C3D4E5F6";
+
+/**
+ * A simctl host with a stateful boot and shutdown over {@link FakeWatchSimctl}'s listing: a boot
+ * turns the device `Booted` (labelled "ios", as the shared boot path does) and a shutdown turns it
+ * `Shutdown`. Every boot/shutdown command is logged in `commands`.
+ */
+export class FakeWatchLifecycleSimctl extends FakeWatchSimctl implements WatchLifecycleSimctl {
+  readonly commands: string[] = [];
+  onStateChange: (() => void) | undefined;
+
+  constructor(devices: AppleDevice[] = [watchDevice()]) {
+    super();
+    this.listing = {
+      devices: {
+        [WATCH_RUNTIME_ID]: devices,
+        [IOS_RUNTIME_ID]: [
+          { udid: IPHONE_UDID, name: "iPhone 16", state: "Booted", isAvailable: true },
+        ],
+      },
+    };
+  }
+
+  async waitForSimulatorReady(udid: string, timeoutMs?: number): Promise<BootedDevice> {
+    this.commands.push(`boot ${udid} ${timeoutMs}`);
+    const device = this.setState(udid, "Booted");
+    return { name: device.name, platform: "ios", deviceId: udid, observedAt: 7 };
+  }
+
+  async killSimulator(device: BootedDevice): Promise<void> {
+    this.commands.push(`shutdown ${device.deviceId}`);
+    this.setState(device.deviceId, "Shutdown");
+  }
+
+  stateOf(udid: string): string | undefined {
+    return this.find(udid)?.state;
+  }
+
+  private setState(udid: string, state: string): AppleDevice {
+    const device = this.find(udid);
+    if (!device) {
+      throw new Error(`Invalid device: ${udid}`);
+    }
+    device.state = state;
+    this.onStateChange?.();
+    return device;
+  }
+
+  private find(udid: string): AppleDevice | undefined {
+    return Object.values(this.listing.devices)
+      .flat()
+      .find((device) => device.udid === udid);
   }
 }

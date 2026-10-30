@@ -1,6 +1,8 @@
 import { ToolResponseSerialization } from "./ToolResponseSerialization";
 import { ObservationDisplayRenderer, isObserveResult } from "./ObservationDisplayRenderer";
 import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/toolEnvelopePayload";
+import { isWatchObservation } from "../models/WatchObservation";
+import type { ObserveResult } from "../models/ObserveResult";
 import { appendArtifactResourceLinks } from "./finalizeToolResponse/artifactResourceLinks";
 import type { FinalizeToolResponseContext } from "./finalizeToolResponse/contracts";
 import {
@@ -66,7 +68,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   const state = createFinalizationState(ctx, payload);
   const { isObserveTool } = state;
   const renderedDisplay = ObservationDisplayRenderer.displayMetadata(state);
-  if (isObserveTool && isObserveResult(payload)) {
+  if (isObserveTool && isRenderedObservation(payload)) {
     renderObservePayload(payload, state);
   } else if (!isObserveTool && payload.observation !== undefined) {
     renderActionPayload(state);
@@ -104,6 +106,15 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   commitDeliveredBaseline(ctx, state.pendingBaselineUpdate, renderedDisplay);
 
   return response;
+}
+
+/**
+ * An observation the observe renderer projects and diffs. A watch observation has no hierarchy
+ * (#14910): projecting it would serve an empty skeleton, which reads as an empty screen, and
+ * diffing would make it a session baseline, so it is served as the handler built it.
+ */
+function isRenderedObservation(payload: unknown): payload is ObserveResult {
+  return isObserveResult(payload) && !isWatchObservation(payload);
 }
 
 /** Share the request's cached complete JSON with the artifact writer. */

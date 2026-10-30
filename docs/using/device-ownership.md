@@ -329,6 +329,13 @@ watch, even after one was selected.
   `boot` (the default) it boots the watch and returns a `sessionId`; a watch it
   created is deleted again if that fails. `resources`, `enableTools` and
   `readiness: "automation"` are refused; `readiness` is always `"none"`.
+- `observe` on a watch returns only a fresh screenshot (`screenshotPath`,
+  `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note:
+  the view hierarchy is not available on watchOS yet. `viewHierarchy`,
+  `skeleton`, `elements` and the other element fields are absent, not empty, so
+  read the screenshot rather than treating the screen as empty. Options that
+  need a hierarchy (`waitFor`, `raw`, `project`, `scope`, `layer`, `crop` and
+  the like), `screenshot: "none"` and `screenshotOptions` are refused by name.
 - Every other device tool refuses a watch with `<tool> does not support watchOS
   yet`. `startDevice` and `killDevice` start and stop a watch named with
   `platform: "watchos"`.

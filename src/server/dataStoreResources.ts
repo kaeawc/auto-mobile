@@ -348,17 +348,23 @@ export function registerDataStoreResources(
   ResourceRegistry.registerTemplate(
     DATA_STORE_RESOURCE_TEMPLATES.STORES,
     "App DataStore Instances",
-    "List the Jetpack DataStore instances an app exposes through a host-registered AutoMobile SDK adapter (Android only).",
-    "application/json",
-    (params) => getDataStoresResource(params, reader),
+    {
+      description:
+        "List the Jetpack DataStore instances an app exposes through a host-registered AutoMobile SDK adapter (Android only).",
+      mimeType: "application/json",
+      handler: (params) => getDataStoresResource(params, reader),
+    },
   );
 
   ResourceRegistry.registerTemplate(
     DATA_STORE_RESOURCE_TEMPLATES.ENTRIES,
     "DataStore Instance Entries",
-    "Read the key-value entries of a named Jetpack DataStore instance via a host-registered AutoMobile SDK adapter (Android only).",
-    "application/json",
-    (params) => getDataStoreEntriesResource(params, reader),
+    {
+      description:
+        "Read the key-value entries of a named Jetpack DataStore instance via a host-registered AutoMobile SDK adapter (Android only).",
+      mimeType: "application/json",
+      handler: (params) => getDataStoreEntriesResource(params, reader),
+    },
   );
 
   logger.info("[DataStoreResources] Registered DataStore resources");

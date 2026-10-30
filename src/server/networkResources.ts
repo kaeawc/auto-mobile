@@ -354,21 +354,18 @@ export function registerNetworkResources(
     () => handleTrafficQuery({}, repository),
   );
 
-  ResourceRegistry.registerTemplate(
-    TRAFFIC_QUERY_TEMPLATE,
-    "Network Traffic",
-    "Query captured network traffic with optional filters.",
-    "application/json",
-    async (params) => handleTrafficQuery(params, repository),
-  );
+  ResourceRegistry.registerTemplate(TRAFFIC_QUERY_TEMPLATE, "Network Traffic", {
+    description: "Query captured network traffic with optional filters.",
+    mimeType: "application/json",
+    handler: async (params) => handleTrafficQuery(params, repository),
+  });
 
   // Single request detail by ID
-  ResourceRegistry.registerTemplate(
-    NETWORK_RESOURCE_URIS.REQUEST,
-    "Network Request Detail",
-    "Full HTTP request and response detail for a single captured network call (bodies truncated to 10KB).",
-    "application/json",
-    async (params) => {
+  ResourceRegistry.registerTemplate(NETWORK_RESOURCE_URIS.REQUEST, "Network Request Detail", {
+    description:
+      "Full HTTP request and response detail for a single captured network call (bodies truncated to 10KB).",
+    mimeType: "application/json",
+    handler: async (params) => {
       const requestId = parseInt(params.requestId, 10);
       if (!Number.isFinite(requestId) || requestId < 1) {
         return {
@@ -401,7 +398,7 @@ export function registerNetworkResources(
         };
       }
     },
-  );
+  });
 
   registerNetworkTrafficStreams(repository);
 

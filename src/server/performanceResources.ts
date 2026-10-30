@@ -147,12 +147,10 @@ export function registerPerformanceResources(): void {
     () => getPerformanceResource({}, PERFORMANCE_RESOURCE_URIS.BASE),
   );
 
-  ResourceRegistry.registerTemplate(
-    PERFORMANCE_QUERY_TEMPLATE,
-    "Performance Results",
-    "List UI performance audit results from the local database.",
-    "application/json",
-    async (params) => {
+  ResourceRegistry.registerTemplate(PERFORMANCE_QUERY_TEMPLATE, "Performance Results", {
+    description: "List UI performance audit results from the local database.",
+    mimeType: "application/json",
+    handler: async (params) => {
       try {
         const options = parsePerformanceParams(params);
         const uri = buildPerformanceUri(options);
@@ -172,7 +170,7 @@ export function registerPerformanceResources(): void {
         };
       }
     },
-  );
+  });
 
   logger.info("[PerformanceResources] Registered performance resources");
 }

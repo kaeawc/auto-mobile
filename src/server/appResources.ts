@@ -880,12 +880,11 @@ export function registerAppResources(deps: AppResourceDependencies = {}): void {
     () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE, deps),
   );
 
-  ResourceRegistry.registerTemplate(
-    APPS_QUERY_TEMPLATE,
-    "Installed Apps",
-    "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile.",
-    "application/json",
-    async (params) => {
+  ResourceRegistry.registerTemplate(APPS_QUERY_TEMPLATE, "Installed Apps", {
+    description:
+      "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile.",
+    mimeType: "application/json",
+    handler: async (params) => {
       try {
         const options = parseAppsQueryParams(params);
         const uri = getRequestedResourceUri(params) || buildAppsUri(options);
@@ -905,34 +904,31 @@ export function registerAppResources(deps: AppResourceDependencies = {}): void {
         };
       }
     },
-  );
+  });
 
-  ResourceRegistry.registerTemplate(
-    APP_RESOURCE_TEMPLATES.DEVICE_APPS,
-    "Installed Apps",
-    "List of installed user apps for a specific device. " +
+  ResourceRegistry.registerTemplate(APP_RESOURCE_TEMPLATES.DEVICE_APPS, "Installed Apps", {
+    description:
+      "List of installed user apps for a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system.",
-    "application/json",
-    async (params) => getAppsResource(params.deviceId, deps),
-  );
+    mimeType: "application/json",
+    handler: async (params) => getAppsResource(params.deviceId, deps),
+  });
 
-  ResourceRegistry.registerTemplate(
-    APP_RESOURCE_TEMPLATES.DEVICE_APP,
-    "Installed App Details",
-    "Details for a specific user app installed on a specific device. " +
+  ResourceRegistry.registerTemplate(APP_RESOURCE_TEMPLATES.DEVICE_APP, "Installed App Details", {
+    description:
+      "Details for a specific user app installed on a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system&search=PACKAGE_NAME.",
-    "application/json",
-    async (params) => getAppResource(params.deviceId, params.packageName, deps),
-  );
+    mimeType: "application/json",
+    handler: async (params) => getAppResource(params.deviceId, params.packageName, deps),
+  });
 
-  ResourceRegistry.registerTemplate(
-    APP_RESOURCE_TEMPLATES.DEVICE_APP_METADATA,
-    "App Metadata",
-    "Version, build number, install path, and timestamps for an installed app. " +
+  ResourceRegistry.registerTemplate(APP_RESOURCE_TEMPLATES.DEVICE_APP_METADATA, "App Metadata", {
+    description:
+      "Version, build number, install path, and timestamps for an installed app. " +
       "Returns normalized metadata for both Android (package name) and iOS (bundle ID).",
-    "application/json",
-    async (params) => getAppMetadataResource(params.deviceId, params.appId),
-  );
+    mimeType: "application/json",
+    handler: async (params) => getAppMetadataResource(params.deviceId, params.appId),
+  });
 
   void syncInstalledAppResources(deps);
 

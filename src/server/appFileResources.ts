@@ -74,20 +74,18 @@ export function registerAppFileResources(appFileService?: AppFileService): void 
     [CANONICAL_APP_FILE_RESOURCE_TEMPLATES, buildCanonicalAppFileResourceUri],
     [APP_FILE_RESOURCE_TEMPLATES, buildAppFileResourceUri],
   ] as const) {
-    ResourceRegistry.registerTemplate(
-      templates.CONTAINER,
-      "App Container Files",
-      "List files in a logical app container for a specific device and app. Android auto-resolves the installed user; optional ?userId=N selects a profile.",
-      "application/json",
-      createListAppFilesResource(service, buildUri),
-    );
+    ResourceRegistry.registerTemplate(templates.CONTAINER, "App Container Files", {
+      description:
+        "List files in a logical app container for a specific device and app. Android auto-resolves the installed user; optional ?userId=N selects a profile.",
+      mimeType: "application/json",
+      handler: createListAppFilesResource(service, buildUri),
+    });
 
-    ResourceRegistry.registerTemplate(
-      templates.FILE,
-      "App Container File",
-      "Read a file from a logical app container. Android auto-resolves the installed user; optional ?userId=N selects a profile. UTF-8 content is returned as text; binary content is returned as a base64 MCP blob.",
-      "application/octet-stream",
-      createReadAppFileResource(service, buildUri),
-    );
+    ResourceRegistry.registerTemplate(templates.FILE, "App Container File", {
+      description:
+        "Read a file from a logical app container. Android auto-resolves the installed user; optional ?userId=N selects a profile. UTF-8 content is returned as text; binary content is returned as a base64 MCP blob.",
+      mimeType: "application/octet-stream",
+      handler: createReadAppFileResource(service, buildUri),
+    });
   }
 }

@@ -2059,7 +2059,6 @@ export async function queryDeviceServiceStatus(
 
 // Register all booted device resources
 export function registerBootedDeviceResources(deps: BootedDeviceResourceDependencies = {}): void {
-  // Register the all-booted-devices resource
   ResourceRegistry.register(
     BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
     "Booted Devices",
@@ -2068,13 +2067,14 @@ export function registerBootedDeviceResources(deps: BootedDeviceResourceDependen
     () => getAllBootedDevices(deps),
   );
 
-  // Register the platform-specific template
   ResourceRegistry.registerTemplate(
     BOOTED_DEVICE_RESOURCE_URIS.PLATFORM_TEMPLATE,
     "Platform-specific Booted Devices",
-    "List of booted/running devices for a specific platform (android or ios).",
-    "application/json",
-    (params: Record<string, string>) => getBootedDevicesByPlatform(params, deps),
+    {
+      description: "List of booted/running devices for a specific platform (android or ios).",
+      mimeType: "application/json",
+      handler: (params: Record<string, string>) => getBootedDevicesByPlatform(params, deps),
+    },
   );
 
   // Register the lightweight per-device lock-state resource (issue #5056).

@@ -54,12 +54,10 @@ export function registerPrototypeResources(
     }),
   );
 
-  ResourceRegistry.registerTemplate(
-    PROTOTYPE_ICONS_TEMPLATE,
-    "Prototype icon lookup",
-    `Material icon names containing the query (at most ${ICON_LOOKUP_LIMIT} per read)`,
-    "application/json",
-    async (params: Record<string, string>) => {
+  ResourceRegistry.registerTemplate(PROTOTYPE_ICONS_TEMPLATE, "Prototype icon lookup", {
+    description: `Material icon names containing the query (at most ${ICON_LOOKUP_LIMIT} per read)`,
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) => {
       const query = params.query ?? "";
       const { total, names } = searchIcons(query);
       return {
@@ -68,14 +66,13 @@ export function registerPrototypeResources(
         text: JSON.stringify({ query, total, truncated: total > names.length, names }),
       };
     },
-  );
+  });
 
-  ResourceRegistry.registerTemplate(
-    PROTOTYPE_NATIVE_TEMPLATE,
-    "Prototype as native app code",
-    "The prototype's spec, assets and a Jetpack Compose or SwiftUI host file that renders it with the published AutoMobile prototype library",
-    "application/json",
-    async (params: Record<string, string>) => {
+  ResourceRegistry.registerTemplate(PROTOTYPE_NATIVE_TEMPLATE, "Prototype as native app code", {
+    description:
+      "The prototype's spec, assets and a Jetpack Compose or SwiftUI host file that renders it with the published AutoMobile prototype library",
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) => {
       const native = await readNativePrototype(params, nativeSources);
       const query = new URLSearchParams(params).toString();
       return {
@@ -84,14 +81,12 @@ export function registerPrototypeResources(
         text: JSON.stringify(native, null, 2),
       };
     },
-  );
+  });
 
-  ResourceRegistry.registerTemplate(
-    PROTOTYPE_NATIVE_ASSET_TEMPLATE,
-    "Prototype asset bytes",
-    "One saved prototype's image or font, base64 encoded",
-    "application/octet-stream",
-    async (params: Record<string, string>) => {
+  ResourceRegistry.registerTemplate(PROTOTYPE_NATIVE_ASSET_TEMPLATE, "Prototype asset bytes", {
+    description: "One saved prototype's image or font, base64 encoded",
+    mimeType: "application/octet-stream",
+    handler: async (params: Record<string, string>) => {
       const asset = await readNativePrototypeAsset(params, nativeSources);
       return {
         uri: `${PROTOTYPE_NATIVE_ASSET_URI}?${new URLSearchParams(params).toString()}`,
@@ -99,5 +94,5 @@ export function registerPrototypeResources(
         blob: Buffer.from(asset.bytes).toString("base64"),
       };
     },
-  );
+  });
 }

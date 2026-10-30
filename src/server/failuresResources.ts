@@ -195,13 +195,12 @@ export function registerFailuresResources(
   );
 
   // Register timeline resource template
-  ResourceRegistry.registerTemplate(
-    TIMELINE_QUERY_TEMPLATE,
-    "Failures Timeline",
-    "Get timeline data for failures. Optional dateRange (1h, 24h, 3d, 7d, 30d; default 24h) and aggregation (minute, hour, day, week; default hour). Buckets and labels are UTC; weeks start Monday 00:00 UTC.",
-    "application/json",
-    (params) => getTimelineResource(params, repository, timer),
-  );
+  ResourceRegistry.registerTemplate(TIMELINE_QUERY_TEMPLATE, "Failures Timeline", {
+    description:
+      "Get timeline data for failures. Optional dateRange (1h, 24h, 3d, 7d, 30d; default 24h) and aggregation (minute, hour, day, week; default hour). Buckets and labels are UTC; weeks start Monday 00:00 UTC.",
+    mimeType: "application/json",
+    handler: (params) => getTimelineResource(params, repository, timer),
+  });
 
   logger.info("[FailuresResources] Registered failures resources");
 }

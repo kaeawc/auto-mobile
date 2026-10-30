@@ -210,7 +210,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         this.requireFocusedAndroidInput(signal, ANDROID_TYPE_FOCUSED_INPUT_ERROR, display),
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
-      verifyKeyEventLetterCase: (text, typed, signal, display, before) =>
+      verifyKeyEventLetterCase: (text, typed, signal, { display, before } = {}) =>
         this.verifyKeyEventLetterCase(text, typed, { mode: "eventOnly", signal, display, before }),
       supportsAndroidKeyCombination: (signal) => this.supportsAndroidKeyCombination(signal),
       preExistingFieldText: (hierarchy, operation) => preExistingFieldText(hierarchy, operation),
@@ -425,8 +425,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         operation,
         requestedMode,
         command.keyboardProfile,
-        resolvedMode,
-        routing.passwordField,
+        { resolvedMode, passwordField: routing.passwordField },
       );
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
@@ -634,7 +633,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       };
     }
 
-    const result = await this.inputKey.press(command.key, undefined, undefined, modifiers);
+    const result = await this.inputKey.press(command.key, undefined, undefined, { modifiers });
     if (command.key === "tab") {
       this.iosSdkText.focusMayHaveMoved();
     }
@@ -690,9 +689,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return this.clearImeFieldWithKeyEvents(signal, display);
     }
     const result = await this.executeAndroidImeCommit("", "insert", undefined, {
-      signal,
-      display,
-      delivery: "clearField",
+      routing: {
+        signal,
+        display,
+        delivery: "clearField",
+      },
     });
     if (!result.imeActivationFailed) {
       return result;
@@ -860,18 +861,17 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
-    routing: ImeCommitRouting = {},
-    mode: "ime" | "imeKeyEvents" = "ime",
+    {
+      routing = {},
+      mode = "ime",
+    }: { routing?: ImeCommitRouting; mode?: "ime" | "imeKeyEvents" } = {},
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
-    return this.imeCommitTyper.executeAndroidImeCommit(
-      text,
-      operation,
-      keyboardProfile,
+    return this.imeCommitTyper.executeAndroidImeCommit(text, operation, keyboardProfile, {
       routing,
       mode,
-    );
+    });
   }
 
   private verifySafeImeRecovery(

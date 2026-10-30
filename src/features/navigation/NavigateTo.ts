@@ -795,12 +795,9 @@ export class NavigateTo {
       // Keep the caller's injected ADB executor and timer for Android recovery.
       // PressButton retains the accessibility-service/ADB fallback without
       // observing, so this internal recovery does not advance any diff baseline.
-      const result = await new PressButton(this.device, this.adb, this.timer).press(
-        "back",
-        undefined,
-        undefined,
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back", {
         signal,
-      );
+      });
       throwIfAborted(signal);
       if (!result.success) {
         throw new Error(result.error ?? "Android back navigation failed");

@@ -5,6 +5,8 @@ import { GrpcStatus, type GrpcStatusResult } from "./grpcFraming";
 export type EmulatorAudioErrorCode =
   | "audio_emulator_exited"
   | "audio_guest_capture_unavailable"
+  | "audio_host_microphone_unavailable"
+  | "audio_repeat_injection_unsafe"
   | "audio_injection_busy"
   | "audio_injection_unsupported"
   | "audio_capture_unsupported"
@@ -20,9 +22,38 @@ export class EmulatorAudioError extends ActionableError {
     readonly code: EmulatorAudioErrorCode,
     message: string,
     readonly grpcStatus?: GrpcStatusResult,
+    options?: { retryable?: boolean; remedy?: string },
   ) {
     super(`[${code}] ${message}`);
+    this.retryable = options?.retryable;
+    this.remedy = options?.remedy;
   }
+
+  readonly retryable?: boolean;
+  readonly remedy?: string;
+}
+
+const HOST_MICROPHONE_REMEDY =
+  "Grant macOS Microphone permission to the host app that runs the emulator in System Settings > " +
+  "Privacy and Security > Microphone, or restart the emulator.";
+
+export function hostMicrophoneUnavailable(deviceId: string): EmulatorAudioError {
+  return new EmulatorAudioError(
+    "audio_host_microphone_unavailable",
+    `Emulator ${deviceId} reported a host microphone voice failure. ${HOST_MICROPHONE_REMEDY}`,
+    undefined,
+    { retryable: false, remedy: HOST_MICROPHONE_REMEDY },
+  );
+}
+
+export function repeatInjectionUnsafe(deviceId: string): EmulatorAudioError {
+  return new EmulatorAudioError(
+    "audio_repeat_injection_unsafe",
+    `An injection has already been started on emulator ${deviceId} in this boot; another may crash it. ` +
+      `Stop any earlier injection before restarting. ${HOST_MICROPHONE_REMEDY}`,
+    undefined,
+    { retryable: false, remedy: HOST_MICROPHONE_REMEDY },
+  );
 }
 
 export function injectionError(status: GrpcStatusResult): EmulatorAudioError {

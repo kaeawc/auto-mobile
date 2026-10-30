@@ -31,7 +31,7 @@ function harness() {
       supportsImeKeyEvents: async () => true,
       supportsImeClearField: async () => true,
       supportsImeInsertedText: async () => true,
-      commitViaIme: async (text, prior, signal, delivery, trace) => {
+      commitViaIme: async (text, prior, signal, { delivery, trace } = {}) => {
         calls.push({ text, prior, signal, delivery, trace });
         return { success: true, insertedText: text };
       },
@@ -137,13 +137,15 @@ describe("ImeCommitTyper", () => {
         "insert",
         undefined,
         {
-          signal: undefined,
-          display: undefined,
-          focusedInputVerified: mode === "auto",
-          focusedFieldClass: mode === "auto" ? "android.widget.EditText" : undefined,
-          passwordField: undefined,
+          routing: {
+            signal: undefined,
+            display: undefined,
+            focusedInputVerified: mode === "auto",
+            focusedFieldClass: mode === "auto" ? "android.widget.EditText" : undefined,
+            passwordField: undefined,
+          },
+          ...(mode === "imeKeyEvents" ? { mode: "imeKeyEvents" } : {}),
         },
-        ...(mode === "imeKeyEvents" ? ["imeKeyEvents"] : []),
       ]);
     }
   });

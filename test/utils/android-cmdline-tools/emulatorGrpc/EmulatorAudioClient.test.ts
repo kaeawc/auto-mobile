@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   EmulatorAudioClient,
   INJECT_AUDIO_METHOD,
+  type InjectAudioOptions,
   prepareForInjection,
   STREAM_AUDIO_METHOD,
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
@@ -49,6 +50,30 @@ function sentFrames(written: Uint8Array[]): number {
 }
 
 describe("EmulatorAudioClient.injectAudio", () => {
+  test("runs the stream guard after authorization and preserves its refusal without opening transport", async () => {
+    const { client, transport, authorizer } = setup();
+    const authorized = Promise.withResolvers<string>();
+    authorizer.authorization = () => authorized.promise;
+    const refusal = new EmulatorAudioError(
+      "audio_host_microphone_unavailable",
+      "host voice failed",
+    );
+    let guardCalls = 0;
+    const options: InjectAudioOptions = {
+      beforeStreamOpen: () => {
+        guardCalls++;
+        throw refusal;
+      },
+    };
+    const outcome = client.injectAudio(CLIP, options).catch((error: unknown) => error);
+    expect(guardCalls).toBe(0);
+    expect(transport.calls).toHaveLength(0);
+    authorized.resolve("Bearer registered");
+    expect(await outcome).toBe(refusal);
+    expect(guardCalls).toBe(1);
+    expect(transport.calls).toHaveLength(0);
+  });
+
   test("streams the clip in 20ms packets with the format on the first packet only", async () => {
     const { client, transport } = setup();
     const injection = await client.injectAudio(CLIP);

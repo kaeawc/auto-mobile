@@ -226,7 +226,7 @@ describe("InputText.execute", () => {
         const result = runWithAbortSignal(controller.signal, () =>
           runWithTextRequestContext({ getDeadlineMs: () => undefined, textState: state }, () =>
             path === "key-event plan"
-              ? input.appendText("a", undefined, undefined, controller.signal)
+              ? input.appendText("a", { signal: controller.signal })
               : input.execute(
                   "hi",
                   { imeAction: path === "IME done" ? "done" : "previous", mode: "a11y" },

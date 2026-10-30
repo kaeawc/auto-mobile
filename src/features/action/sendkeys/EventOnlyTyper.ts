@@ -27,8 +27,7 @@ export interface EventOnlyTyperHost {
     text: string,
     typed: TextActionResult,
     signal?: AbortSignal,
-    display?: string,
-    before?: string,
+    options?: { display?: string; before?: string },
   ): Promise<TextActionResult>;
   supportsAndroidKeyCombination(signal?: AbortSignal): Promise<boolean>;
   preExistingFieldText(hierarchy: InputHierarchy, operation: SendKeysOperation): string;
@@ -94,7 +93,10 @@ export class EventOnlyTyper implements AndroidModeTyper {
       }
       mutated = true;
     }
-    return this.host.verifyKeyEventLetterCase(text, { success: true }, signal, display, beforeText);
+    return this.host.verifyKeyEventLetterCase(text, { success: true }, signal, {
+      display,
+      before: beforeText,
+    });
   }
 
   async clearEventOnlyForReplace(
@@ -105,15 +107,13 @@ export class EventOnlyTyper implements AndroidModeTyper {
     let deleted = false;
     try {
       const supportsKeyCombination = await this.host.supportsAndroidKeyCombination(signal);
-      await clearTextWithKeyEvents(
-        this.host.adb,
-        count,
+      await clearTextWithKeyEvents(this.host.adb, count, {
         signal,
-        () => {
+        onDelete: () => {
           deleted = true;
         },
         supportsKeyCombination,
-      );
+      });
       const verification = await verifyKeyEventClear(
         () =>
           this.host.observer.execute({

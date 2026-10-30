@@ -98,7 +98,8 @@ accepted when the page posted it, so it is already bounded to `maxElements` and 
 redacted when `redactText` is on; nothing unredacted leaves the bridge.
 
 The page script posts a snapshot on load, on every DOM mutation, and (coalesced to one per 100 ms)
-after a scroll, a focus change, or an `input` or `change` event, so geometry, focus and typed values
+after a scroll, a focus change, an `input` or `change` event, a window resize, or a visual-viewport
+resize or scroll (pinch zoom and its pan), so geometry, the viewport, focus and typed values
 follow the page without a mutation (assigning an input's value changes no DOM attribute). Only the
 main frame posts snapshots, and the bridge accepts only main-frame ones: element ids are per
 document and actions resolve them in the main frame, so a frame's element could otherwise answer
@@ -156,11 +157,15 @@ exactly one web view and the screen shows exactly one outermost `WKWebView`: not
 registration to its native view, and the registry orders web views by registration rather than by
 screen position, so with two or more the pairing is ambiguous and they stay XCTest-only. Each
 visible DOM element of the merged snapshot is attached as a
-child of its `WKWebView` node, offset by the web view's origin, clipped to it and truncated to whole
+child of its `WKWebView` node. Its CSS-pixel bounds are mapped to points through the snapshot's
+visual viewport (the viewport's offset is subtracted and its CSS width spans the web view's width,
+which covers pages without a `device-width` viewport and pinch zoom; a snapshot without a viewport
+is taken as points), then offset by the web view's origin, clipped to it and truncated to whole
 points as the runner truncates XCTest frames; one wholly outside the web view is dropped, as are elements whose id occurs more than once in the snapshot, since an action naming that id could reach either. Elements map onto the existing attributes
 (`label` → `content-desc`, `value` → `text`, `role` → `class`; a redacted value is not reported as text but as `value-redacted: "true"`, which text verification treats as unverifiable (unless the replaced XCTest leaf reports a readable `value`); `enabled` elements are `clickable`;
-text entry roles such as `input` and `textarea` report `role: textfield`, so focus and `sendKeys`
-targeting treat them as editable) and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
+text entry roles such as `textarea`, and an `input` whose reported `inputType` is text-like (`text`,
+`search`, `email`, `url`, `tel`, `password`, `number`, or none), report `role: textfield`, so focus
+and `sendKeys` targeting treat them as editable while a checkbox input does not) and carry `web-view-id`, `web-snapshot-id`, `web-element-id`, `web-document-id` (the page document that posted the snapshot; element ids restart for each document) when the SDK reports it, and, when the page URL has one,
 `web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with the same bounds and the same label, value or id as a DOM element are replaced by it in the leaf's place (so container-scoped selectors still find it), and every attribute the fresh leaf reports wins over the snapshot's (its `resource-id`, native `class`, input properties, focus and the rest), so native selectors, field detection and verification keep working; the DOM element adds its web identity and what the leaf does not report, but never its focus, since the snapshot can be older than the XCTest read. A leaf that two DOM elements both match (a wrapper and the control it wraps), or whose attributes match different DOM elements, is not replaced. A web view
 without a snapshot (none posted yet, a disallowed origin, a terminated process) keeps only its
 XCTest nodes. A merge reports `backend: sdk` unless the native bridge already set `backend`. The
@@ -198,8 +203,24 @@ bridge's `insertText` and its clear (the `clear` command and the clear before a 
 `backend` and, for an XCTest stand-in, `fallbackReason`; a command that used both reports the
 fallback. The focus tap itself stays on XCTest, so an XCTest stand-in finds the field focused as
 usual, and the typed text is verified by read-back as for XCTest typing. IME actions have no
-bridge form: on a bridge field they run through XCTest and report `fallbackReason: unsupported`.
-`sendKeys` without a selector has no resolved field, so it stays on XCTest.
+native bridge form: on a native bridge field they run through XCTest and report
+`fallbackReason: unsupported`. `sendKeys` without a selector has no resolved field, so it stays on
+XCTest.
+
+A focused DOM `<input>` or `<textarea>` merged from a web view (each merged element carries its DOM
+role as `web-role`) routes the same way through the web view's bounded actions; other DOM editors,
+such as `contenteditable`, ignore an assigned `value` and stay on XCTest: a clear is `clear`, and IME `done` is `submit` (the field's form, if it has one). Text
+entry is `setValue`, which replaces the value, so it is used only after the command cleared the
+field through the web view (a replace); typing that appends at the caret stays on XCTest and
+reports `fallbackReason: unsupported`, as do the other IME actions. Only a field with a
+`web-document-id` routes this way, since without one a navigation cannot be told apart from the same
+page. The field keeps its web view, element id (stable across the document's snapshots) and document
+id, and takes the snapshot id of every observation that shows it in the same document; when that
+element id appears in a new document (the page navigated), its next action fails closed; when the fresh read before its first action no longer shows it (the
+element left, or no snapshot merged), XCTest stands in and the result reports
+`fallbackReason: unavailable`. A rejected web action fails closed. After Tab or any IME action,
+which can move focus or leave the page, the command forgets the field (native or web), and later
+text actions follow keyboard focus through XCTest.
 
 Any capture moves the bridge's current observation, and the bridge rejects an action naming an older
 one. So sendKeys keeps the field's element id, takes the capture identity of every observation it
@@ -214,6 +235,15 @@ naming the capture the swipe was resolved against. Edge swipes reach system UI t
 see and stay on XCTest without a `backend`. A boomerang has no bridge form, so XCTest runs it and
 reports `fallbackReason: unsupported`. Other fallbacks and fail-closed results follow `tapOn`. A bridge scroll has no timed stroke, so its result marks the duration as ignored (`durationIgnored`, with a warning when `durationMs` was passed). The display fence is checked right before the bridge dispatch, as it is before an XCTest swipe. The
 bridge budget is the gesture's duration plus 3 s, and never less than 5 s. Scroll searches
-(`lookFor`) stay on XCTest.
+(`lookFor`) swipe with XCTest, after one web-view step: when the target is not in view, the search is
+unscoped (no container, scoped `lookFor` or layer, which the snapshot cannot express), the screen
+shows exactly one web view, and `lookFor.text` names exactly one enabled, visible DOM element of its
+snapshot by label or value (matched exactly, case and quote style aside; a redacted value never matches), the page
+scrolls that element into view with `scrollIntoView`. The snapshot lists off-screen elements, which
+the merged observation drops. The search then waits 250 ms for the page's next snapshot, re-reads
+the screen and searches again; a hit reports `backend: sdk` with no swipe. An unavailable bridge
+leaves the search to swipe and reports `fallbackReason: unavailable`; a rejected scroll fails
+closed; a target that is no single page element (an `elementId` selector, an ambiguous or partial
+text) swipes as before with no `backend`.
 
 WKWebView DOM nodes (#5162) extend the same observation under their WKWebView node.

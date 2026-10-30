@@ -19,6 +19,7 @@ import {
 } from "../daemon/videoRecordingManager";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
+import { assertAudioFitsOneSegment } from "../features/video/AudioTrackVideoCaptureBackend";
 import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
 import { logger } from "../utils/logger";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
@@ -232,19 +233,6 @@ function createVideoStartResponse(output: {
 }
 
 /** Segmented Android recordings (over 180 s) have no audio track: it would need stitching. */
-function assertAudioFitsOneSegment(
-  platform: string,
-  maxDurationSeconds: number,
-  audio: boolean | undefined,
-): void {
-  if (audio && platform === "android" && maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS) {
-    throw new ActionableError(
-      `audio is supported for Android recordings up to ${ANDROID_SCREENRECORD_MAX_SECONDS} s; ` +
-        "set maxDuration to that or less, or record without audio.",
-    );
-  }
-}
-
 async function startDeviceRecordings(
   ctx: RecordingToolContext,
   device: BootedDevice,

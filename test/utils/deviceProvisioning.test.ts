@@ -19,6 +19,9 @@ import {
 import { FakeAndroidAvdCreator, FakeIosSimulatorCreator } from "../fakes/FakeDeviceProvisioner";
 import { logger } from "../../src/utils/logger";
 import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
+import { androidSystemImageTagsFor, defaultAndroidProfileIdFor } from "../../src/models/formFactor";
+import { enrichDeviceInfoList } from "../../src/utils/android-cmdline-tools/avdDeviceInfoEnrichment";
+import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 
 function deviceType(name: string, productFamily = "iPhone"): AppleDeviceType {
   return {
@@ -244,6 +247,288 @@ describe("pickAndroidSystemImage handheld-only default selection (#14900)", () =
       "google_apis_playstore_tablet",
     ]) {
       expect(pickAndroidSystemImage([systemImage(35, tag, "x86_64")], {}, "x64").tag).toBe(tag);
+    }
+  });
+});
+
+describe("pickAndroidSystemImage TV selection (#15881)", () => {
+  const sdkmanagerListing = readFileSync(
+    new URL("../fixtures/android-sdkmanager/list-system-images-available.txt", import.meta.url),
+    "utf8",
+  );
+  const tv = { formFactor: "tv" } as const;
+
+  it("selects only TV images, even when a newer phone image is installed", () => {
+    const images = [
+      systemImage(36, "google_apis", "x86_64"),
+      systemImage(36, "android-wear", "x86_64"),
+      systemImage(36, "android-automotive", "x86_64"),
+      systemImage(34, "android-tv", "x86_64"),
+    ];
+
+    expect(pickAndroidSystemImage(images, tv, "x64").packageName).toBe(
+      "system-images;android-34;android-tv;x86_64",
+    );
+  });
+
+  it("prefers android-tv, then google-tv, then google-tv-ps16k at the same API and ABI", () => {
+    const all = [
+      systemImage(36, "google-tv-ps16k", "x86_64"),
+      systemImage(36, "google-tv", "x86_64"),
+      systemImage(36, "android-tv", "x86_64"),
+    ];
+
+    expect(pickAndroidSystemImage(all, tv, "x64").tag).toBe("android-tv");
+    expect(pickAndroidSystemImage(all.slice(0, 2), tv, "x64").tag).toBe("google-tv");
+    expect(pickAndroidSystemImage(all.slice(0, 1), tv, "x64").tag).toBe("google-tv-ps16k");
+  });
+
+  it("ranks API level, then host-runnable ABI, ahead of the tag", () => {
+    expect(
+      pickAndroidSystemImage(
+        [systemImage(34, "android-tv", "x86_64"), systemImage(36, "google-tv", "x86_64")],
+        tv,
+        "x64",
+      ).packageName,
+    ).toBe("system-images;android-36;google-tv;x86_64");
+    expect(
+      pickAndroidSystemImage(
+        [systemImage(34, "android-tv", "x86"), systemImage(34, "google-tv", "arm64-v8a")],
+        tv,
+        "arm64",
+      ).packageName,
+    ).toBe("system-images;android-34;google-tv;arm64-v8a");
+  });
+
+  it("honours the requested API range", () => {
+    const images = [
+      systemImage(34, "android-tv", "x86_64"),
+      systemImage(35, "android-tv", "x86_64"),
+      systemImage(36, "android-tv", "x86_64"),
+    ];
+
+    expect(pickAndroidSystemImage(images, { ...tv, maxOsVersion: "35" }, "x64").apiLevel).toBe(35);
+    expect(
+      pickAndroidSystemImage(images, { ...tv, minOsVersion: "14", maxOsVersion: "14" }, "x64")
+        .apiLevel,
+    ).toBe(34);
+  });
+
+  it("never selects a TV image below the CtrlProxy minSdk floor", () => {
+    expect(() => pickAndroidSystemImage([systemImage(23, "android-tv", "x86")], tv, "x64")).toThrow(
+      /API 24 \(CtrlProxy runner minSdk\)/,
+    );
+  });
+
+  it("picks the newest host-runnable android-tv image from a captured sdkmanager listing", () => {
+    const parsed = parseSystemImages(sdkmanagerListing, undefined, "available");
+
+    expect(pickAndroidSystemImage(parsed, tv, "x64").packageName).toBe(
+      "system-images;android-36;android-tv;x86_64",
+    );
+    expect(pickAndroidSystemImage(parsed, tv, "arm64").packageName).toBe(
+      "system-images;android-36;android-tv;arm64-v8a",
+    );
+  });
+
+  it.each(["phone", "tablet", "foldable"] as const)(
+    "a %s request never selects a TV image",
+    (formFactor) => {
+      expect(() =>
+        pickAndroidSystemImage([systemImage(36, "android-tv", "x86_64")], { formFactor }, "x64"),
+      ).toThrow(/No installed handheld \(phone\) Android system image/);
+    },
+  );
+
+  it.each(["x64", "arm64"])(
+    "the default install hint on %s names a package the SDK catalog publishes",
+    (architecture) => {
+      const published = new Set(
+        parseSystemImages(sdkmanagerListing, undefined, "available").map(
+          (image) => image.packageName,
+        ),
+      );
+      let message = "";
+      try {
+        pickAndroidSystemImage([systemImage(36, "google_apis", "x86_64")], tv, architecture);
+      } catch (error) {
+        message = error instanceof Error ? error.message : "";
+      }
+
+      const suggested = /sdkmanager "([^"]+)"/.exec(message)?.[1];
+      expect(suggested).toBeDefined();
+      expect(published.has(suggested ?? "")).toBe(true);
+    },
+  );
+
+  it.each([
+    [{}, "x64", 'sdkmanager "system-images;android-36;android-tv;x86_64"', "x86_64 or x86"],
+    [
+      {},
+      "arm64",
+      'sdkmanager "system-images;android-36;android-tv;arm64-v8a"',
+      "arm64-v8a or x86_64",
+    ],
+    [
+      { maxOsVersion: "35" },
+      "x64",
+      'sdkmanager "system-images;android-35;android-tv;x86_64"',
+      "x86_64 or x86",
+    ],
+    [
+      { minOsVersion: "36" },
+      "x64",
+      'sdkmanager "system-images;android-36;android-tv;x86_64"',
+      "x86_64 or x86",
+    ],
+  ] as const)(
+    "names the missing TV image and its install command (%j on %s)",
+    (range, architecture, command, abis) => {
+      const images = [
+        systemImage(36, "google_apis", "x86_64"),
+        systemImage(23, "android-tv", "x86"),
+      ];
+      let thrown: unknown;
+      try {
+        pickAndroidSystemImage(images, { ...tv, ...range }, architecture);
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(ActionableError);
+      const message = thrown instanceof Error ? thrown.message : "";
+      expect(message).toContain(
+        "No installed Android TV system image (android-tv, google-tv, google-tv-ps16k)",
+      );
+      expect(message).toContain(command);
+      expect(message).toContain(`This host runs ${abis} images`);
+      expect(message).toContain(
+        "Installed images: system-images;android-36;google_apis;x86_64, system-images;android-23;android-tv;x86.",
+      );
+      expect(message).toContain("does not download system images");
+    },
+  );
+});
+
+describe("pickAndroidSystemImage automotive selection (#15879)", () => {
+  const car = (apiLevel: number, tag = "android-automotive", abi = "x86_64") =>
+    systemImage(apiLevel, tag, abi);
+
+  it("picks only an automotive image for an automotive request, even over a newer phone image", () => {
+    const images = [systemImage(36, "google_apis", "x86_64"), car(34)];
+
+    expect(pickAndroidSystemImage(images, { formFactor: "automotive" }, "x64").packageName).toBe(
+      "system-images;android-34;android-automotive;x86_64",
+    );
+  });
+
+  it("prefers the playstore car image at the same API level", () => {
+    const images = [car(34), car(34, "android-automotive-playstore")];
+
+    expect(pickAndroidSystemImage(images, { formFactor: "automotive" }, "x64").tag).toBe(
+      "android-automotive-playstore",
+    );
+  });
+
+  it("keeps API level ahead of the playstore preference", () => {
+    const images = [car(34, "android-automotive-playstore"), car(35)];
+
+    expect(pickAndroidSystemImage(images, { formFactor: "automotive" }, "x64").apiLevel).toBe(35);
+  });
+
+  it("prefers a host-runnable ABI over the playstore tag", () => {
+    const images = [
+      car(34, "android-automotive-playstore", "x86_64"),
+      car(34, "android-automotive", "arm64-v8a"),
+    ];
+
+    expect(pickAndroidSystemImage(images, { formFactor: "automotive" }, "arm64").abi).toBe(
+      "arm64-v8a",
+    );
+  });
+
+  it("honours the requested API range", () => {
+    const images = [car(33), car(34), car(35)];
+
+    expect(
+      pickAndroidSystemImage(images, { formFactor: "automotive", maxOsVersion: "14" }, "x64")
+        .apiLevel,
+    ).toBe(34);
+    expect(
+      pickAndroidSystemImage(images, { formFactor: "automotive", minOsVersion: "35" }, "x64")
+        .apiLevel,
+    ).toBe(35);
+  });
+
+  it("never selects a car image below the CtrlProxy runner minSdk", () => {
+    expect(() => pickAndroidSystemImage([car(23)], { formFactor: "automotive" }, "x64")).toThrow(
+      /No installed Android Automotive system image[\s\S]*API 24 \(CtrlProxy runner minSdk\)/,
+    );
+    expect(() =>
+      pickAndroidSystemImage([car(34)], { formFactor: "automotive", maxOsVersion: "23" }, "x64"),
+    ).toThrow(/below API 24/);
+  });
+
+  it("does not pick a distant-display or other non-car image for a car request", () => {
+    const images = [
+      systemImage(36, "android-automotive-distant-display-playstore", "x86_64"),
+      systemImage(36, "android-tv", "x86_64"),
+      systemImage(36, "google_apis", "x86_64"),
+    ];
+
+    expect(() => pickAndroidSystemImage(images, { formFactor: "automotive" }, "x64")).toThrow(
+      ActionableError,
+    );
+  });
+
+  it("names the missing image and the exact sdkmanager command for the host ABI", () => {
+    let thrown: unknown;
+    try {
+      pickAndroidSystemImage(
+        [systemImage(36, "google_apis", "arm64-v8a")],
+        { formFactor: "automotive" },
+        "arm64",
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ActionableError);
+    const message = (thrown as ActionableError).message;
+    expect(message).toContain("No installed Android Automotive system image");
+    expect(message).toContain("system-images;android-36;google_apis;arm64-v8a");
+    expect(message).toContain(`sdkmanager "system-images;android-34;android-automotive;arm64-v8a"`);
+  });
+
+  it("puts the requested API level in the install command", () => {
+    expect(() =>
+      pickAndroidSystemImage([], { formFactor: "automotive", minOsVersion: "15" }, "x64"),
+    ).toThrow(`sdkmanager "system-images;android-35;android-automotive;x86_64"`);
+    expect(() =>
+      pickAndroidSystemImage([], { formFactor: "automotive", maxOsVersion: "13" }, "x64"),
+    ).toThrow(`sdkmanager "system-images;android-33;android-automotive;x86_64"`);
+  });
+
+  it.each([
+    ["phone", "phone"],
+    ["tablet", "tablet"],
+    ["foldable", "foldable"],
+    ["unknown", "unknown"],
+    ["omitted", undefined],
+  ] as const)("never picks a car image for a %s request", (_label, formFactor) => {
+    expect(() => pickAndroidSystemImage([car(36)], { formFactor }, "x64")).toThrow(
+      /handheld[\s\S]*android-automotive/,
+    );
+  });
+
+  it("ranks exactly the tags inventory classifies as automotive", () => {
+    expect(androidSystemImageTagsFor("automotive")).toEqual([
+      "android-automotive-playstore",
+      "android-automotive",
+    ]);
+    for (const tag of androidSystemImageTagsFor("automotive")) {
+      expect(pickAndroidSystemImage([car(34, tag)], { formFactor: "automotive" }, "x64").tag).toBe(
+        tag,
+      );
     }
   });
 });
@@ -931,7 +1216,187 @@ describe("DefaultDeviceProvisioner", () => {
       /iOS simulator tools \(xcrun simctl\) are not available/,
     );
   });
-  it.each(["tv", "watch", "automotive"] as const)(
+  it("creates an automotive AVD from a car image with the default car profile (#15879)", async () => {
+    const avd = new FakeAndroidAvdCreator([
+      systemImage(36, "google_apis", "x86_64"),
+      systemImage(34, "android-automotive-playstore", "x86_64"),
+    ]);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "x64",
+    });
+
+    const created = await provisioner.provision({ platform: "android", formFactor: "automotive" });
+
+    expect(created).toEqual({
+      platform: "android",
+      name: "AutoMobile-android-automotive-34-uuid1",
+      deviceType: "system-images;android-34;android-automotive-playstore;x86_64",
+      runtime: "android-34",
+      runtimeId: "system-images;android-34;android-automotive-playstore;x86_64",
+    });
+    expect(avd.createCalls).toEqual([
+      {
+        name: "AutoMobile-android-automotive-34-uuid1",
+        package: "system-images;android-34;android-automotive-playstore;x86_64",
+        device: "automotive_1024p_landscape",
+      },
+    ]);
+  });
+
+  it("does not create anything when no car image is installed (#15879)", async () => {
+    const avd = new FakeAndroidAvdCreator([systemImage(36, "google_apis", "x86_64")]);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "x64",
+    });
+
+    await expect(
+      provisioner.provision({ platform: "android", formFactor: "automotive" }),
+    ).rejects.toThrow(/sdkmanager "system-images;android-34;android-automotive;x86_64"/);
+    expect(avd.createCalls).toEqual([]);
+  });
+
+  it("classifies the created car AVD as automotive, so a repeated request reuses it (#15879)", async () => {
+    const avd = new FakeAndroidAvdCreator([systemImage(34, "android-automotive", "x86_64")]);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "x64",
+    });
+    const created = await provisioner.provision({ platform: "android", formFactor: "automotive" });
+    const createCall = avd.createCalls[0];
+    // avdmanager writes the image package and profile into config.ini; inventory reads them back.
+    const [listed] = await enrichDeviceInfoList(
+      {
+        readConfig: async () => ({
+          systemImagePackage: createCall?.package,
+          deviceName: createCall?.device,
+          apiLevel: 34,
+          osVersion: "14",
+        }),
+      },
+      [{ name: created.name, platform: "android", isRunning: false }],
+    );
+
+    if (!listed) {
+      throw new Error("enrichment dropped the created AVD");
+    }
+    expect(listed.formFactor).toBe("automotive");
+    const matcher = new DefaultDeviceMatcher();
+    expect(
+      matcher.matchDeviceImage(
+        { platform: "android", formFactor: "automotive" },
+        [listed],
+        "LATEST",
+      )?.name,
+    ).toBe(created.name);
+    expect(
+      matcher.matchDeviceImage({ platform: "android", formFactor: "phone" }, [listed], "LATEST"),
+    ).toBeNull();
+  });
+
+  it("shares the broker's default car profile, which a current avdmanager lists", () => {
+    const listDevice = readFileSync(
+      new URL("../fixtures/android-avdmanager/list-device.txt", import.meta.url),
+      "utf8",
+    );
+    const profile = defaultAndroidProfileIdFor("automotive");
+
+    expect(listDevice).toContain(`or "${profile}"`);
+  });
+
+  it("creates a TV AVD from a TV image with the shared TV profile (#15881)", async () => {
+    const avd = new FakeAndroidAvdCreator([
+      systemImage(36, "google_apis", "x86_64"),
+      systemImage(34, "google-tv", "x86_64"),
+      systemImage(34, "android-tv", "x86_64"),
+    ]);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "x64",
+    });
+
+    const created = await provisioner.provision({ platform: "android", formFactor: "tv" });
+
+    expect(created).toEqual({
+      platform: "android",
+      name: "AutoMobile-android-tv-34-uuid1",
+      deviceType: "system-images;android-34;android-tv;x86_64",
+      runtime: "android-34",
+      runtimeId: "system-images;android-34;android-tv;x86_64",
+    });
+    expect(avd.createCalls).toEqual([
+      {
+        name: "AutoMobile-android-tv-34-uuid1",
+        package: "system-images;android-34;android-tv;x86_64",
+        device: "tv_1080p",
+      },
+    ]);
+  });
+
+  it("keeps a requested name for a TV AVD", async () => {
+    const avd = new FakeAndroidAvdCreator([systemImage(34, "android-tv", "arm64-v8a")]);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+    });
+
+    await provisioner.provision({ platform: "android", formFactor: "tv", name: "living-room" });
+
+    expect(avd.createCalls[0]?.name).toBe("AutoMobile-living-room-uuid1");
+  });
+
+  it("creates nothing and names the sdkmanager command when no TV image is installed", async () => {
+    const avd = new FakeAndroidAvdCreator([systemImage(36, "google_apis", "arm64-v8a")]);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+    });
+
+    await expect(provisioner.provision({ platform: "android", formFactor: "tv" })).rejects.toThrow(
+      'sdkmanager "system-images;android-36;android-tv;arm64-v8a"',
+    );
+    expect(avd.createCalls).toEqual([]);
+  });
+
+  it.each(["phone", "tablet", "foldable", undefined] as const)(
+    "a %p request creates a handheld AVD with avdmanager's default hardware",
+    async (formFactor) => {
+      const avd = new FakeAndroidAvdCreator([
+        systemImage(34, "google_apis", "x86_64"),
+        systemImage(36, "android-tv", "x86_64"),
+      ]);
+      const provisioner = new DefaultDeviceProvisioner({
+        iosCreator: () => undefined,
+        androidCreator: () => avd,
+        idGenerator: new CountingIdGenerator("uuid"),
+        architecture: "x64",
+      });
+
+      await provisioner.provision({ platform: "android", ...(formFactor ? { formFactor } : {}) });
+
+      expect(avd.createCalls).toEqual([
+        {
+          name: "AutoMobile-android-34-uuid1",
+          package: "system-images;android-34;google_apis;x86_64",
+        },
+      ]);
+    },
+  );
+
+  it.each(["watch"] as const)(
     "refuses to create a handheld AVD for a %s request",
     async (formFactor) => {
       const avd = new FakeAndroidAvdCreator([
@@ -948,6 +1413,9 @@ describe("DefaultDeviceProvisioner", () => {
         new RegExp(`'${formFactor}' AVD is not supported yet`),
       );
       expect(avd.createCalls).toEqual([]);
+      expect(() =>
+        pickAndroidSystemImage([systemImage(35, "google_apis", "x86_64")], { formFactor }, "x64"),
+      ).toThrow(/not supported yet/);
     },
   );
 });

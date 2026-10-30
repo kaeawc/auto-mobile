@@ -18,9 +18,9 @@ export interface DeviceSkin {
 /**
  * The non-handheld form factors a booted device announces in `ro.build.characteristics`.
  * Handhelds (phone, tablet, foldable) are deliberately left null so their behaviour does
- * not change; TV is left for later.
+ * not change.
  */
-export type TraitFormFactor = "watch" | "automotive";
+export type TraitFormFactor = "watch" | "automotive" | "tv";
 
 /** Identifying build props of one Android device. A prop that could not be read is null. */
 export interface AndroidDeviceTraits {
@@ -45,7 +45,7 @@ export interface AndroidDeviceTraits {
    */
   skin: DeviceSkin | null;
   /**
-   * `ro.build.characteristics` containing `watch` or `automotive`. Null for everything else,
+   * `ro.build.characteristics` containing `watch`, `automotive` or `tv`. Null for everything else,
    * including a prop that could not be read: callers gate special behaviour on a positive
    * match and leave every other device on today's path.
    */
@@ -81,7 +81,10 @@ export function parseTraitFormFactor(raw: string | null): TraitFormFactor | null
   if (characteristics.includes("automotive")) {
     return "automotive";
   }
-  return characteristics.includes("watch") ? "watch" : null;
+  if (characteristics.includes("watch")) {
+    return "watch";
+  }
+  return characteristics.includes("tv") ? "tv" : null;
 }
 
 /** True only when the device positively announced an automotive build. */

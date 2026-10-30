@@ -1,7 +1,11 @@
 import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBinding";
 import { logger } from "../utils/logger";
 import type { BootedDevice, Platform } from "../models";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+  PlatformDeviceManager,
+} from "../devices/deviceUtils";
 import {
   resetBootedDevicesResourceCache,
   resetAndroidDeviceImageResourceCache,
@@ -341,12 +345,7 @@ export class MissingDeviceLiveness {
     resetAndroidDeviceImageResourceCache();
     const discovery = await this.pool
       .getDeviceManager()
-      .getBootedDevicesDetailed(
-        platform,
-        platform === "ios"
-          ? { bypassIosDeviceListCache: true }
-          : { bypassAndroidDeviceListCache: true },
-      );
+      .getBootedDevicesDetailed(platform, freshPresenceOptions(platform));
     return this.pool.mapAndroidDiscovery &&
       this.pool.needsAndroidTransportNormalization?.(discovery.devices)
       ? { ...discovery, devices: this.pool.mapAndroidDiscovery(discovery.devices) }
@@ -638,5 +637,17 @@ export class MissingDeviceLiveness {
       undefined,
       "absent",
     );
+  }
+}
+
+/** Each platform's cache bypass; the watch listing has no cache, so it reads fresh as is (#14908). */
+function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions {
+  switch (platform) {
+    case "android":
+      return { bypassAndroidDeviceListCache: true };
+    case "ios":
+      return { bypassIosDeviceListCache: true };
+    case "watchos":
+      return {};
   }
 }

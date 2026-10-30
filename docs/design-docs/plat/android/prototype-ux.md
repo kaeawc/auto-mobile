@@ -479,6 +479,16 @@ On a watch whose launcher does not support pinned shortcuts, `save` with `pin:tr
 and reports `pinned:"unsupported"`. Round-aware layouts, `ScalingLazyColumn`, Wear Material
 components and rotary input in prototypes are out of scope.
 
+## Android Automotive
+
+The renderer is phone-oriented; on a car display it lays out wide and landscape. A successful `show`
+on an Android device whose booted form factor is `automotive` reports `formFactor: "automotive"`,
+taken from the device's form factor with no extra read; other devices omit it. `save` with `pin:true`
+uses the same launcher check as everywhere else, so a car launcher without pinned-shortcut support keeps
+the save and reports `pinned:"unsupported"`. Dismiss placement relative to the car system bars, and
+whether the overlay stays visible while driving restrictions are on, are unverified on an AAOS emulator
+(#14916). Car App Library templates and car-specific spec nodes are out of scope.
+
 ## Common node properties
 
 Every node has required `type`. All other common properties are optional:
@@ -2229,9 +2239,13 @@ exactly one `/<module>/<key>`: `pitchDeg` and `rollDeg` (whole degrees, -180 to 
 only; iOS has no public ambient-light API). A sensor the device lacks leaves its key absent, so it compares as
 missing. `prototypeSensorReference.ts` is the reference the runtimes copy: whole-unit rounding, per-key
 throttling at `1000 / rateHz` ms (`rateHz` 1 to 30), and a shake at 2.7 g or more with a 1000 ms cooldown,
-replayed from `test/fixtures/prototype-sensors/`. The root `sensors` subscription block (which sensors to listen
-to and their `rateHz`) and the `motion` permission for `steps` are outside this contract. No production
-runtime advertises the module.
+replayed from `test/fixtures/prototype-sensors/`.
+
+The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`:
+`shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
+`rateHz` of 1 to 30. `steps` also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
+read or a `sensors.shake` handler must name a sensor the block lists. No production runtime advertises the
+module.
 
 **Voice notes (#14194, contract only).** The `audioRecorder` module
 (`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`

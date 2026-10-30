@@ -17,8 +17,23 @@ export const iosSdkWebElementSchema = z.object({
   enabled: z.boolean(),
   visible: z.boolean(),
   focused: z.boolean(),
+  /** An `<input>` element's `type`; absent for every other element. */
+  inputType: z.string().optional(),
 });
 export type IosSdkWebElement = z.infer<typeof iosSdkWebElementSchema>;
+
+/**
+ * The page's visual viewport when the snapshot was taken, in CSS pixels. Element bounds are relative
+ * to the layout viewport; the visual viewport's offset and width map them onto the web view.
+ */
+export const iosSdkWebViewportSchema = z.object({
+  offsetLeft: z.number(),
+  offsetTop: z.number(),
+  width: z.number(),
+  height: z.number(),
+  scale: z.number(),
+});
+export type IosSdkWebViewport = z.infer<typeof iosSdkWebViewportSchema>;
 
 /** A bounded, redacted DOM snapshot. Element ids are valid only for this snapshot. */
 export const iosSdkWebSnapshotSchema = z.object({
@@ -26,6 +41,13 @@ export const iosSdkWebSnapshotSchema = z.object({
   url: z.string().optional(),
   title: z.string().optional(),
   elements: z.array(iosSdkWebElementSchema),
+  /** Absent from an SDK that predates it; bounds are then taken as web-view points. */
+  viewport: iosSdkWebViewportSchema.optional(),
+  /**
+   * The page document that posted the snapshot; a navigation starts a new one. Element ids restart
+   * for each document, so the same id in another document names an unrelated element.
+   */
+  documentId: z.string().optional(),
 });
 export type IosSdkWebSnapshot = z.infer<typeof iosSdkWebSnapshotSchema>;
 

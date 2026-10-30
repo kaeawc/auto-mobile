@@ -158,6 +158,8 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagReader;
   voiceOverExecutor?: VoiceOverSwipeRunner;
+  /** Scrolls a WKWebView DOM element into view for `lookFor` (#5162); iOS only. */
+  webScrollIntoView?: import("./IosSdkWebScrollIntoView").IosSdkWebScrollIntoView;
   autoTargetSelector?: AutoTargetSelectorService;
   visionConfig?: import("../../../vision/VisionTypes").VisionFallbackConfig;
   screenshotCapturer?: import("../../navigation/SelectionStateTracker").ScreenshotCapturer;

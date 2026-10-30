@@ -68,7 +68,7 @@ export async function bindProvisionedDeviceSession(
     binding.signal,
     "binding the device session",
     bindUndoneIfUndelivered(
-      async (receipt) =>
+      async (receipt, bindSignal) =>
         ctx.bindBootedDeviceSession(
           boot.device,
           provisionSessionArgs(args),
@@ -76,7 +76,13 @@ export async function bindProvisionedDeviceSession(
           boot.processHandle,
           // Our own stable-name readiness reservation must not deny our
           // own bind when the pooled incarnation changed during readiness.
-          provisionSessionBindingOptions(args, readinessReservation, settlementState, receipt),
+          provisionSessionBindingOptions(
+            args,
+            readinessReservation,
+            settlementState,
+            receipt,
+            bindSignal,
+          ),
         ),
       () => boot,
     ),
@@ -91,9 +97,11 @@ function provisionSessionBindingOptions(
   readinessReservation: DeviceReadinessReservation | undefined,
   settlementState: ProvisionSettlementState,
   receipt: AcquisitionReceipt,
+  signal: AbortSignal,
 ) {
   return {
     receipt,
+    signal,
     readinessReservationOwners: readinessReservation
       ? new Set([readinessReservation.owner])
       : undefined,

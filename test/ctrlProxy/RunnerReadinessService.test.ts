@@ -28,6 +28,8 @@ import {
   deviceReadinessLockKey,
 } from "../../src/utils/deviceReadinessLock";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ForegroundUserPendingError } from "../../src/ctrlProxy/setupUser";
+import { ActionableError } from "../../src/models/ActionableError";
 
 import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 
@@ -737,6 +739,95 @@ describe("RunnerReadinessService", () => {
     ).rejects.toThrow(/readiness phase exceeded/);
 
     expect(timer.now()).toBeLessThanOrEqual(6_000);
+  });
+
+  test("waits for the driver user on a headless automotive build, then sets up (#15879)", async () => {
+    const manager = new FakeAndroidManager();
+    manager.installed = false;
+    manager.setup = async () => {
+      manager.setupCalls++;
+      if (manager.setupCalls === 1) {
+        // The setup result keeps the thrown error as its cause.
+        return {
+          success: false,
+          message: "Setup failed",
+          cause: new ForegroundUserPendingError("driver user is not in the foreground yet"),
+        };
+      }
+      manager.installed = true;
+      return { success: true, message: "ready" };
+    };
+    const { service } = createService({ androidManager: manager });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 500,
+    });
+    expect(manager.setupCalls).toBe(2);
+    expect(manager.resetSetupStateCalls).toBe(1);
+  });
+
+  test("retries a pending driver user wrapped as a cause (#15879)", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    const isInstalled = manager.isInstalled.bind(manager);
+    manager.isInstalled = async () => {
+      attempts++;
+      if (attempts === 1) {
+        throw new ActionableError("status read failed", {
+          cause: new ForegroundUserPendingError("driver user is not in the foreground yet"),
+        });
+      }
+      return isInstalled();
+    };
+    const { service } = createService({ androidManager: manager });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 500,
+    });
+    expect(attempts).toBe(2);
+  });
+
+  test("names the pending driver user when it never arrives within the budget (#15879)", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      throw new ForegroundUserPendingError("the driver user is not in the foreground yet");
+    };
+    const { service, timer } = createService({ androidManager: manager });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 600,
+        readinessTimeoutMs: 500,
+      }),
+    ).rejects.toThrow(/driver user is not in the foreground yet/);
+    expect(attempts).toBe(3);
+    expect(timer.now()).toBe(600);
+  });
+
+  test("does not retry an ordinary setup failure", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      throw new ActionableError("the driver user is not in the foreground yet");
+    };
+    const { service } = createService({ androidManager: manager });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 600,
+        readinessTimeoutMs: 500,
+      }),
+    ).rejects.toThrow(/driver user/);
+    expect(attempts).toBe(1);
   });
 
   test("stops transient setup retries at the shared absolute deadline", async () => {

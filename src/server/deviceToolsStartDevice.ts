@@ -49,10 +49,13 @@ import { ProgressCallback } from "./toolRegistry";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
+import { isWatchStartRequest, startWatchDevice } from "./deviceToolsWatchOs";
 import {
   DevicePreparationBudgets,
   DeviceToolsDependencies,
   StartDeviceArgs,
+  type StartDeviceSessionArgs,
+  type StartDeviceRequest,
   acquisitionLifecycleTimeoutError,
   androidSourceImageWithBootedMetadata,
   assertAndroidBootDidNotEnterRecovery,
@@ -474,7 +477,7 @@ async function bindPreparedDevice(
                 "binding the device session",
               ),
             bindUndoneIfUndelivered(
-              async (receipt) => {
+              async (receipt, bindSignal) => {
                 return await bindBootedDeviceSession(
                   state.boot!.device,
                   args,
@@ -494,6 +497,7 @@ async function bindPreparedDevice(
                       state.bindingSettlements.push(settlement);
                     },
                     receipt,
+                    signal: bindSignal,
                   },
                 );
               },
@@ -609,9 +613,9 @@ export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Pro
 
 export async function bindBootedDeviceSession(
   device: BootedDevice,
-  args: StartDeviceArgs,
-  sourceImage?: DeviceInfo,
-  childProcess?: ChildProcess | null,
+  args: StartDeviceSessionArgs,
+  sourceImage: DeviceInfo | undefined,
+  childProcess: ChildProcess | null | undefined,
   {
     autolockEnabled = captureAutolockPolicy(getDeviceToolsDependencies().env),
     readinessReservationOwners,
@@ -619,6 +623,7 @@ export async function bindBootedDeviceSession(
     achievedReadiness = "automationReady",
     collectCancellationSettlement,
     receipt,
+    signal,
   }: {
     autolockEnabled?: boolean;
     readinessReservationOwners?: ReadonlySet<symbol>;
@@ -627,7 +632,9 @@ export async function bindBootedDeviceSession(
     collectCancellationSettlement?: (settlement: Promise<void>) => void;
     /** Filled in with the session this bind mints, for a caller that may have to take it back. */
     receipt?: AcquisitionReceipt;
-  } = {},
+    /** The bind's cancel signal; autolock acquisition stops when it aborts (#15671). */
+    signal: AbortSignal | undefined;
+  },
 ): Promise<string> {
   if (device.platform === "android") {
     // A deliberate startDevice/provisionDevice boot owns this serial now; a tombstone left by a
@@ -663,7 +670,7 @@ export async function bindBootedDeviceSession(
         verifiedAndroidAvdIdentity,
         achievedReadiness,
         collectCancellationSettlement,
-        { autolockEnabled, receipt },
+        { autolockEnabled, receipt, signal },
       );
     if (autolockSessionId) {
       // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before
@@ -714,7 +721,7 @@ export async function bindBootedDeviceSession(
 /** A join can complete without running this start's assigner, so adopt R through the reuse bind. */
 async function resumePreparedDeviceSession(
   device: BootedDevice,
-  args: StartDeviceArgs,
+  args: StartDeviceSessionArgs,
   resumeSessionId: string,
   bind: (target?: SessionRecoveryTarget) => Promise<string>,
   {
@@ -778,7 +785,7 @@ async function resumePreparedDeviceSession(
 }
 
 export function restartResumeSessionForDevice(
-  args: StartDeviceArgs,
+  args: StartDeviceSessionArgs,
   device: BootedDevice,
 ): string | undefined {
   const pool = initializedDevicePool();
@@ -930,10 +937,13 @@ export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceR
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   const { prepareDevice, stripInternalAcquisitionParams } = hooks;
   const startDeviceHandler = async (
-    rawArgs: StartDeviceArgs,
+    rawArgs: StartDeviceArgs | StartDeviceRequest,
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    if (isWatchStartRequest(rawArgs)) {
+      return await startWatchDevice(rawArgs, bindBootedDeviceSession, signal);
+    }
     const internalSessionId = internalMcpSessionId(rawArgs);
     const args = {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),

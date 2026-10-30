@@ -73,7 +73,8 @@ describe("IosSdkTextRouting (#5159)", () => {
     expect(result).toEqual({ success: true });
     expect(calls).toEqual(["xctest"]);
     expect(router.requests).toEqual([]);
-    expect(text.imeFields()).toEqual({});
+    const ime = await text.tracked(() => text.ime("done", undefined, xctestInsert(calls)));
+    expect(ime.iosBackend).toBeUndefined();
   });
 
   test("refreshes the focus-time identity once, then types through the bridge", async () => {
@@ -155,11 +156,16 @@ describe("IosSdkTextRouting (#5159)", () => {
     expect(result.iosBackend).toBeUndefined();
   });
 
-  test("an IME action on a bridge field reports the unsupported XCTest fallback", () => {
-    const { text } = routing([]);
+  test("an IME action on a bridge field reports the unsupported XCTest fallback", async () => {
+    const { text, router } = routing([]);
     text.setTarget({ elementId: "email", observationIdentity: 41 });
-    expect(text.imeFields()).toEqual({ backend: "xctest", fallbackReason: "unsupported" });
+    const calls: string[] = [];
+    const done = await text.tracked(() => text.ime("done", undefined, xctestInsert(calls)));
+    expect(done.iosBackend).toEqual({ backend: "xctest", fallbackReason: "unsupported" });
+    expect(calls).toEqual(["xctest"]);
+    expect(router.requests).toEqual([]);
     text.setTarget(undefined);
-    expect(text.imeFields()).toEqual({});
+    const none = await text.tracked(() => text.ime("done", undefined, xctestInsert(calls)));
+    expect(none.iosBackend).toBeUndefined();
   });
 });

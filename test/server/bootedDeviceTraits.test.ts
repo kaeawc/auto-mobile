@@ -56,14 +56,16 @@ describe("bootedDeviceTraits.enrich", () => {
     expect(reader.reads.map((read) => read.deviceId)).toEqual(["emulator-5554"]);
   });
 
-  test("carries an announced watch or automotive form factor and leaves handhelds null", async () => {
+  test("carries an announced watch, automotive or tv form factor and leaves handhelds null", async () => {
     const reader = new FakeDeviceTraits(androidDeviceTraits());
     reader.setTraitsFor("emulator-5554", androidDeviceTraits({ formFactor: "automotive" }));
     reader.setTraitsFor("emulator-5556", androidDeviceTraits({ formFactor: "watch" }));
+    reader.setTraitsFor("emulator-5560", androidDeviceTraits({ formFactor: "tv" }));
     const devices = [
       entry("android", "emulator-5554"),
       entry("android", "emulator-5556"),
       entry("android", "emulator-5558"),
+      entry("android", "emulator-5560"),
     ];
 
     await enrich(devices, options(reader));
@@ -72,9 +74,15 @@ describe("bootedDeviceTraits.enrich", () => {
       "automotive",
       "watch",
       null,
+      "tv",
     ]);
-    expect(devices.map((device) => isAutomotive(device.traits))).toEqual([true, false, false]);
-    expect(devices.map((device) => isWatch(device.traits))).toEqual([false, true, false]);
+    expect(devices.map((device) => isAutomotive(device.traits))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(devices.map((device) => isWatch(device.traits))).toEqual([false, true, false, false]);
   });
 
   test("a failed read leaves that entry without traits and keeps the others", async () => {

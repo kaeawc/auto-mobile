@@ -21,7 +21,7 @@ describe("device tool schemas", () => {
     ["listDeviceImagesSchema", listDeviceImagesSchema, "99aeae52a5177ece"],
     ["listDevicesSchema", listDevicesSchema, "e5fef4f11fff7c45"],
     ["listDevicesOutputSchema", listDevicesOutputSchema, "bd7a120dcc06ffed"],
-    ["killDeviceSchema", killDeviceSchema, "2f248a681b7e57ca"],
+    ["killDeviceSchema", killDeviceSchema, "244baa5c3bae738c"],
     ["teardownDeviceSchema", teardownDeviceSchema, "b08bb03163153f9d"],
   ])("%s keeps its JSON schema", (_name, schema, expected) => {
     expect(fingerprint(schema)).toBe(expected);

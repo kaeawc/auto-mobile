@@ -27,6 +27,7 @@ import {
   prototypeSecureStorageError,
 } from "./prototypeSecureStorage";
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
+import { prototypeSensorsBlockError, prototypeSensorUseError } from "./prototypeSensorsBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -465,9 +466,11 @@ function readError(
   if (!declared.has(name)) {
     return notDeclared(use.path, name);
   }
-  return stateKnown(name, use.pointer, { channels, players, root })
-    ? undefined
-    : { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  if (!stateKnown(name, use.pointer, { channels, players, root })) {
+    return { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  }
+  const key = prototypePlatformPointerKey(use.pointer);
+  return name === "sensors" && key ? prototypeSensorUseError(key, use.path, root) : undefined;
 }
 
 /**
@@ -539,7 +542,12 @@ function useError(
       if (!owner) {
         return { path: use.path, message: "Unknown platform event" };
       }
-      return context.declared.has(owner) ? undefined : notDeclared(use.path, owner);
+      if (!context.declared.has(owner)) {
+        return notDeclared(use.path, owner);
+      }
+      return owner === "sensors"
+        ? prototypeSensorUseError(use.event.slice("sensors.".length), use.path, context.root)
+        : undefined;
     }
     case "call":
       return callError(use.action, use.path, context, check);
@@ -643,6 +651,7 @@ function rootBlockError(
     prototypeAuthBlockError(root) ??
     prototypeSecureStorageError(root) ??
     prototypeLocationBlockError(root) ??
+    prototypeSensorsBlockError(root) ??
     prototypeNotificationsBlockError(root) ??
     prototypeMediaError(root) ??
     prototypeMediaQueueError(root, check) ??

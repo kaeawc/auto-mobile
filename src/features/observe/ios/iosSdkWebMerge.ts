@@ -1,7 +1,7 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
 import { boundsKey, childrenOf } from "./iosSdkObservationMerge";
-import type { IosSdkWebElement, IosSdkWebSnapshot } from "./sdkWebViewBridge";
+import type { IosSdkWebElement, IosSdkWebSnapshot, IosSdkWebViewport } from "./sdkWebViewBridge";
 import { WEB_SNAPSHOT_ID_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 import { VALUE_REDACTED_ATTRIBUTE } from "../../../models/Element";
 
@@ -20,11 +20,32 @@ export const WEB_VIEW_ID_ATTRIBUTE = "web-view-id";
 export { WEB_SNAPSHOT_ID_ATTRIBUTE };
 export const WEB_ELEMENT_ID_ATTRIBUTE = "web-element-id";
 export const WEB_ORIGIN_ATTRIBUTE = "web-origin";
+/** The page document the element's snapshot came from; element ids are unique only within one. */
+export const WEB_DOCUMENT_ID_ATTRIBUTE = "web-document-id";
+/** The element's DOM role (its ARIA role, else its tag), kept where a replaced leaf's class wins. */
+export const WEB_ROLE_ATTRIBUTE = "web-role";
+
+/** DOM roles whose text is their `value`: the only fields the web view's setValue and clear edit. */
+const VALUE_FIELD_ROLES: ReadonlySet<string> = new Set(["input", "textarea"]);
+
+/**
+ * The web identity of a merged element whose text the web view can set and clear, or null. Other
+ * editors (`contenteditable`, ARIA textboxes) ignore an assigned `value`, so they stay on XCTest.
+ */
+export function iosSdkWebValueTarget(attributes: Record<string, unknown>): IosSdkWebTarget | null {
+  const role = attributes[WEB_ROLE_ATTRIBUTE];
+  const target =
+    typeof role === "string" && VALUE_FIELD_ROLES.has(role) ? iosSdkWebTarget(attributes) : null;
+  // Without a document id a navigation cannot be told apart from the same page, so the field
+  // stays on XCTest rather than risk acting on an unrelated element of a new page.
+  return target?.documentId ? target : null;
+}
 
 /**
  * DOM roles of text entry fields. They are reported as an XCTest text field would be (`role:
  * textfield`, focusable, with an input type), so focus, sendKeys and setUIState still treat a merged
- * field as editable after its XCTest duplicate is removed. A snapshot carries no input type, so a non-text `<input>` counts too.
+ * field as editable after its XCTest duplicate is removed. An `<input>` counts only with a text-like
+ * type (see {@link TEXT_INPUT_TYPES}).
  */
 const EDITABLE_WEB_ROLES: ReadonlySet<string> = new Set([
   "input",
@@ -33,6 +54,27 @@ const EDITABLE_WEB_ROLES: ReadonlySet<string> = new Set([
   "searchbox",
   "combobox",
 ]);
+
+/**
+ * `<input>` types that take typed text. A checkbox, radio, range, file or button input is not a text
+ * field. An input without a reported type (an SDK that predates it) is taken as text, the HTML default.
+ */
+const TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
+  "text",
+  "search",
+  "email",
+  "url",
+  "tel",
+  "password",
+  "number",
+]);
+
+function isEditable(element: IosSdkWebElement, role: string): boolean {
+  if (role !== "input") {
+    return EDITABLE_WEB_ROLES.has(role);
+  }
+  return TEXT_INPUT_TYPES.has((element.inputType ?? "text").toLowerCase());
+}
 
 /** The value the SDK bridge reports in place of a DOM value when its policy redacts text. */
 const REDACTED_WEB_VALUE = "[REDACTED]";
@@ -54,6 +96,8 @@ export interface IosSdkWebTarget {
   webViewId: string;
   snapshotId: string;
   elementId: string;
+  /** The page document, when the SDK reports one. */
+  documentId?: string;
 }
 
 export function iosSdkWebTarget(attributes: Record<string, unknown>): IosSdkWebTarget | null {
@@ -70,7 +114,37 @@ export function iosSdkWebTarget(attributes: Record<string, unknown>): IosSdkWebT
   ) {
     return null;
   }
-  return { webViewId, snapshotId, elementId };
+  const documentId = attributes[WEB_DOCUMENT_ID_ATTRIBUTE];
+  return typeof documentId === "string" && documentId
+    ? { webViewId, snapshotId, elementId, documentId }
+    : { webViewId, snapshotId, elementId };
+}
+
+/**
+ * The web identity of the merged DOM element with this web view and element id in `hierarchy`,
+ * carrying the snapshot id it was merged from there; null when no such element was merged.
+ * Element ids are stable across a document's snapshots, so this finds the same element in a newer
+ * snapshot.
+ */
+export function findIosSdkWebTarget(
+  hierarchy: ViewHierarchyResult | undefined,
+  webViewId: string,
+  elementId: string,
+): IosSdkWebTarget | null {
+  const root: unknown = hierarchy?.hierarchy?.node;
+  const pending: ViewHierarchyNode[] = Array.isArray(root)
+    ? [...(root as ViewHierarchyNode[])]
+    : root && typeof root === "object"
+      ? [root as ViewHierarchyNode]
+      : [];
+  for (let node = pending.pop(); node; node = pending.pop()) {
+    const target = iosSdkWebTarget(nodeAttributes(node));
+    if (target && target.webViewId === webViewId && target.elementId === elementId) {
+      return target;
+    }
+    pending.push(...childrenOf(node));
+  }
+  return null;
 }
 
 interface Box {
@@ -130,20 +204,50 @@ function originOf(url: string | undefined): string | undefined {
   return origin === "null" ? undefined : origin;
 }
 
+/** How CSS pixels map onto the web view: an offset in CSS pixels, then points per CSS pixel. */
+interface CssToPoints {
+  offsetLeft: number;
+  offsetTop: number;
+  pointsPerPixel: number;
+}
+
 /**
- * The element's screen bounds: its `[x, y, width, height]` in the page's CSS pixels, offset by the
- * web view's origin and clipped to the web view, truncated to whole points as the runner reports
- * XCTest frames (`Int(value)`), so a DOM element and its XCTest twin get the same bounds.
+ * The visual viewport fills the web view, so its CSS width spans the web view's width in points.
+ * That ratio covers a page without a `device-width` viewport (a 980 px layout viewport in a 390 pt
+ * web view) and pinch zoom alike. Without a usable viewport, CSS pixels are taken as points.
  */
-function screenBounds(element: IosSdkWebElement, webView: Box): Box | null {
+function cssToPoints(viewport: IosSdkWebViewport | undefined, webView: Box): CssToPoints {
+  const usable =
+    viewport !== undefined &&
+    [viewport.offsetLeft, viewport.offsetTop, viewport.width].every(Number.isFinite) &&
+    viewport.width > 0;
+  if (!usable) {
+    return { offsetLeft: 0, offsetTop: 0, pointsPerPixel: 1 };
+  }
+  return {
+    offsetLeft: viewport.offsetLeft,
+    offsetTop: viewport.offsetTop,
+    pointsPerPixel: (webView.right - webView.left) / viewport.width,
+  };
+}
+
+/**
+ * The element's screen bounds: its `[x, y, width, height]` in the page's CSS pixels, converted to
+ * points relative to the visual viewport, offset by the web view's origin and clipped to the web
+ * view, truncated to whole points as the runner reports XCTest frames (`Int(value)`), so a DOM
+ * element and its XCTest twin get the same bounds.
+ */
+function screenBounds(element: IosSdkWebElement, webView: Box, scale: CssToPoints): Box | null {
   const [x, y, width, height] = element.bounds;
   if ([x, y, width, height].some((part) => part === undefined || !Number.isFinite(part))) {
     return null;
   }
-  const left = Math.trunc(Math.max(webView.left, webView.left + x));
-  const top = Math.trunc(Math.max(webView.top, webView.top + y));
-  const right = Math.trunc(Math.min(webView.right, webView.left + x + width));
-  const bottom = Math.trunc(Math.min(webView.bottom, webView.top + y + height));
+  const originX = webView.left + (x - scale.offsetLeft) * scale.pointsPerPixel;
+  const originY = webView.top + (y - scale.offsetTop) * scale.pointsPerPixel;
+  const left = Math.trunc(Math.max(webView.left, originX));
+  const top = Math.trunc(Math.max(webView.top, originY));
+  const right = Math.trunc(Math.min(webView.right, originX + width * scale.pointsPerPixel));
+  const bottom = Math.trunc(Math.min(webView.bottom, originY + height * scale.pointsPerPixel));
   return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 
@@ -171,16 +275,22 @@ function valueAttributes(
   return typeof native?.value === "string" ? {} : { [VALUE_REDACTED_ATTRIBUTE]: "true" };
 }
 
+/** The web view and snapshot (and page document, when reported) a merged element came from. */
+interface WebSource {
+  webViewId: string;
+  snapshotId: string;
+  documentId?: string;
+}
+
 function convertElement(
   element: IosSdkWebElement,
   bounds: Box,
-  webViewId: string,
-  snapshotId: string,
+  source: WebSource,
   origin: string | undefined,
   native?: Record<string, unknown>,
 ): ViewHierarchyNode {
   const role = element.role ?? "element";
-  const editable = EDITABLE_WEB_ROLES.has(role);
+  const editable = isEditable(element, role);
   return {
     $: {
       class: role,
@@ -198,9 +308,11 @@ function convertElement(
       // detection and verification read, so each one wins over the snapshot's.
       ...native,
       bounds,
-      [WEB_VIEW_ID_ATTRIBUTE]: webViewId,
-      [WEB_SNAPSHOT_ID_ATTRIBUTE]: snapshotId,
+      [WEB_VIEW_ID_ATTRIBUTE]: source.webViewId,
+      [WEB_SNAPSHOT_ID_ATTRIBUTE]: source.snapshotId,
+      ...(source.documentId ? { [WEB_DOCUMENT_ID_ATTRIBUTE]: source.documentId } : {}),
       [WEB_ELEMENT_ID_ATTRIBUTE]: element.id,
+      [WEB_ROLE_ATTRIBUTE]: role,
       ...(origin ? { [WEB_ORIGIN_ATTRIBUTE]: origin } : {}),
     },
     extras: { "sdk.source": IOS_SDK_WEB_SOURCE },
@@ -307,11 +419,12 @@ export function mergeIosSdkWebSnapshots(
     }
     const origin = originOf(snapshot.url);
     const ambiguous = duplicateIds(snapshot.elements);
+    const scale = cssToPoints(snapshot.viewport, webViewBox);
     const converted = snapshot.elements.flatMap((element) => {
       // An action names its element by id: with none it cannot be routed, and with two elements
       // sharing one it could act on either.
       const routable = element.id !== "" && !ambiguous.has(element.id);
-      const bounds = element.visible && routable ? screenBounds(element, webViewBox) : null;
+      const bounds = element.visible && routable ? screenBounds(element, webViewBox, scale) : null;
       return bounds ? [{ element, bounds }] : [];
     });
     if (converted.length === 0) {
@@ -333,7 +446,12 @@ export function mergeIosSdkWebSnapshots(
     shared.forEach((signature) => covering.delete(signature));
     const build = (position: number, native?: Record<string, unknown>) => {
       const { element, bounds } = converted[position];
-      return convertElement(element, bounds, webViewId, snapshot.snapshotId, origin, native);
+      const source = {
+        webViewId,
+        snapshotId: snapshot.snapshotId,
+        documentId: snapshot.documentId,
+      };
+      return convertElement(element, bounds, source, origin, native);
     };
     const placed = new Set<number>();
     summary.deduplicated += replaceCoveredLeaves(webViewNode, covering, build, placed);

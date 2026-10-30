@@ -115,6 +115,7 @@ type AssignmentState = Pick<
   | "deviceManager"
   | "foreignDeviceOwnership"
   | "iosForeignDeviceOwnership"
+  | "watchForeignDeviceOwnership"
   | "bindingExclusion"
 >;
 export type AssignmentCallbacks = Pick<
@@ -432,7 +433,7 @@ export class DevicePoolAssignment {
     }
   }
 
-  /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
+  /** Re-read which idle devices (Android, iOS, watchOS) other daemons drive, for this pass. */
   async refreshForeignOwnership(requireCurrent = true): Promise<void> {
     const idle = (platform: Platform) =>
       this.callbacks
@@ -442,6 +443,7 @@ export class DevicePoolAssignment {
     await Promise.all([
       this.state.foreignDeviceOwnership?.refresh(idle("android")),
       this.state.iosForeignDeviceOwnership?.refresh(idle("ios")),
+      this.state.watchForeignDeviceOwnership?.refresh(idle("watchos")),
       this.state.bindingExclusion
         ? requireCurrent
           ? refreshAllocationBindingExclusion(this.state.bindingExclusion)

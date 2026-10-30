@@ -56,6 +56,7 @@ internal object PrototypePlatformRules {
     val players = PrototypeMedia.players(root, nodes)
     val notificationChannels = PrototypeNotificationRules.channels(root)
     val background = requires.strings("background").toSet()
+    val sensors = root.member("sensors")
   }
 
   // Root-level blocks, checked in order before any call or event use. The videoPlayer node rules
@@ -67,6 +68,7 @@ internal object PrototypePlatformRules {
       { root, _ -> PrototypeAuthRules.blockError(root) },
       { root, _ -> PrototypeSecureStorageRules.blockError(root) },
       { root, _ -> PrototypeLocationRules.blockError(root) },
+      { root, _ -> PrototypeSensorRules.blockError(root) },
       { root, _ -> PrototypeNotificationRules.blockError(root) },
       { root, _ -> PrototypeMedia.error(root) },
       { root, _ -> PrototypeMediaQueue.error(root) },
@@ -135,7 +137,7 @@ internal object PrototypePlatformRules {
         when {
           owner == null -> fail(use.path, "Unknown platform event")
           owner !in declared.modules -> notDeclared(use.path, owner)
-          else -> null
+          else -> PrototypeSensorRules.eventError(use.event, use.path, declared.sensors)
         }
       }
       is Use.Call -> callError(use.action, use.path, declared)
@@ -160,7 +162,9 @@ internal object PrototypePlatformRules {
           else -> tokens.size != 2 || tokens[1] !in state
         }
       } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
-      else -> comparisonError(use)
+      else ->
+        PrototypeSensorRules.readError(use.pointer, use.path, declared.sensors)
+          ?: comparisonError(use)
     }
   }
 

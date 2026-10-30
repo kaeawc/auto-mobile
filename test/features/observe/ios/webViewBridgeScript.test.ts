@@ -26,6 +26,7 @@ function pageScript(): string {
 
 interface FakeElement {
   tagName: string;
+  type?: string;
   value?: string;
   dataset: Record<string, string>;
   textContent: string;
@@ -63,10 +64,19 @@ interface Posted {
     value: string | null;
     visible: boolean;
     bounds: number[];
+    inputType: string | null;
   }>;
+  viewport?: {
+    offsetLeft: number;
+    offsetTop: number;
+    width: number;
+    height: number;
+    scale: number;
+  };
+  documentId?: string;
 }
 
-function page(options: { mainFrame?: boolean } = {}) {
+function page(options: { mainFrame?: boolean; visualViewport?: Record<string, number> } = {}) {
   const elements: FakeElement[] = [];
   const posted: Posted[] = [];
   const listeners: Record<string, Array<() => void>> = {};
@@ -80,6 +90,15 @@ function page(options: { mainFrame?: boolean } = {}) {
     WebSocket: class {},
   };
   window.top = options.mainFrame === false ? {} : window;
+  const viewportListeners: Record<string, Array<() => void>> = {};
+  window.visualViewport = options.visualViewport && {
+    ...options.visualViewport,
+    addEventListener: (name: string, callback: () => void) => {
+      (viewportListeners[name] ??= []).push(callback);
+    },
+  };
+  window.innerWidth = 390;
+  window.innerHeight = 700;
   const document = { querySelectorAll: () => elements, activeElement: null as FakeElement | null };
   const globals: Record<string, unknown> = {
     window,
@@ -110,6 +129,7 @@ function page(options: { mainFrame?: boolean } = {}) {
     document,
     snapshots,
     fire: (name: string) => listeners[name]?.forEach((listener) => listener()),
+    fireViewport: (name: string) => viewportListeners[name]?.forEach((listener) => listener()),
     mutate: () => observers.forEach((observer) => observer()),
     flushTimers: () => timers.splice(0).forEach((timer) => timer()),
   };
@@ -177,5 +197,68 @@ describe("WKWebView bridge page script (#15877)", () => {
     p.flushTimers();
     expect(p.snapshots()).toHaveLength(2);
     expect(p.snapshots().at(-1)?.elements?.[0].value).toBe("typed");
+  });
+
+  test("a snapshot carries the visual viewport and each input's type", () => {
+    const p = page({
+      visualViewport: { offsetLeft: 100, offsetTop: 50, width: 200, height: 350, scale: 2 },
+    });
+    const checkbox = element("input", "");
+    checkbox.type = "checkbox";
+    p.elements.push(checkbox, element("button", "Pay"));
+    p.fire("load");
+    const posted = p.snapshots().at(-1);
+    expect(posted?.viewport).toEqual({
+      offsetLeft: 100,
+      offsetTop: 50,
+      width: 200,
+      height: 350,
+      scale: 2,
+    });
+    expect(posted?.elements?.map((e) => e.inputType)).toEqual(["checkbox", null]);
+  });
+
+  test("without a visualViewport the layout viewport stands in at scale 1", () => {
+    const p = page();
+    p.elements.push(element("input", ""));
+    p.fire("load");
+    const posted = p.snapshots().at(-1);
+    expect(posted?.viewport).toEqual({
+      offsetLeft: 0,
+      offsetTop: 0,
+      width: 390,
+      height: 700,
+      scale: 1,
+    });
+    // An input with no type attribute is a text input.
+    expect(posted?.elements?.[0].inputType).toBe("text");
+  });
+
+  test("a resize, pinch zoom or visual-viewport pan posts a fresh snapshot", () => {
+    const viewport = { offsetLeft: 0, offsetTop: 0, width: 390, height: 700, scale: 1 };
+    const p = page({ visualViewport: viewport });
+    p.elements.push(element("button", "Pay"));
+    p.fire("load");
+    // Rotation changes the window size; zoom and pan change only the visual viewport.
+    p.fire("resize");
+    p.flushTimers();
+    p.fireViewport("resize");
+    p.flushTimers();
+    p.fireViewport("scroll");
+    p.flushTimers();
+    expect(p.snapshots()).toHaveLength(4);
+  });
+
+  test("every snapshot of a document carries the same document id, and a new document gets a new one", () => {
+    const first = page();
+    first.elements.push(element("button", "Pay"));
+    first.fire("load");
+    first.mutate();
+    const [a, b] = first.snapshots();
+    expect(typeof a.documentId).toBe("string");
+    expect(b.documentId).toBe(a.documentId);
+    const second = page();
+    second.fire("load");
+    expect(second.snapshots()[0].documentId).not.toBe(a.documentId);
   });
 });

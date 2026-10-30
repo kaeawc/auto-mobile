@@ -380,6 +380,33 @@ describe("Android broker reset dispatch and recovery", () => {
     },
   );
 
+  test("the port forwards its reset signal to the Android baseline reset", async () => {
+    const session = await ready();
+    const reached = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let strategySignal: AbortSignal | undefined;
+    host.strategy = {
+      reset: async (_device, _packages, assertOwned, context) => {
+        strategySignal = context.signal;
+        reached.resolve();
+        await resume.promise;
+        await assertOwned();
+        return { outcome: "clean", mode: "none", phases: {} };
+      },
+    };
+    await options.store.beginRelease(session, OWNER);
+    expect((await options.devices.release(session)).settled).toBe(true);
+    const resource = (await options.store.listResources())[0]!;
+    const controller = new AbortController();
+    const reset = options.devices.reset!(resource, controller.signal);
+    await reached.promise;
+    controller.abort(new Error("release cancelled"));
+    // The strategy's signal aborts with the caller's, not only once the port's fence notices.
+    expect(strategySignal?.aborted).toBe(true);
+    resume.resolve();
+    await expect(reset).rejects.toThrow("release cancelled");
+  });
+
   test("qualified injected Android strategy reuses the same AVD without creation", async () => {
     const first = await ready();
     expect(await broker.release(first)).toMatchObject({ outcome: "released" });

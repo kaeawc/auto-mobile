@@ -85,6 +85,8 @@ function readinessDependencyOverrides(
   return {
     ...resourceNotificationDependencyOverrides(deps, currentDeps),
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
+    watchSimulatorLifecycleFactory:
+      deps.watchSimulatorLifecycleFactory ?? currentDeps.watchSimulatorLifecycleFactory,
     deviceCreationGateFactory:
       deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,

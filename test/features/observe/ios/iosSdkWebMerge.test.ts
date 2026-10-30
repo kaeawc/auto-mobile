@@ -477,3 +477,111 @@ describe("a native leaf matching two DOM elements by different attributes (#5162
     expect(elements.some((element) => element["resource-id"] === "checkout")).toBe(false);
   });
 });
+
+describe("CSS pixels to web-view points (#5162)", () => {
+  test("a page laid out wider than the web view is scaled down before clipping", () => {
+    // A 400 pt web view showing an 800 px layout viewport: half a point per CSS pixel.
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: {
+          ...snapshot([{ ...submit, bounds: [400, 40, 100, 40] }]),
+          viewport: { offsetLeft: 0, offsetTop: 0, width: 800, height: 1400, scale: 0.5 },
+        },
+      },
+    ]);
+    const [element] = attached(findWebViewNodes(hierarchy)[0]);
+    expect(element?.bounds).toEqual({ left: 200, top: 120, right: 250, bottom: 140 });
+  });
+
+  test("a pinch-zoomed page maps through the visual viewport's offset and scale", () => {
+    // Zoomed 2x and panned: the 200 px visual viewport starts at (100, 50) in the layout viewport.
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: {
+          ...snapshot([{ ...submit, bounds: [150, 70, 20, 10] }]),
+          viewport: { offsetLeft: 100, offsetTop: 50, width: 200, height: 350, scale: 2 },
+        },
+      },
+    ]);
+    const [element] = attached(findWebViewNodes(hierarchy)[0]);
+    expect(element?.bounds).toEqual({ left: 100, top: 140, right: 140, bottom: 160 });
+  });
+});
+
+describe("input types (#5162)", () => {
+  test("only text-like inputs are reported as text fields", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "agree", role: "input", inputType: "checkbox", bounds: [0, 0, 20, 20] },
+          { ...submit, id: "email", role: "input", inputType: "email", bounds: [0, 30, 200, 40] },
+          { ...submit, id: "legacy", role: "input", bounds: [0, 80, 200, 40] },
+        ]),
+      },
+    ]);
+    const roles = attached(findWebViewNodes(hierarchy)[0]).map((element) => [
+      element["web-element-id"],
+      element.role,
+      element["input-type"],
+    ]);
+    expect(roles).toEqual([
+      ["agree", "input", undefined],
+      ["email", "textfield", "text"],
+      ["legacy", "textfield", "text"],
+    ]);
+  });
+});
+
+describe("the DOM role (#5162)", () => {
+  test("each merged element carries its DOM role, even where a native class wins", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "UITextField",
+        "content-desc": "Email",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "email", role: "input", label: "Email" },
+          { ...submit, id: "notes", role: "textbox", label: "Notes", bounds: [0, 300, 200, 40] },
+        ]),
+      },
+    ]);
+    const roles = webElements(findWebViewNodes(hierarchy)[0]).map((element) => [
+      element["web-element-id"],
+      element.class,
+      element["web-role"],
+    ]);
+    expect(roles).toEqual([
+      ["email", "UITextField", "input"],
+      ["notes", "textbox", "textbox"],
+    ]);
+  });
+});
+
+describe("page identity (#5162)", () => {
+  test("each merged element carries its snapshot's document id, and its web target reads it", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      { webViewId: "checkout", snapshot: { ...snapshot([submit]), documentId: "d1" } },
+    ]);
+    const [element] = attached(findWebViewNodes(hierarchy)[0]);
+    expect(element["web-document-id"]).toBe("d1");
+    expect(iosSdkWebTarget(element)).toEqual({
+      webViewId: "checkout",
+      snapshotId: "s7",
+      elementId: "e0",
+      documentId: "d1",
+    });
+  });
+});

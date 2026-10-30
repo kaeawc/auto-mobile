@@ -329,6 +329,36 @@ export const iosDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
 };
 
 /**
+ * The scope Apple Watch simulator claims live under (#14908). Like an iOS simulator, a watch
+ * belongs to the user's CoreSimulator set, so every daemon on the host contends for one claim per
+ * UDID; watches keep their own namespace so a watch claim is never read as an iOS one.
+ */
+export const WATCH_SIMULATOR_CLAIM_SCOPE = "watch-simulators";
+
+/** Where an Apple Watch simulator's allocation claim lives, keyed by its UDID (#14908). */
+export function watchDeviceAllocationClaimPath(
+  udid: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(
+      WATCH_SIMULATOR_CLAIM_SCOPE,
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
+    ctrlProxyForwardLeaseFileName(udid),
+  );
+}
+
+/** The watch file source (#14908): only the allocation claim, as for iOS simulators. */
+export const watchDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
+  ...iosDeviceOwnershipFileSource,
+  claimPath: (udid) => watchDeviceAllocationClaimPath(udid),
+};
+
+/**
  * Reads two per-device lock files: the CtrlProxy forwarding lease (#10485) a daemon takes in its
  * coordination directory when it first talks to a device's CtrlProxy, and the allocation claim a
  * daemon takes while a session holds the device (#10709). The claim lives in a directory

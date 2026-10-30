@@ -22,7 +22,7 @@ export function withSwipeObservationReadScope<T>(block: () => T): T {
     : swipeReadScope.run(true, () => withObservationReadScope(block));
 }
 
-function swipeHierarchyReadTimeoutMs(timer: Timer): number {
+export function swipeHierarchyReadTimeoutMs(timer: Timer): number {
   const deadline = getRequestContext()?.getDeadlineMs?.();
   return Math.max(
     0,

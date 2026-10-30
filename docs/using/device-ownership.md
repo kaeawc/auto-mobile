@@ -296,6 +296,8 @@ the device really should be stopped out from under its holder.
   `device_owned_by_other_daemon`: stop it through that daemon, wait for it to
   release the device, or pass `force: true`.
 - For a wedged Android emulator, `force` also skips the AVD-name comparison.
+- `killDevice` stops an Apple Watch simulator too: pass `platform: "watchos"`
+  and its UDID. A UDID that is not a watch simulator is refused.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 

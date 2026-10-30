@@ -475,8 +475,7 @@ async function readResourceCharges(
   registry: BindingResourceRegistry,
   inventory: BindingInventory,
   request: { signal?: AbortSignal; deadlineMs?: number },
-  timer: Pick<Timer, "now">,
-  probes: PowerProbes,
+  { timer, probes }: { timer: Pick<Timer, "now">; probes: PowerProbes },
 ): Promise<{
   charges: ResourceCharge[];
   charged: ChargedEvidence[];
@@ -594,7 +593,7 @@ export class RegistryBindingResourceBudget implements BindingResourceBudget {
   ): Promise<BindingResourceAdmission> {
     const probes: PowerProbes = new Map();
     const read = () =>
-      readResourceCharges(registry, this.deps.inventory, request, this.timer, probes);
+      readResourceCharges(registry, this.deps.inventory, request, { timer: this.timer, probes });
     let ledger = await read();
     if (rankedCount(ledger.charges, request.journalEntryId) > limit) {
       ledger = await read();

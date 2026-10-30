@@ -457,7 +457,9 @@ describe("Android broker reset dispatch and recovery", () => {
     host.strategy = undefined;
     const reset = new AndroidBaselineReset(host);
     await expect(
-      reset.reset("resource", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+      reset.reset("resource", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {},
+      }),
     ).rejects.toThrow("cannot prove restoration of unobservable state");
     expect(host.inventoryCalls).toBe(0);
     expect(host.commands).toEqual([]);
@@ -514,7 +516,8 @@ describe("Android broker reset dispatch and recovery", () => {
     const controller = new AbortController();
     host.onInventory = () => controller.abort(new Error("prepare cancelled"));
     await expect(
-      reset.capture("resource", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session", {
+      reset.capture("resource", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        sessionId: "session",
         stableDeviceId: "stable-avd",
         signal: controller.signal,
         timer,
@@ -525,7 +528,8 @@ describe("Android broker reset dispatch and recovery", () => {
 
     host.onInventory = () => timer.advanceTime(11);
     await expect(
-      reset.capture("resource", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session", {
+      reset.capture("resource", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        sessionId: "session",
         stableDeviceId: "stable-avd",
         timeoutMs: 10,
         timer,

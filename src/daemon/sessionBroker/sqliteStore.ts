@@ -1,4 +1,4 @@
-import { countSessionAdmissions } from "./sqliteAdmissions";
+import { countSessionAdmissions, occupiedResources } from "./sqliteAdmissions";
 import { completedAcquisitionTiming, pendingAcquisitionTiming } from "./timingRecorder";
 import { requestRecord, resourceRecord, readRequest, readResource } from "./sqliteRecords";
 import { SqliteBrokerTimingStore } from "./sqliteTimingStore";
@@ -95,17 +95,6 @@ function requireValue<T>(value: T | undefined | null, message: string): T {
   return value;
 }
 
-function occupiedResources(resources: readonly BrokerResourceRecord[]) {
-  return resources
-    .filter((resource) => resource.state !== "destroyed")
-    .map((resource) => ({
-      id: resource.resourceId,
-      state: resource.state as Exclude<BrokerResourceRecord["state"], "destroyed">,
-      idleOrder: resource.idleOrder,
-      compatible: false,
-    }));
-}
-
 /**
  * Durable reservation and receipt layer of the host registry. Physical device ownership remains
  * in its assignment rows and native work remains in its journal. Every mutation uses that same
@@ -118,13 +107,20 @@ function occupiedResources(resources: readonly BrokerResourceRecord[]) {
 export class SqliteSessionBrokerStore {
   private readonly timingStore: SqliteBrokerTimingStore;
 
+  private readonly ids: IdGenerator;
+  private readonly clock: Pick<Timer, "now">;
+
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     private readonly scopeKey: string,
     private readonly isOwnerLive: BindingExecOwnerLiveness,
-    private readonly ids: IdGenerator = defaultIdGenerator,
-    private readonly clock: Pick<Timer, "now"> = defaultTimer,
+    {
+      ids = defaultIdGenerator,
+      clock = defaultTimer,
+    }: { ids?: IdGenerator; clock?: Pick<Timer, "now"> } = {},
   ) {
+    this.ids = ids;
+    this.clock = clock;
     this.timingStore = new SqliteBrokerTimingStore(db, clock);
   }
 
@@ -160,7 +156,7 @@ export class SqliteSessionBrokerStore {
     fingerprint: string,
     identity: BrokerExportIdentity,
   ): Promise<void> {
-    return linkRequestExport(this.db, this.clock.now(), requestId, fingerprint, identity);
+    return linkRequestExport(this.db, this.clock.now(), requestId, { fingerprint, identity });
   }
 
   async getSession(sessionId: string): Promise<BrokerRequestRecord | undefined> {
@@ -234,7 +230,7 @@ export class SqliteSessionBrokerStore {
     limit: number,
     exportRetentionMs?: number,
   ): Promise<number> {
-    return pruneTerminalRequests(this.db, this.clock, retentionMs, limit, exportRetentionMs);
+    return pruneTerminalRequests(this.db, this.clock, retentionMs, { limit, exportRetentionMs });
   }
 
   /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
@@ -540,8 +536,10 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
     error: string,
-    errorCode = "session_preparation_failed",
-    retryable = false,
+    {
+      errorCode = "session_preparation_failed",
+      retryable = false,
+    }: { errorCode?: string; retryable?: boolean } = {},
   ): Promise<DestructionTicket | undefined> {
     return this.failWhere(requestId, owner, { error, errorCode, retryable });
   }

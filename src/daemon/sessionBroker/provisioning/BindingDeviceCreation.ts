@@ -87,8 +87,7 @@ export interface BindingDeviceCreationHost {
     context: ReconcileContext,
     disposition: BindingDisposition,
     assignment: BindingAssignmentRecord,
-    provisioned: BindingProvisionedDevice,
-    reservation: string | undefined,
+    options: { provisioned: BindingProvisionedDevice; reservation?: string },
   ): Promise<ReadyResult>;
 }
 
@@ -122,8 +121,10 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
     disposition: "created" | "replaced",
-    replacing?: BindingJournalEntry,
-    options: { bootReservation?: BootSlotReservation } = {},
+    {
+      replacing,
+      ...options
+    }: { bootReservation?: BootSlotReservation } & { replacing?: BindingJournalEntry } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
     let capacityVerifiedAtMs: number | undefined;
@@ -195,27 +196,27 @@ export class BindingDeviceCreation {
           ? await options.bootReservation.run(provision)
           : await provision();
       } catch (error) {
-        return await this.failedCreate(context, assignment, entry, replacing === undefined, error);
+        return await this.failedCreate(context, assignment, entry, {
+          fresh: replacing === undefined,
+          error,
+        });
       }
       return await this.host.readyOrReleaseOnBusy(provisioned, async (release) => {
         if (provisioned.created && !this.host.isAutomationReady(provisioned)) {
           this.deps.journal.markRemovalIntended(entry);
         }
-        entry = await this.recordCreated(
-          context,
-          entry,
-          provisioned.device,
+        entry = await this.recordCreated(context, entry, provisioned.device, {
           release,
-          provisioned.created && !this.host.isAutomationReady(provisioned),
-        );
+          removalRequested: provisioned.created && !this.host.isAutomationReady(provisioned),
+        });
         if (!this.host.isAutomationReady(provisioned)) {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
+          return await this.discardUncommitted(context, provisioned, entry, {
             release,
-            failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
-          );
+            reason: failure(
+              "readiness_incomplete",
+              `Device '${name}' did not reach automation readiness.`,
+            ),
+          });
         }
         const committed = await this.deps.journal.advance(entry, {
           expectedPhase: "created",
@@ -241,22 +242,15 @@ export class BindingDeviceCreation {
           );
         }
         if (committed.kind !== "advanced") {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
+          return await this.discardUncommitted(context, provisioned, entry, {
             release,
-            claimFailure(committed, "create commit"),
-          );
+            reason: claimFailure(committed, "create commit"),
+          });
         }
         this.noteJournal(context, committed.entry);
-        return await this.host.claimAndReady(
-          context,
-          disposition,
-          committed.assignment!,
+        return await this.host.claimAndReady(context, disposition, committed.assignment!, {
           provisioned,
-          undefined,
-        );
+        });
       });
     } finally {
       this.deps.journal.inFlight.delete(entry.id);
@@ -314,8 +308,7 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
     entry: BindingJournalEntry,
-    fresh: boolean,
-    error: unknown,
+    { fresh, error }: { fresh: boolean; error: unknown },
   ): Promise<never> {
     const { request } = context;
     if (
@@ -356,8 +349,10 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     entry: BindingJournalEntry,
     device: Pick<BindingProvisionedDevice["device"], "stableId" | "name">,
-    release?: () => Promise<void>,
-    removalRequested = false,
+    {
+      release,
+      removalRequested = false,
+    }: { release?: () => Promise<void>; removalRequested?: boolean } = {},
   ): Promise<BindingJournalEntry> {
     const recorded = await this.deps.journal
       .advance(entry, {
@@ -501,8 +496,7 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     provisioned: BindingProvisionedDevice,
     entry: BindingJournalEntry,
-    release: () => Promise<void>,
-    reason: BindingReconcileFailure,
+    { release, reason }: { release: () => Promise<void>; reason: BindingReconcileFailure },
   ): Promise<never> {
     try {
       if (provisioned.created) {
@@ -752,7 +746,8 @@ export class BindingDeviceCreation {
     } finally {
       this.deps.journal.inFlight.delete(entry.id);
     }
-    return await this.createAndCommit(context, emptied, "replaced", deletedEntry, {
+    return await this.createAndCommit(context, emptied, "replaced", {
+      replacing: deletedEntry,
       bootReservation: reservation,
     });
   }

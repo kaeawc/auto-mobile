@@ -249,8 +249,7 @@ export class BrokerExecutionRelease {
         this.closing.signal.throwIfAborted();
         return registry.recoverSettledBindings();
       },
-      undefined,
-      { fastRecovery: true },
+      { schedule: { fastRecovery: true } },
     );
     if (!result.done || this.closed) {
       return [];
@@ -298,7 +297,7 @@ export class BrokerExecutionRelease {
     // the session is gone: a mark that throws must not leave the binding claimable (#11616).
     const releaseHold = this.holdOwner(sessionId, device);
     try {
-      return await this.drainHeldBindings(registry, sessionId, held, live, device);
+      return await this.drainHeldBindings(registry, sessionId, held, { live, device });
     } finally {
       releaseHold();
     }
@@ -308,15 +307,14 @@ export class BrokerExecutionRelease {
     registry: ManagedExecutionBindingRegistry,
     sessionId: string,
     held: readonly BindingAssignmentRecord[],
-    live: boolean,
-    device: string | null,
+    { live, device }: { live: boolean; device: string | null },
   ): Promise<BrokerExecutionReleaseResult> {
     const { cancellationRequested, drained } = await this.cancelAndDrain(sessionId);
     const bindingFailures: ManagedExecutionBindingFailure[] = [];
     const marks = newSettlingMarks();
     if (!drained) {
       // Protect the bindings before anything else lets go: unsettled work may still drive the device.
-      await this.markSettling(registry, sessionId, held, bindingFailures, marks);
+      await this.markSettling(registry, sessionId, held, { failures: bindingFailures, marks });
     }
 
     const release = live
@@ -327,21 +325,23 @@ export class BrokerExecutionRelease {
     // A binding marked before the release stays reported pending; its watcher confirms settlement.
     const settled = drained && release.releaseSettled && this.isSettled(sessionId, releasedDevice);
     if (!settled && drained) {
-      await this.markSettling(registry, sessionId, held, bindingFailures, marks);
+      await this.markSettling(registry, sessionId, held, { failures: bindingFailures, marks });
     }
-    const bindings = await this.releaseOwnership(
-      registry,
-      sessionId,
-      held,
-      bindingFailures,
-      marks.owed,
-    );
+    const bindings = await this.releaseOwnership(registry, sessionId, held, {
+      failures: bindingFailures,
+      owed: marks.owed,
+    });
     if (marks.marked.length > 0) {
       this.track(this.settleLater(registry, sessionId, releasedDevice, marks.marked));
     }
     if (marks.owed.length > 0) {
       const releaseOwedHold = this.holdOwner(sessionId, releasedDevice);
-      this.track(this.settleOwedMarks(registry, sessionId, releasedDevice, marks, releaseOwedHold));
+      this.track(
+        this.settleOwedMarks(registry, sessionId, releasedDevice, {
+          first: marks,
+          releaseHold: releaseOwedHold,
+        }),
+      );
     }
     return {
       ...this.keepAwakeRestoreResult(sessionId),
@@ -489,9 +489,12 @@ export class BrokerExecutionRelease {
       const bindingFailures: ManagedExecutionBindingFailure[] = [];
       const marks = newSettlingMarks();
       if (!this.isSettled(sessionId, deviceId)) {
-        await this.markSettling(registry, sessionId, held, bindingFailures, marks);
+        await this.markSettling(registry, sessionId, held, { failures: bindingFailures, marks });
       }
-      await this.releaseOwnership(registry, sessionId, held, bindingFailures, marks.owed);
+      await this.releaseOwnership(registry, sessionId, held, {
+        failures: bindingFailures,
+        owed: marks.owed,
+      });
       for (const failure of bindingFailures) {
         this.warn(
           `[BrokerExecutionRelease] Binding ${failure.scopeKey}/${failure.bindingIndex} bookkeeping ` +
@@ -506,7 +509,12 @@ export class BrokerExecutionRelease {
         marks.marked.length > 0
           ? this.settleLater(registry, sessionId, deviceId, marks.marked)
           : undefined,
-        owedHold ? this.settleOwedMarks(registry, sessionId, deviceId, marks, owedHold) : undefined,
+        owedHold
+          ? this.settleOwedMarks(registry, sessionId, deviceId, {
+              first: marks,
+              releaseHold: owedHold,
+            })
+          : undefined,
       ]);
     } finally {
       releaseHold();
@@ -523,8 +531,7 @@ export class BrokerExecutionRelease {
     registry: ManagedExecutionBindingRegistry,
     sessionId: string,
     held: readonly BindingAssignmentRecord[],
-    failures: ManagedExecutionBindingFailure[],
-    marks: SettlingMarks,
+    { failures, marks }: { failures: ManagedExecutionBindingFailure[]; marks: SettlingMarks },
   ): Promise<void> {
     await this.stampOwners(registry, sessionId, held, marks);
     const results = await Promise.allSettled(
@@ -648,8 +655,7 @@ export class BrokerExecutionRelease {
     registry: ManagedExecutionBindingRegistry,
     sessionId: string,
     deviceId: string | null,
-    first: SettlingMarks,
-    releaseHold: () => void,
+    { first, releaseHold }: { first: SettlingMarks; releaseHold: () => void },
   ): Promise<void> {
     const owed: readonly BindingAssignmentRecord[] = [...first.owed];
     const marks: SettlingMarks = { ...first, marked: [], owed: [...owed] };
@@ -665,7 +671,7 @@ export class BrokerExecutionRelease {
           const failures: ManagedExecutionBindingFailure[] = [];
           const retried = marks.owed;
           marks.owed = [];
-          await this.markSettling(registry, sessionId, retried, failures, marks);
+          await this.markSettling(registry, sessionId, retried, { failures, marks });
           if (marks.owed.length > 0) {
             throw new Error(failures.map((failure) => failure.error).join("; "));
           }
@@ -676,7 +682,7 @@ export class BrokerExecutionRelease {
             );
           }
         },
-        settled,
+        { stopWhen: settled },
       );
       if (this.closed) {
         // The records stay, and so does the hold while the work runs (see holdOwner); they die
@@ -685,7 +691,7 @@ export class BrokerExecutionRelease {
       }
       // Every owed binding is now fenced `settling`, or its work has settled: let go of the owner.
       const failures: ManagedExecutionBindingFailure[] = [];
-      await this.releaseOwnership(registry, sessionId, owed, failures, []);
+      await this.releaseOwnership(registry, sessionId, owed, { failures, owed: [] });
       for (const failure of failures) {
         this.warn(
           `[BrokerExecutionRelease] Clearing the owner of binding ${failure.scopeKey}/` +
@@ -713,8 +719,10 @@ export class BrokerExecutionRelease {
     registry: ManagedExecutionBindingRegistry,
     sessionId: string,
     held: readonly BindingAssignmentRecord[],
-    failures: ManagedExecutionBindingFailure[],
-    owed: readonly BindingAssignmentRecord[],
+    {
+      failures,
+      owed,
+    }: { failures: ManagedExecutionBindingFailure[]; owed: readonly BindingAssignmentRecord[] },
   ): Promise<ManagedExecutionBindingEvidence[]> {
     const results = await Promise.allSettled(
       held.map(async (assignment) =>

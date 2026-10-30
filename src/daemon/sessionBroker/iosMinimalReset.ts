@@ -70,8 +70,11 @@ export class IosMinimalReset {
     device: BootedDevice,
     profile: IosResetProfile,
     assertOwned: () => Promise<void>,
-    scope: DeviceMutationScope,
-    { reuseCount, signal }: { reuseCount: number; signal?: AbortSignal },
+    {
+      scope,
+      reuseCount,
+      signal,
+    }: { reuseCount: number; signal?: AbortSignal } & { scope: DeviceMutationScope },
   ): Promise<ResetOutcome> {
     assertIosResetInput(device, profile);
     assertDeviceMutationScope(scope, scope.sessionUuid);

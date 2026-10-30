@@ -286,7 +286,7 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     };
     try {
       await fence();
-      const reason = await this.escalationReason(session, port, mutationContext, context, phases);
+      const reason = await this.whyEscalate(session, port, mutationContext, { context, phases });
       await fence();
       if (reason) {
         fallbackReason = reason;
@@ -398,12 +398,12 @@ export class AndroidKeepBootedReset implements AndroidResetStrategy {
     }
   }
 
-  private async escalationReason(
+  /** Returns why this reset must escalate to the fallback, or undefined when cleaning may proceed. */
+  private async whyEscalate(
     session: AndroidKeepBootedSession,
     port: AndroidKeepBootedResetPort,
     mutationContext: DeviceMutationResetContext,
-    context: AndroidResetSessionContext,
-    phases: Record<string, number>,
+    { context, phases }: { context: AndroidResetSessionContext; phases: Record<string, number> },
   ): Promise<string | undefined> {
     if (session.uses >= this.maxUses) {
       return "maxUses retirement";

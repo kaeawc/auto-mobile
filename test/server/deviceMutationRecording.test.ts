@@ -902,11 +902,13 @@ describe("review regression coverage", () => {
       }),
       "test-scope",
       { acquire: async () => {}, release: async () => {} },
-      new FakeTimer(),
       {
-        recordingGaps: gaps,
-        recorderFor: async () => {
-          throw new Error("base recovery failed");
+        timer: new FakeTimer(),
+        mutations: {
+          recordingGaps: gaps,
+          recorderFor: async () => {
+            throw new Error("base recovery failed");
+          },
         },
       },
     );

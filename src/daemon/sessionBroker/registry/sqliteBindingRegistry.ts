@@ -247,7 +247,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */
   sessionBrokerStore(scopeKey: string, ids?: IdGenerator): SqliteSessionBrokerStore {
-    return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, ids, this.timer);
+    return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, {
+      ids,
+      clock: this.timer,
+    });
   }
 
   deviceMutationJournal(): SqliteDeviceMutationJournal {
@@ -397,15 +400,16 @@ export class SqliteBindingRegistry implements BindingRegistry {
     next: BindingBindingCommit,
   ): Promise<CommitBindingResult> {
     assertValidBindingKey(key);
-    return this.db.transaction().execute((trx) => this.commitBindingIn(trx, key, expected, next));
+    return this.db
+      .transaction()
+      .execute((trx) => this.commitBindingIn(trx, key, expected, { next }));
   }
 
   private async commitBindingIn(
     trx: Executor,
     key: BindingKey,
     expected: BindingBindingExpectation,
-    next: BindingBindingCommit,
-    journaled = false,
+    { next, journaled = false }: { next: BindingBindingCommit; journaled?: boolean },
   ): Promise<CommitBindingResult> {
     const resolvedSpecJson =
       next.resolvedSpec === null || next.resolvedSpec === undefined
@@ -413,7 +417,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
         : serializeSpec(next.resolvedSpec);
     const requestedSpecJson =
       next.requestedSpec === undefined ? undefined : serializeSpec(next.requestedSpec);
-    const checked = await this.checkBinding(trx, key, expected, journaled);
+    const checked = await this.checkBinding(trx, key, expected, { journaled });
     if ("kind" in checked) {
       return checked;
     }
@@ -482,10 +486,17 @@ export class SqliteBindingRegistry implements BindingRegistry {
     trx: Executor,
     key: BindingKey,
     expected: BindingBindingExpectation,
-    { state, settler }: { state: BindingAssignmentState; settler: BindingProcessIdentity | null },
-    journaled = false,
+    {
+      state,
+      settler,
+      journaled = false,
+    }: {
+      state: BindingAssignmentState;
+      settler: BindingProcessIdentity | null;
+      journaled?: boolean;
+    },
   ): Promise<UpdateBindingStateResult> {
-    const checked = await this.checkBinding(trx, key, expected, journaled);
+    const checked = await this.checkBinding(trx, key, expected, { journaled });
     if ("kind" in checked) {
       return checked;
     }
@@ -514,7 +525,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
   ): Promise<ClaimExecutionResult> {
     assertValidBindingKey(key);
     return this.db.transaction().execute(async (trx): Promise<ClaimExecutionResult> => {
-      const checked = await this.checkBinding(trx, key, expected, false, owner.sessionUuid);
+      const checked = await this.checkBinding(trx, key, expected, {
+        journaled: false,
+        claimingSessionUuid: owner.sessionUuid,
+      });
       if ("kind" in checked) {
         return checked;
       }
@@ -928,17 +942,15 @@ export class SqliteBindingRegistry implements BindingRegistry {
   ): Promise<BindingAssignmentRecord | BindingJournalChangeFailure> {
     const result =
       change.kind === "commit"
-        ? await this.commitBindingIn(trx, key, change.expected, change.next, true)
-        : await this.updateBindingStateIn(
-            trx,
-            key,
-            change.expected,
-            {
-              state: change.state,
-              settler: assertSettlerForState(change.state, change.options),
-            },
-            true,
-          );
+        ? await this.commitBindingIn(trx, key, change.expected, {
+            next: change.next,
+            journaled: true,
+          })
+        : await this.updateBindingStateIn(trx, key, change.expected, {
+            state: change.state,
+            settler: assertSettlerForState(change.state, change.options),
+            journaled: true,
+          });
     return result.kind === "committed" || result.kind === "updated" ? result.assignment : result;
   }
 
@@ -976,8 +988,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
     trx: Executor,
     key: BindingKey,
     expected: BindingBindingExpectation,
-    journaled = false,
-    claimingSessionUuid?: string,
+    {
+      journaled = false,
+      claimingSessionUuid,
+    }: { journaled?: boolean; claimingSessionUuid?: string } = {},
   ): Promise<BindingAssignmentRecord | BindingCasFailure> {
     const scope = await this.readScope(trx, key.scopeKey);
     const current = await this.readAssignment(trx, key);

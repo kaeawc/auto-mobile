@@ -26,7 +26,7 @@ class RecordingGesture implements Pick<ExecuteGesture, "swipe"> {
   readonly fences: boolean[] = [];
   failWith?: string;
 
-  async swipe(...[x1, y1, x2, y2, options]: SwipeArgs): Promise<SwipeResult> {
+  async swipe(...[{ x1, y1, x2, y2 }, options]: SwipeArgs): Promise<SwipeResult> {
     // The real dispatch asserts the fence before any input is sent.
     options?.displayFence?.assertCurrent();
     this.swipes.push({ x1, y1, x2, y2, duration: options?.duration });

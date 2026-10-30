@@ -17,14 +17,14 @@ class GuestAudioCaptureControllerTest {
     var stopped = 0
     var reads = 0
     var recording = false
-    var startError: String? = null
+    var startError: Exception? = null
     var onRead: () -> Int = { 16 }
     var onStop: () -> Unit = {}
     var onRelease: () -> Unit = {}
 
     override fun start() {
       started++
-      startError?.let { error(it) }
+      startError?.let { throw it }
       recording = true
     }
 
@@ -50,7 +50,7 @@ class GuestAudioCaptureControllerTest {
   private class FakePort : GuestAudioCapturePort {
     var permission = true
     var creates = 0
-    var createError: String? = null
+    var createError: Exception? = null
     val record = FakeRecord()
     var now = 0L
     val workers = mutableListOf<() -> Unit>()
@@ -65,7 +65,7 @@ class GuestAudioCaptureControllerTest {
 
     override fun createRecord(): GuestAudioCaptureRecord {
       creates++
-      createError?.let { error(it) }
+      createError?.let { throw it }
       return record
     }
 
@@ -199,7 +199,7 @@ class GuestAudioCaptureControllerTest {
 
   @Test
   fun `creation failure reports reason without a reader`() {
-    val port = FakePort().apply { createError = "cannot create record" }
+    val port = FakePort().apply { createError = IllegalStateException("cannot create record") }
     assertEquals(
       "failed cannot create record",
       GuestAudioCaptureController(port).handle("start", "one"),
@@ -209,13 +209,59 @@ class GuestAudioCaptureControllerTest {
 
   @Test
   fun `start failure releases the created record`() {
-    val port = FakePort().apply { record.startError = "cannot start record" }
+    val port = FakePort().apply { record.startError = IllegalStateException("cannot start record") }
     assertEquals(
       "failed cannot start record",
       GuestAudioCaptureController(port).handle("start", "one"),
     )
     assertEquals(1, port.record.released)
     assertTrue(port.workers.isEmpty())
+  }
+
+  @Test
+  fun `unsupported start releases the created record once and leaves no lease`() {
+    val port =
+      FakePort().apply { record.startError = UnsupportedOperationException("cannot start record") }
+    val controller = GuestAudioCaptureController(port)
+    assertEquals("failed cannot start record", controller.handle("start", "one"))
+    assertEquals(1, port.creates)
+    assertEquals(1, port.record.released)
+    assertEquals("absent", controller.handle("stop", "one"))
+    assertEquals(1, port.record.released)
+    assertTrue(port.workers.isEmpty())
+  }
+
+  @Test
+  fun `unsupported creation reports failure without a record or lease`() {
+    val port =
+      FakePort().apply { createError = UnsupportedOperationException("cannot create record") }
+    val controller = GuestAudioCaptureController(port)
+    assertEquals("failed cannot create record", controller.handle("start", "one"))
+    assertEquals(1, port.creates)
+    assertEquals(0, port.record.started)
+    assertEquals(0, port.record.released)
+    assertEquals("absent", controller.handle("status", "one"))
+    assertTrue(port.workers.isEmpty())
+  }
+
+  @Test
+  fun `unsupported read releases the lease once and next status reports failure`() {
+    val port = FakePort()
+    val controller = GuestAudioCaptureController(port)
+    assertEquals("running", controller.handle("start", "one"))
+    port.record.onRead = { throw UnsupportedOperationException("cannot read record") }
+    port.workers.single()()
+    assertEquals(1, port.record.reads)
+    assertEquals(1, port.record.stopped)
+    assertEquals(1, port.record.released)
+    assertEquals("failed cannot read record", controller.handle("status", "one"))
+    assertEquals("absent", controller.handle("status", "one"))
+    assertEquals("absent", controller.handle("stop", "one"))
+    port.workers.single()()
+    assertEquals(1, port.record.reads)
+    assertEquals(1, port.record.released)
+    assertTrue(port.awaitBounds.isEmpty())
+    assertTrue(port.deadlines.isEmpty())
   }
 
   @Test
@@ -395,7 +441,8 @@ class GuestAudioCaptureControllerTest {
 
   @Test
   fun `reasons replace quotes and line breaks`() {
-    val port = FakePort().apply { record.startError = "bad \"record\"\r\nstate" }
+    val port =
+      FakePort().apply { record.startError = IllegalStateException("bad \"record\"\r\nstate") }
     assertEquals(
       "failed bad  record   state",
       GuestAudioCaptureController(port).handle("start", "one"),

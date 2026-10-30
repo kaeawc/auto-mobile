@@ -1,7 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import java.util.concurrent.RejectedExecutionException
-
 internal const val GUEST_AUDIO_CAPTURE_DEFAULT_LEASE_MS = 30 * 60 * 1000L
 internal const val GUEST_AUDIO_CAPTURE_MAX_LEASE_MS = 3_720_000L
 private const val READER_EXIT_TIMEOUT_MS = 1000L
@@ -222,16 +220,12 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
     "failed " + reason.replace('"', ' ').replace('\r', ' ').replace('\n', ' ')
 }
 
+// Port exceptions must reach lease cleanup and failure reporting.
+@Suppress("TooGenericExceptionCaught")
 private fun captureFailure(operation: () -> Unit): String? =
   try {
     operation()
     null
-  } catch (error: IllegalStateException) {
-    error.message ?: error.javaClass.simpleName
-  } catch (error: IllegalArgumentException) {
-    error.message ?: error.javaClass.simpleName
-  } catch (error: SecurityException) {
-    error.message ?: error.javaClass.simpleName
-  } catch (error: RejectedExecutionException) {
+  } catch (error: Exception) {
     error.message ?: error.javaClass.simpleName
   }

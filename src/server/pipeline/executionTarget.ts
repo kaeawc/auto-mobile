@@ -963,7 +963,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return undefined;
     }
 
-    const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
+    // "either" names no platform; a named one (watchOS included, #14908) narrows the selection.
+    const platformFilter = platform === "either" ? undefined : platform;
     const sessionId = devicePool.resolveAutolockSessionForMcpSession(
       mcpSessionId,
       platformFilter,

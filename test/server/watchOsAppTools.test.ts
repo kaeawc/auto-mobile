@@ -19,6 +19,7 @@ import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { watchOsUnsupportedToolMessage } from "../../src/server/watchOsToolSupport";
 import type { Platform } from "../../src/models";
+import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -50,6 +51,18 @@ const pixel: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform
 const APP = "/build/Debug-watchsimulator/Workout.app";
 const BUNDLE = "com.example.workout.watchkitapp";
 const CONNECTION = "client-a";
+
+/** Another daemon's claim on the watch, as this daemon's watch claim store reports it. */
+class ForeignHeldWatch implements ForeignDeviceOwnership {
+  async refresh(): Promise<void> {}
+  foreignOwnerPid(deviceId: string): number | undefined {
+    return deviceId === watch.deviceId ? 4242 : undefined;
+  }
+  async claim(): Promise<boolean> {
+    return false;
+  }
+  release(): void {}
+}
 const WATCH_SESSION = "watch-session";
 
 describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
@@ -68,8 +81,21 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     cleanup();
   });
 
-  async function arrange(connected: BootedDevice[] = [iphone], { untypedListing = false } = {}) {
-    const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
+  async function arrange(
+    connected: BootedDevice[] = [iphone],
+    {
+      untypedListing = false,
+      autolock = "0",
+      pooledWatch = true,
+      watchOwnership,
+    }: {
+      untypedListing?: boolean;
+      autolock?: "0" | "1";
+      pooledWatch?: boolean;
+      watchOwnership?: ForeignDeviceOwnership;
+    } = {},
+  ) {
+    const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: autolock };
     const timer = new FakeTimer();
     const deviceUtils = new FakeDeviceUtils();
     deviceUtils.setBootedDevices("watchos", [watch]);
@@ -85,9 +111,10 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
         env,
         timer,
         deviceManager: deviceUtils,
+        ...(watchOwnership ? { watchForeignDeviceOwnership: watchOwnership } : {}),
       }),
     );
-    await pool.initializeWithDevices([watch, ...connected]);
+    await pool.initializeWithDevices(pooledWatch ? [watch, ...connected] : connected);
     DaemonState.getInstance().initialize(sessions, pool);
     const adb = new FakeAdbExecutor();
     adb.setDevices(connected.filter((device) => device.platform === "android"));
@@ -273,6 +300,47 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     expect(await listedBundles(target)).toMatchObject({ platform: "watchos", type: "user" });
     const error = await failure(call("listApps", { ...target, type: "launchable" }));
     expect(String(error)).toContain("launchability is unknown");
+  });
+
+  test("a launchable watch listing names the apps whose launchability is unknown", async () => {
+    const { watchSimctl } = await arrange();
+    watchSimctl.seed(watch.deviceId, { CFBundleIdentifier: "com.example.legacy" });
+
+    const result = toolJson(
+      await call("listApps", { platform: "watchos", deviceId: watch.deviceId }),
+    );
+
+    expect(result).toMatchObject({
+      query: { type: "launchable" },
+      launchabilityUnknownApps: ["com.example.legacy"],
+    });
+    expect(listAppsResultSchema.safeParse(result).success).toBe(true);
+  });
+
+  test("with autolock, a sessionless watchOS call never lands on the connection's iPhone session", async () => {
+    const { pool, watchSimctl } = await arrange([iphone], { autolock: "1" });
+    watchSimctl.seed(watch.deviceId, { CFBundleIdentifier: BUNDLE, ApplicationType: "User" });
+    await pool.autolockDevice(iphone.deviceId, "ios", CONNECTION);
+
+    const removed = toolJson(await call("uninstallApp", { platform: "watchos", appId: BUNDLE }));
+
+    expect(removed).toMatchObject({ success: true, packageName: BUNDLE, wasInstalled: true });
+    expect(watchSimctl.commands).toEqual([`uninstall ${watch.deviceId} ${BUNDLE}`]);
+  });
+
+  test("an app mutation on an unpooled watch another daemon holds is refused", async () => {
+    const { watchSimctl } = await arrange([iphone], {
+      pooledWatch: false,
+      watchOwnership: new ForeignHeldWatch(),
+    });
+    watchSimctl.seed(watch.deviceId, { CFBundleIdentifier: BUNDLE, ApplicationType: "User" });
+
+    const error = await failure(
+      call("uninstallApp", { platform: "watchos", deviceId: watch.deviceId, appId: BUNDLE }),
+    );
+
+    expect(error).toMatchObject({ code: "device_owned_by_other_daemon" });
+    expect(watchSimctl.commands).toEqual([]);
   });
 
   test("sessionless listApps naming the watch id without platform never reaches the watch", async () => {

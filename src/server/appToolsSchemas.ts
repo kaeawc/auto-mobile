@@ -190,7 +190,9 @@ const watchAwarePlatformSchema = () =>
   z
     .enum(["android", "ios", "watchos"])
     .optional()
-    .describe('Device platform; "watchos" must be named to target an Apple Watch simulator');
+    .describe(
+      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session',
+    );
 
 const installAppInput = z.object({
   platform: watchAwarePlatformSchema(),

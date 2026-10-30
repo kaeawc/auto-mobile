@@ -316,7 +316,8 @@ watch, even after one was selected.
   Android-only options are refused by name. `uninstallApp` refuses
   `keepData: true`, because uninstalling always removes the app's data.
 - Every other device tool refuses a watch with `<tool> does not support watchOS
-  yet`.
+  yet`. `startDevice` and `killDevice` start and stop a watch named with
+  `platform: "watchos"`.
 
 ## A device that drops off
 

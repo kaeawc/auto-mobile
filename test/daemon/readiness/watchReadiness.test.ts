@@ -58,4 +58,16 @@ describe("resolveBootedWatchForCall", () => {
     });
     expect(seen).toEqual(["WATCH-A"]);
   });
+
+  test("a read fails when its late-ownership hook refuses the watch", async () => {
+    const error = await failure(
+      resolveBootedWatchForCall(utilsWith([watchA]), "WATCH-A", undefined, {
+        intent: "read",
+        beforeReadReadiness: async () => {
+          throw new Error("ownership lost");
+        },
+      }),
+    );
+    expect(error).toContain("ownership lost");
+  });
 });

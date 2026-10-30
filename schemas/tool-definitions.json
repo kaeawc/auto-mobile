@@ -14814,7 +14814,7 @@
       "type": "object",
       "properties": {
         "platform": {
-          "description": "Device platform; \"watchos\" must be named to target an Apple Watch simulator",
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
           "type": "string",
           "enum": ["android", "ios", "watchos"]
         },
@@ -17589,7 +17589,7 @@
       "type": "object",
       "properties": {
         "platform": {
-          "description": "Device platform; \"watchos\" must be named to target an Apple Watch simulator",
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
           "type": "string",
           "enum": ["android", "ios", "watchos"]
         },
@@ -65228,7 +65228,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
-          "description": "Device platform; \"watchos\" must be named to target an Apple Watch simulator",
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
           "type": "string",
           "enum": ["android", "ios", "watchos"]
         },

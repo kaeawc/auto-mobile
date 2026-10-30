@@ -7,7 +7,11 @@ import type { BootedDevice, InstallAppResult } from "../models";
 import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { queryInstalledApps, type AppsQueryResourceContent } from "./appResources";
 import { normalizeIosApps } from "./appResourcesNormalization";
-import { filterAppsByQuery, isLaunchabilityUnknown } from "./appResourcesQuery";
+import {
+  filterAppsByQuery,
+  isLaunchabilityUnknown,
+  launchabilityUnknownApps,
+} from "./appResourcesQuery";
 import type { AppsQueryOptions, AppsQueryType } from "./appResourcesTypes";
 
 /** Builds the app manager for a watch; tests pass a factory over a fake simctl. */
@@ -75,6 +79,8 @@ async function queryWatchApps(
   const type: AppsQueryType = options.type ?? (launchabilityUnknown ? "user" : "launchable");
   const query: AppsQueryOptions = { ...options, type };
   const apps = filterAppsByQuery(queryApps, query);
+  // As on iOS: a launchable listing names the apps it left out because no record says.
+  const unknownApps = type === "launchable" ? launchabilityUnknownApps(queryApps, query) : [];
   const lastUpdated = new Date().toISOString();
   return {
     query,
@@ -83,6 +89,7 @@ async function queryWatchApps(
     installedCount: queryApps.length,
     deviceCount: 1,
     lastUpdated,
+    ...(unknownApps.length > 0 ? { launchabilityUnknownApps: unknownApps } : {}),
     devices: [
       {
         deviceId: options.deviceId,

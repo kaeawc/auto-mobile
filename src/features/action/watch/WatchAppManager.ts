@@ -81,9 +81,13 @@ export class WatchAppManager {
           "Omit keepData or pass keepData: false.",
       );
     }
-    if (call.guard || call.userId !== undefined) {
+    const unsupported = [
+      ...(call.guard ? ["expectedSigningSha256"] : []),
+      ...(call.userId === undefined ? [] : ["userId"]),
+    ];
+    if (unsupported.length > 0) {
       throw new ActionableError(
-        `uninstallApp on watchOS does not support: ${call.guard ? "expectedSigningSha256" : "userId"} (Android only).`,
+        `uninstallApp on watchOS does not support: ${unsupported.join(", ")} (Android only).`,
       );
     }
     const wasInstalled = await this.isInstalled(appId, call.signal);

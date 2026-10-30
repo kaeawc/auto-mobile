@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import { WatchAppManager } from "../../../src/features/action/watch/WatchAppManager";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { FakeWatchAppsSimctl, FakeWatchBundleIds } from "../../fakes/FakeWatchApps";
@@ -148,13 +150,41 @@ describe("WatchAppManager", () => {
     expect(simctl.commands).toEqual([`install ${watch.deviceId} ${APP}`]);
   });
 
-  test("refuses the Android-only uninstall signing guard by name", async () => {
+  test("refuses every Android-only uninstall option it was given, by name", async () => {
     const { apps } = arrange();
 
-    const error = await rejection(
+    const guard = await rejection(
       apps.uninstall(BUNDLE, { guard: { expectedSigningSha256: ["ab"] } }),
     );
+    const both = await rejection(
+      apps.uninstall(BUNDLE, { guard: { expectedSigningSha256: ["ab"] }, userId: 10 }),
+    );
 
-    expect(String(error)).toContain("does not support: expectedSigningSha256");
+    expect(String(guard)).toContain("does not support: expectedSigningSha256 (Android only)");
+    expect(String(both)).toContain("does not support: expectedSigningSha256, userId");
+  });
+
+  test("the default resolver anchors a relative bundle path at the daemon launch directory", async () => {
+    const relative = APP.slice(1);
+    const launched = path.resolve("/launch-dir", relative);
+    const previous = process.env[DAEMON_LAUNCH_CWD_ENV];
+    process.env[DAEMON_LAUNCH_CWD_ENV] = "/launch-dir";
+    try {
+      const plist = new FakeWatchBundleIds();
+      plist.byPath.set(launched, BUNDLE);
+      const simctl = new FakeWatchAppsSimctl(plist);
+
+      expect(await new WatchAppManager(watch, simctl, plist).install(relative)).toMatchObject({
+        artifactPath: launched,
+        packageName: BUNDLE,
+      });
+      expect(simctl.commands).toEqual([`install ${watch.deviceId} ${launched}`]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
+      } else {
+        process.env[DAEMON_LAUNCH_CWD_ENV] = previous;
+      }
+    }
   });
 });

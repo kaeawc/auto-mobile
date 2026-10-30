@@ -25,7 +25,7 @@ import {
 } from "../../observe/output/ObserveResultOutput";
 import { isStabilityDiffEmpty } from "../../observe/SettleObserve";
 import { SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS } from "../notificationHints";
-import type { SystemTrayNotificationArgs } from "../systemTrayTypes";
+import type { SystemTrayCall, SystemTrayNotificationArgs } from "../systemTrayTypes";
 import { getDetector, getSystemTrayDependencies, type SystemTrayObserver } from "./dependencies";
 import {
   collectNotificationCandidates,
@@ -256,15 +256,17 @@ const waitForSystemTrayClosed = async (
   return observation;
 };
 
+export interface EnsureSystemTrayOpenOptions extends Pick<SystemTrayCall, "signal"> {
+  /** Recovery can reuse the closed observation it just read instead of reading twice. */
+  initialObservation?: ObserveResult;
+  /** The caller just collapsed the shade, so probing for it is a wasted read; expand directly. */
+  shadeKnownClosed?: boolean;
+}
+
 export const ensureSystemTrayOpen = async (
   device: BootedDevice,
   awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-  // Recovery can reuse the closed observation it just read instead of reading twice.
-  initialObservation?: ObserveResult,
-  // The caller just collapsed the shade, so probing for it is a wasted read; expand directly.
-  shadeKnownClosed = false,
+  { signal, initialObservation, shadeKnownClosed = false }: EnsureSystemTrayOpenOptions = {},
 ): Promise<{
   observation?: ObserveResult;
   opened: boolean;
@@ -415,8 +417,7 @@ export const waitForNotificationMatch = async (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   awaitTimeoutMs: number,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
+  { progress, signal }: SystemTrayCall = {},
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
   const resolvedAwaitTimeoutMs = resolveSystemTrayAwaitTimeout(awaitTimeoutMs);
@@ -424,7 +425,7 @@ export const waitForNotificationMatch = async (
   const observeScreen = observeScreenFactory(device);
   const deadlineMs = timer.now() + resolvedAwaitTimeoutMs;
   const remainingMs = Math.max(0, deadlineMs - timer.now());
-  const result = await ensureSystemTrayOpen(device, remainingMs, progress, signal);
+  const result = await ensureSystemTrayOpen(device, remainingMs, { signal });
   let observation = result.observation;
   const minTimestamp = result.minTimestamp;
   if (!observation) {

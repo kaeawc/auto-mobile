@@ -72,6 +72,12 @@ export const DEFAULT_MAX_INTERACTIONS = 200;
  * automatically discovering navigation paths, prioritizing likely navigation elements,
  * avoiding redundant interactions, and efficiently covering unexplored screens.
  */
+/** The session an exploration records under and the dialog-tap seam its blocker handlers use. */
+export interface ExploreSessionOptions {
+  sessionUuid?: string;
+  tapActionFactory?: DialogTapActionFactory;
+}
+
 export class Explore extends BaseVisualChange {
   private navigationManager: NavigationGraphService;
   private exploredElements: Map<string, TrackedElement>;
@@ -117,8 +123,7 @@ export class Explore extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     navigationManager?: NavigationGraphService,
-    sessionUuid?: string,
-    tapActionFactory?: DialogTapActionFactory,
+    { sessionUuid, tapActionFactory }: ExploreSessionOptions = {},
   ) {
     super(device, adb, timer);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
@@ -456,8 +461,7 @@ export class Explore extends BaseVisualChange {
       this.device,
       this.adb,
       this.elementParser,
-      progress,
-      this.blockerHandlerDeps(),
+      { ...this.blockerHandlerDeps(), progress },
     );
     if (blockerHandled) {
       // Re-observe after handling blocker
@@ -498,9 +502,11 @@ export class Explore extends BaseVisualChange {
         this.graphTraversalState,
         this.navigationManager,
         this.timer,
-        this.currentElementConfidence,
-        (reason) => {
-          this.stopReason = reason;
+        {
+          elementConfidence: this.currentElementConfidence,
+          setStopReason: (reason) => {
+            this.stopReason = reason;
+          },
         },
       );
 

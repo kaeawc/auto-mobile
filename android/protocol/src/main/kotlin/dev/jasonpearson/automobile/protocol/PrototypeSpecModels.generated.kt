@@ -340,6 +340,11 @@ data class PrototypeSetStackAction(
 ) : PrototypeAction()
 
 @Serializable
+data class PrototypeNodeMapOnCameraIdle(
+  val into: String,
+)
+
+@Serializable
 sealed class PrototypeNode {
   abstract val id: String?
   abstract val testTag: String?
@@ -1879,6 +1884,41 @@ data class PrototypeVideoPlayerNode(
   val startMs: Int? = null,
   val positionKey: String? = null,
   val captions: List<JsonObject>? = null,
+) : PrototypeNode()
+
+@SerialName("map")
+@Serializable
+data class PrototypeMapNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val mapStyle: String? = null,
+  val camera: JsonObject? = null,
+  val fit: String? = null,
+  val markers: JsonObject? = null,
+  val polylines: List<JsonObject>? = null,
+  val showUserLocation: Boolean? = null,
+  val onMarkerTap: List<PrototypeAction>? = null,
+  val onCameraIdle: PrototypeNodeMapOnCameraIdle? = null,
 ) : PrototypeNode()
 
 @Serializable

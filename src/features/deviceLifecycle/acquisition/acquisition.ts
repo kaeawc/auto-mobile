@@ -2,7 +2,7 @@ import { ActionableError } from "../../../models";
 import { deviceReservedForRestartRecoveryError } from "../../../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "../lifecycleRequester";
 import { type StableDeviceTarget } from "../core/deadlines";
-import { type StartDeviceArgs } from "../core/contracts";
+import { type StartDeviceArgs, type StartDeviceSessionArgs } from "../core/contracts";
 import { initializedDevicePool } from "../core/dependencies";
 
 /** Mutable holder for the acquisition stage currently in flight. */
@@ -73,7 +73,7 @@ export function admitRestartReservedStart(args: StartDeviceArgs): void {
   }
 }
 
-export function startRequester(args: StartDeviceArgs) {
+export function startRequester(args: StartDeviceSessionArgs) {
   const requester = lifecycleRequester(args);
   return {
     ...requester,

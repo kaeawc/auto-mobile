@@ -707,6 +707,7 @@ export class LivenessScenario {
       deviceManager: this.discovery,
       foreignDeviceOwnership: this.peerAwareOwnership(clock),
       iosForeignDeviceOwnership: undefined,
+      watchForeignDeviceOwnership: undefined,
     });
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });

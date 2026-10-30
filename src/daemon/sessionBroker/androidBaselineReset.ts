@@ -359,7 +359,8 @@ export class AndroidBaselineReset {
     try {
       return await raceWithDeadline(
         () =>
-          this.resetWithinDeadline(resourceId, device, profile, owned, resetSignal, {
+          this.resetWithinDeadline(resourceId, device, profile, owned, {
+            signal: resetSignal,
             deadlineMs,
             timing,
             timer,
@@ -434,12 +435,13 @@ export class AndroidBaselineReset {
     device: BootedDevice,
     profile: AndroidResetProfile,
     assertOwned: () => Promise<void>,
-    signal: AbortSignal,
     {
+      signal,
       deadlineMs,
       timing,
       timer,
     }: {
+      signal: AbortSignal;
       deadlineMs: number;
       timing: ResetOutcome;
       timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
@@ -457,17 +459,11 @@ export class AndroidBaselineReset {
       if (!strategy.handlesSessionMutations && !activityAllowsReset(strategy, baseline.activity)) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
-      await this.assertTarget(
-        device,
-        profile,
-        signal,
-        Math.max(1, deadlineMs - timer.now()),
-        {
-          requireBoot: !strategy.handlesSessionMutations,
-          allowPendingName: true,
-        },
+      await this.assertTarget(device, profile, signal, Math.max(1, deadlineMs - timer.now()), {
+        requireBoot: !strategy.handlesSessionMutations,
+        allowPendingName: true,
         budget,
-      );
+      });
       if (baseline.bootId) {
         await this.assertBootIdentity(device, baseline.bootId, signal, budget);
       }
@@ -526,8 +522,7 @@ export class AndroidBaselineReset {
               profile,
               signal,
               Math.max(1, deadlineMs - timer.now()),
-              { allowPendingName: true },
-              budget,
+              { allowPendingName: true, budget },
             );
             const bootId = await this.bootIdentity(device, signal, undefined, budget);
             await assertOwned();
@@ -577,8 +572,7 @@ export class AndroidBaselineReset {
       profile,
       signal,
       Math.max(1, budget.deadlineMs - budget.timer.now()),
-      { allowPendingName: true },
-      budget,
+      { allowPendingName: true, budget },
     );
     await budget.assertOwned();
     await this.packages(device, signal, undefined, budget);
@@ -598,8 +592,8 @@ export class AndroidBaselineReset {
     {
       requireBoot = true,
       allowPendingName = false,
-    }: { requireBoot?: boolean; allowPendingName?: boolean } = {},
-    budget?: ResetReadBudget,
+      budget,
+    }: { requireBoot?: boolean; allowPendingName?: boolean; budget?: ResetReadBudget } = {},
   ): Promise<void> {
     const runtime = parseAndroidSystemImageRuntime(profile.systemImagePackage);
     const validInput = [

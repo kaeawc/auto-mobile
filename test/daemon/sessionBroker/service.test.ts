@@ -606,9 +606,11 @@ describe("session broker service lifecycle", () => {
       BROKER_SCOPE_KEY,
       new RecordingLock(),
       new FakeTimer(),
-      gaps,
-      async () => {
-        throw new Error("assignment unavailable");
+      {
+        recordingGaps: gaps,
+        recorderFor: async () => {
+          throw new Error("assignment unavailable");
+        },
       },
     );
     expect(await service.recoverMutationRecorder("broker-session")).toBeUndefined();
@@ -620,13 +622,9 @@ describe("session broker service lifecycle", () => {
     const timer = new FakeTimer();
     const lock = new RecordingLock();
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
-    const service = new SessionBrokerService(
-      broker,
-      BROKER_SCOPE_KEY,
-      lock,
-      timer,
-      new InMemoryMutationRecordingGaps(),
-    );
+    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer, {
+      recordingGaps: new InMemoryMutationRecordingGaps(),
+    });
     service.start();
     await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
       description: "idle recovery loop",
@@ -655,13 +653,9 @@ describe("session broker service lifecycle", () => {
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
     const expire = spyOn(broker, "expireIdlePool").mockRejectedValueOnce(new Error("busy"));
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    const service = new SessionBrokerService(
-      broker,
-      BROKER_SCOPE_KEY,
-      new RecordingLock(),
-      timer,
-      new InMemoryMutationRecordingGaps(),
-    );
+    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, new RecordingLock(), timer, {
+      recordingGaps: new InMemoryMutationRecordingGaps(),
+    });
     try {
       service.start();
       await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
@@ -689,13 +683,9 @@ describe("session broker service lifecycle", () => {
     const lock = new RecordingLock();
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
     broker.blockRecovery = true;
-    const service = new SessionBrokerService(
-      broker,
-      BROKER_SCOPE_KEY,
-      lock,
-      timer,
-      new InMemoryMutationRecordingGaps(),
-    );
+    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer, {
+      recordingGaps: new InMemoryMutationRecordingGaps(),
+    });
     service.start();
     await broker.recoveryStarted.promise;
 
@@ -723,13 +713,9 @@ describe("session broker service lifecycle", () => {
     const timer = new FakeTimer();
     const lock = new RecordingLock();
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
-    const service = new SessionBrokerService(
-      broker,
-      BROKER_SCOPE_KEY,
-      lock,
-      timer,
-      new InMemoryMutationRecordingGaps(),
-    );
+    const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer, {
+      recordingGaps: new InMemoryMutationRecordingGaps(),
+    });
     try {
       service.start();
       service.start();

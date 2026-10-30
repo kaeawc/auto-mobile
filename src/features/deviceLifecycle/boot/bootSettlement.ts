@@ -131,10 +131,11 @@ export function cancelUnownedColdBoot(
  * the bind finishes, the caller gets no session id, so what the bind minted is released again
  * (#11565). The pool fills the receipt in while it binds. `bootOf` names the boot the bind is
  * for: once its session is gone, the device this request cold-booted is stopped on either
- * platform (#11593). The request still holds the device's lifecycle lease at that point.
+ * platform (#11593). The request still holds the device's lifecycle lease at that point. `bind`
+ * receives the deadline-bound operation signal, so it can cancel its own work (#15671).
  */
 export function bindUndoneIfUndelivered(
-  bind: (receipt: AcquisitionReceipt) => Promise<string>,
+  bind: (receipt: AcquisitionReceipt, signal: AbortSignal) => Promise<string>,
   bootOf?: () => DeviceBootResult | undefined,
 ): DeadlineBoundOperation<string> {
   return async (signal, undoIfUndelivered, onDelivered) => {
@@ -154,7 +155,7 @@ export function bindUndoneIfUndelivered(
         await cancelUnownedColdBoot(boot);
       }
     });
-    return await bind(receipt);
+    return await bind(receipt, signal);
   };
 }
 

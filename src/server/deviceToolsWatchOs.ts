@@ -112,10 +112,11 @@ async function bindWatchSession(
         `startDevice timed out while binding the device session; target=watchos:${watch.deviceId}`,
       ),
     bindUndoneIfUndelivered(
-      async (receipt) =>
+      async (receipt, bindSignal) =>
         await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
           achievedReadiness: "booted",
           receipt,
+          signal: bindSignal,
         }),
     ),
   );

@@ -100,7 +100,9 @@ describe("WatchAppManager launch", () => {
     expect(removed.sort()).toEqual(
       ["Documents", "Library", "tmp"].map((folder) => `${container}/${folder}`),
     );
+    // The strict stop, then the wipe backend's own (lenient) terminate finding nothing to stop.
     expect(simctl.commands.slice(1)).toEqual([
+      `terminate ${UDID} ${BUNDLE}`,
       `terminate ${UDID} ${BUNDLE}`,
       `get_app_container ${UDID} ${BUNDLE} data`,
       `launch ${UDID} ${BUNDLE}`,
@@ -124,6 +126,25 @@ describe("WatchAppManager launch", () => {
     expect(result.error).toContain("EACCES: permission denied");
     expect(simctl.commands.some((command) => command.startsWith("launch"))).toBe(false);
   });
+
+  test.each([
+    ["clearAppData", { clearAppData: true }],
+    ["coldBoot", { coldBoot: true }],
+  ])(
+    "%s stops before wiping or launching when the app cannot be terminated",
+    async (_label, options) => {
+      const { simctl, apps, removed } = await arrange();
+      await apps.launch(BUNDLE, LAUNCH);
+      simctl.terminateError = new Error("Unable to terminate: device is busy");
+
+      const result = await apps.launch(BUNDLE, { ...LAUNCH, ...options });
+
+      expect(result).toMatchObject({ success: false, packageName: BUNDLE });
+      expect(result.error).toContain("device is busy");
+      expect(removed).toEqual([]);
+      expect(simctl.commands.filter((command) => command.startsWith("launch"))).toHaveLength(1);
+    },
+  );
 
   test("a simctl launch failure is reported as a failed launch", async () => {
     const { simctl, apps } = await arrange();

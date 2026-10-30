@@ -328,6 +328,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     expect(watchSimctl.commands).toEqual([
       `launch ${watch.deviceId} ${BUNDLE}`,
       `terminate ${watch.deviceId} ${BUNDLE}`,
+      `terminate ${watch.deviceId} ${BUNDLE}`,
       `get_app_container ${watch.deviceId} ${BUNDLE} data`,
       `launch ${watch.deviceId} ${BUNDLE}`,
       `terminate ${watch.deviceId} ${BUNDLE}`,

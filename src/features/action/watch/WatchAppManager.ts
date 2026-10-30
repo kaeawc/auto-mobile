@@ -18,10 +18,7 @@ import {
   getIosInstalledAppBundleId,
   type IosInstalledAppRecord,
 } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
-import {
-  resolveIosLenientTerminateBackend,
-  SimulatorIosClearDataBackend,
-} from "../../../utils/ios-cmdline-tools/SimulatorIosClearDataBackend";
+import { SimulatorIosClearDataBackend } from "../../../utils/ios-cmdline-tools/SimulatorIosClearDataBackend";
 import type { InstallAppCall } from "../InstallAppTypes";
 import type { LaunchAppCall } from "../LaunchAppTypes";
 import { PACKAGE_NOT_INSTALLED_ERROR } from "../LaunchPackageRemovedError";
@@ -199,27 +196,49 @@ export class WatchAppManager {
     appId: string,
     call: LaunchAppCall,
   ): Promise<LaunchAppResult | undefined> {
+    if (!call.clearAppData && !call.coldBoot) {
+      return undefined;
+    }
     const deviceId = this.device.deviceId;
-    if (call.clearAppData) {
-      const cleared = await new SimulatorIosClearDataBackend(deviceId, {
-        ...this.dataWipe,
-        simctl: this.simctl,
-      }).clearAppData(appId);
-      return cleared.success
-        ? undefined
-        : {
-            success: false,
-            packageName: appId,
-            error: `Could not clear app data for ${appId} on watch ${deviceId}: ${cleared.error}`,
-          };
+    // Both need the old process gone: a wipe under a running app, or a "cold" launch that reuses
+    // it, would be wrong. Only an already-gone process is tolerated; any other failure stops here.
+    const stopError = await this.stopForLaunch(appId);
+    if (stopError) {
+      return {
+        success: false,
+        packageName: appId,
+        error: `Could not stop ${appId} on watch ${deviceId} before launching: ${stopError}`,
+      };
     }
-    if (call.coldBoot) {
-      // A not-running app is the expected case here; the lenient backend logs and continues.
-      await resolveIosLenientTerminateBackend(deviceId, { simctl: this.simctl }).terminateApp(
-        appId,
-      );
+    if (!call.clearAppData) {
+      return undefined;
     }
-    return undefined;
+    const cleared = await new SimulatorIosClearDataBackend(deviceId, {
+      ...this.dataWipe,
+      simctl: this.simctl,
+    }).clearAppData(appId);
+    return cleared.success
+      ? undefined
+      : {
+          success: false,
+          packageName: appId,
+          error: `Could not clear app data for ${appId} on watch ${deviceId}: ${cleared.error}`,
+        };
+  }
+
+  /** `simctl terminate`; undefined when the app stopped or was already gone, else the failure. */
+  private async stopForLaunch(appId: string): Promise<string | undefined> {
+    try {
+      await this.simctl.terminateApp(appId, this.device.deviceId);
+      return undefined;
+    } catch (error) {
+      const message = errorMessage(error);
+      if (isProcessAlreadyGoneError(message)) {
+        return undefined;
+      }
+      logger.warn(`[watchOS] Could not stop ${appId} on ${this.device.deviceId}: ${message}`);
+      return message;
+    }
   }
 
   /** The raw `simctl listapps` records for the watch; a failed listing throws. */

@@ -63,6 +63,12 @@ interface DialogDismissState {
   dumpUsed: boolean;
 }
 
+/** The CtrlProxy seams TalkBackToggle reads and writes through; each defaults to the device's. */
+export interface TalkBackToggleCtrlProxy {
+  secureSettings?: SecureSettingsRpc | null;
+  dialogProbe?: TalkBackDialogProbe | null;
+}
+
 export class TalkBackToggle {
   private readonly adb: AdbExecutor;
   private readonly secureSettings: SecureSettingsRpc;
@@ -73,8 +79,7 @@ export class TalkBackToggle {
     adb: AdbExecutor | null = null,
     private readonly detector: AccessibilityDetector = accessibilityDetector,
     private readonly timer: Timer = defaultTimer,
-    secureSettings: SecureSettingsRpc | null = null,
-    dialogProbe: TalkBackDialogProbe | null = null,
+    { secureSettings, dialogProbe }: TalkBackToggleCtrlProxy = {},
   ) {
     this.adb = adb ?? defaultAdbClientFactory.create(device);
     this.secureSettings = secureSettings ?? new CtrlProxySecureSettingsRpc(device);

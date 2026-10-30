@@ -347,8 +347,8 @@ export class SystemTray {
   }
 
   private async open(awaitTimeoutMs: number): Promise<SystemTrayOutcome> {
-    const { device, progress, signal } = this;
-    const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress, signal);
+    const { device, signal } = this;
+    const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, { signal });
     await captureSystemTrayTerminalEvidence(device, result.observation, signal);
     const success = result.skipped || result.opened;
     const payload = {
@@ -383,7 +383,7 @@ export class SystemTray {
   }
 
   private async list(args: SystemTrayArgs, awaitTimeoutMs: number): Promise<SystemTrayOutcome> {
-    const { device, progress, signal } = this;
+    const { device, signal } = this;
     if (device.platform !== "android") {
       throw new ActionableError("systemTray list is supported only on Android.");
     }
@@ -398,14 +398,9 @@ export class SystemTray {
       throw new ActionableError(`App ${appId} is not installed.`);
     }
     const label = await resolveUniqueTrayAppLabel(device, appId, appIds, signal);
-    const result = await listSystemTrayNotifications(
-      device,
-      appId,
-      label,
-      awaitTimeoutMs,
-      progress,
+    const result = await listSystemTrayNotifications(device, appId, label, awaitTimeoutMs, {
       signal,
-    );
+    });
     await captureSystemTrayTerminalEvidence(device, result.observation, signal);
     return ok({
       message: formatTrayListMessage(appId, result),
@@ -449,8 +444,7 @@ export class SystemTray {
       notification,
       appMatchTexts,
       awaitTimeoutMs,
-      progress,
-      signal,
+      { progress, signal },
     );
 
     if (!match) {
@@ -475,8 +469,7 @@ export class SystemTray {
       notification,
       appMatchTexts,
       awaitTimeoutMs,
-      progress,
-      signal,
+      { progress, signal },
     );
 
     if (!initialMatch.match) {
@@ -488,8 +481,7 @@ export class SystemTray {
       notification,
       appMatchTexts,
       actionStartMs + awaitTimeoutMs,
-      progress,
-      { observation: initialMatch.observation, match: initialMatch.match, signal },
+      { observation: initialMatch.observation, match: initialMatch.match, signal, progress },
     );
 
     const tapMatch = resolveNotificationTapElement(match, notification);
@@ -537,8 +529,7 @@ export class SystemTray {
       notification,
       appMatchTexts,
       awaitTimeoutMs,
-      progress,
-      signal,
+      { progress, signal },
     );
 
     if (!initialMatch.match) {
@@ -550,8 +541,7 @@ export class SystemTray {
       notification,
       appMatchTexts,
       actionStartMs + awaitTimeoutMs,
-      progress,
-      { observation: initialMatch.observation, match: initialMatch.match, signal },
+      { observation: initialMatch.observation, match: initialMatch.match, signal, progress },
     );
     const swipeTarget = resolveDismissSwipeTarget(match, notification, appMatchTexts);
 
@@ -582,8 +572,7 @@ export class SystemTray {
             ),
             notification,
             appMatchTexts,
-            nextObservation,
-            signal,
+            { observation: nextObservation, signal },
           )
         : undefined;
     const finalObservation = verification?.observation ?? nextObservation;

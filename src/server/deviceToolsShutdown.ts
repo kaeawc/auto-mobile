@@ -248,12 +248,14 @@ async function resolvePooledAvdKillTarget(
     devicePool,
     dependencies.resolveRunningAndroidAvdName,
     {
-      timer: dependencies.timer,
-      deadlineMs: budget.deadlineMs,
-      signal: budget.requestAbortSignal,
-      processStopper: dependencies.androidEmulatorProcessStopper,
+      budget: {
+        timer: dependencies.timer,
+        deadlineMs: budget.deadlineMs,
+        signal: budget.requestAbortSignal,
+        processStopper: dependencies.androidEmulatorProcessStopper,
+      },
+      force: pooledAvdIdentity.force,
     },
-    pooledAvdIdentity.force,
   ).catch((error: unknown) => {
     logger.warn(`[DeviceTools] Pooled stop identity probe failed for ${device.deviceId}`, error);
     assertStopIdentity?.({ unconfirmed: true });

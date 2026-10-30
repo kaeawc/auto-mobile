@@ -385,15 +385,10 @@ export async function cleanupFailedProvisionDevice(
       platform: createdDevice.platform,
       stableId,
     });
-    const cleanup = ctx.executeDeleteDevice(
-      cleanupArgs,
-      deps,
-      undefined,
-      cleanupService,
+    const cleanup = ctx.executeDeleteDevice(cleanupArgs, deps, undefined, cleanupService, {
       lifecycleLease,
-      undefined,
-      createdNeverLaunched ? { unlaunchedCreatedAvd: { stableId } } : undefined,
-    );
+      internal: createdNeverLaunched ? { unlaunchedCreatedAvd: { stableId } } : undefined,
+    });
     lifecycleLeaseTransferred = true;
     const response = await cleanup;
     const cleanupResult = provisionDeviceCleanupResult(cleanupArgs, response);

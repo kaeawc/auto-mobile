@@ -51,8 +51,7 @@ function managerWith(watches?: FakeWatchList): MultiPlatformDeviceManager {
     }),
     createFakeAndroidEmulator({ getBootedDevicesChecked: async () => [ANDROID] }),
     undefined,
-    undefined,
-    { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+    { physicalIosDevices: { listConnectedDevices: async () => ({ devices: [], complete: true }) } },
   );
   return watches ? manager.withWatchSimulators(watches) : manager;
 }

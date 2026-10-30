@@ -49,8 +49,7 @@ function scriptedReal(): ScriptedDeviceManager {
       getBootedDevicesChecked: androidBooted,
     }),
     undefined,
-    undefined,
-    { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+    { physicalIosDevices: { listConnectedDevices: async () => ({ devices: [], complete: true }) } },
   );
   return {
     manager,

@@ -99,7 +99,7 @@ export function serialOnlyAndroidTeardownRestartFailure(
             "original serial disappeared; refusing deletion rather than assuming the target did not restart there."
         : `The Android AVD may have reappeared on peer emulator '${suspect.deviceId}' after deletion, ` +
             "but its AVD name could not be resolved; refusing to report success rather than assuming inventory absence is durable.",
-      target.device,
+      { resolved: target.device },
     );
   }
   if (probedName !== context.args.target.stableId) {
@@ -113,7 +113,7 @@ export function serialOnlyAndroidTeardownRestartFailure(
       ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
       : `The Android AVD reappeared on peer emulator '${suspect.deviceId}' after deletion; ` +
           "refusing to report success rather than assuming inventory absence is durable.",
-    target.device,
+    { resolved: target.device },
   );
 }
 
@@ -201,7 +201,7 @@ async function checkForeignRuntimesBeforeDestroy(
       phase,
       "target_identity_unresolved",
       `Android emulator runtime '${probe.runtime.deviceId}' has no resolvable AVD name; refusing deletion.`,
-      target.device,
+      { resolved: target.device },
     );
   }
   if (probe.kind === "runs-target") {
@@ -211,7 +211,7 @@ async function checkForeignRuntimesBeforeDestroy(
       "target_restarted",
       `Android AVD '${probe.avdName}' is running on emulator '${probe.runtime.deviceId}', which ` +
         "another AutoMobile daemon owns; refusing deletion.",
-      target.device,
+      { resolved: target.device },
     );
   }
   return undefined;
@@ -237,7 +237,7 @@ export async function checkForRestartedTeardownTarget(
       phase,
       "booted_inventory_incomplete",
       "Cannot confirm the Android AVD is not running.",
-      target.device,
+      { resolved: target.device },
     );
   }
   const devicePool = defaultDaemonContext.devicePool();
@@ -257,7 +257,7 @@ export async function checkForRestartedTeardownTarget(
       "target_identity_unresolved",
       `A new Android emulator runtime '${newlyAppearedUnresolvedRuntime.deviceId}' appeared ` +
         "without a resolvable AVD name; refusing deletion.",
-      target.device,
+      { resolved: target.device },
     );
   }
   const foreignRestart = await checkForeignRuntimesBeforeDestroy(context, target, booted, phase);
@@ -284,7 +284,7 @@ export async function checkForRestartedTeardownTarget(
     phase === "stop"
       ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
       : "The Android AVD is still running after deletion.",
-    target.device,
+    { resolved: target.device },
   );
 }
 
@@ -328,7 +328,7 @@ export function teardownInventoryVerificationFailure(
         sourceDetail +
         diagnosticDetail +
         presenceDetail,
-      target.device,
+      { resolved: target.device },
     );
   }
   if (!inventoryContainsTarget(inventory, target)) {
@@ -341,7 +341,7 @@ export function teardownInventoryVerificationFailure(
     "verification",
     "target_still_present",
     `The platform deletion command completed, but target '${targetName}' is still present in inventory.${sourceDetail}`,
-    target.device,
+    { resolved: target.device },
   );
 }
 
@@ -381,7 +381,7 @@ export function createTeardownVerificationDeadlineFailure(
     "verification",
     "verification_deadline_exceeded",
     message,
-    target.device,
+    { resolved: target.device },
   );
 }
 
@@ -425,7 +425,7 @@ export async function verifyTeardownAbsence(
         "destroyed",
         { stop, destroy: "accepted" },
         { notRunning: "confirmed", inventory: "complete_absence_confirmed" },
-        target.device,
+        { resolved: target.device },
       );
     }
     lastFailure = failure;

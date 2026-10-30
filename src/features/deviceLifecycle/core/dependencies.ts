@@ -332,13 +332,10 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceProvisionerFactory: () =>
         createDefaultDeviceProvisioner(undefined, undefined, getDefaultSimulatorCreationService()),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
-        createDefaultExactDeviceProvisioner(
-          deviceManager,
-          deviceCreationGate,
-          undefined,
-          assertNotBindingDeviceForAdoption,
-          getDefaultSimulatorCreationService(),
-        ),
+        createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate, {
+          assertAdoptable: assertNotBindingDeviceForAdoption,
+          simulatorCreation: getDefaultSimulatorCreationService(),
+        }),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,

@@ -34,8 +34,8 @@ export async function rethrowFailedProvisionDeviceLifecycle(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
   {
+    provisioned,
     createdAvdNeverLaunched,
     creationStarted,
     retainCreatedForRetry,
@@ -47,6 +47,7 @@ export async function rethrowFailedProvisionDeviceLifecycle(
     recordLifecycle,
     observedRuntimeDevice,
   }: {
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     createdAvdNeverLaunched?: boolean;
     creationStarted: boolean;
     retainCreatedForRetry?: boolean;

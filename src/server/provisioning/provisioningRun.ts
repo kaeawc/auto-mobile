@@ -89,9 +89,15 @@ async function reserveProvisionLifecycleLease(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  perf: ReturnType<typeof createPerformanceTracker>,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
+  {
+    perf,
+    totalDeadlineMs,
+    signal,
+  }: {
+    perf: ReturnType<typeof createPerformanceTracker>;
+    totalDeadlineMs: number;
+    signal: AbortSignal | undefined;
+  },
 ): Promise<VirtualDeviceLifecycleLease> {
   if (args.device.platform === "android") {
     return await reserveStableDeviceLifecycle(
@@ -166,14 +172,11 @@ async function runProvisionDeviceLifecycle(
   };
   try {
     admitRestartReservedProvision(args, args.device.deviceId);
-    lifecycleLease = await reserveProvisionLifecycleLease(
-      args,
-      deps,
-      deviceManager,
+    lifecycleLease = await reserveProvisionLifecycleLease(args, deps, deviceManager, {
       perf,
       totalDeadlineMs,
       signal,
-    );
+    });
     const deviceCreationGate = deps.deviceCreationGateFactory();
     provisioned = await provisionExactDevice(
       args,
@@ -214,7 +217,8 @@ async function runProvisionDeviceLifecycle(
     const provisionedDevice = provisioned;
     const bootLifecycleLease = lifecycleLease;
     const booted = await runWithPerfTracker(ambientPerfFor(perf), () =>
-      bootExactProvisionedDevice(ctx, args, deps, deviceManager, deviceCreationGate, {
+      bootExactProvisionedDevice(ctx, args, deps, deviceManager, {
+        deviceCreationGate,
         provisioned: provisionedDevice,
         perf: perf,
         totalDeadlineMs: totalDeadlineMs,
@@ -246,32 +250,26 @@ async function runProvisionDeviceLifecycle(
     return buildProvisionDeviceResult(args, provisioned, createdByRequest, perf, booted);
   } catch (error) {
     perf.end();
-    return await rethrowFailedProvisionDeviceLifecycle(
-      ctx,
-      args,
-      deps,
-      deviceManager,
+    return await rethrowFailedProvisionDeviceLifecycle(ctx, args, deps, deviceManager, {
       provisioned,
-      {
-        createdAvdNeverLaunched:
-          args.device.platform === "android" &&
-          provisioned?.created === true &&
-          !settlementState.bootAttempted,
-        creationStarted: creationStarted,
-        retainCreatedForRetry: settlementState.retainCreatedForRetry,
-        signal: combineAbortSignals(signal, lifecycleLease?.signal),
-        takeLifecycleLease: () => {
-          const rollbackLease = lifecycleLease;
-          lifecycleLease = undefined;
-          return rollbackLease;
-        },
-        error: error,
-        unownedColdBootSettlement: settlementState.unownedColdBootSettlement,
-        pendingMutationSettlement: settlementState.exactProvisioning,
-        recordLifecycle: recordLifecycle,
-        observedRuntimeDevice: observedRuntimeDevice,
+      createdAvdNeverLaunched:
+        args.device.platform === "android" &&
+        provisioned?.created === true &&
+        !settlementState.bootAttempted,
+      creationStarted: creationStarted,
+      retainCreatedForRetry: settlementState.retainCreatedForRetry,
+      signal: combineAbortSignals(signal, lifecycleLease?.signal),
+      takeLifecycleLease: () => {
+        const rollbackLease = lifecycleLease;
+        lifecycleLease = undefined;
+        return rollbackLease;
       },
-    );
+      error: error,
+      unownedColdBootSettlement: settlementState.unownedColdBootSettlement,
+      pendingMutationSettlement: settlementState.exactProvisioning,
+      recordLifecycle: recordLifecycle,
+      observedRuntimeDevice: observedRuntimeDevice,
+    });
   } finally {
     releaseProvisionLifecycleReservations(settlementState, () => lifecycleLease);
   }

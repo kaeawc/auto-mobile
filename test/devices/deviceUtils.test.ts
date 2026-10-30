@@ -127,8 +127,11 @@ describe("MultiPlatformDeviceManager", () => {
         }),
         createFakeAndroidEmulator({ getBootedDevicesChecked: androidDiscovery }),
         undefined,
-        undefined,
-        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+        {
+          physicalIosDevices: {
+            listConnectedDevices: async () => ({ devices: [], complete: true }),
+          },
+        },
       );
     }
 
@@ -237,8 +240,7 @@ describe("MultiPlatformDeviceManager", () => {
         fakeSimctl,
         createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
         undefined,
-        undefined,
-        fakeLister,
+        { physicalIosDevices: fakeLister },
       );
     }
 
@@ -265,8 +267,7 @@ describe("MultiPlatformDeviceManager", () => {
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
           undefined,
-          undefined,
-          hangingLister,
+          { physicalIosDevices: hangingLister },
         ).withPhysicalIosScanBudget(3_000, timer);
 
         const pending = manager.getBootedDevicesDetailed("ios").finally(() => {
@@ -547,11 +548,12 @@ describe("MultiPlatformDeviceManager", () => {
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
           undefined,
-          undefined,
           {
-            listConnectedDevices: async () => {
-              listerCalls++;
-              return { devices: [physicalDevice], complete: true };
+            physicalIosDevices: {
+              listConnectedDevices: async () => {
+                listerCalls++;
+                return { devices: [physicalDevice], complete: true };
+              },
             },
           },
         );
@@ -623,8 +625,11 @@ describe("MultiPlatformDeviceManager", () => {
         fakeSimctl,
         createFakeAndroidEmulator({}),
         undefined,
-        undefined,
-        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+        {
+          physicalIosDevices: {
+            listConnectedDevices: async () => ({ devices: [], complete: true }),
+          },
+        },
       );
 
       await expect(
@@ -681,8 +686,7 @@ describe("MultiPlatformDeviceManager", () => {
         fakeSimctl,
         createFakeAndroidEmulator({}),
         undefined,
-        undefined,
-        { listConnectedDevices: () => physicalDiscovery },
+        { physicalIosDevices: { listConnectedDevices: () => physicalDiscovery } },
       );
 
       const discoveryPromise = manager.getBootedDevicesDetailed("ios", {
@@ -718,11 +722,12 @@ describe("MultiPlatformDeviceManager", () => {
         fakeSimctl,
         createFakeAndroidEmulator({}),
         undefined,
-        undefined,
         {
-          listConnectedDevices: async (options) => {
-            physicalOptions = options;
-            return { devices: [], complete: true };
+          physicalIosDevices: {
+            listConnectedDevices: async (options) => {
+              physicalOptions = options;
+              return { devices: [], complete: true };
+            },
           },
         },
       );
@@ -1824,7 +1829,7 @@ describe("MultiPlatformDeviceManager", () => {
       fakeSimctl,
       createFakeAndroidEmulator({}),
       lifecycleCoordinator,
-      timer,
+      { timer },
     );
 
     await manager.destroyDevice(
@@ -1901,8 +1906,11 @@ describe("discovery classifies tooling that is not installed apart from a failed
         }),
       createFakeAndroidEmulator({ getBootedDevicesChecked: seams.adb ?? (async () => []) }),
       undefined,
-      undefined,
-      seams.devicectl ?? { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+      {
+        physicalIosDevices: seams.devicectl ?? {
+          listConnectedDevices: async () => ({ devices: [], complete: true }),
+        },
+      },
     );
   }
 

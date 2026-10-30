@@ -169,7 +169,7 @@ export async function resolveInventoryTeardownTarget(
         "precondition",
         "booted_inventory_incomplete",
         `Cannot confirm ${target.device.platform} target '${target.device.name}' is not running.`,
-        target.device,
+        { resolved: target.device },
       ),
     };
   }
@@ -206,7 +206,7 @@ export async function finalizeIosNameResolvedTeardownTarget(
         "precondition",
         "inventory_incomplete",
         "Cannot resolve the requested iOS device name against the complete inventory because platform discovery did not complete.",
-        target.device,
+        { resolved: target.device },
       ),
     };
   }
@@ -221,7 +221,7 @@ export async function finalizeIosNameResolvedTeardownTarget(
         "precondition",
         "target_identity_conflict",
         "Multiple iOS devices matched the requested stable name; refusing to guess which one to delete.",
-        target.device,
+        { resolved: target.device },
       ),
     };
   }
@@ -472,7 +472,7 @@ export async function refuseLiveStoppedAndroidTarget(
                 processes.kind === "read" ? processes.candidates : [],
                 processes.kind === "unreadable" ? "unreadable" : undefined,
               ),
-            target.device,
+            { resolved: target.device },
           );
         }
         return undefined;

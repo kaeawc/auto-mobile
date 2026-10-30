@@ -1206,8 +1206,7 @@ describe("killDevice handler", () => {
         { avdName: "Pixel_8_Old", incarnation: entry.incarnation },
         pool,
         async () => undefined,
-        { timer: new FakeTimer(), deadlineMs: 30_000 },
-        false,
+        { budget: { timer: new FakeTimer(), deadlineMs: 30_000 }, force: false },
       );
       expect(confirmation.kind).toBe("refusal");
       if (confirmation.kind !== "refusal") {

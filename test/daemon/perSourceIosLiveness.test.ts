@@ -106,19 +106,20 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
       ),
       bootedEmulator(),
       undefined,
-      undefined,
       {
-        listConnectedDevices: async () =>
-          options.devicectlOk
-            ? { devices: [PHYSICAL], complete: true }
-            : {
-                devices: options.retainedPhysical ? [PHYSICAL] : [],
-                complete: false,
-                error: {
-                  code: "failed",
-                  message: "devicectl could not list physical iOS devices (failed): fake",
+        physicalIosDevices: {
+          listConnectedDevices: async () =>
+            options.devicectlOk
+              ? { devices: [PHYSICAL], complete: true }
+              : {
+                  devices: options.retainedPhysical ? [PHYSICAL] : [],
+                  complete: false,
+                  error: {
+                    code: "failed",
+                    message: "devicectl could not list physical iOS devices (failed): fake",
+                  },
                 },
-              },
+        },
       },
     );
 
@@ -179,16 +180,17 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
       new FakeBootedSimctl([SIMULATOR]),
       bootedEmulator(),
       undefined,
-      undefined,
       {
-        listConnectedDevices: async () => ({
-          devices: [PHYSICAL],
-          complete: false,
-          error: {
-            code: "failed",
-            message: "devicectl could not list physical iOS devices (failed): fake",
-          },
-        }),
+        physicalIosDevices: {
+          listConnectedDevices: async () => ({
+            devices: [PHYSICAL],
+            complete: false,
+            error: {
+              code: "failed",
+              message: "devicectl could not list physical iOS devices (failed): fake",
+            },
+          }),
+        },
       },
     );
 
@@ -334,8 +336,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
         new FakeBootedSimctl([SIMULATOR]),
         bootedEmulator(),
         undefined,
-        undefined,
-        lister,
+        { physicalIosDevices: lister },
       );
       expect((await lister.listConnectedDevices()).complete).toBe(true);
       const originalPlatform = listing.result.devices[0].properties.hardware.platform;

@@ -148,11 +148,12 @@ function managerWithPhysicalCounter() {
     }),
     createFakeAndroidEmulator({ getBootedDevicesChecked: async () => [] }),
     undefined,
-    undefined,
     {
-      listConnectedDevices: async () => {
-        physicalCalls++;
-        return { devices: [PHONE], complete: true };
+      physicalIosDevices: {
+        listConnectedDevices: async () => {
+          physicalCalls++;
+          return { devices: [PHONE], complete: true };
+        },
       },
     },
   );

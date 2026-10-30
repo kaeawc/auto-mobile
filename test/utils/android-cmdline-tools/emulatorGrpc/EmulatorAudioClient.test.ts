@@ -414,6 +414,15 @@ describe("SilenceFiller", () => {
     expect(filler.before(packet(nowUs))).toBeUndefined();
   });
 
+  test("contiguous packets that waited out a slow consumer add no silence", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    expect(filler.before(packet(START_US))).toBeUndefined();
+    // An 11 s disk stall delays processing; the next packet's timestamp is still contiguous.
+    nowUs += 11_000_000;
+    expect(filler.before(packet(START_US + 20_000))).toBeUndefined();
+  });
+
   test("a timestamp that disagrees with the host clock falls back to arrival time", () => {
     let nowUs = START_US;
     const filler = new SilenceFiller(16_000, () => nowUs);

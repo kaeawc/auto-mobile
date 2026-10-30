@@ -79,7 +79,8 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   flow control holds the emulator. The loopback route pauses the helper's stdout. A stalled disk
   bounds memory instead of queueing audio. A silent guest sends no packets, so the gRPC route writes
   silence for the time between packets (from the packet timestamps, or arrival time when a timestamp
-  disagrees with the host clock by over 10 s) to keep the track in step with the video.
+  is over 10 s from both the host clock and where the stream had reached, so audio that waited out a
+  slow disk is not mistaken for silence) to keep the track in step with the video.
 - At stop, after the video is final, it ends the capture and muxes with ffmpeg: video copied, audio
   AAC, the audio captured between the stream opening and the video launch skipped (`-ss`), and the
   track padded with silence to the video's length (`apad` + `-shortest`). An empty capture becomes

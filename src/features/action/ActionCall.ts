@@ -39,19 +39,6 @@ export interface TapAtCall<PlanContext> extends ActionCall {
   planContext?: PlanContext;
 }
 
-/** Normalizes the `TapOnCall` form and the deprecated positional `(progress, signal, recovery, request)`. */
-export function resolveTapOnCall(
-  progressOrCall?: ProgressCallback | TapOnCall,
-  signal?: AbortSignal,
-  recovery?: { throwOnKeyboardOcclusion?: boolean },
-  request?: { requestDeadlineMs?: number },
-): TapOnCall {
-  if (typeof progressOrCall === "object" && progressOrCall !== null) {
-    return progressOrCall;
-  }
-  return { progress: progressOrCall, signal, recovery, deadlineMs: request?.requestDeadlineMs };
-}
-
 /** Normalizes the `ActionCall` form and the deprecated positional `(progress, signal, request)`. */
 export function resolveDeadlineActionCall(
   progressOrCall?: ProgressCallback | ActionCall,
@@ -112,17 +99,4 @@ export function resolveActionCall(
     return progressOrCall;
   }
   return { progress: progressOrCall, signal };
-}
-
-/** Normalizes the `RotateCall` form and the deprecated positional rotate tail. */
-export function resolveRotateCall(
-  progressOrCall?: ProgressCallback | RotateCall,
-  lockOrientation?: boolean,
-  signal?: AbortSignal,
-  display?: number,
-): RotateCall {
-  if (typeof progressOrCall === "object" && progressOrCall !== null) {
-    return progressOrCall;
-  }
-  return { progress: progressOrCall, lockOrientation, signal, display };
 }

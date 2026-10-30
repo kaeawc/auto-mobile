@@ -136,12 +136,15 @@ describe("slice 2 registered handler cancellation", () => {
         const adb = new FakeAdbExecutor();
         let dispatches = 0;
         interactionDeps.clipboardFactory = () =>
-          new Clipboard(device, { create: () => adb }, () => ({
-            requestClipboard: async () => {
-              dispatches++;
-              return { success: true, totalTimeMs: 0 };
-            },
-          }));
+          new Clipboard(device, {
+            adbFactory: { create: () => adb },
+            ctrlProxyFactory: () => ({
+              requestClipboard: async () => {
+                dispatches++;
+                return { success: true, totalTimeMs: 0 };
+              },
+            }),
+          });
         const controller = new AbortController();
         controller.abort();
         await expect(
@@ -160,12 +163,15 @@ describe("slice 2 registered handler cancellation", () => {
         const controller = new AbortController();
         const { started, sleep } = pausedSleep(timer);
         interactionDeps.clipboardFactory = () =>
-          new Clipboard(device, { create: () => adb }, () => ({
-            requestClipboard: async () => {
-              await timer.sleep(1000);
-              return { success: false, totalTimeMs: 0 };
-            },
-          }));
+          new Clipboard(device, {
+            adbFactory: { create: () => adb },
+            ctrlProxyFactory: () => ({
+              requestClipboard: async () => {
+                await timer.sleep(1000);
+                return { success: false, totalTimeMs: 0 };
+              },
+            }),
+          });
         try {
           const pending = handler("clipboard")(
             device,
@@ -195,12 +201,15 @@ describe("slice 2 registered handler cancellation", () => {
       const adb = new FakeAdbExecutor();
       const controller = new AbortController();
       interactionDeps.clipboardFactory = () =>
-        new Clipboard(devices[0]!, { create: () => adb }, () => ({
-          requestClipboard: async () => {
-            controller.abort();
-            return { success: false, totalTimeMs: 0 };
-          },
-        }));
+        new Clipboard(devices[0]!, {
+          adbFactory: { create: () => adb },
+          ctrlProxyFactory: () => ({
+            requestClipboard: async () => {
+              controller.abort();
+              return { success: false, totalTimeMs: 0 };
+            },
+          }),
+        });
       await expect(
         handler("clipboard")(devices[0]!, { action, text: "hello" }, undefined, controller.signal),
       ).rejects.toThrow("cancelled");
@@ -222,9 +231,12 @@ describe("slice 2 registered handler cancellation", () => {
       };
     });
     interactionDeps.clipboardFactory = () =>
-      new Clipboard(devices[0]!, { create: () => adb }, () => ({
-        requestClipboard: async () => ({ success: false, totalTimeMs: 0 }),
-      }));
+      new Clipboard(devices[0]!, {
+        adbFactory: { create: () => adb },
+        ctrlProxyFactory: () => ({
+          requestClipboard: async () => ({ success: false, totalTimeMs: 0 }),
+        }),
+      });
     try {
       await expect(
         handler("clipboard")(devices[0]!, { action: "paste" }, undefined, controller.signal),
@@ -450,15 +462,18 @@ describe("slice 2 registered handler cancellation", () => {
         cancelScreenshotBackoff: () => {},
       });
       interactionDeps.clipboardFactory = () =>
-        new Clipboard(devices[1]!, { create: () => adb }, () => ({
-          requestClipboard: async (...args) => {
-            try {
-              return await proxy.requestClipboard(...args);
-            } finally {
-              finished();
-            }
-          },
-        }));
+        new Clipboard(devices[1]!, {
+          adbFactory: { create: () => adb },
+          ctrlProxyFactory: () => ({
+            requestClipboard: async (...args) => {
+              try {
+                return await proxy.requestClipboard(...args);
+              } finally {
+                finished();
+              }
+            },
+          }),
+        });
       try {
         const pending = handler("clipboard")(
           devices[1]!,

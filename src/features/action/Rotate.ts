@@ -21,7 +21,7 @@ import {
   readNaturalLandscape,
   rotationForOrientation,
 } from "./OrientationReader";
-import { resolveRotateCall, type RotateCall } from "./ActionCall";
+import type { RotateCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { RotationSettingsStore } from "./RotationSettingsStore";
 import {
@@ -85,14 +85,24 @@ export class Rotate extends BaseVisualChange {
   private readonly outcomes: RotationOutcomes;
   private readonly endConfirmation: RotationEndConfirmation;
 
+  private readonly options: RotateOptions;
+
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    timer: Timer = defaultTimer,
-    private readonly options: RotateOptions = {},
-    collaborators: DisplayFenceDependencies = {},
+    {
+      adb = null,
+      timer = defaultTimer,
+      options = {},
+      collaborators = {},
+    }: {
+      adb?: AdbExecutor | null;
+      timer?: Timer;
+      options?: RotateOptions;
+      collaborators?: DisplayFenceDependencies;
+    } = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
+    this.options = options;
     const ctx = (): RotationContext => ({
       device: this.device,
       adb: this.adb,
@@ -172,28 +182,10 @@ export class Rotate extends BaseVisualChange {
     );
   }
 
-  async execute(orientation: "portrait" | "landscape", call?: RotateCall): Promise<RotateResult>;
-  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(
     orientation: "portrait" | "landscape",
-    progress?: ProgressCallback,
-    lockOrientation?: boolean,
-    signal?: AbortSignal,
-    display?: number,
-  ): Promise<RotateResult>;
-  async execute(
-    orientation: "portrait" | "landscape",
-    progressOrCall?: ProgressCallback | RotateCall,
-    lockOrientationArg?: boolean,
-    signalArg?: AbortSignal,
-    displayArg?: number,
+    { progress, lockOrientation, signal, display = 0 }: RotateCall = {},
   ): Promise<RotateResult> {
-    const {
-      progress,
-      lockOrientation,
-      signal,
-      display = 0,
-    } = resolveRotateCall(progressOrCall, lockOrientationArg, signalArg, displayArg);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("rotate");

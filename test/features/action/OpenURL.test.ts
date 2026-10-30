@@ -48,10 +48,7 @@ describe("OpenURL Android command output", () => {
       try {
         const openURL = new OpenURL(
           { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-          new FakeAdbExecutor(),
-          null,
-          null,
-          timer,
+          { adb: new FakeAdbExecutor(), simctl: null, devicectl: null, timer },
         );
         await expect(openURL.execute("package:com.example.app")).rejects.toBe(typed);
       } finally {
@@ -75,10 +72,7 @@ describe("OpenURL Android command output", () => {
       );
       const openURL = new OpenURL(
         { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-        fakeAdb,
-        null,
-        null,
-        timer,
+        { adb: fakeAdb, simctl: null, devicectl: null, timer },
       );
       const observeScreen = new FakeObserveScreen();
       observeScreen.setObserveResult(
@@ -125,10 +119,7 @@ describe("OpenURL Android command output", () => {
     );
     const openURL = new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      fakeAdb,
-      null,
-      null,
-      timer,
+      { adb: fakeAdb, simctl: null, devicectl: null, timer },
     );
     const observeScreen = new FakeObserveScreen();
     observeScreen.setObserveResult(
@@ -169,7 +160,7 @@ const openIos = (
   devicectl: FakeDeviceUrlLauncher,
   url: string,
 ) => {
-  const openURL = new OpenURL(device, new FakeAdbExecutor(), simctl, devicectl);
+  const openURL = new OpenURL(device, { adb: new FakeAdbExecutor(), simctl, devicectl });
   return openURL.testHooks.executeiOSOpenURL(url);
 };
 
@@ -385,12 +376,11 @@ describe("OpenURL package: delegation is unchanged", () => {
       () => launchSpy.mockRestore(),
       () => warnSpy.mockRestore(),
     );
-    const openURL = new OpenURL(
-      iosDevice(PHYSICAL_UDID),
-      new FakeAdbExecutor(),
-      new FakeSimctl(),
-      new FakeDeviceUrlLauncher(),
-    );
+    const openURL = new OpenURL(iosDevice(PHYSICAL_UDID), {
+      adb: new FakeAdbExecutor(),
+      simctl: new FakeSimctl(),
+      devicectl: new FakeDeviceUrlLauncher(),
+    });
 
     const result = await openURL.execute("package:com.example.MyApp");
 
@@ -412,7 +402,11 @@ describe("OpenURL package: delegation is unchanged", () => {
 
     const simctl = new FakeSimctl();
     const devicectl = new FakeDeviceUrlLauncher();
-    const openURL = new OpenURL(iosDevice(PHYSICAL_UDID), new FakeAdbExecutor(), simctl, devicectl);
+    const openURL = new OpenURL(iosDevice(PHYSICAL_UDID), {
+      adb: new FakeAdbExecutor(),
+      simctl,
+      devicectl,
+    });
 
     const result = await openURL.execute("package:com.example.MyApp");
 
@@ -429,7 +423,7 @@ describe("OpenURL Android parity (regression guard)", () => {
     const fakeAdb = new FakeAdbExecutor();
     const openURL = new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      fakeAdb,
+      { adb: fakeAdb },
     );
 
     const result = await openURL.testHooks.executeAndroidOpenURL("https://example.com/x");
@@ -445,7 +439,7 @@ describe("OpenURL input validation", () => {
   const openAndroid = (url: string) =>
     new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      new FakeAdbExecutor(),
+      { adb: new FakeAdbExecutor() },
     ).execute(url);
 
   test("empty URL returns an explicit error without dispatching", async () => {
@@ -505,7 +499,7 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
     const fakeAdb = new FakeAdbExecutor();
     const openURL = new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      fakeAdb,
+      { adb: fakeAdb },
     );
 
     const result = await openURL.execute(input);
@@ -520,12 +514,11 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
     stubObservedInteraction();
     const simctl = new FakeSimctl();
     const devicectl = new FakeDeviceUrlLauncher();
-    const openURL = new OpenURL(
-      iosDevice(SIMULATOR_UDID),
-      new FakeAdbExecutor(),
+    const openURL = new OpenURL(iosDevice(SIMULATOR_UDID), {
+      adb: new FakeAdbExecutor(),
       simctl,
       devicectl,
-    );
+    });
 
     const result = await openURL.execute(input);
 
@@ -539,7 +532,11 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
     stubObservedInteraction();
     const simctl = new FakeSimctl();
     const devicectl = new FakeDeviceUrlLauncher();
-    const openURL = new OpenURL(iosDevice(PHYSICAL_UDID), new FakeAdbExecutor(), simctl, devicectl);
+    const openURL = new OpenURL(iosDevice(PHYSICAL_UDID), {
+      adb: new FakeAdbExecutor(),
+      simctl,
+      devicectl,
+    });
 
     const result = await openURL.execute(input);
 
@@ -558,7 +555,7 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
 
     const openURL = new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-      new FakeAdbExecutor(),
+      { adb: new FakeAdbExecutor() },
     );
 
     const result = await openURL.execute("  package:com.example.MyApp  ");

@@ -60,10 +60,11 @@ export class ExplorePlatformRecovery {
   async relaunch(packageName: string, signal?: AbortSignal): Promise<void> {
     if (this.device.platform === "android") {
       // Same injected transport and timer as the home press above.
-      const result = await new LaunchApp(this.device, this.adb, null, this.timer).execute(
-        packageName,
-        { clearAppData: false, coldBoot: false, signal },
-      );
+      const result = await new LaunchApp(this.device, {
+        adb: this.adb,
+        simctl: null,
+        timer: this.timer,
+      }).execute(packageName, { clearAppData: false, coldBoot: false, signal });
       if (!result.success) {
         throw new Error(result.error ?? `Android relaunch of ${packageName} failed`);
       }

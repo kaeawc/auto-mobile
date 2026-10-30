@@ -118,7 +118,7 @@ function rotateOn(adb: FakeAdbExecutor, timer: FakeTimer): Rotate {
     activityName: "MainActivity",
     layoutSeqSum: 1,
   });
-  const rotate = new Rotate(device, adb, timer);
+  const rotate = new Rotate(device, { adb, timer });
   rotate.awaitIdle = new FakeAwaitIdle();
   rotate.observeScreen = observeScreen;
   rotate.window = window;

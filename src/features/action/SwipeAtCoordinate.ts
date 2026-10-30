@@ -211,17 +211,12 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     }
     let target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     try {
-      target = await prepareTargetDisplayAction(
-        this.device,
-        display,
-        this.observeScreen,
-        this.adb,
-        {
-          lastRenderedObservation: this.lastRenderedObservation,
-          signal,
-          transitions: this.displayTransitionReader,
-        },
-      );
+      target = await prepareTargetDisplayAction(this.device, display, this.observeScreen, {
+        adb: this.adb,
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      });
     } catch (error) {
       if (
         error instanceof StaleDisplayError ||

@@ -41,7 +41,12 @@ const openWithForeground = async (url: string, before: string, after: string[]) 
   const observe = new FakeObserveScreen();
   observe.setObserveSequence(after.map((appId) => observation(appId)));
   interactionSpy.mockImplementation(runBlockWith(() => observation(before)));
-  const action = new OpenURL(simulator, new FakeAdbExecutor(), simctl, null, timer);
+  const action = new OpenURL(simulator, {
+    adb: new FakeAdbExecutor(),
+    simctl,
+    devicectl: null,
+    timer,
+  });
   action.observeScreen = observe;
   try {
     const result = await action.execute(url);

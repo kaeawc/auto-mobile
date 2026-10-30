@@ -62,7 +62,11 @@ function fixture(
   return {
     simctl,
     reader,
-    permissions: new IosSimulatorPermissions(device, simctl, reader, undefined, verifier),
+    permissions: new IosSimulatorPermissions(device, {
+      simctl,
+      tccReader: reader,
+      photosVerifier: verifier,
+    }),
   };
 }
 const command = (action: string, permission: string) => [
@@ -557,7 +561,10 @@ describe("captured Photos readback", () => {
     ),
   )("full2 overrides stale PhotosAdd for %j", async ({ query }) => {
     const reader = new FixtureTccReader("full2");
-    const permissions = new IosSimulatorPermissions(device27, new FakeSimctl(), reader);
+    const permissions = new IosSimulatorPermissions(device27, {
+      simctl: new FakeSimctl(),
+      tccReader: reader,
+    });
     const result = await permissions.getPermissions(appId, query);
     const stored = (await loadPhotosTccCase("full2")).rows.find(
       (row) => row.service === "kTCCServicePhotosAdd",
@@ -588,7 +595,10 @@ describe("captured Photos readback", () => {
 
   test.each([...photosTccCases])("native probe agrees with add-only readback: %s", async (name) => {
     const reader = new FixtureTccReader(name);
-    const permissions = new IosSimulatorPermissions(device27, new FakeSimctl(), reader);
+    const permissions = new IosSimulatorPermissions(device27, {
+      simctl: new FakeSimctl(),
+      tccReader: reader,
+    });
     const { probe } = await loadPhotosTccCase(name);
     const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);
     const [photos, add] = result.permissions;
@@ -615,8 +625,7 @@ describe("iOS 26.5 Photos captures", () => {
     const reader = new FixtureTccReader(name, "ios26.5");
     const permissions = new IosSimulatorPermissions(
       { ...device, iosVersion: "26.5" },
-      new FakeSimctl(),
-      reader,
+      { simctl: new FakeSimctl(), tccReader: reader },
     );
     const { probe, rows } = await loadPhotosTccCase(name, "ios26.5");
     const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);

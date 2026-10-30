@@ -75,10 +75,17 @@ export class Clipboard {
 
   constructor(
     device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    ctrlProxyFactory?: ClipboardCtrlProxyFactory,
-    hierarchyProvider?: KeyboardHierarchyProvider,
-    timer: Timer = defaultTimer,
+    {
+      adbFactory = defaultAdbClientFactory,
+      ctrlProxyFactory,
+      hierarchyProvider,
+      timer = defaultTimer,
+    }: {
+      adbFactory?: AdbClientFactory;
+      ctrlProxyFactory?: ClipboardCtrlProxyFactory;
+      hierarchyProvider?: KeyboardHierarchyProvider;
+      timer?: Timer;
+    } = {},
   ) {
     this.device = device;
     this.adbFactory = adbFactory;

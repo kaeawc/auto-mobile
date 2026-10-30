@@ -177,7 +177,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.clearVerifier = this.createClearVerifier();
     this.passwordRouting = this.createPasswordRouting();
     this.iosTyper = this.createIosTyper();
-    this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
+    this.inputKey = dependencies.inputKey ?? new InputKey(device, { adbFactory });
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
     this.keyEventSupport = this.createKeyEventSupport();
     this.imeSpanService =

@@ -32,7 +32,7 @@ const constructors: [string, () => object][] = [
   ["SwipeAtCoordinate", () => new SwipeAtCoordinate(device, adb, { timer })],
   ["DragAndDrop", () => new DragAndDrop(device, adb, timer)],
   ["SwipeOn", () => new SwipeOn(device, adb, { timer })],
-  ["LaunchApp", () => new LaunchApp(device, adb, new FakeSimctl(), timer)],
+  ["LaunchApp", () => new LaunchApp(device, { adb, simctl: new FakeSimctl(), timer })],
   ["RealObserveScreen", () => new RealObserveScreen(device, factory, undefined, timer)],
 ];
 const clearRegistries = (): void => {

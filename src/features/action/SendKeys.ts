@@ -469,9 +469,7 @@ export class SendKeys {
           });
           const result = await tap.execute(
             { ...selector, ...options, action: "focus", display },
-            undefined,
-            signal,
-            { throwOnKeyboardOcclusion: true },
+            { signal, recovery: { throwOnKeyboardOcclusion: true } },
           );
           return {
             success: result.success,

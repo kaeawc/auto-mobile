@@ -24,6 +24,7 @@ import {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { isWatchProvisionRequest, provisionWatchDevice } from "./deviceToolsWatchProvision";
 import { registerDaemonDeviceDeletion } from "../daemon/daemonDeviceDeletion";
+import { deleteWatchAsDaemon } from "./deviceToolsWatchDaemonDelete";
 import {
   killDeviceSchema,
   listDeviceImagesOutputSchema,
@@ -52,6 +53,10 @@ export function registerDeviceTools() {
   // The daemon's own deletions (abandoned broker bindings, #11174) run the same verified workflow with
   // no caller: the broker binding and session-holder refusals guard callers, not the daemon itself.
   registerDaemonDeviceDeletion((args, signal) => {
+    if (args.target.platform === "watchos") {
+      // A broker watch binding's watch (#15882): deleteDevice's watch path, run as the daemon.
+      return deleteWatchAsDaemon(args, signal);
+    }
     const deps = getDeviceToolsDependencies();
     return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));
   });

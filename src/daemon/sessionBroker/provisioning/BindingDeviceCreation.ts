@@ -20,7 +20,9 @@ import {
   bindingMatches,
   type BindingAssignmentRecord,
   type BindingJournalEntry,
+  type BindingPlatform,
 } from "../registry/bindingRegistry";
+import { bindingReadinessLabel } from "./bindingReadiness";
 import { deviceStableId } from "../registry/deviceIdentity";
 import { provisionableSpec } from "./DefaultManagedSpecResolver";
 import { ReconcileAbort, type BindingReconcileFailure } from "./ReconcileAbort";
@@ -77,7 +79,8 @@ export interface BindingDeviceCreationDependencies {
 /** Publishing and session ownership remain with the reconciler. */
 export interface BindingDeviceCreationHost {
   checkBudget(request: BindingReconcileRequest): void;
-  isAutomationReady(provisioned: BindingProvisionedDevice): boolean;
+  /** Automation readiness on Android and iOS; booted with a session on watchOS. */
+  isBindingReady(platform: BindingPlatform, provisioned: BindingProvisionedDevice): boolean;
   releaseSession(sessionUuid: string): Promise<void>;
   readyOrReleaseOnBusy(
     provisioned: BindingProvisionedDevice,
@@ -93,12 +96,13 @@ export interface BindingDeviceCreationHost {
 
 /**
  * Whether the device counts toward its platform's boot limit, by the gates' own definition: a
- * simulator that is booting or shutting down holds its binding although it is not listed as running.
+ * simulator (iPhone or Apple Watch, both counted by the simulator gate) that is booting or shutting
+ * down holds its binding although it is not listed as running.
  */
 function holdsBootBinding(device: DeviceInfo): boolean {
   return (
     device.isRunning ||
-    (device.platform === "ios" &&
+    (device.platform !== "android" &&
       device.state !== undefined &&
       OCCUPYING_SIMULATOR_STATES.has(device.state))
   );
@@ -178,20 +182,25 @@ export class BindingDeviceCreation {
             deadlineMs: request.deadlineMs,
             signal: request.signal,
           });
+        const platform = request.platform;
         const provision = () =>
-          withVerifiedBootCapacity(
-            {
-              platform: request.platform,
-              name,
-              spec: {
-                runtime: request.requestedSpec.runtime,
-                deviceType: context.resolvedSpec.deviceType,
-              },
-            },
-            capacityVerifiedAtMs,
-            this.deps.timer,
-            provisionDevice,
-          );
+          platform === "watchos"
+            ? // Only the Android/iOS exact provisioner consumes a pre-create capacity proof; a
+              // watch's boot is admitted (or refused at the limit) by the simulator boot gate.
+              provisionDevice()
+            : withVerifiedBootCapacity(
+                {
+                  platform,
+                  name,
+                  spec: {
+                    runtime: request.requestedSpec.runtime,
+                    deviceType: context.resolvedSpec.deviceType,
+                  },
+                },
+                capacityVerifiedAtMs,
+                this.deps.timer,
+                provisionDevice,
+              );
         provisioned = options.bootReservation
           ? await options.bootReservation.run(provision)
           : await provision();
@@ -201,20 +210,21 @@ export class BindingDeviceCreation {
           error,
         });
       }
+      const ready = this.host.isBindingReady(request.platform, provisioned);
       return await this.host.readyOrReleaseOnBusy(provisioned, async (release) => {
-        if (provisioned.created && !this.host.isAutomationReady(provisioned)) {
+        if (provisioned.created && !ready) {
           this.deps.journal.markRemovalIntended(entry);
         }
         entry = await this.recordCreated(context, entry, provisioned.device, {
           release,
-          removalRequested: provisioned.created && !this.host.isAutomationReady(provisioned),
+          removalRequested: provisioned.created && !ready,
         });
-        if (!this.host.isAutomationReady(provisioned)) {
+        if (!ready) {
           return await this.discardUncommitted(context, provisioned, entry, {
             release,
             reason: failure(
               "readiness_incomplete",
-              `Device '${name}' did not reach automation readiness.`,
+              `Device '${name}' did not reach ${bindingReadinessLabel(request.platform)}.`,
             ),
           });
         }

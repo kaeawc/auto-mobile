@@ -1,6 +1,7 @@
 import {
   androidBindingSpecSchema,
   iosBindingSpecSchema,
+  watchBindingSpecSchema,
 } from "../../../utils/provisionDeviceSpecSchemas";
 import type { BindingRequestedSpec } from "../provisioning/reconciler";
 import {
@@ -11,6 +12,7 @@ import {
 import {
   journalCreationPlatform,
   type BindingBindingCommit,
+  type BindingPlatform,
   type BindingJournalEntry,
 } from "./bindingRegistry";
 export function skippedReason(entry: BindingJournalEntry): BindingJournalBlockReason {
@@ -46,6 +48,13 @@ export function toRecord(
   };
 }
 
+/** A watch spec is never read with the iOS schema: it has its own exact runtime + device type. */
+const SPEC_SCHEMAS = {
+  android: androidBindingSpecSchema,
+  ios: iosBindingSpecSchema,
+  watchos: watchBindingSpecSchema,
+} as const satisfies Record<BindingPlatform, unknown>;
+
 /**
  * The entry's recorded requested spec, validated; undefined when it no longer parses. A managed
  * binding's requested spec may omit `deviceType` (owner decision Q4), so it is read with the managed
@@ -54,12 +63,6 @@ export function toRecord(
 export function recordedSpec(
   entry: Pick<BindingJournalEntry, "platform" | "target">,
 ): BindingRequestedSpec | undefined {
-  const platform = journalCreationPlatform(entry);
-  if (platform === "watchos") {
-    // No watch spec is managed yet (#15882 part 1): never read one with the iOS schema.
-    return undefined;
-  }
-  const schema = platform === "android" ? androidBindingSpecSchema : iosBindingSpecSchema;
-  const parsed = schema.safeParse(entry.target.requestedSpec);
+  const parsed = SPEC_SCHEMAS[journalCreationPlatform(entry)].safeParse(entry.target.requestedSpec);
   return parsed.success ? parsed.data : undefined;
 }

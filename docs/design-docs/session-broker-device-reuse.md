@@ -249,8 +249,9 @@ to the snapshot fallback if configured, else destroys).
   kind: Android emulators of any form factor (phone, Wear OS, TV, Automotive),
   iPhone/iPad simulators (a CarPlay screen is a display of its iPhone, not a
   device) and Apple Watch simulators (`watchos` bindings and running
-  `ambroker-` watches are charged; the broker cannot create a watch binding yet
-  and refuses one as `spec_unsupported`).
+  `ambroker-` watches are charged). A watch binding is created, reused and
+  deleted like an iOS simulator binding and is ready once booted; see
+  `docs/decisions/watchos-platform.md`.
 - `idlePoolCap`: devices retained between sessions; more warm devices cost disk,
   memory and simulator/emulator capacity. Start small, from concurrent bursts and
   measured reuse demand.

@@ -139,6 +139,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "provisionDeviceDependencyOverrides",
     "provisionDeviceLifecycleByError",
     "provisionDeviceProfileSchema",
+    "provisionDeviceRegistrationSchema",
     "provisionDeviceSchema",
     "provisionDeviceTimeoutError",
     "publishWarmDeviceReady",

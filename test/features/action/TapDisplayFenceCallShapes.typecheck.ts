@@ -9,15 +9,21 @@ import type { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBac
 // Indexed private method types and Function.bind preserve the real signatures.
 declare const fence: DisplayFence;
 declare const tapOnElement: TapOnElement;
-declare const element: Parameters<TapOnElement["executeAndroidTap"]>[4];
-void tapOnElement.executeAndroidTap("tap", 10, 10, 50, element);
-void tapOnElement.executeAndroidTap("tap", 10, 10, 50, element, {
+declare const element: Parameters<TapOnElement["executeAndroidTap"]>[3];
+void tapOnElement.executeAndroidTap("tap", { x: 10, y: 10 }, 50, element);
+void tapOnElement.executeAndroidTap("tap", { x: 10, y: 10 }, 50, element, {
   options: {
     action: "tap",
     displayFence: fence,
   },
 });
-const talkBackFlag = tapOnElement.executeAndroidTap.bind(tapOnElement, "tap", 10, 10, 50, element);
+const talkBackFlag = tapOnElement.executeAndroidTap.bind(
+  tapOnElement,
+  "tap",
+  { x: 10, y: 10 },
+  50,
+  element,
+);
 void talkBackFlag({ isTalkBackEnabled: false });
 // @ts-expect-error The TalkBack flag is a boolean, never a display fence.
 void talkBackFlag({ isTalkBackEnabled: fence });
@@ -32,8 +38,8 @@ void talkBackFlag({ isTalkBackEnabled: { assertCurrent: 1 } });
 declare const call0: TapOnElement["executeAndroidTap"];
 declare const args0: Parameters<typeof call0>;
 void call0(...args0);
-const options0 = call0.bind(undefined, args0[0], args0[1], args0[2], args0[3], args0[4]);
-void options0(args0[5]);
+const options0 = call0.bind(undefined, args0[0], args0[1], args0[2], args0[3]);
+void options0(args0[4]);
 void options0({ options: { action: "tap", displayFence: fence } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
 void options0({ options: { action: "tap", displayFence: [] } });

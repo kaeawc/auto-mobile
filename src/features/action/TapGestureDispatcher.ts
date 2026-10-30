@@ -129,8 +129,7 @@ export class TapGestureDispatcher {
 
   async executeAndroidTap(
     action: string,
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     element: Element,
     {
@@ -143,6 +142,7 @@ export class TapGestureDispatcher {
       isTalkBackEnabled?: boolean;
     } = {},
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    const { x, y } = point;
     const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled =
@@ -576,14 +576,11 @@ export class TapGestureDispatcher {
       await options.verification.dispatch(retryPoint);
       return;
     }
-    await this.host.executeAndroidTap(
-      action,
-      retryPoint.x,
-      retryPoint.y,
-      longPressDuration,
-      retryTarget,
-      { signal, options: { ...options, resolvedHierarchy: probe.hierarchy }, isTalkBackEnabled },
-    );
+    await this.host.executeAndroidTap(action, retryPoint, longPressDuration, retryTarget, {
+      signal,
+      options: { ...options, resolvedHierarchy: probe.hierarchy },
+      isTalkBackEnabled,
+    });
   }
 
   isScreenReaderNavigationEnabled(options?: TapOnElementOptions): boolean {

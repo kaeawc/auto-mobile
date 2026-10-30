@@ -839,8 +839,7 @@ export class TapExecution {
       android: async () => {
         target.screenReaderNavigation = await this.host.executeAndroidTap(
           target.action,
-          tapPoint.x,
-          tapPoint.y,
+          tapPoint,
           target.longPressDuration,
           target.tapElement,
           {

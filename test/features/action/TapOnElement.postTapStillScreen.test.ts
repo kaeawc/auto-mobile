@@ -370,7 +370,7 @@ describe("Android post-tap wait with the real CtrlProxy cache (#9618)", () => {
     let verified: Awaited<ReturnType<TapOnElement["deriveTapEffectAfterPostTapObservation"]>>;
     try {
       const element = { text: "B", bounds: { left: 0, top: 100, right: 200, bottom: 160 } };
-      await h.tap.executeAndroidTap("tap", 100, 130, 0, element, {});
+      await h.tap.executeAndroidTap("tap", { x: 100, y: 130 }, 0, element, {});
       // The existing retry seam refreshes its evidence before deciding whether
       // to dispatch again. Supply the real post-tap waiter, not a scripted verdict.
       await h.tap.retryTapIfNoChange(

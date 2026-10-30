@@ -60,7 +60,7 @@ function harness(observation: ObserveResult, platform: "ios" | "android" = "ios"
   tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
   });
-  tap.executeAndroidTap = async (_action, x, y) => {
+  tap.executeAndroidTap = async (_action, { x, y }) => {
     points.push({ x, y });
   };
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({

@@ -110,7 +110,7 @@ test.each(
     return createExecResult("", "");
   });
   spyOn(InputKey.prototype, "press").mockImplementation(
-    async (_key, _timeout, _context, _args, routing) => {
+    async (_key, _timeout, _context, routing) => {
       routing?.onDispatch?.();
       secondDispatches.push("key");
       return { success: true, key: "enter", keyCode: "KEYCODE_ENTER" };

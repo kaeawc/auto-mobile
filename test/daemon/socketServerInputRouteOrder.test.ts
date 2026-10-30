@@ -117,9 +117,13 @@ async function drive(route: Route, options: Parameters<typeof harness>[0] = {}) 
   const { server, events } = harness(options);
   const press = PressButton.prototype;
   const originalPress = press.press;
-  press.press = async function (this: PressButton, ...args: unknown[]) {
+  press.press = async function (
+    this: PressButton,
+    _button: string,
+    options: { onDispatch?: () => void } = {},
+  ) {
     events.push("dispatch:pressButton");
-    (args[4] as (() => void) | undefined)?.();
+    options.onDispatch?.();
     return { success: true } as never;
   } as never;
   const request = { id: "1", type: "mcp_request", method: route.method, params: route.params };

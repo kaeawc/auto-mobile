@@ -29,10 +29,11 @@ test.each([false, true])(
         calls.push(args);
         expect(args[0]).toBe("AB");
         // Deadline is 1400; client lookup consumed 70ms of the 1000ms budget.
-        expect(args[1]).toBe(930);
+        expect(args[1]?.timeoutMs).toBe(930);
         timer.advanceTime(110);
-        if (args[2]) {
-          expect(await args[2]()).toMatchObject({ success: true });
+        const beforeKeyEvents = args[1]?.beforeKeyEvents;
+        if (beforeKeyEvents) {
+          expect(await beforeKeyEvents()).toMatchObject({ success: true });
         }
         return { success: true, charsSent: 2 };
       },
@@ -49,9 +50,9 @@ test.each([false, true])(
       }),
     ).toEqual({ success: true, charsSent: 2 });
     expect(calls).toHaveLength(1);
-    expect(calls[0].length).toBe(5);
-    expect(typeof calls[0][4]).toBe("function");
-    expect(calls[0][3]).toBe(signal);
+    expect(calls[0].length).toBe(2);
+    expect(typeof calls[0][1]?.onDispatch).toBe("function");
+    expect(calls[0][1]?.signal).toBe(signal);
     expect(validate.mock.calls).toEqual(present ? [["frame", 820]] : []);
   },
 );
@@ -72,7 +73,7 @@ test.each(["append", "validation"] as const)(
       totalTimeMs: 0,
     });
     const appendText = mock<AppendTextInput["appendText"]>(
-      async (_text, timeoutMs, beforeKeyEvent) => {
+      async (_text, { timeoutMs, beforeKeyEvents: beforeKeyEvent } = {}) => {
         expect(timeoutMs).toBe(930);
         timer.advanceTime(930);
         expect(beforeKeyEvent).toBeDefined();
@@ -112,7 +113,7 @@ test.each([false, true])(
     server.getAppendTextInput = () => ({
       fromCache: true,
       input: {
-        appendText: async (text, _timeout, _validate, _signal, onDispatch) => {
+        appendText: async (text, { onDispatch } = {}) => {
           attempts++;
           if (attempts === 1) {
             if (firstSent) {

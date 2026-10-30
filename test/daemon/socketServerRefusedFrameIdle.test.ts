@@ -303,12 +303,12 @@ describe("a holder's control frame refused before it reaches the device", () => 
     });
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(() => proxyManager);
     spyOn(PressButton.prototype, "press").mockImplementation(async (button, ...rest) => ({
-      ...(await run("pressButton", 4)(button, ...rest)),
+      ...(await run("pressButton", 1)(button, ...rest)),
       button,
       keyCode: 3,
     }));
     spyOn(InputKey.prototype, "press").mockImplementation(async (key, ...rest) => ({
-      ...(await run("key", 4)(key, ...rest)),
+      ...(await run("key", 3)(key, ...rest)),
       key,
       keyCode: "KEYCODE_ENTER",
     }));
@@ -341,7 +341,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     );
     server.appendTextFactory = () => ({
       appendText: async (...args) => ({
-        ...(await run("appendText", 4)(...args)),
+        ...(await run("appendText", 1)(...args)),
         charsSent: args[0].length,
       }),
     });

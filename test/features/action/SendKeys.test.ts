@@ -470,7 +470,7 @@ function createTextClient(
       calls.push(`setKeyboardProfile:${id}`);
       return options.setKeyboardProfile?.(id) ?? { success: true, previousProfileId: "direct" };
     },
-    commitViaIme: async (text, priorImeId, _signal, delivery) => {
+    commitViaIme: async (text, priorImeId, _signal, { delivery } = {}) => {
       if (delivery === "clearField") {
         calls.push("clearField");
         return { success: true };
@@ -686,7 +686,7 @@ describe("SendKeys", () => {
       const result = await commitViaIme(...args);
       if (result.success) {
         // Model the device applying both the IME clear and the subsequent commit.
-        fieldText = args[3] === "clearField" ? "" : args[0];
+        fieldText = args[3]?.delivery === "clearField" ? "" : args[0];
       }
       return result;
     };
@@ -4235,7 +4235,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
     expect(calls).toEqual(["ime:next"]);
     expect(press).toHaveBeenCalledTimes(1);
-    expect(press).toHaveBeenCalledWith("tab", undefined, undefined, ["shift"]);
+    expect(press).toHaveBeenCalledWith("tab", undefined, undefined, { modifiers: ["shift"] });
   });
 
   test("forwards an IME action warning on semantic keys", async () => {

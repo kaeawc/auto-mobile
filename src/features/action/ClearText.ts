@@ -397,9 +397,11 @@ function isFocusedTextInputProperties(nodeProperties: Record<string, unknown>): 
 export async function clearTextWithKeyEvents(
   adb: AdbExecutor,
   count: number,
-  signal?: AbortSignal,
-  onDelete?: () => void,
-  supportsKeyCombination = false,
+  {
+    signal,
+    onDelete,
+    supportsKeyCombination,
+  }: { signal?: AbortSignal; onDelete?: () => void; supportsKeyCombination?: boolean } = {},
 ): Promise<void> {
   signal?.throwIfAborted();
   await adb.executeCommand(
@@ -754,6 +756,6 @@ export class ClearText extends BaseVisualChange {
       this.androidKeyCombinationSupported,
       signal,
     );
-    await clearTextWithKeyEvents(this.adb, count, signal, undefined, supportsKeyCombination);
+    await clearTextWithKeyEvents(this.adb, count, { signal, supportsKeyCombination });
   }
 }

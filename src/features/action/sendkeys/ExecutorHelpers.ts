@@ -81,8 +81,10 @@ export function getAutoImeFallback(
   operation: SendKeysOperation,
   requestedMode: SendKeysTypingMode,
   keyboardProfile: KeyboardProfileId | undefined,
-  resolvedMode: AndroidSendKeysTypingMode,
-  passwordField?: boolean,
+  {
+    resolvedMode,
+    passwordField,
+  }: { resolvedMode: AndroidSendKeysTypingMode; passwordField?: boolean },
 ): AndroidSendKeysTypingMode | undefined {
   // A password field typed through the IME has no safe fallback: eventAll would need the
   // up-front deliverability check, and a mid-run switch could leave part of it typed.

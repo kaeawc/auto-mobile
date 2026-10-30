@@ -66,7 +66,7 @@ describe("IME trace opt-in", () => {
     setDebugModeEnabled(true);
     const h = harness("hello");
     h.client.supportsImeTrace = async () => true;
-    h.client.commitViaIme = async (_text, _prior, _signal, _delivery, trace) => {
+    h.client.commitViaIme = async (_text, _prior, _signal, { delivery: _delivery, trace } = {}) => {
       expect(trace).toBe(true);
       return {
         success,
@@ -83,7 +83,7 @@ describe("IME trace opt-in", () => {
     setDebugModeEnabled(true);
     const h = harness("different");
     h.client.supportsImeTrace = async () => true;
-    h.client.commitViaIme = async (_text, _prior, _signal, delivery, trace) => {
+    h.client.commitViaIme = async (_text, _prior, _signal, { delivery, trace } = {}) => {
       expect(trace).toBe(true);
       return {
         success: true,
@@ -107,7 +107,7 @@ describe("IME trace opt-in", () => {
     const clearLines = ["seq=1 t=0 event=commitStart", "seq=2 t=0 event=complete"];
     const commitLines = ["seq=3 t=0 event=commitStart", "seq=4 t=0 event=complete"];
     h.client.supportsImeTrace = async () => true;
-    h.client.commitViaIme = async (_text, _prior, _signal, delivery) => ({
+    h.client.commitViaIme = async (_text, _prior, _signal, { delivery } = {}) => ({
       success: true,
       insertedText: delivery === "clearField" ? "" : "hello",
       imeTrace: delivery === "clearField" ? clearLines : [...clearLines, ...commitLines],
@@ -127,7 +127,7 @@ describe("IME trace opt-in", () => {
     const h = harness("hello");
     const lines = Array.from({ length: 600 }, (_, index) => `seq=${index + 1} t=0 event=complete`);
     h.client.supportsImeTrace = async () => true;
-    h.client.commitViaIme = async (_text, _prior, _signal, delivery) => ({
+    h.client.commitViaIme = async (_text, _prior, _signal, { delivery } = {}) => ({
       success: true,
       insertedText: delivery === "clearField" ? "" : "hello",
       imeTrace: delivery === "clearField" ? lines.slice(0, 350) : lines.slice(300),
@@ -211,7 +211,7 @@ describe("IME trace opt-in", () => {
     setDebugModeEnabled(debug);
     const h = harness("hello");
     h.client.supportsImeTrace = async () => capability;
-    h.client.commitViaIme = async (_text, _prior, _signal, _delivery, trace) => {
+    h.client.commitViaIme = async (_text, _prior, _signal, { delivery: _delivery, trace } = {}) => {
       expect(trace).toBeUndefined();
       return { success: true, insertedText: "hello" };
     };

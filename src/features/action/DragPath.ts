@@ -333,8 +333,7 @@ export class DragPath extends BaseVisualChange {
     const result = await this.iosClient.requestPathGesture(
       timeline,
       resolveGestureCtrlProxyTimeoutMs(plan.totalMs),
-      observation.viewHierarchy?.frameContext,
-      call.signal,
+      { frameContext: observation.viewHierarchy?.frameContext, signal: call.signal },
     );
     if (!result.success) {
       const note =

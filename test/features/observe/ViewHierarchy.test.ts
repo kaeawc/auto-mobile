@@ -909,8 +909,9 @@ describe("ViewHierarchy", function () {
           _waitForFresh?: boolean,
           _timeout?: number,
           _perf?: unknown,
-          _skipWaitForFresh?: boolean,
-          { signal }: { minTimestamp?: number; signal?: AbortSignal } = {},
+          {
+            signal,
+          }: { skipWaitForFresh?: boolean; minTimestamp?: number; signal?: AbortSignal } = {},
         ) => {
           receivedSignal = signal;
           // A wedged CtrlProxy: this settles ONLY when the caller cancels.

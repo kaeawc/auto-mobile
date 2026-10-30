@@ -531,16 +531,10 @@ describe("CtrlProxyVoiceOver", function () {
 
       try {
         const bounds = { left: 0, top: 50, right: 50, bottom: 90 };
-        const resultPromise = client.requestVoiceOverActivate(
-          "Row",
-          "long_press",
-          5000,
-          undefined,
-          {
-            bounds,
-            duration: 1750,
-          },
-        );
+        const resultPromise = client.requestVoiceOverActivate("Row", "long_press", 5000, {
+          bounds,
+          duration: 1750,
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -647,8 +641,7 @@ describe("CtrlProxyVoiceOver", function () {
           "long_press",
           "com.test.app:id/submit_button",
           undefined,
-          5000,
-          { duration: 1750 },
+          { timeoutMs: 5000, duration: 1750 },
         );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
@@ -684,13 +677,10 @@ describe("CtrlProxyVoiceOver", function () {
       controller.abort(new Error("openLink deadline exceeded"));
 
       try {
-        const result = await client.requestAction(
-          "system_alert_accept",
-          undefined,
-          undefined,
-          5000,
-          { abortSignal: controller.signal },
-        );
+        const result = await client.requestAction("system_alert_accept", undefined, undefined, {
+          timeoutMs: 5000,
+          abortSignal: controller.signal,
+        });
         const sentTypes = (getSocket()?.sentMessages ?? []).map(
           (raw) => (JSON.parse(raw) as { type?: string }).type,
         );
@@ -714,7 +704,8 @@ describe("CtrlProxyVoiceOver", function () {
       const cancellation = new Error("openLink deadline exceeded");
 
       try {
-        const result = client.requestAction("system_alert_accept", undefined, undefined, 5000, {
+        const result = client.requestAction("system_alert_accept", undefined, undefined, {
+          timeoutMs: 5000,
           abortSignal: controller.signal,
         });
         const socket = await waitForSocket(getSocket);

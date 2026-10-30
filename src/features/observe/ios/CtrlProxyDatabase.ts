@@ -92,8 +92,12 @@ export class CtrlProxyDatabase {
     appId: string,
     databasePath: string,
     query: string,
-    timeout: number | SdkCapabilityQueryOptions = 5000,
-    { sessionId, mutationToken, readOnly }: ExecuteSqlOptions = {},
+    {
+      timeout = 5000,
+      sessionId,
+      mutationToken,
+      readOnly,
+    }: ExecuteSqlOptions & { timeout?: number | SdkCapabilityQueryOptions } = {},
   ): Promise<SQLResult> {
     const result = await this.request<ExecuteSqlResult>(
       "execute_sql",
@@ -106,8 +110,7 @@ export class CtrlProxyDatabase {
         ...(mutationToken ? { mutationToken } : {}),
         ...(readOnly ? { readOnly: true } : {}),
       },
-      timeout,
-      "Execute SQL",
+      { timeout, operationName: "Execute SQL" },
     );
 
     return result.queryType === "mutation"
@@ -134,8 +137,7 @@ export class CtrlProxyDatabase {
       "list_databases",
       "list_databases_result",
       { appId },
-      timeout,
-      "List databases",
+      { timeout, operationName: "List databases" },
     );
     return result.databases ?? [];
   }
@@ -148,8 +150,7 @@ export class CtrlProxyDatabase {
       "storage_capabilities",
       "storage_capabilities_result",
       { appId },
-      timeout,
-      "Get storage capabilities",
+      { timeout, operationName: "Get storage capabilities" },
     );
     return (
       result.capabilities ?? {
@@ -171,8 +172,7 @@ export class CtrlProxyDatabase {
       "list_tables",
       "list_tables_result",
       { appId, databasePath },
-      timeout,
-      "List tables",
+      { timeout, operationName: "List tables" },
     );
     return result.tables ?? [];
   }
@@ -181,15 +181,17 @@ export class CtrlProxyDatabase {
     appId: string,
     databasePath: string,
     table: string,
-    { limit = 50, offset = 0 }: TablePage = {},
-    timeout: number | SdkCapabilityQueryOptions = 5000,
+    {
+      limit = 50,
+      offset = 0,
+      timeout = 5000,
+    }: TablePage & { timeout?: number | SdkCapabilityQueryOptions } = {},
   ): Promise<TableDataResult> {
     const result = await this.request<TableDataResponseResult>(
       "get_table_data",
       "table_data_result",
       { appId, databasePath, table, limit, offset },
-      timeout,
-      "Get table data",
+      { timeout, operationName: "Get table data" },
     );
     return {
       columns: result.columns ?? [],
@@ -209,8 +211,7 @@ export class CtrlProxyDatabase {
       "get_table_structure",
       "table_structure_result",
       { appId, databasePath, table },
-      timeout,
-      "Get table structure",
+      { timeout, operationName: "Get table structure" },
     );
     return { columns: result.columns ?? [], diagnostic: result.diagnostic };
   }
@@ -219,8 +220,10 @@ export class CtrlProxyDatabase {
     type: string,
     responseType: string,
     payload: Record<string, unknown>,
-    timeout: number | SdkCapabilityQueryOptions,
-    operationName: string,
+    {
+      timeout,
+      operationName,
+    }: { timeout: number | SdkCapabilityQueryOptions; operationName: string },
   ): Promise<T> {
     const startTime = this.context.timer.now();
     // A bare timeout never attaches ambient cancellation: a dispatched database request

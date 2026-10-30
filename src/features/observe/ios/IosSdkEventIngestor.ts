@@ -171,7 +171,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         if (version?.accepted === false) {
           return;
         }
-        await this.recordAcceptedSdkEvent(event, recorder, ts, p, applicationId);
+        await this.recordAcceptedSdkEvent(event, recorder, ts, { p, applicationId });
       } finally {
         // Restore previous context so Android events aren't affected
         recorder.setContext(prevContext.deviceId, prevContext.sessionId);
@@ -209,8 +209,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     event: SdkEvent,
     recorder: IosTelemetryRecorder,
     ts: number,
-    p: Record<string, unknown>,
-    applicationId: string | null,
+    { p, applicationId }: { p: Record<string, unknown>; applicationId: string | null },
   ): Promise<unknown> {
     switch (event.type) {
       case "network_request":
@@ -234,7 +233,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
       case "storage_changed":
         return this.recordStorageSdkEvent(recorder, ts, p, applicationId);
       default:
-        return this.recordUnknownSdkEvent(recorder, ts, p, applicationId, event);
+        return this.recordUnknownSdkEvent(recorder, ts, p, { applicationId, event });
     }
   }
 
@@ -553,8 +552,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     recorder: IosTelemetryRecorder,
     ts: number,
     p: Record<string, unknown>,
-    applicationId: string | null,
-    event: SdkEvent,
+    { applicationId, event }: { applicationId: string | null; event: SdkEvent },
   ): Promise<void> {
     // Record unknown types as log events
     return recorder.recordLogEvent({

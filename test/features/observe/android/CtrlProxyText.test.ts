@@ -1042,7 +1042,7 @@ describe("Android non-idempotent text outcomes", () => {
               onDispatch,
             },
           })
-        : text.requestImeAction("send", 5000, undefined, signal, onDispatch);
+        : text.requestImeAction("send", 5000, undefined, { abortSignal: signal, onDispatch });
 
     test.each(["timeout", "disconnect", "abort"])(
       `${operation}: unconfirmed %s stops replay`,
@@ -1165,8 +1165,10 @@ test("Android client forwards appended transport controls for insert and IME", a
     expect(insert.mock.calls).toEqual([
       ["abc", { timeoutMs: 1234, options: { expectedSuffix: "x" }, transport }],
     ]);
-    await client.requestImeAction("send", 1234, undefined, signal, onDispatch);
-    expect(ime.mock.calls).toEqual([["send", 1234, undefined, signal, onDispatch]]);
+    await client.requestImeAction("send", 1234, undefined, { abortSignal: signal, onDispatch });
+    expect(ime.mock.calls).toEqual([
+      ["send", 1234, undefined, { abortSignal: signal, onDispatch }],
+    ]);
   } finally {
     insert.mockRestore();
     ime.mockRestore();
@@ -1197,15 +1199,11 @@ describe("semantic IME dispatch outcomes", () => {
     async (action) => {
       const h = createIosDelegateHarness();
       let dispatches = 0;
-      const pending = new CtrlProxyText(h.context).requestImeAction(
-        action,
-        5000,
-        undefined,
-        undefined,
-        () => {
+      const pending = new CtrlProxyText(h.context).requestImeAction(action, 5000, undefined, {
+        onDispatch: () => {
           dispatches++;
         },
-      );
+      });
       await Promise.resolve();
       h.advanceTime(5000);
       expect(await pending).toMatchObject({ success: false, action, retryable: false });

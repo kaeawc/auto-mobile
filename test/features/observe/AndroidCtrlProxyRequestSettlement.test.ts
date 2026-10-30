@@ -125,7 +125,8 @@ const methods: Method[] = [
     name: `clipboard ${action}`,
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestClipboard(action, action === "copy" ? "text" : undefined, 50, perf, {
+      h.client.requestClipboard(action, action === "copy" ? "text" : undefined, 50, {
+        perf,
         signal,
       }),
   })),
@@ -245,7 +246,8 @@ const methods: Method[] = [
   {
     name: "ime action",
     signal: true,
-    invoke: (h, signal) => h.client.testHooks.text().requestImeAction("done", 50, perf, signal),
+    invoke: (h, signal) =>
+      h.client.testHooks.text().requestImeAction("done", 50, perf, { abortSignal: signal }),
   },
   { name: "select all", invoke: (h) => h.client.testHooks.text().requestSelectAll(50) },
   { name: "insert text state", invoke: (h) => h.client.testHooks.text().requestInsertTextState() },

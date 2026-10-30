@@ -87,7 +87,7 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
       undefined,
       false,
       undefined,
-      50,
+      { timeoutMs: 50 },
     );
 
     expect(result).toBeNull();
@@ -110,7 +110,7 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
       undefined,
       false,
       undefined,
-      50,
+      { timeoutMs: 50 },
     );
     timer.advanceTime(50);
 
@@ -131,7 +131,7 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
       undefined,
       false,
       controller.signal,
-      100,
+      { timeoutMs: 100 },
     );
 
     await Promise.resolve();
@@ -154,7 +154,7 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
       undefined,
       false,
       undefined,
-      5_000,
+      { timeoutMs: 5_000 },
     );
 
     await expect(request).rejects.toBeInstanceOf(ActionableError);
@@ -176,7 +176,7 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
       undefined,
       false,
       undefined,
-      5_000,
+      { timeoutMs: 5_000 },
     );
 
     await expect(request).rejects.toBeInstanceOf(ActionableError);
@@ -199,7 +199,7 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
       undefined,
       false,
       undefined,
-      5_000,
+      { timeoutMs: 5_000 },
     );
 
     await expect(request).rejects.toBeInstanceOf(ActionableError);

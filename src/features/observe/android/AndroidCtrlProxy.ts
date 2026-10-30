@@ -139,8 +139,7 @@ export interface AndroidCtrlProxy
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
-    options?: HierarchySyncRequestOptions,
+    options?: HierarchySyncRequestOptions & { timeoutMs?: number },
   ): Promise<{
     hierarchy: AccessibilityHierarchy;
     perfTiming?: AndroidPerfTiming[];
@@ -221,8 +220,7 @@ export interface AndroidCtrlProxy
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: { abortSignal?: AbortSignal; onDispatch?: () => void },
   ): Promise<A11yImeActionResult>;
 
   requestSelectAll(timeoutMs?: number, perf?: PerformanceTracker): Promise<A11ySelectAllResult>;
@@ -263,8 +261,7 @@ export interface AndroidCtrlProxy
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: DispatchOptions,
+    options?: DispatchOptions & { perf?: PerformanceTracker },
   ): Promise<A11yClipboardResult>;
 
   requestSettingsGet(

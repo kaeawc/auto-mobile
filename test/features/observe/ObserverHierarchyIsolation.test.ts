@@ -539,7 +539,7 @@ test("Android real client routes a changed correlated observer frame through the
       new NoOpPerformanceTracker(),
       false,
       undefined,
-      100,
+      { timeoutMs: 100 },
     );
     const requestId = await sentRequestId(socket, "request_hierarchy");
     socket.simulateMessage(
@@ -599,7 +599,7 @@ test("Android real client keeps an identical observer frame private", async () =
       new NoOpPerformanceTracker(),
       false,
       undefined,
-      100,
+      { timeoutMs: 100 },
     );
     const requestId = await sentRequestId(socket, "request_hierarchy");
     socket.simulateMessage(
@@ -636,7 +636,7 @@ test("iOS real client resolves a correlated observer frame without cache or stre
       new NoOpPerformanceTracker(),
       false,
       undefined,
-      100,
+      { timeoutMs: 100 },
     );
     const requestId = await sentRequestId(socket, "request_hierarchy");
     socket.simulateMessage(
@@ -675,7 +675,7 @@ test("Android uncorrelated push stays with owner and observer times out", async 
       new NoOpPerformanceTracker(),
       false,
       undefined,
-      100,
+      { timeoutMs: 100 },
     );
     await sentRequestId(socket, "request_hierarchy");
     socket.simulateMessage(
@@ -719,7 +719,7 @@ test.each(["android", "ios"] as const)(
         new NoOpPerformanceTracker(),
         false,
         undefined,
-        100,
+        { timeoutMs: 100 },
       );
       const requestId = await sentRequestId(sockets.socket(), "request_hierarchy");
       sockets
@@ -762,7 +762,9 @@ test.each(["android", "ios"] as const)(
       // Sample the owner as the observer rejects: auto-advance keeps moving fake time
       // afterwards and would expire the owner's own 1000 ms timeout next.
       const observed = await client
-        .requestHierarchySyncForObserver(new NoOpPerformanceTracker(), false, undefined, 30)
+        .requestHierarchySyncForObserver(new NoOpPerformanceTracker(), false, undefined, {
+          timeoutMs: 30,
+        })
         .then(
           () => ({ error: undefined, ownerPending: requests.isPending(ownerId) }),
           (error: unknown) => ({ error, ownerPending: requests.isPending(ownerId) }),
@@ -804,7 +806,7 @@ test.each(["android", "ios"] as const)(
         new NoOpPerformanceTracker(),
         false,
         undefined,
-        100,
+        { timeoutMs: 100 },
       );
       await Promise.resolve();
       sockets.socket().close();
@@ -1231,14 +1233,13 @@ test("Android observer preservation policies use separate flights and isolate on
       new NoOpPerformanceTracker(),
       false,
       undefined,
-      100,
+      { timeoutMs: 100 },
     );
     const preserved = client.requestHierarchySyncForObserver(
       new NoOpPerformanceTracker(),
       false,
       undefined,
-      100,
-      { preserveDisplayState: true },
+      { timeoutMs: 100, display: { preserveDisplayState: true } },
     );
     await sentRequestId(sockets.socket(), "request_hierarchy");
     const requests = sockets

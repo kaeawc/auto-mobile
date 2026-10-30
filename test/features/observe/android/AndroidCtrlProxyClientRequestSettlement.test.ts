@@ -160,7 +160,7 @@ const methods: RequestMethod[] = [
   {
     name: "requestClipboard",
     invoke: (h, s) =>
-      h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
+      h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, { perf, signal: s }),
   },
   {
     name: "requestSettingsGet",
@@ -295,7 +295,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestImeAction",
-    invoke: (h, s) => h.client.requestImeAction("done", LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) => h.client.requestImeAction("done", LONG_TIMEOUT_MS, perf, { abortSignal: s }),
   },
   {
     name: "requestClearText",
@@ -505,7 +505,8 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestHierarchySyncForObserver",
-    invoke: (h, s) => h.client.requestHierarchySyncForObserver(perf, false, s, LONG_TIMEOUT_MS),
+    invoke: (h, s) =>
+      h.client.requestHierarchySyncForObserver(perf, false, s, { timeoutMs: LONG_TIMEOUT_MS }),
   },
   {
     name: "requestScreenshot",
@@ -513,7 +514,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestHierarchySync",
-    invoke: (h, s) => h.client.requestHierarchySync(perf, false, s, LONG_TIMEOUT_MS),
+    invoke: (h, s) => h.client.requestHierarchySync(perf, false, s, { timeoutMs: LONG_TIMEOUT_MS }),
   },
   {
     name: "listPreferenceFiles",

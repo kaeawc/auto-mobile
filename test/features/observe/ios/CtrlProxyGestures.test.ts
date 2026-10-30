@@ -112,7 +112,7 @@ describe("iOS CtrlProxyGestures", () => {
       const gestures = new CtrlProxyGestures(context, undefined, async () => ["path_gesture_v1"]);
 
       const { sentMsg, result } = await callAndResolve(sent, requestManager, () =>
-        gestures.requestPathGesture(points, 5000, "frame-9"),
+        gestures.requestPathGesture(points, 5000, { frameContext: "frame-9" }),
       );
 
       expect(sentMsg.type).toBe("request_path_gesture");

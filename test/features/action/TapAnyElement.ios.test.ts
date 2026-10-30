@@ -136,7 +136,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       );
       expect(result.success).toBe(true);
       if (voiceOver) {
-        expect(activate).toHaveBeenCalledWith("Target Button", "long_press", 19000, undefined, {
+        expect(activate).toHaveBeenCalledWith("Target Button", "long_press", 19000, {
           bounds: makeClickableElement().bounds,
           duration: 17000,
         });
@@ -488,7 +488,6 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "Target Button",
       "activate",
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      undefined,
       { bounds: makeClickableElement().bounds, duration: undefined },
     );
   });
@@ -524,7 +523,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     });
 
     expect(result.success).toBe(true);
-    const timeouts = hierarchyRequests.mock.calls.map((call) => call[3]);
+    const timeouts = hierarchyRequests.mock.calls.map((call) => call[3]?.timeoutMs);
     // At least one refresh happened during the search loop, and every one of
     // them was bounded to (at most) the search window -- never left
     // `undefined`, which is what let the old code fall through to
@@ -620,16 +619,10 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration });
 
     expect(result.success).toBe(true);
-    expect(activateSpy).toHaveBeenCalledWith(
-      "Target Button",
-      "long_press",
-      duration + 2000,
-      undefined,
-      {
-        bounds: makeClickableElement().bounds,
-        duration,
-      },
-    );
+    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", duration + 2000, {
+      bounds: makeClickableElement().bounds,
+      duration,
+    });
   });
 
   test("VoiceOver longPress over 5s sizes the requestVoiceOverActivate timeout from the duration", async () => {
@@ -639,7 +632,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration: 6000 });
 
     expect(result.success).toBe(true);
-    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", 8000, undefined, {
+    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", 8000, {
       bounds: makeClickableElement().bounds,
       duration: 6000,
     });
@@ -717,13 +710,11 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(actionSpy).toHaveBeenCalledWith(
-      "activate",
-      "com.test.app:id/submit_button",
-      undefined,
-      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      { abortSignal: undefined, onDispatch: expect.any(Function) },
-    );
+    expect(actionSpy).toHaveBeenCalledWith("activate", "com.test.app:id/submit_button", undefined, {
+      timeoutMs: TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      abortSignal: undefined,
+      onDispatch: expect.any(Function),
+    });
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
     ]);
@@ -813,7 +804,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
       await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
-      const options = actionSpy.mock.calls[0]?.[4];
+      const options = actionSpy.mock.calls[0]?.[3];
       expect(options?.abortSignal).toBe(controller.signal);
       expect(typeof options?.onDispatch).toBe("function");
     });
@@ -912,13 +903,11 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(actionSpy).toHaveBeenCalledWith(
-      "activate",
-      "com.test.app:id/submit_button",
-      undefined,
-      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      { abortSignal: undefined, onDispatch: expect.any(Function) },
-    );
+    expect(actionSpy).toHaveBeenCalledWith("activate", "com.test.app:id/submit_button", undefined, {
+      timeoutMs: TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      abortSignal: undefined,
+      onDispatch: expect.any(Function),
+    });
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
     ]);
@@ -942,8 +931,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "long_press",
       "com.test.app:id/submit_button",
       undefined,
-      DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-      { duration: 1750, abortSignal: undefined, onDispatch: expect.any(Function) },
+      {
+        timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+        duration: 1750,
+        abortSignal: undefined,
+        onDispatch: expect.any(Function),
+      },
     );
     expect(fakeIosClient.getActionHistory()[0]?.duration).toBe(1750);
   });

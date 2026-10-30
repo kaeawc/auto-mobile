@@ -53,7 +53,7 @@ test("iOS tapAny refresh uses the observe projection within the caller budget", 
   const sync = spyOn(client, "requestHierarchySync");
   const capture = await tapAny.testHooks.refreshViewHierarchy(37, undefined, signal);
   expect(capture).not.toBeNull();
-  expect(sync).toHaveBeenCalledWith(undefined, false, signal, 37);
+  expect(sync).toHaveBeenCalledWith(undefined, false, signal, { timeoutMs: 37 });
   expect(directRead).not.toHaveBeenCalled();
   sync.mockRestore();
 });

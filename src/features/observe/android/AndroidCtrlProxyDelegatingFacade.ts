@@ -279,10 +279,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
+    { abortSignal, onDispatch }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<A11yImeActionResult> {
-    return this.text.requestImeAction(action, timeoutMs, perf, abortSignal, onDispatch);
+    return this.text.requestImeAction(action, timeoutMs, perf, { abortSignal, onDispatch });
   }
 
   async requestSelectAll(
@@ -617,8 +616,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
-    options?: HierarchySyncRequestOptions,
+    { timeoutMs, ...options }: HierarchySyncRequestOptions & { timeoutMs?: number } = {},
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, {
       timeoutMs,

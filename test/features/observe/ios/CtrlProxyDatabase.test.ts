@@ -265,7 +265,7 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       wireType: "execute_sql",
       timeoutMsg: `Execute SQL timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Execute SQL failed",
-      call: () => db.executeSQL("com.app", "/db/main.db", "SELECT 1", TIMEOUT),
+      call: () => db.executeSQL("com.app", "/db/main.db", "SELECT 1", { timeout: TIMEOUT }),
       successPayload: {
         success: true,
         totalTimeMs: 1,
@@ -309,7 +309,11 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       timeoutMsg: `Get table data timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Get table data failed",
       call: () =>
-        db.getTableData("com.app", "/db/main.db", "users", { limit: 50, offset: 0 }, TIMEOUT),
+        db.getTableData("com.app", "/db/main.db", "users", {
+          limit: 50,
+          offset: 0,
+          timeout: TIMEOUT,
+        }),
       successPayload: {
         success: true,
         totalTimeMs: 1,
@@ -384,14 +388,17 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
   // executeSQL queryType defaulting (the "queryType default unpinned" gap).
   describe("executeSQL queryType defaulting", () => {
     test("maps queryType 'mutation' to a rowsAffected result", async () => {
-      const promise = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", TIMEOUT);
+      const promise = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", {
+        timeout: TIMEOUT,
+      });
       await flush();
       h.resolveLast({ success: true, totalTimeMs: 1, queryType: "mutation", rowsAffected: 4 });
       expect(await promise).toEqual({ type: "mutation", rowsAffected: 4 });
     });
 
     test("sends readOnly on the wire only when the host classified a read (#10966)", async () => {
-      const read = db.executeSQL("com.app", "/db/main.db", "SELECT 1", TIMEOUT, {
+      const read = db.executeSQL("com.app", "/db/main.db", "SELECT 1", {
+        timeout: TIMEOUT,
         sessionId: "s",
         mutationToken: "t",
         readOnly: true,
@@ -401,7 +408,7 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       h.resolveLast({ success: true, totalTimeMs: 1, queryType: "query" });
       await read;
 
-      const write = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", TIMEOUT);
+      const write = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", { timeout: TIMEOUT });
       await flush();
       expect(h.sentMessages.at(-1)).not.toHaveProperty("readOnly");
       h.resolveLast({ success: true, totalTimeMs: 1, queryType: "mutation" });
@@ -409,14 +416,16 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
     });
 
     test("defaults rowsAffected to 0 for a mutation that omits it", async () => {
-      const promise = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", TIMEOUT);
+      const promise = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", {
+        timeout: TIMEOUT,
+      });
       await flush();
       h.resolveLast({ success: true, totalTimeMs: 1, queryType: "mutation" });
       expect(await promise).toEqual({ type: "mutation", rowsAffected: 0 });
     });
 
     test("treats an absent queryType as a query (not a mutation)", async () => {
-      const promise = db.executeSQL("com.app", "/db/main.db", "SELECT 1", TIMEOUT);
+      const promise = db.executeSQL("com.app", "/db/main.db", "SELECT 1", { timeout: TIMEOUT });
       await flush();
       // No queryType field at all: the default half must be 'query'.
       h.resolveLast({ success: true, totalTimeMs: 1, columns: ["n"], rows: [[1]] });
@@ -424,7 +433,7 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
     });
 
     test("defaults columns and rows to empty arrays for a query that omits them", async () => {
-      const promise = db.executeSQL("com.app", "/db/main.db", "SELECT 1", TIMEOUT);
+      const promise = db.executeSQL("com.app", "/db/main.db", "SELECT 1", { timeout: TIMEOUT });
       await flush();
       h.resolveLast({ success: true, totalTimeMs: 1, queryType: "query" });
       expect(await promise).toEqual({ type: "query", columns: [], rows: [] });

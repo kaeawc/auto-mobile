@@ -150,8 +150,7 @@ export class CtrlProxyVoiceOver {
     action: string,
     resourceId?: string,
     label?: string,
-    timeoutMs: number = 5000,
-    options?: CtrlProxyRequestActionOptions,
+    { timeoutMs = 5000, ...options }: CtrlProxyRequestActionOptions & { timeoutMs?: number } = {},
   ): Promise<CtrlProxyActionResult> {
     let dispatched = false;
     const result = await sendCommand<CtrlProxyActionResult>(this.context, {
@@ -316,8 +315,7 @@ export class CtrlProxyVoiceOver {
     label: string,
     action: "activate" | "long_press",
     timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-    perf?: PerformanceTracker,
-    options?: VoiceOverActivationOptions,
+    { perf, ...options }: VoiceOverActivationOptions & { perf?: PerformanceTracker } = {},
   ): Promise<CtrlProxyActionResult> {
     const signal = getAbortSignal();
     let dispatched = false;
@@ -333,7 +331,7 @@ export class CtrlProxyVoiceOver {
         idPrefix: "voiceover_action",
         responseType: "action",
         messageType: "request_action",
-        params: { label, action, bounds: options?.bounds, duration: options?.duration },
+        params: { label, action, bounds: options.bounds, duration: options.duration },
         timeoutMs,
         perf,
         cancelScreenshotBackoff: false,

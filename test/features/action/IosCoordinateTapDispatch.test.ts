@@ -393,7 +393,8 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
 
 describe("iOS requestAction dispatch tracking (#9971)", () => {
   const act = (h: ReturnType<typeof createIosDelegateHarness>, onDispatch: () => void) =>
-    new CtrlProxyVoiceOver(h.context).requestAction("activate", "com.app:id/go", undefined, 50, {
+    new CtrlProxyVoiceOver(h.context).requestAction("activate", "com.app:id/go", undefined, {
+      timeoutMs: 50,
       onDispatch,
     });
 

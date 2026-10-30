@@ -1,6 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 internal const val GUEST_AUDIO_CAPTURE_MAX_LEASE_MS = 30 * 60 * 1000L
+private const val READER_EXIT_TIMEOUT_MS = 1000L
+
+internal fun interface GuestAudioCaptureReader {
+  /** Returns false when the reader has not exited within the supplied bound. */
+  fun awaitExit(timeoutMs: Long): Boolean
+}
 
 internal interface GuestAudioCaptureRecord {
   fun start()
@@ -23,7 +29,7 @@ internal interface GuestAudioCapturePort {
   fun nowMs(): Long
 
   /** Enqueues work without waiting for it to finish. */
-  fun launchReader(read: () -> Unit)
+  fun launchReader(read: () -> Unit): GuestAudioCaptureReader
 
   fun schedule(delayMs: Long, task: () -> Unit): () -> Unit
 }
@@ -32,37 +38,62 @@ internal interface GuestAudioCapturePort {
 internal class GuestAudioCaptureController(private val port: GuestAudioCapturePort) {
   private class Lease(val id: String, val record: GuestAudioCaptureRecord, val startedAt: Long) {
     var cancelTimeout: (() -> Unit)? = null
+    var reader: GuestAudioCaptureReader? = null
   }
 
+  // Serializes callers through disposal; the reader never takes this lock.
+  private val operations = Any()
   private var held: Lease? = null
   // A read failure releases the record immediately, but the owner must still see why it ended.
   private var failure: Pair<String, String>? = null
 
-  @Synchronized
-  fun handle(op: String?, leaseId: String?): String {
-    return try {
-      expire()
-      if (leaseId.isNullOrEmpty()) return "absent"
-      when (op) {
-        "start" -> start(leaseId)
-        "status" -> status(leaseId)
-        "stop" -> {
-          if (held?.id != leaseId) {
-            if (failure?.first == leaseId) failure = null
-            "absent"
-          } else {
-            release(requireNotNull(held))
-            "stopped"
+  fun handle(op: String?, leaseId: String?): String =
+    synchronized(operations) {
+      val disposals = mutableListOf<Lease>()
+      val result =
+        try {
+          val expired =
+            synchronized(this) {
+              held
+                ?.takeIf { port.nowMs() - it.startedAt >= GUEST_AUDIO_CAPTURE_MAX_LEASE_MS }
+                ?.also { detach(it) }
+            }
+          expired
+            ?.let { dispose(it) }
+            ?.let {
+              return@synchronized failed(it)
+            }
+          synchronized(this) {
+            if (leaseId.isNullOrEmpty()) return@synchronized "absent"
+            when (op) {
+              "start" -> start(leaseId, disposals)
+              "status" -> status(leaseId, disposals)
+              "stop" -> {
+                val lease = held
+                if (lease?.id != leaseId) {
+                  if (failure?.first == leaseId) failure = null
+                  "absent"
+                } else {
+                  detach(lease)
+                  disposals.add(lease)
+                  "stopped"
+                }
+              }
+              else -> failed("unknown capture operation")
+            }
           }
+        } catch (error: Exception) {
+          failed(error.message ?: error.javaClass.simpleName)
         }
-        else -> failed("unknown capture operation")
+      try {
+        val disposalFailure = disposals.firstNotNullOfOrNull { dispose(it) }
+        if (disposalFailure == null) result else failed(disposalFailure)
+      } catch (error: Exception) {
+        failed(error.message ?: error.javaClass.simpleName)
       }
-    } catch (error: Exception) {
-      failed(error.message ?: error.javaClass.simpleName)
     }
-  }
 
-  private fun start(id: String): String {
+  private fun start(id: String, disposals: MutableList<Lease>): String {
     if (!port.hasRecordAudioPermission()) {
       return failed("RECORD_AUDIO is not granted to CtrlProxy; reinstall the CtrlProxy APK")
     }
@@ -79,20 +110,29 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
       held = lease
       lease.cancelTimeout =
         port.schedule(GUEST_AUDIO_CAPTURE_MAX_LEASE_MS) {
-          synchronized(this) {
-            if (held === lease) release(lease)
+          synchronized(operations) {
+            val expired =
+              synchronized(this) {
+                if (held === lease) lease.also { detach(it) } else null
+              }
+            expired?.let { dispose(it) }
           }
         }
-      port.launchReader { drain(lease) }
+      lease.reader = port.launchReader { drain(lease) }
       return "running"
     } catch (error: Exception) {
       val lease = held
-      if (lease != null) release(lease) else if (record != null) dispose(record)
+      if (lease != null) {
+        detach(lease)
+        disposals.add(lease)
+      } else if (record != null) {
+        disposals.add(Lease(id, record, port.nowMs()))
+      }
       return failed(error.message ?: error.javaClass.simpleName)
     }
   }
 
-  private fun status(id: String): String {
+  private fun status(id: String, disposals: MutableList<Lease>): String {
     val lease = held
     if (lease?.id == id) {
       val reason =
@@ -102,7 +142,8 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
         } catch (error: Exception) {
           error.message ?: error.javaClass.simpleName
         }
-      release(lease)
+      detach(lease)
+      disposals.add(lease)
       return failed(reason)
     }
     val ended = failure
@@ -127,7 +168,9 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
           // A stop can unblock a read with an error; it must not fail or release a newer lease.
           if (held === lease) {
             failure = lease.id to reason
-            release(lease)
+            detach(lease)
+            // The final read has returned. Keep ownership serialized, but never await ourselves.
+            dispose(lease, awaitReader = false)
           }
         }
         return
@@ -135,22 +178,29 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
     }
   }
 
-  private fun expire() {
-    held?.let { if (port.nowMs() - it.startedAt >= GUEST_AUDIO_CAPTURE_MAX_LEASE_MS) release(it) }
-  }
-
-  private fun release(lease: Lease) {
+  /** Detach under the state monitor; any reader await must happen outside it. */
+  private fun detach(lease: Lease) {
     held = null
     lease.cancelTimeout?.invoke()
-    dispose(lease.record)
   }
 
-  private fun dispose(record: GuestAudioCaptureRecord) {
+  private fun dispose(lease: Lease, awaitReader: Boolean = true): String? {
+    var reason: String? = null
     try {
-      record.stop()
+      lease.record.stop()
     } finally {
-      record.release()
+      try {
+        if (awaitReader && lease.reader?.awaitExit(READER_EXIT_TIMEOUT_MS) == false) {
+          reason = "capture reader did not exit within $READER_EXIT_TIMEOUT_MS ms"
+          synchronized(this) {
+            if (held == null) failure = lease.id to requireNotNull(reason)
+          }
+        }
+      } finally {
+        lease.record.release()
+      }
     }
+    return reason
   }
 
   private fun failed(reason: String): String =

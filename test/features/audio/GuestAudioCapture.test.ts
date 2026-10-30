@@ -114,6 +114,49 @@ describe("AdbGuestAudioCapture", () => {
     });
   }
 
+  for (const { errorCode, output, detail } of [
+    {
+      errorCode: "permission_denied",
+      output: "Permission Denial: receiver requires android.permission.DUMP",
+      detail: "adb shell was refused the CtrlProxy receiver",
+    },
+    {
+      errorCode: "no_matching_receiver",
+      output: "Error: receiver not found",
+      detail: "no guest capture receiver; reinstall the CtrlProxy APK",
+    },
+    {
+      errorCode: "protected_broadcast",
+      output: "SecurityException: not allowed to send broadcast dev.example.CAPTURE from shell",
+      detail: "guest capture broadcast is protected",
+    },
+    {
+      errorCode: "broadcast_failed",
+      output: "Error: broadcast dispatch failed",
+      detail: "guest capture broadcast failed",
+    },
+  ]) {
+    test(`reports ${errorCode} distinctly with bounded reply text`, async () => {
+      const { adb, capture } = setup();
+      const diagnostic = `${output}: ${"x".repeat(4_000)}TAIL_MUST_BE_TRUNCATED`;
+      adb.setCommandResponse("--es op start", createExecResult(diagnostic, ""));
+      const error = await capture.open("emulator-5554").catch((thrown: unknown) => thrown);
+      expect(error).toMatchObject({ code: "audio_guest_capture_unavailable" });
+      if (!(error instanceof Error)) throw new Error("Expected a capture failure");
+      expect(error.message).toContain(detail);
+      if (errorCode !== "no_matching_receiver") {
+        expect(error.message).not.toContain("reinstall");
+        expect(error.message).toContain(diagnostic.slice(0, 2_048));
+        expect(error.message).not.toContain(`${diagnostic.slice(0, 2_048)}x`);
+        expect(error.message).not.toContain("TAIL_MUST_BE_TRUNCATED");
+      }
+      if (errorCode === "permission_denied") {
+        expect(error.message).toContain("android.permission.DUMP");
+        expect(error.message).toContain("held by the adb shell");
+      }
+    });
+  }
+
   test("refuses deadline expiry and still sends best-effort stop", async () => {
     const { capture, adb, timer } = setup({ timeoutMs: 400, settleMs: 300, pollMs: 250 });
     await expect(capture.open("emulator-5554")).rejects.toThrow("deadline");

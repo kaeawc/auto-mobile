@@ -9,6 +9,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.SystemClock
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -85,8 +86,16 @@ private class AndroidGuestAudioCapturePort(private val context: Context) : Guest
     }
   }
 
-  override fun launchReader(read: () -> Unit) {
-    thread(name = "guest-audio-capture", isDaemon = true) { read() }
+  override fun launchReader(read: () -> Unit): GuestAudioCaptureReader {
+    val exited = CountDownLatch(1)
+    thread(name = "guest-audio-capture", isDaemon = true) {
+      try {
+        read()
+      } finally {
+        exited.countDown()
+      }
+    }
+    return GuestAudioCaptureReader { timeoutMs -> exited.await(timeoutMs, TimeUnit.MILLISECONDS) }
   }
 
   override fun schedule(delayMs: Long, task: () -> Unit): () -> Unit {

@@ -122,11 +122,31 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
         throw unavailable(deviceId, result.error);
       }
       const reply = parseBroadcastOutput(`${result.stdout}\n${result.stderr}`);
-      if (!reply.delivered || !reply.resultData) {
-        throw unavailable(
-          deviceId,
-          "the CtrlProxy on the device has no guest capture receiver; reinstall the CtrlProxy APK",
-        );
+      const missingReceiver =
+        "the CtrlProxy on the device has no guest capture receiver; reinstall the CtrlProxy APK";
+      if (!reply.delivered) {
+        const output = reply.output.trim().slice(0, 2_048);
+        switch (reply.errorCode) {
+          case "permission_denied":
+            throw unavailable(
+              deviceId,
+              "the adb shell was refused the CtrlProxy receiver, which needs " +
+                `android.permission.DUMP (held by the adb shell): ${output}`,
+            );
+          case "no_matching_receiver":
+            throw unavailable(deviceId, missingReceiver);
+          case "protected_broadcast":
+            throw unavailable(deviceId, `the guest capture broadcast is protected: ${output}`);
+          default:
+            // The parser classifies am's explicit missing-receiver error as broadcast_failed.
+            if (reply.output.trimStart().startsWith("Error: receiver not found")) {
+              throw unavailable(deviceId, missingReceiver);
+            }
+            throw unavailable(deviceId, `the guest capture broadcast failed: ${output}`);
+        }
+      }
+      if (!reply.resultData) {
+        throw unavailable(deviceId, missingReceiver);
       }
       return reply.resultData.slice(0, 2_048);
     };

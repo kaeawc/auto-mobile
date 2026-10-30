@@ -1,5 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,6 +19,8 @@ class GuestAudioCaptureControllerTest {
     var recording = false
     var startError: String? = null
     var onRead: () -> Int = { 16 }
+    var onStop: () -> Unit = {}
+    var onRelease: () -> Unit = {}
 
     override fun start() {
       started++
@@ -31,10 +38,12 @@ class GuestAudioCaptureControllerTest {
     override fun stop() {
       stopped++
       recording = false
+      onStop()
     }
 
     override fun release() {
       released++
+      onRelease()
     }
   }
 
@@ -46,6 +55,11 @@ class GuestAudioCaptureControllerTest {
     var now = 0L
     val workers = mutableListOf<() -> Unit>()
     val deadlines = mutableListOf<Pair<Long, () -> Unit>>()
+    val events: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    val readerExited = CountDownLatch(1)
+    val awaitBounds = mutableListOf<Long>()
+    var threadedReader = false
+    var awaitResult = true
 
     override fun hasRecordAudioPermission() = permission
 
@@ -57,8 +71,20 @@ class GuestAudioCaptureControllerTest {
 
     override fun nowMs() = now
 
-    override fun launchReader(read: () -> Unit) {
-      workers.add(read)
+    override fun launchReader(read: () -> Unit): GuestAudioCaptureReader {
+      val worker = {
+        try {
+          read()
+        } finally {
+          events.add("reader-exit")
+          readerExited.countDown()
+        }
+      }
+      if (threadedReader) thread(isDaemon = true) { worker() } else workers.add(worker)
+      return GuestAudioCaptureReader { timeoutMs ->
+        awaitBounds.add(timeoutMs)
+        if (threadedReader) readerExited.await(timeoutMs, TimeUnit.MILLISECONDS) else awaitResult
+      }
     }
 
     override fun schedule(delayMs: Long, task: () -> Unit): () -> Unit {
@@ -77,6 +103,78 @@ class GuestAudioCaptureControllerTest {
           it.second()
         }
     }
+  }
+
+  private fun blockedReader(): Pair<FakePort, GuestAudioCaptureController> {
+    val reading = CountDownLatch(1)
+    val stopped = CountDownLatch(1)
+    val port =
+      FakePort().apply {
+        threadedReader = true
+        record.onRead = {
+          reading.countDown()
+          check(stopped.await(1, TimeUnit.SECONDS)) { "stop did not unblock read" }
+          16
+        }
+        record.onStop = {
+          events.add("stop")
+          stopped.countDown()
+        }
+        record.onRelease = { events.add("release") }
+      }
+    val controller = GuestAudioCaptureController(port)
+    assertEquals("running", controller.handle("start", "one"))
+    assertTrue("reader did not enter read", reading.await(1, TimeUnit.SECONDS))
+    return port to controller
+  }
+
+  @Test
+  fun `stop waits for blocked reader exit before releasing record`() {
+    val (port, controller) = blockedReader()
+    assertEquals("stopped", controller.handle("stop", "one"))
+    assertEquals(listOf("stop", "reader-exit", "release"), port.events.toList())
+    assertEquals(0L, port.readerExited.count)
+  }
+
+  @Test
+  fun `reader timeout is bounded recorded and still releases on stop and status`() {
+    for (op in listOf("stop", "status")) {
+      val port = FakePort().apply { awaitResult = false }
+      val controller = GuestAudioCaptureController(port)
+      controller.handle("start", "one")
+      if (op == "status") port.record.recording = false
+      assertEquals(
+        "failed capture reader did not exit within 1000 ms",
+        controller.handle(op, "one"),
+      )
+      assertEquals(listOf(1000L), port.awaitBounds)
+      assertEquals(1, port.record.released)
+      assertEquals(
+        "failed capture reader did not exit within 1000 ms",
+        controller.handle("status", "one"),
+      )
+    }
+  }
+
+  @Test
+  fun `stop on another thread completes while read is blocked without deadlock`() {
+    val (port, controller) = blockedReader()
+    val finished = CountDownLatch(1)
+    val result = AtomicReference<String>()
+    val failure = AtomicReference<Throwable>()
+    thread(isDaemon = true) {
+      try {
+        result.set(controller.handle("stop", "one"))
+      } catch (error: Throwable) {
+        failure.set(error)
+      } finally {
+        finished.countDown()
+      }
+    }
+    assertTrue("stop deadlocked with the reader", finished.await(1, TimeUnit.SECONDS))
+    assertEquals(null, failure.get())
+    assertEquals("stopped", result.get())
+    assertEquals(listOf("stop", "reader-exit", "release"), port.events.toList())
   }
 
   @Test

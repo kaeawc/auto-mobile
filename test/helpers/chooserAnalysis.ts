@@ -110,7 +110,7 @@ export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) 
         },
       });
       try {
-        const match = await probe.findAppInChooser(roots, pkg, h.packageName);
+        const match = await probe.findAppInChooser(roots, pkg, { hierarchyPackage: h.packageName });
         apps[pkg] = {
           ok: true,
           packageVerified: match.packageVerified,

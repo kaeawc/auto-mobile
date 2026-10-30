@@ -129,19 +129,16 @@ export class ClockOperations {
     slot?: DeviceClockRestoreSlot,
   ): Promise<DeviceClockState> {
     try {
-      return await writeDeviceClock(
-        this.dependencies.device(),
-        this.clockAdapter,
-        input,
+      return await writeDeviceClock(this.dependencies.device(), this.clockAdapter, input, {
         slot,
-        {
+        dependencies: {
           hostClock: this.dependencies.timer(),
           invalidate: this.invalidateClockCaches,
           restoreRegistry: this.clockRestoreRegistry,
           mutationSignal: this.clockSignal,
         },
         prepared,
-      );
+      });
     } catch (error) {
       logger.warn(`Clock mutation failed for ${this.dependencies.device().deviceId}`, error);
       return clockFailure(error);

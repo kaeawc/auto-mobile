@@ -39,3 +39,22 @@ export async function prototypeScreenShapeOutput(
   const round = await reader.isScreenRound(signal);
   return round === undefined ? {} : { screenRound: round };
 }
+
+/**
+ * `formFactor` for a successful show on an Android Automotive device (#14922). The Android renderer is
+ * phone-oriented, so on a car display it lays out wide and landscape; the field tells an agent why. It
+ * comes from the booted device's form factor, so no read; other devices report no field.
+ */
+export function prototypeFormFactorOutput(input: {
+  action: string;
+  success: boolean;
+  device: BootedDevice;
+}): { formFactor?: "automotive" } {
+  const { action, success, device } = input;
+  return action === "show" &&
+    success &&
+    device.platform === "android" &&
+    device.formFactor === "automotive"
+    ? { formFactor: "automotive" }
+    : {};
+}

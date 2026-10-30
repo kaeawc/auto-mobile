@@ -13,6 +13,8 @@ import {
 } from "../../src/server/appTools";
 import { listAppsResultSchema } from "../../src/server/appToolOutputSchemas";
 import { createPlatformInstallApp } from "../../src/server/appToolsWatch";
+import { sessionlessDeviceReadFor } from "../../src/server/deviceObservationAccess";
+import { resolveSessionlessDeviceRead } from "../../src/server/pipeline/readTarget";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
@@ -363,6 +365,23 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     expect(result.devices).toEqual([
       expect.objectContaining({ deviceId: watch.deviceId, platform: "watchos" }),
     ]);
+  });
+
+  test("a sessionless read of a pooled watch's id that names no platform resolves the watch", async () => {
+    const { readiness } = await arrange();
+    const read = sessionlessDeviceReadFor({
+      avdConfigReader: undefined,
+      listBooted: async (_signal, scope) => (scope === "watchos" ? [watch] : [iphone]),
+      isAuthorized: () => true,
+    });
+
+    const context = await resolveSessionlessDeviceRead(
+      { name: "listApps", args: {}, options: {}, deviceReadiness: readiness },
+      read,
+      watch.deviceId,
+    );
+
+    expect(context.device).toMatchObject({ deviceId: watch.deviceId, platform: "watchos" });
   });
 
   test("sessionless listApps naming the watch id without platform never reaches the watch", async () => {

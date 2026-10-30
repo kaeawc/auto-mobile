@@ -56,13 +56,11 @@ import {
   refuseControlCallBeforeAdmission,
 } from "./deviceCallDispatch";
 import { createToolExecutionContext } from "../ToolExecutionContext";
-import { resolveDirectSessionDevice } from "../../utils/directSessionDeviceRegistry";
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
-import { DeviceOutsideBoundSessionError } from "../../daemon/deviceOutsideBoundSessionRefusal";
-import { DirectSessionNotActiveError } from "../../models/DirectSessionNotActiveError";
+import { adoptDirectSessionDevice } from "./directSessionTarget";
 
 export interface ExecutionTargetInput {
   name: string;
@@ -421,7 +419,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // is sufficient on its own — without this, a client that omits `platform`
       // (now optional) with both platforms connected falls through to
       // ensureDeviceReady("either", undefined) and hits an ambiguity error.
-      this.adoptDirectSessionDevice(state, sessionUuid);
+      adoptDirectSessionDevice(state, sessionUuid);
     } else if (sessionUuid) {
       logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
     }
@@ -505,29 +503,6 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       deviceId: admittedSession.assignedDevice || state.providedDeviceId,
     });
     options.assertHeldDeviceStart(admittedSession.assignedDevice || undefined, sessionUuid);
-  }
-
-  private adoptDirectSessionDevice(state: TargetResolution, sessionUuid: string): void {
-    const directSession = resolveDirectSessionDevice(sessionUuid);
-    if (!directSession) {
-      throw new DirectSessionNotActiveError(sessionUuid);
-    }
-    if (state.providedDeviceId && state.providedDeviceId !== directSession.device.deviceId) {
-      throw new DeviceOutsideBoundSessionError(
-        sessionUuid,
-        directSession.device,
-        { deviceId: state.providedDeviceId },
-        `${state.input.name} deviceId '${state.providedDeviceId}' does not match session '${sessionUuid}' device '${directSession.device.deviceId}'. ` +
-          "Omit deviceId to target the session's device.",
-      );
-    }
-    if (!state.providedDeviceId) {
-      state.providedDeviceId = directSession.device.deviceId;
-      logger.info(
-        `[ToolRegistry] Resolved device from direct session ${sessionUuid}: ${state.providedDeviceId}`,
-      );
-      state.platform = directSession.device.platform;
-    }
   }
 
   /** Resolves the device this call runs on, or answers early from the read-only device path. */
